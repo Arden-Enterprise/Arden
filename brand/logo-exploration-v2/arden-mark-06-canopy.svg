@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" color="#F4F3EF" role="img" aria-labelledby="title">
+  <title id="title">Arden Canopy symbol</title>
+  <g fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M50 82V49M50 49 25 24M50 49 75 21M50 64 25 77M50 64 76 76"/>
+    <circle cx="50" cy="49" r="8" fill="currentColor" stroke="none"/>
+    <circle cx="25" cy="24" r="6" fill="currentColor" stroke="none"/>
+    <circle cx="75" cy="21" r="5" fill="currentColor" stroke="none"/>
+    <circle cx="25" cy="77" r="5" fill="currentColor" stroke="none"/>
+    <circle cx="76" cy="76" r="6" fill="currentColor" stroke="none"/>
+  </g>
+</svg>

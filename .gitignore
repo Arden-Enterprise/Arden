@@ -1,0 +1,12 @@
+node_modules/
+.pnpm-store/
+dist/
+out/
+coverage/
+.env
+.env.*.local
+*.log
+*.tsbuildinfo
+.DS_Store
+.playwright-cli/
+.impeccable/review/

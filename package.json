@@ -1,0 +1,24 @@
+{
+  "name": "arden",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "dev": "concurrently -k -n api,web \"pnpm dev:api\" \"pnpm dev:web\"",
+    "dev:api": "pnpm --filter @arden/api dev",
+    "dev:web": "pnpm --filter @arden/web dev",
+    "dev:desktop": "pnpm --filter @arden/desktop dev",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "build": "pnpm -r build"
+  },
+  "devDependencies": {
+    "concurrently": "10.0.5",
+    "typescript": "5.9.3"
+  }
+}

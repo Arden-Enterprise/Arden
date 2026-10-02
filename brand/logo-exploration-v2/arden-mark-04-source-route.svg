@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" color="#F4F3EF" role="img" aria-labelledby="title">
+  <title id="title">Arden Source Route symbol</title>
+  <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M17 77Q26 58 49 49T76 21" stroke-width="7"/>
+    <path d="M49 49Q68 54 80 76" stroke-width="5"/>
+    <circle cx="17" cy="77" r="7" fill="currentColor" stroke="none"/>
+    <circle cx="49" cy="49" r="10" fill="currentColor" stroke="none"/>
+    <circle cx="76" cy="21" r="6" fill="currentColor" stroke="none"/>
+    <circle cx="80" cy="76" r="6" fill="currentColor" stroke="none"/>
+  </g>
+</svg>

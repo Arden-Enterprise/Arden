@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" color="#F4F3EF" role="img" aria-labelledby="title">
+  <title id="title">Arden Layered Archive symbol</title>
+  <g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M25 20H69Q77 20 77 28V34H34Q26 34 26 42V48" stroke-width="6"/>
+    <path d="M18 43H62Q70 43 70 51V57H27Q19 57 19 65V72" stroke-width="6"/>
+    <path d="M12 66H54Q62 66 62 74V80H22Q14 80 14 87" stroke-width="6"/>
+    <circle cx="77" cy="20" r="5" fill="currentColor" stroke="none"/>
+  </g>
+</svg>

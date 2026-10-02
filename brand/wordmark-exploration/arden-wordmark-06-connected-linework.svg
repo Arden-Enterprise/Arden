@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 140" color="#F4F3EF" role="img" aria-labelledby="title">
+  <title id="title">ARDEN — Connected geometric linework wordmark</title>
+  <g transform="translate(41 0)" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round">
+    <!-- A: open apex and broad crossbar -->
+    <path d="M38 105 67 34 96 105 M49 78 H85"/>
+    <!-- R: rounded bowl with a decisive diagonal leg -->
+    <path d="M125 105 V35 H154 C180 35 180 72 154 72 H125 M151 72 177 105"/>
+    <!-- D: one continuous stem and rounded bowl -->
+    <path d="M207 35 V105 H228 C272 105 272 35 228 35 Z"/>
+    <!-- E: clear three-level structure -->
+    <path d="M302 35 H356 M302 35 V105 H356 M302 70 H347 M302 105 H356"/>
+    <!-- N: strong diagonal ties the final letter together -->
+    <path d="M386 105 V35 L440 105 V35"/>
+  </g>
+</svg>

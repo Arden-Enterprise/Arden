@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Arden — Logo directions</title>
+  <style>
+    :root { color-scheme: light; font-family: "Helvetica Neue", Arial, sans-serif; background:#f4f3ef; color:#242628; font-synthesis:none; text-rendering:optimizeLegibility; -webkit-font-smoothing:antialiased; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-width:360px; }
+    button { font:inherit; }
+    .page { max-width:1180px; width:calc(100% - 48px); margin:auto; padding:70px 0 48px; }
+    header { max-width:760px; margin:0 auto 42px; text-align:center; }
+    .eyebrow { color:#7c8181; font:600 10px/1.5 "Cascadia Code",Consolas,monospace; letter-spacing:.19em; text-transform:uppercase; }
+    h1 { margin:16px 0 12px; font:400 clamp(42px,6vw,66px)/1 "Bodoni Moda","Bodoni 72","Bodoni MT",Didot,"Times New Roman",serif; letter-spacing:-.055em; font-optical-sizing:auto; }
+    .intro { max-width:620px; margin:0 auto; color:#666c6d; font-size:15px; line-height:1.7; }
+    .controls { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:9px; margin:28px 0 30px; }
+    .controls-label { color:#73797a; margin-right:4px; font-size:12px; }
+    .surface { display:inline-flex; align-items:center; gap:8px; border:1px solid #cfd1ce; border-radius:99px; padding:7px 11px; background:transparent; color:#303536; cursor:pointer; font-size:11px; }
+    .surface[aria-pressed="true"] { outline:2px solid #8b9090; outline-offset:2px; }
+    .swatch { width:12px; height:12px; border:1px solid #777; border-radius:50%; background:var(--color); }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+    .card { overflow:hidden; border:1px solid #d8d9d5; border-radius:12px; background:#fffefa; transition:transform .24s ease,box-shadow .24s ease; }
+    .card:hover { transform:translateY(-3px); box-shadow:0 16px 35px rgba(34,39,39,.11); }
+    .stage { display:grid; place-items:center; min-height:175px; padding:26px 22px; background:#242628; transition:background .2s ease; }
+    .stage img.lockup { width:min(100%,500px); height:auto; }
+    body[data-surface="grey"] .stage { background:#929698; }
+    body[data-surface="mist"] .stage { background:#d4d5d5; }
+    body[data-surface="white"] .stage { background:#f4f3ef; }
+    body[data-surface="mist"] .stage img,body[data-surface="white"] .stage img { filter:brightness(0); }
+    .copy { padding:18px 21px 20px; }
+    .copy-head { display:flex; justify-content:space-between; align-items:baseline; gap:10px; }
+    h2 { margin:0; font-size:15px; font-weight:650; letter-spacing:.01em; }
+    .num { color:#8a9090; font:10px "Cascadia Code",Consolas,monospace; }
+    .copy p { min-height:42px; margin:9px 0 16px; color:#626969; font-size:13px; line-height:1.6; }
+    .actions { display:flex; gap:8px; flex-wrap:wrap; }
+    .action { border:1px solid #c9ceca; border-radius:6px; padding:8px 10px; background:transparent; color:#303536; text-decoration:none; cursor:pointer; font-size:11px; }
+    .action.primary { border-color:#242628; background:#242628; color:#f4f3ef; }
+    .choice { min-height:50px; margin:24px 0 0; border-left:2px solid #64706b; padding:8px 13px; color:#515859; font-size:13px; line-height:1.6; }
+    footer { margin-top:46px; border-top:1px solid #d8d9d5; padding-top:18px; color:#7a8080; text-align:center; font:10px/1.6 "Cascadia Code",Consolas,monospace; letter-spacing:.1em; text-transform:uppercase; }
+    @media(max-width:740px){.page{width:calc(100% - 28px);padding-top:46px}.grid{grid-template-columns:1fr}.stage{min-height:150px}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important}}
+  </style>
+</head>
+<body data-surface="charcoal">
+  <main class="page">
+    <header>
+      <p class="eyebrow">Arden · identity exploration 02</p>
+      <h1>Mark and wordmark</h1>
+      <p class="intro">A high-contrast editorial wordmark meets six symbols built around Arden’s core idea: private knowledge becoming connected, useful organizational memory.</p>
+    </header>
+    <div class="controls" role="group" aria-label="Preview logo backgrounds">
+      <span class="controls-label">Preview on</span>
+      <button class="surface" type="button" data-surface-choice="charcoal" aria-pressed="true"><span class="swatch" style="--color:#242628"></span>Charcoal</button>
+      <button class="surface" type="button" data-surface-choice="grey" aria-pressed="false"><span class="swatch" style="--color:#929698"></span>Grey</button>
+      <button class="surface" type="button" data-surface-choice="mist" aria-pressed="false"><span class="swatch" style="--color:#d4d5d5"></span>Mist</button>
+      <button class="surface" type="button" data-surface-choice="white" aria-pressed="false"><span class="swatch" style="--color:#f4f3ef"></span>White</button>
+    </div>
+    <section class="grid" aria-label="Complete Arden logo directions">
+      <article class="card"><div class="stage"><img class="lockup" src="arden-logo.svg" alt="Open Index A mark and Arden custom wordmark"></div><div class="copy"><div class="copy-head"><h2>Open Index</h2><span class="num">01 · RECOMMENDED</span></div><p>Aperture-shaped A with a connection leaving its crossbar. Reads as Arden first, graph second.</p><div class="actions"><button class="action primary choose" data-choice="Open Index">Choose direction</button><a class="action" href="arden-logo.svg" download>Download logo</a><a class="action" href="arden-mark.svg" download>Download mark</a></div></div></article>
+      <article class="card"><div class="stage"><img class="lockup" src="arden-logo-02-folio.svg" alt="Folio symbol and Arden custom wordmark"></div><div class="copy"><div class="copy-head"><h2>Folio</h2><span class="num">02</span></div><p>Two pages meet around a quiet center seam: knowledge gathered, shaped, and kept.</p><div class="actions"><button class="action primary choose" data-choice="Folio">Choose direction</button><a class="action" href="arden-logo-02-folio.svg" download>Download logo</a><a class="action" href="arden-mark-02-folio.svg" download>Download mark</a></div></div></article>
+      <article class="card"><div class="stage"><img class="lockup" src="arden-logo-03-quiet-core.svg" alt="Quiet Core symbol and Arden custom wordmark"></div><div class="copy"><div class="copy-head"><h2>Quiet Core</h2><span class="num">03</span></div><p>An open orbit around a central index; privacy with intentional, permissioned connections.</p><div class="actions"><button class="action primary choose" data-choice="Quiet Core">Choose direction</button><a class="action" href="arden-logo-03-quiet-core.svg" download>Download logo</a><a class="action" href="arden-mark-03-quiet-core.svg" download>Download mark</a></div></div></article>
+      <article class="card"><div class="stage"><img class="lockup" src="arden-logo-04-source-route.svg" alt="Source Route symbol and Arden custom wordmark"></div><div class="copy"><div class="copy-head"><h2>Source Route</h2><span class="num">04</span></div><p>An asymmetric path connects a few meaningful points, not a field of anonymous nodes.</p><div class="actions"><button class="action primary choose" data-choice="Source Route">Choose direction</button><a class="action" href="arden-logo-04-source-route.svg" download>Download logo</a><a class="action" href="arden-mark-04-source-route.svg" download>Download mark</a></div></div></article>
+      <article class="card"><div class="stage"><img class="lockup" src="arden-logo-05-layered-archive.svg" alt="Layered Archive symbol and Arden custom wordmark"></div><div class="copy"><div class="copy-head"><h2>Layered Archive</h2><span class="num">05</span></div><p>Offset records resolve into a current source, a visual cue for versions and published knowledge.</p><div class="actions"><button class="action primary choose" data-choice="Layered Archive">Choose direction</button><a class="action" href="arden-logo-05-layered-archive.svg" download>Download logo</a><a class="action" href="arden-mark-05-layered-archive.svg" download>Download mark</a></div></div></article>
+      <article class="card"><div class="stage"><img class="lockup" src="arden-logo-06-canopy.svg" alt="Canopy symbol and Arden custom wordmark"></div><div class="copy"><div class="copy-head"><h2>Canopy</h2><span class="num">06</span></div><p>A stable trunk with branching relationships gives Arden’s natural name a restrained story.</p><div class="actions"><button class="action primary choose" data-choice="Canopy">Choose direction</button><a class="action" href="arden-logo-06-canopy.svg" download>Download logo</a><a class="action" href="arden-mark-06-canopy.svg" download>Download mark</a></div></div></article>
+    </section>
+    <p class="choice" id="choice" aria-live="polite">My recommendation is Open Index. It carries Arden’s initial, connection model, and a small-size app mark in one shape.</p>
+    <footer>Arden · private organizational memory · grayscale identity</footer>
+  </main>
+  <script>
+    document.querySelectorAll("[data-surface-choice]").forEach((button) => button.addEventListener("click", () => {
+      document.body.dataset.surface = button.dataset.surfaceChoice;
+      document.querySelectorAll("[data-surface-choice]").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+    }));
+    document.querySelectorAll(".choose").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll(".choose").forEach((item) => item.textContent = "Choose direction");
+      button.textContent = "Selected ✓";
+      document.getElementById("choice").textContent = `Selected direction: ${button.dataset.choice}. I’ll refine the symbol, optical spacing, and compact app mark around this choice.`;
+    }));
+  </script>
+</body>
+</html>

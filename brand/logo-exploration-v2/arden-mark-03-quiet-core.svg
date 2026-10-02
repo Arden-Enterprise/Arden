@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" color="#F4F3EF" role="img" aria-labelledby="title">
+  <title id="title">Arden Quiet Core symbol</title>
+  <g fill="none" stroke="currentColor" stroke-linecap="round">
+    <path d="M59 14A37 37 0 1 0 85 48" stroke-width="7"/>
+    <path d="M63 28A23 23 0 1 0 72 53" stroke-width="5"/>
+    <path d="M50 39V61" stroke-width="6"/>
+    <circle cx="50" cy="33" r="6" fill="currentColor" stroke="none"/>
+    <circle cx="86" cy="43" r="5" fill="currentColor" stroke="none"/>
+  </g>
+</svg>

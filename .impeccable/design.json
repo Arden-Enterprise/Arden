@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-23T09:36:26Z",
+  "title": "Design System: Arden",
+  "extensions": {
+    "colorMeta": {
+      "charcoal": {
+        "role": "primary",
+        "displayName": "Charcoal",
+        "canonical": "#242628",
+        "tonalRamp": ["oklch(15% 0.004 230)", "oklch(26% 0.004 230)", "oklch(38% 0.004 230)", "oklch(50% 0.004 230)", "oklch(62% 0.004 230)", "oklch(74% 0.004 230)", "oklch(85% 0.004 230)", "oklch(95% 0.004 230)"]
+      },
+      "warm": {
+        "role": "neutral",
+        "displayName": "Warm Paper",
+        "canonical": "#f4f3ef",
+        "tonalRamp": ["oklch(15% 0.007 92)", "oklch(26% 0.007 92)", "oklch(38% 0.007 92)", "oklch(50% 0.007 92)", "oklch(62% 0.007 92)", "oklch(74% 0.007 92)", "oklch(85% 0.007 92)", "oklch(95% 0.007 92)"]
+      },
+      "mist": {
+        "role": "neutral",
+        "displayName": "Mist",
+        "canonical": "#d4d5d5",
+        "tonalRamp": ["oklch(15% 0.003 210)", "oklch(26% 0.003 210)", "oklch(38% 0.003 210)", "oklch(50% 0.003 210)", "oklch(62% 0.003 210)", "oklch(74% 0.003 210)", "oklch(85% 0.003 210)", "oklch(95% 0.003 210)"]
+      },
+      "stone": {
+        "role": "neutral",
+        "displayName": "Stone Grey",
+        "canonical": "#929698",
+        "tonalRamp": ["oklch(15% 0.005 220)", "oklch(26% 0.005 220)", "oklch(38% 0.005 220)", "oklch(50% 0.005 220)", "oklch(62% 0.005 220)", "oklch(74% 0.005 220)", "oklch(85% 0.005 220)", "oklch(95% 0.005 220)"]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Structural Line",
+        "canonical": "#dedfdd",
+        "tonalRamp": ["oklch(15% 0.003 145)", "oklch(26% 0.003 145)", "oklch(38% 0.003 145)", "oklch(50% 0.003 145)", "oklch(62% 0.003 145)", "oklch(74% 0.003 145)", "oklch(85% 0.003 145)", "oklch(95% 0.003 145)"]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "Control White",
+        "canonical": "#ffffff",
+        "tonalRamp": ["oklch(15% 0 0)", "oklch(26% 0 0)", "oklch(38% 0 0)", "oklch(50% 0 0)", "oklch(62% 0 0)", "oklch(74% 0 0)", "oklch(85% 0 0)", "oklch(95% 0 0)"]
+      },
+      "sidebar": {
+        "role": "neutral",
+        "displayName": "Sidebar Paper",
+        "canonical": "#f8f8f6",
+        "tonalRamp": ["oklch(15% 0.003 110)", "oklch(26% 0.003 110)", "oklch(38% 0.003 110)", "oklch(50% 0.003 110)", "oklch(62% 0.003 110)", "oklch(74% 0.003 110)", "oklch(85% 0.003 110)", "oklch(95% 0.003 110)"]
+      },
+      "graph-field": {
+        "role": "neutral",
+        "displayName": "Graph Field",
+        "canonical": "#fafaf8",
+        "tonalRamp": ["oklch(15% 0.003 105)", "oklch(26% 0.003 105)", "oklch(38% 0.003 105)", "oklch(50% 0.003 105)", "oklch(62% 0.003 105)", "oklch(74% 0.003 105)", "oklch(85% 0.003 105)", "oklch(95% 0.003 105)"]
+      },
+      "control-border": {
+        "role": "neutral",
+        "displayName": "Control Border",
+        "canonical": "#d0d2d1",
+        "tonalRamp": ["oklch(15% 0.003 175)", "oklch(26% 0.003 175)", "oklch(38% 0.003 175)", "oklch(50% 0.003 175)", "oklch(62% 0.003 175)", "oklch(74% 0.003 175)", "oklch(85% 0.003 175)", "oklch(95% 0.003 175)"]
+      }
+    },
+    "typographyMeta": {
+      "headline": { "displayName": "Headline", "purpose": "Graph page title." },
+      "title": { "displayName": "Title", "purpose": "Selected item heading in the Knowledge Pane." },
+      "body": { "displayName": "Body", "purpose": "Selected item summary and supporting explanation." },
+      "label": { "displayName": "Label", "purpose": "Navigation, section headings, controls, and metadata." },
+      "graph-label": { "displayName": "Graph Label", "purpose": "Readable node names in the network." }
+    },
+    "shadows": [
+      { "name": "selected-segment", "value": "0 1px 3px rgba(36, 38, 40, 0.09)", "purpose": "Active filter segment on its grey track." },
+      { "name": "graph-controls", "value": "0 5px 15px rgba(36, 38, 40, 0.08)", "purpose": "Zoom and Fit controls over the graph." },
+      { "name": "search-focus", "value": "0 0 0 2px rgba(36, 38, 40, 0.08)", "purpose": "Focus ring supplement for the search field." }
+    ],
+    "motion": [
+      { "name": "graph-emphasis", "value": "180ms ease", "purpose": "Node and edge focus transitions." },
+      { "name": "reduced-motion", "value": "0.01ms", "purpose": "Global transition and animation duration under prefers-reduced-motion: reduce." }
+    ],
+    "breakpoints": [
+      { "name": "compact-desktop", "value": "1220px" },
+      { "name": "icon-rail", "value": "980px" },
+      { "name": "stacked", "value": "760px" },
+      { "name": "narrow-mobile", "value": "480px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Active navigation",
+      "kind": "nav",
+      "refersTo": "navigation-active",
+      "description": "The current Graph destination in the left rail or mobile strip.",
+      "html": "<button class=\"ds-nav-active\" type=\"button\" aria-current=\"page\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><circle cx=\"5\" cy=\"12\" r=\"2\"/><circle cx=\"12\" cy=\"5\" r=\"2\"/><circle cx=\"19\" cy=\"12\" r=\"2\"/><circle cx=\"12\" cy=\"19\" r=\"2\"/><path d=\"m6.5 10.5 4-4m3 0 4 4m0 3-4 4m-3 0-4-4\"/></svg><span>Graph</span></button>",
+      "css": ".ds-nav-active{display:inline-flex;align-items:center;gap:12px;min-height:39px;padding:0 11px;border:0;border-radius:6px;background:#242628;color:#fff;font:560 12px 'Segoe UI',ui-sans-serif,system-ui,sans-serif;text-align:left;cursor:pointer}.ds-nav-active:focus-visible{outline:2px solid #242628;outline-offset:3px}"
+    },
+    {
+      "name": "Planned navigation",
+      "kind": "nav",
+      "refersTo": "navigation-idle",
+      "description": "An unavailable destination with an explicit Soon label.",
+      "html": "<button class=\"ds-nav-idle\" type=\"button\" disabled><span>My work</span><small>Soon</small></button>",
+      "css": ".ds-nav-idle{display:inline-flex;align-items:center;gap:12px;min-height:39px;padding:0 11px;border:0;border-radius:6px;background:transparent;color:#515759;font:560 12px 'Segoe UI',ui-sans-serif,system-ui,sans-serif;text-align:left;opacity:.73;cursor:not-allowed}.ds-nav-idle small{margin-left:auto;color:#8d9293;font-size:9px;font-weight:600;letter-spacing:.04em}.ds-nav-idle:focus-visible{outline:2px solid #242628;outline-offset:3px}"
+    },
+    {
+      "name": "Graph search",
+      "kind": "input",
+      "refersTo": "search-field",
+      "description": "Search field for sample graph item names and summaries.",
+      "html": "<label class=\"ds-search\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.7\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"10.5\" cy=\"10.5\" r=\"6.5\"/><path d=\"m16 16 5 5\"/></svg><input aria-label=\"Search sample graph\" placeholder=\"Search this graph\" /></label>",
+      "css": ".ds-search{display:flex;align-items:center;gap:9px;width:318px;max-width:100%;height:37px;padding:0 10px;border:1px solid #d0d2d1;border-radius:6px;background:#fff;color:#626869}.ds-search:focus-within{border-color:#6b7172;box-shadow:0 0 0 2px rgba(36,38,40,.08)}.ds-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:#242628;font:12px 'Segoe UI',ui-sans-serif,system-ui,sans-serif}.ds-search input::placeholder{color:#6e7475;opacity:1}"
+    },
+    {
+      "name": "Scope switch",
+      "kind": "button",
+      "refersTo": "scope-selected",
+      "description": "A compact segmented filter with one white selected option.",
+      "html": "<div class=\"ds-scope\" role=\"group\" aria-label=\"Filter graph by visibility\"><button class=\"ds-scope-selected\" type=\"button\" aria-pressed=\"true\">All</button><button type=\"button\" aria-pressed=\"false\">Shared</button><button type=\"button\" aria-pressed=\"false\">Personal</button><button type=\"button\" aria-pressed=\"false\">External</button></div>",
+      "css": ".ds-scope{display:inline-flex;gap:2px;padding:3px;border:1px solid #d0d2d1;border-radius:6px;background:#eaeae7}.ds-scope button{min-height:28px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:#555b5c;font:600 12px 'Segoe UI',ui-sans-serif,system-ui,sans-serif;cursor:pointer}.ds-scope button.ds-scope-selected{background:#fff;color:#242628;box-shadow:0 1px 3px rgba(36,38,40,.09)}.ds-scope button:focus-visible{outline:2px solid #242628;outline-offset:3px}"
+    },
+    {
+      "name": "Graph surface",
+      "kind": "card",
+      "refersTo": "graph-surface",
+      "description": "The bordered, faintly dotted working field that carries the network.",
+      "html": "<div class=\"ds-graph-surface\"><strong>8 items</strong><span>Illustrative network</span><svg class=\"ds-graph-preview\" viewBox=\"0 0 280 120\" role=\"img\" aria-label=\"Sample connected graph marks\"><line x1=\"50\" y1=\"44\" x2=\"140\" y2=\"60\"/><line x1=\"140\" y1=\"60\" x2=\"230\" y2=\"35\"/><circle cx=\"50\" cy=\"44\" r=\"9\"/><circle class=\"ds-graph-selected\" cx=\"140\" cy=\"60\" r=\"13\"/><rect x=\"222\" y=\"27\" width=\"16\" height=\"16\" rx=\"3\"/></svg></div>",
+      "css": ".ds-graph-surface{display:flex;flex-direction:column;min-height:180px;padding:20px;border:1px solid #d9dbd9;border-radius:8px;background-color:#fafaf8;background-image:radial-gradient(#d7d9d7 .7px,transparent .7px);background-size:24px 24px;color:#242628;font-family:'Segoe UI',ui-sans-serif,system-ui,sans-serif}.ds-graph-surface strong{font-size:11px;font-weight:650}.ds-graph-surface span{margin-top:3px;color:#6d7374;font-size:10px}.ds-graph-preview{width:100%;max-width:320px;align-self:center;flex:1}.ds-graph-preview line{stroke:#c8ccca;stroke-width:1.5}.ds-graph-preview circle,.ds-graph-preview rect{fill:#fff;stroke:#515758;stroke-width:2}.ds-graph-preview .ds-graph-selected{fill:#242628;stroke:#242628}"
+    },
+    {
+      "name": "Knowledge Pane",
+      "kind": "card",
+      "description": "Selected item identity and provenance, divided by fine rules.",
+      "html": "<section class=\"ds-pane\"><header>Knowledge pane</header><div class=\"ds-pane-identity\"><small>● &nbsp; Work brief</small><h2>Release readiness</h2><p>A working view of the decisions, checks, and open questions around the next release.</p></div><div class=\"ds-pane-section\"><h3>Context</h3><dl><div><dt>Status</dt><dd>Shared draft</dd></div><div><dt>Source</dt><dd>Arden sample</dd></div></dl></div></section>",
+      "css": ".ds-pane{width:330px;max-width:100%;border:1px solid #dedfdd;background:#fff;color:#242628;font-family:'Segoe UI',ui-sans-serif,system-ui,sans-serif}.ds-pane header{display:flex;align-items:center;min-height:66px;padding:0 23px;border-bottom:1px solid #dedfdd;font-size:12px;font-weight:670}.ds-pane-identity{padding:31px 24px 28px}.ds-pane-identity small{color:#606667;font-size:10px;font-weight:650}.ds-pane-identity h2{margin:14px 0 13px;font-size:23px;font-weight:670;line-height:1.18;letter-spacing:-.03em}.ds-pane-identity p{margin:0;color:#4f5556;font-size:12px;line-height:1.7}.ds-pane-section{padding:23px 24px 24px;border-top:1px solid #dedfdd}.ds-pane-section h3{margin:0 0 17px;font-size:12px}.ds-pane-section dl{display:grid;gap:15px;margin:0}.ds-pane-section dl div{display:flex;justify-content:space-between;gap:10px;font-size:11px}.ds-pane-section dt{color:#6a7071}.ds-pane-section dd{margin:0;color:#313637;font-weight:600}"
+    },
+    {
+      "name": "Sample badge",
+      "kind": "chip",
+      "refersTo": "sample-badge",
+      "description": "A persistent outline marker for illustrative workspace content.",
+      "html": "<span class=\"ds-sample-badge\"><span class=\"ds-sample-dot\" aria-hidden=\"true\"></span>SAMPLE DATA</span>",
+      "css": ".ds-sample-badge{display:inline-flex;align-items:center;gap:7px;padding:8px 9px;border:1px solid #c9cccb;border-radius:4px;color:#4c5253;font:720 9px 'Segoe UI',ui-sans-serif,system-ui,sans-serif;letter-spacing:.1em;white-space:nowrap}.ds-sample-dot{width:5px;height:5px;border-radius:50%;background:#575d5f}"
+    },
+    {
+      "name": "Mobile selected item",
+      "kind": "custom",
+      "description": "Compact status and provenance summary immediately below the mobile graph.",
+      "html": "<div class=\"ds-mobile-selection\"><span class=\"ds-mobile-mark\" aria-hidden=\"true\"></span><div><strong>Release readiness</strong><span>Shared draft · Arden sample</span></div><small>SELECTED</small></div>",
+      "css": ".ds-mobile-selection{display:flex;align-items:center;gap:10px;min-height:57px;padding:9px 12px;border:1px solid #d9dbd9;border-radius:6px;background:#fff;font-family:'Segoe UI',ui-sans-serif,system-ui,sans-serif}.ds-mobile-mark{flex:none;width:10px;height:10px;border:1.5px solid #242628;border-radius:50%;background:#242628}.ds-mobile-selection div{display:flex;flex:1;flex-direction:column;gap:3px;min-width:0}.ds-mobile-selection strong{color:#2f3435;font-size:11px;font-weight:670}.ds-mobile-selection div span{color:#626869;font-size:10px}.ds-mobile-selection small{color:#626869;font-size:8px;font-weight:700;letter-spacing:.08em}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Calibrated Workspace",
+    "overview": "Arden's shared web and Windows desktop shell is a quiet operating surface for inspecting a connected knowledge graph. The network carries the visual complexity; navigation, controls, and the Knowledge Pane stay precise and restrained. Warm paper surrounds near-white working surfaces, and charcoal marks the current selection.\n\nThe geometry is mostly square with small softened corners. Hairline divisions separate ownership, context, and action without suggesting that sample content is live organizational data. The current interface is a preview: its graph interactions work against illustrative nodes, while other destinations and AI are visibly marked as planned.",
+    "keyCharacteristics": [
+      "Warm monochrome palette with no chromatic accent.",
+      "A graph-dominant desktop workspace and a stacked mobile reading order.",
+      "Ownership and selection conveyed by node shape, fill, outline, and text.",
+      "Compact labels and measured rules instead of decorative panels."
+    ],
+    "rules": [
+      { "name": "The Single Emphasis Rule", "body": "Use charcoal for current or selected state. Keep other interface chrome within the warm neutral family.", "section": "colors" },
+      { "name": "The Clear Annotation Rule", "body": "Keep graph item names readable even when their nodes are out of focus; de-emphasize the mark and edges before fading label text.", "section": "typography" },
+      { "name": "The Flat Workspace Rule", "body": "Default pane and navigation surfaces use color and hairline borders for separation; reserve shadows for these interactive controls.", "section": "elevation" }
+    ],
+    "dos": [
+      "**Do** keep the graph dominant on desktop while retaining visible status, source, and relationships in the Knowledge Pane.",
+      "**Do** use the same neutral shape grammar and text labels for shared, personal, and external items.",
+      "**Do** preserve clear sample-data and planned-feature labeling wherever preview content or unavailable actions appear.",
+      "**Do** use charcoal focus and selection states, with reduced-motion behavior for graph transitions."
+    ],
+    "donts": [
+      "**Don't** introduce a bright accent, decorative gradient, or decorative metric into this calibrated workspace.",
+      "**Don't** rely on faded text alone to express graph focus or ownership.",
+      "**Don't** present illustrative nodes or planned destinations as live organizational data or working features."
+    ]
+  }
+}

@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Arden — Wordmark exploration</title>
+  <style>
+    :root {
+      --paper: #f4f3ef;
+      --mist: #d4d5d5;
+      --stone: #929698;
+      --charcoal: #242628;
+      --ink: #202224;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+      font-synthesis: none;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 360px; }
+    button { font: inherit; }
+    .page { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 72px 0 48px; }
+    header { max-width: 680px; margin: 0 auto 38px; text-align: center; }
+    .eyebrow { margin: 0 0 14px; color: #74797a; font: 600 10px/1.4 "Cascadia Code", Consolas, monospace; letter-spacing: .2em; text-transform: uppercase; }
+    h1 { margin: 0; color: var(--ink); font: 400 clamp(42px, 7vw, 70px)/1 Georgia, serif; letter-spacing: -.055em; }
+    .intro { max-width: 550px; margin: 18px auto 0; color: #62686a; font-size: 15px; line-height: 1.7; }
+    .toolbar { display: flex; justify-content: center; align-items: center; gap: 9px; flex-wrap: wrap; margin: 28px 0 36px; }
+    .toolbar-label { margin-right: 5px; color: #727779; font-size: 12px; }
+    .swatch { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #d4d5d2; border-radius: 99px; padding: 7px 11px; background: transparent; color: var(--ink); cursor: pointer; font-size: 11px; }
+    .swatch-dot { width: 12px; height: 12px; border: 1px solid #999; border-radius: 50%; background: var(--swatch); }
+    .swatch[aria-pressed="true"] { outline: 2px solid #8b9091; outline-offset: 2px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .card { overflow: hidden; border: 1px solid rgba(72, 78, 78, .16); border-radius: 13px; background: rgba(255,255,255,.66); transition: transform .25s ease, box-shadow .25s ease; }
+    .card:hover { transform: translateY(-3px); box-shadow: 0 14px 35px rgba(23, 29, 29, .09); }
+    .logo-stage { display: grid; place-items: center; min-height: 180px; padding: 24px 28px; background: var(--charcoal); transition: background .2s ease; }
+    .logo-stage img { display: block; width: min(100%, 470px); height: auto; max-height: 112px; object-fit: contain; transition: filter .2s ease, opacity .2s ease; }
+    body[data-surface="stone"] .logo-stage { background: var(--stone); }
+    body[data-surface="mist"] .logo-stage { background: var(--mist); }
+    body[data-surface="paper"] .logo-stage { background: var(--paper); }
+    body[data-surface="mist"] .logo-stage img, body[data-surface="paper"] .logo-stage img { filter: brightness(0); }
+    .card-copy { padding: 20px 22px 18px; }
+    .card-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+    .card h2 { margin: 0; color: #232627; font: 600 15px/1.3 "Segoe UI", sans-serif; }
+    .number { color: #858b8d; font: 11px "Cascadia Code", Consolas, monospace; }
+    .card p { min-height: 42px; margin: 10px 0 18px; color: #646b6d; font-size: 13px; line-height: 1.6; }
+    .card-actions { display: flex; gap: 9px; }
+    .action { border: 1px solid #c9cdca; border-radius: 6px; padding: 8px 11px; background: transparent; color: #33383a; text-decoration: none; cursor: pointer; font-size: 11px; }
+    .action.primary { border-color: var(--charcoal); background: var(--charcoal); color: var(--paper); }
+    .selected { min-height: 52px; margin: 28px 0 0; border-left: 2px solid #626b69; padding: 8px 14px; color: #545a5b; font-size: 13px; line-height: 1.6; }
+    footer { margin-top: 54px; border-top: 1px solid #d9dad6; padding-top: 18px; color: #777d7e; font: 10px/1.7 "Cascadia Code", Consolas, monospace; letter-spacing: .08em; text-align: center; text-transform: uppercase; }
+    @media (max-width: 760px) { .page { width: min(100% - 28px, 560px); padding-top: 48px; } .grid { grid-template-columns: 1fr; } .logo-stage { min-height: 155px; } }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body data-surface="charcoal">
+  <main class="page">
+    <header>
+      <p class="eyebrow">Brand identity · first exploration</p>
+      <h1>Arden</h1>
+      <p class="intro">Six wordmark directions for a private knowledge platform. The work stays monochrome so the lettering can move cleanly across dark, grey, and light surfaces.</p>
+    </header>
+
+    <div class="toolbar" role="group" aria-label="Preview background">
+      <span class="toolbar-label">Preview on</span>
+      <button class="swatch" type="button" data-surface-choice="charcoal" aria-pressed="true"><span class="swatch-dot" style="--swatch:#242628"></span>Charcoal</button>
+      <button class="swatch" type="button" data-surface-choice="stone" aria-pressed="false"><span class="swatch-dot" style="--swatch:#929698"></span>Grey</button>
+      <button class="swatch" type="button" data-surface-choice="mist" aria-pressed="false"><span class="swatch-dot" style="--swatch:#d4d5d5"></span>Mist</button>
+      <button class="swatch" type="button" data-surface-choice="paper" aria-pressed="false"><span class="swatch-dot" style="--swatch:#f4f3ef"></span>White</button>
+    </div>
+
+    <section class="grid" aria-label="Wordmark options">
+      <article class="card">
+        <div class="logo-stage"><img src="arden-wordmark-01-editorial.svg" alt="Arden in quiet editorial serif lettering"></div>
+        <div class="card-copy"><div class="card-top"><h2>Quiet editorial</h2><span class="number">01 / 06</span></div><p>A calm serif with a literary character. It makes the product feel like a place where durable knowledge lives.</p><div class="card-actions"><button class="action primary choose" data-choice="Quiet editorial">Choose direction</button><a class="action" href="arden-wordmark-01-editorial.svg" download>Download SVG</a></div></div>
+      </article>
+      <article class="card">
+        <div class="logo-stage"><img src="arden-wordmark-02-humanist.svg" alt="ARDEN in open humanist sans serif capitals"></div>
+        <div class="card-copy"><div class="card-top"><h2>Open humanist</h2><span class="number">02 / 06</span></div><p>Spaced capitals give the name a clear, steady presence across a desktop title bar or organization login.</p><div class="card-actions"><button class="action primary choose" data-choice="Open humanist">Choose direction</button><a class="action" href="arden-wordmark-02-humanist.svg" download>Download SVG</a></div></div>
+      </article>
+      <article class="card">
+        <div class="logo-stage"><img src="arden-wordmark-03-soft-lowercase.svg" alt="arden in soft lowercase lettering"></div>
+        <div class="card-copy"><div class="card-top"><h2>Soft lowercase</h2><span class="number">03 / 06</span></div><p>More approachable and product-like, with compact lowercase shapes that still feel professional.</p><div class="card-actions"><button class="action primary choose" data-choice="Soft lowercase">Choose direction</button><a class="action" href="arden-wordmark-03-soft-lowercase.svg" download>Download SVG</a></div></div>
+      </article>
+      <article class="card">
+        <div class="logo-stage"><img src="arden-wordmark-04-register.svg" alt="ARDEN in technical monospaced capitals"></div>
+        <div class="card-copy"><div class="card-top"><h2>Technical register</h2><span class="number">04 / 06</span></div><p>A measured, source-aware direction. It nods to systems and provenance, though it reads more technical.</p><div class="card-actions"><button class="action primary choose" data-choice="Technical register">Choose direction</button><a class="action" href="arden-wordmark-04-register.svg" download>Download SVG</a></div></div>
+      </article>
+      <article class="card">
+        <div class="logo-stage"><img src="arden-wordmark-05-archive-slab.svg" alt="Arden in sturdy archive slab serif lettering"></div>
+        <div class="card-copy"><div class="card-top"><h2>Archive slab</h2><span class="number">05 / 06</span></div><p>Sturdier serif forms suggest dependability and institutional memory, with a little more weight.</p><div class="card-actions"><button class="action primary choose" data-choice="Archive slab">Choose direction</button><a class="action" href="arden-wordmark-05-archive-slab.svg" download>Download SVG</a></div></div>
+      </article>
+      <article class="card">
+        <div class="logo-stage"><img src="arden-wordmark-06-connected-linework.svg" alt="Custom geometric ARDEN wordmark built from connected linework"></div>
+        <div class="card-copy"><div class="card-top"><h2>Connected linework</h2><span class="number">06 / 06 · custom paths</span></div><p>Original geometric lettering ties the name to Arden’s graph concept without adding a separate symbol.</p><div class="card-actions"><button class="action primary choose" data-choice="Connected linework">Choose direction</button><a class="action" href="arden-wordmark-06-connected-linework.svg" download>Download SVG</a></div></div>
+      </article>
+    </section>
+
+    <p class="selected" id="selection" aria-live="polite">Pick the direction that feels closest. I’d start by comparing Quiet editorial with Connected linework.</p>
+    <footer>Arden · private organizational memory · wordmark exploration</footer>
+  </main>
+  <script>
+    document.querySelectorAll("[data-surface-choice]").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.body.dataset.surface = button.dataset.surfaceChoice;
+        document.querySelectorAll("[data-surface-choice]").forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+      });
+    });
+    document.querySelectorAll(".choose").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".choose").forEach((item) => item.textContent = "Choose direction");
+        button.textContent = "Selected ✓";
+        document.getElementById("selection").textContent = `Selected direction: ${button.dataset.choice}. I’ll refine the letterforms, kerning, and final light/dark versions around this choice.`;
+      });
+    });
+  </script>
+</body>
+</html>
