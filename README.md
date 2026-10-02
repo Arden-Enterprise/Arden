@@ -33,3 +33,11 @@ pnpm build
 ```
 
 The API exposes `/api/health/live` and `/api/health/ready`; readiness checks PostgreSQL. This is a scaffold, not a deployable Arden release: authentication, the data model, ingestion, graph data, AI, installers, and Coolify production configuration are not implemented yet.
+
+## Private local configuration and server access
+
+For local environment files, credentials, sensitive notes, and data exports, follow the [private files guide](docs/engineering/private-files.md). It explains where to keep private material, how to check Git exclusions, and how to ask Codex for setup help without sharing secret values. Public configuration examples contain placeholders only.
+
+For authorized server work, follow the [private server setup guide](docs/engineering/server-access.md). Connection details belong in each contributor's local Git metadata and personal SSH configuration; the public guide contains placeholders, and Codex's instructions remain scoped to this project through [AGENTS.md](AGENTS.md).
+
+Public environment templates contain placeholders only. Set real values locally using the team's private setup instructions.

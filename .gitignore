@@ -10,3 +10,17 @@ coverage/
 .DS_Store
 .playwright-cli/
 .impeccable/review/
+
+# Private local configuration; public examples contain placeholders only.
+# See docs/engineering/private-files.md.
+.env.*
+/.private/
+*.key
+*.pem
+*.p8
+*.p12
+*.pfx
+*.jks
+*.keystore
+!.env.example
+!.env.sample
