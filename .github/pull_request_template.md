@@ -29,3 +29,7 @@ Describe applicable permission/data-flow changes, migrations/backfills, API/desk
 ## Private configuration review
 
 - [ ] Private files are excluded and untracked; public examples, documentation, and PR artifacts contain no private values.
+
+## Commit scope review
+
+- [ ] Each commit contains one coherent unit of work with a descriptive Conventional Commit subject.

@@ -92,6 +92,7 @@ ci/windows-build
 - `release/<semver>` is the version-only exception. `hotfix/` is for urgent production defects, not ordinary feature work.
 - One branch per coherent change, normally based on current `main`. Do not create a permanent `develop` or use branch names as security/deployment isolation.
 - Do not rename or switch away from someone else's working branch merely to satisfy naming. Inspect status and ask if their work would be disturbed. An unborn/initial repository may need explicit bootstrap handling.
+- Commit each completed, independently reviewable unit of work separately when committing is authorized. Keep related code, documentation, and verification together; preserve unrelated changes and avoid broken intermediate commits. Inspect the proposed diff before committing.
 - Use conventional commit subjects: `<type>(optional-scope): concise summary`. A breaking change must explain compatibility and migration consequences.
 - Inspect status/diff before edits and before staging. Preserve unrelated tracked and untracked work. Stage explicit task-owned paths; do not sweep a dirty workspace with `git add .`.
 - Do not reset, clean, discard, stash, amend others' commits, force-push, delete branches/volumes, or rewrite shared history without specific authorization.

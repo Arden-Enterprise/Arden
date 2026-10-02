@@ -42,6 +42,8 @@ Use synthetic seed data and separate local credentials/volumes. Follow [operatio
 
 ## Changes and commits
 
+Commit in units of work when committing is authorized. Each completed, independently reviewable change gets its own descriptive Conventional Commit. Keep related code, documentation, and verification together, and make the commit coherent and reversible. Do not combine unrelated fixes, features, or cleanup, or split tightly coupled changes into broken intermediate commits. Inspect the proposed diff and stage only the intended paths or hunks; preserve other contributors' work.
+
 - Keep a change focused, preserve unrelated work, and stage explicit owned files. Review the diff and any new files before committing.
 - Use conventional subjects: `feat(graph): add scope filters`, `fix(api): reject invalid upload sizes`, or `docs: clarify private AI deployment`.
 - Do not manufacture features to fill architectural diagrams. Planned libraries require an actual implementation need and compatibility/license review.
