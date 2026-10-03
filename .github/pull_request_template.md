@@ -25,3 +25,11 @@ Describe applicable permission/data-flow changes, migrations/backfills, API/desk
 - [ ] Dependencies/APIs/configuration are compatible with the repository's versions.
 - [ ] Relevant rules, product/architecture/design docs, setup instructions, and decision records are updated (or explicitly not applicable).
 - [ ] Planned/unverified capabilities are not presented as shipped or production-ready.
+
+## Private configuration review
+
+- [ ] Private files are excluded and untracked; public examples, documentation, and PR artifacts contain no private values.
+
+## Commit scope review
+
+- [ ] Each commit contains one coherent unit of work with a descriptive Conventional Commit subject.

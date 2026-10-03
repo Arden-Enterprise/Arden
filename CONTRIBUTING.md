@@ -42,6 +42,8 @@ Use synthetic seed data and separate local credentials/volumes. Follow [operatio
 
 ## Changes and commits
 
+Commit in units of work when committing is authorized. Each completed, independently reviewable change gets its own descriptive Conventional Commit. Keep related code, documentation, and verification together, and make the commit coherent and reversible. Do not combine unrelated fixes, features, or cleanup, or split tightly coupled changes into broken intermediate commits. Inspect the proposed diff and stage only the intended paths or hunks; preserve other contributors' work.
+
 - Keep a change focused, preserve unrelated work, and stage explicit owned files. Review the diff and any new files before committing.
 - Use conventional subjects: `feat(graph): add scope filters`, `fix(api): reject invalid upload sizes`, or `docs: clarify private AI deployment`.
 - Do not manufacture features to fill architectural diagrams. Planned libraries require an actual implementation need and compatibility/license review.
@@ -81,3 +83,9 @@ Review specifically for:
 - Updated rules/docs and explicit unresolved decisions or unverified checks.
 
 Intended `main` protections are reviewed PRs, required CI checks on both OS jobs, resolved review conversations, and restricted force-push/deletion. Security-sensitive changes should receive a reviewer familiar with the affected boundary. These are policy requirements; a maintainer must separately configure/verify GitHub protections. This documentation does not configure remote settings or add mechanical branch-name enforcement.
+
+## Private configuration and public documentation
+
+This repository is public. Follow the [private files guide](docs/engineering/private-files.md) before adding configuration, operational notes, or data files. Keep private or security-critical values in excluded local files or approved secret storage, and document setup with placeholders. Check exclusions and existing tracking before committing; never force-add private files. Share actual values through an approved private channel.
+
+For authorized server work, follow the [private server setup guide](docs/engineering/server-access.md). Keep connection profiles in local Git metadata and personal SSH configuration.
