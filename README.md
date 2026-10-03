@@ -24,6 +24,21 @@ The web shell runs at `http://127.0.0.1:5180`; the API runs at `http://127.0.0.1
 
 `pnpm db:down` stops the local database without deleting its volume. The Compose password is **for local development only**. Production must supply its own secret and connection string.
 
+## Current UI foundation
+
+The shared React package now contains the first ARD-16 frontend slice for both web and desktop:
+
+- a minimal sign-in boundary with no public registration;
+- a Figma-aligned `My Work` preview;
+- a responsive `Personal Workspace` with a private-note list, editor, search, keyboard focus shortcut, unsaved state, and empty states;
+- a permission-aware Knowledge Pane that keeps the active access boundary visible;
+- a guided first-run organization setup preview (SCR-02) covering template, departments, members/roles and access review;
+- a System Admin organization and access preview (SCR-09) with local edits, validation and a separate confirmation step.
+
+Open the first-run setup from the sign-in preview button, or open the member preview to enter My Work directly. Completing setup enters the admin preview, where Organization & Access is available in the sidebar. The template catalogue and member records are illustrative. The two-department minimum is a demo constraint for testing permission boundaries, not a production rule for every organization.
+
+This slice is intentionally labeled as a frontend preview. The sign-in action does not create a session, sample work is not live data, organization/role and private-note edits are held only in memory, and access rules are read-only guidance. Real authentication, authorization, audit events, persistence, conflict handling, and server enforcement still depend on the corresponding API and data-model tasks. Hidden UI is never treated as an authorization boundary.
+
 ## Checks
 
 ```sh
@@ -32,4 +47,4 @@ pnpm test
 pnpm build
 ```
 
-The API exposes `/api/health/live` and `/api/health/ready`; readiness checks PostgreSQL. This is a scaffold, not a deployable Arden release: authentication, the data model, ingestion, graph data, AI, installers, and Coolify production configuration are not implemented yet.
+The API exposes `/api/health/live` and `/api/health/ready`; readiness checks PostgreSQL. This is a scaffold, not a deployable Arden release: authentication, authorization, the canonical data model, persisted notes, ingestion, graph data, AI, installers, and Coolify production configuration are not implemented yet.

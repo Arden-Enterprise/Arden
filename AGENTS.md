@@ -29,7 +29,7 @@ These instructions apply to the whole repository, to coding agents and human con
 4. Personal knowledge is private by default. Contribution creates an explicit separate copy; the private original remains private.
 5. Shared Arden knowledge requires review of an immutable snapshot and explicit authorized publication. Visibility and official status are different properties.
 6. External Jira/GitHub context keeps source provenance and its permitted audience. A connector token is not permission for every Arden user.
-7. The graph is the home screen. A selected node opens the Knowledge Pane. Writing has a dedicated editor; AI has an inspectable context basket.
+7. My Work is the established-user entry screen under the newer `knowledge.md` in the SEP490 workspace. A future knowledge graph opens a Knowledge Pane for selected nodes; writing has a dedicated editor and AI has an inspectable context basket.
 8. AI uses authorized evidence, exact-version citations, and visible uncertainty. It cannot silently publish, administer access, or write externally.
 9. No mandatory Arden-operated service, telemetry, model endpoint, licensing call-home, or update dependency may be introduced without an explicit accepted product decision.
 10. Do not claim end-to-end encryption against customer root/database administrators, guaranteed offline revocation, high availability, air-gap readiness, or production readiness without an implemented and tested design.
@@ -38,7 +38,7 @@ The blueprint's unresolved choices remain unresolved: supported Windows/hardware
 
 ## 3. Current state versus target stack
 
-At this ruleset's creation, the repository is a scaffold: shared illustrative React graph UI, web/Electron shells, Fastify liveness/readiness routes, two API tests, and a local PostgreSQL Compose service. Authentication, canonical content schema, live graph, editor, governance, ingestion, connectors, AI, worker, production deployment, and signed installers are **not implemented**.
+The repository remains a scaffold: the shared React package now includes labeled sign-in, My Work, in-memory private-note, first-run organization setup, and System Admin organization/access UI previews for web/Electron; the API provides only Fastify liveness/readiness routes and two health tests; local PostgreSQL is available through Compose. The UI preview is not authentication, authorization, persistence, or an audit trail. Authentication, the canonical content schema, server-enforced organization/access administration and private notes, live graph, governed editor, governance, ingestion, connectors, AI, worker, production deployment, and signed installers are **not implemented**.
 
 - Current tooling: Node.js 24 in CI, pnpm 11.19.0, strict TypeScript, React/Vite, Electron/electron-vite, Fastify with `pg`, PostgreSQL 17 via a pgvector image, and Vitest. Exact versions come from manifests and lockfile.
 - Planned: React Router, TanStack Query, BlockNote core, Sigma.js/Graphology, Better Auth with its Drizzle adapter, Drizzle migrations, pg-boss worker, protected local file storage, an Ollama/private-endpoint model gateway, SSE notifications, and Playwright coverage.

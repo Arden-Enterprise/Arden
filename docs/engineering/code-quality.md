@@ -4,9 +4,9 @@ These standards apply to application code and tests alongside [AGENTS.md](../../
 
 ## Current evidence and gaps
 
-At this guide's creation, the API has a testable `buildApp` factory and two health-route tests. The shared UI is concentrated in a large `ArdenShell.tsx`; it contains sample data, icon rendering, graph interaction, and composition. That is scaffold debt to improve incrementally, not a pattern for adding every future feature to the same file.
+The API has a testable `buildApp` factory and two health-route tests. The shared UI groups shell orchestration and navigation in `packages/ui/src/app/`, reusable controls and types in `shared/`, and screen-specific code in `sign-in/`, `my-work/`, `personal-workspace/`, and `organization/`. Each preview page owns its interaction state; its child components render the corresponding sections. Organization preview data and pure validation live in `organization/previewModel.ts` with focused tests in `packages/ui/tests/`; this is not server authorization. `shared/useSearchShortcut.ts` owns the keyboard listener and cleanup. `packages/ui/src/styles.css` is the stable public CSS entry point; its imports in `styles/` separate foundations, screens, the shell, and responsive rules. Keep orchestration in `app/ArdenShell.tsx` and avoid turning it or the CSS entry point back into a catch-all as real APIs replace preview data.
 
-The repository has strict TypeScript and typecheck/test/build scripts. It does **not** yet have configured lint/format checks, UI tests, real database integration tests, or end-to-end coverage. Documentation does not install these tools or prove existing code meets every standard. Keep this inventory current when the corresponding work is implemented.
+The repository has strict TypeScript and typecheck/test/build scripts, plus pure organization-preview validation tests. It does **not** yet have configured lint/format checks, rendered-component UI tests, real database integration tests, or end-to-end coverage. Documentation does not install these tools or prove existing code meets every standard. Keep this inventory current when the corresponding work is implemented.
 
 ## Readable and cohesive code
 
