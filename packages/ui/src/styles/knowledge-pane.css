@@ -1,0 +1,148 @@
+/* Permission-aware context pane */
+
+.knowledge-pane-redesign {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  min-width: 0;
+  border-left: 1px solid var(--arden-line);
+  background: var(--arden-white);
+}
+
+.knowledge-pane-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 66px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--arden-line);
+}
+
+.knowledge-pane-header strong {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.knowledge-pane-header span {
+  color: var(--arden-stone);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.knowledge-pane-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  padding: 24px;
+  overflow: auto;
+}
+
+.knowledge-pane-body h2 {
+  margin: -1px 0 0;
+  font-size: 23px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 27px;
+}
+
+.knowledge-pane-body > p,
+.access-boundary p {
+  margin: 0;
+  color: var(--arden-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.pane-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--arden-line);
+}
+
+.pane-suggestions {
+  display: grid;
+  gap: 9px;
+}
+
+.pane-suggestions button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--arden-line);
+  border-radius: var(--arden-radius-sm);
+  color: var(--arden-text-secondary);
+  background: var(--arden-sidebar);
+  font-size: 11px;
+  text-align: left;
+}
+
+.pane-suggestions button > span {
+  flex: none;
+  color: var(--arden-stone);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.access-boundary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 150px;
+  padding: 16px;
+  border: 1px solid var(--arden-line);
+  border-radius: var(--arden-radius-md);
+  background: var(--arden-sidebar);
+}
+
+.access-boundary strong {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.access-boundary p {
+  font-size: 11px;
+  line-height: 17px;
+}
+
+.knowledge-pane-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 93px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--arden-line);
+}
+
+.knowledge-pane-composer > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 37px;
+  padding: 0 10px;
+  border: 1px solid var(--arden-line-strong);
+  border-radius: var(--arden-radius-sm);
+  color: var(--arden-text-secondary);
+  background: #fbfbf9;
+  font-size: 11px;
+}
+
+.knowledge-pane-composer > span {
+  color: var(--arden-stone);
+  font-size: 10px;
+  line-height: 14px;
+}

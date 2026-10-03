@@ -1,0 +1,392 @@
+@media (max-width: 1220px) {
+  .arden-app-shell {
+    grid-template-columns: 194px minmax(0, 1fr) 290px;
+  }
+
+  .app-sidebar {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .workspace-content {
+    padding-right: 22px;
+    padding-left: 22px;
+  }
+
+  .workspace-topbar {
+    padding-right: 22px;
+    padding-left: 22px;
+  }
+
+  .knowledge-pane-header,
+  .knowledge-pane-body,
+  .knowledge-pane-composer {
+    padding-right: 19px;
+    padding-left: 19px;
+  }
+
+  .my-work-grid {
+    grid-template-columns: minmax(0, 1.65fr) minmax(220px, 0.9fr);
+  }
+
+  .member-row {
+    grid-template-columns: minmax(120px, 1fr) minmax(110px, 1fr) minmax(130px, 1fr) 28px;
+  }
+}
+
+@media (max-width: 980px) {
+  .arden-app-shell {
+    grid-template-columns: 70px minmax(0, 1fr) 280px;
+  }
+
+  .app-sidebar {
+    align-items: center;
+    padding: 20px 8px;
+  }
+
+  .sidebar-brand {
+    justify-content: center;
+  }
+
+  .sidebar-brand > span:not(.sidebar-brand-mark),
+  .sidebar-brand small,
+  .access-card,
+  .navigation-label,
+  .sidebar-nav-item > span,
+  .sidebar-nav-item small,
+  .sidebar-session strong,
+  .sidebar-session > span,
+  .sidebar-session button > span {
+    display: none;
+  }
+
+  .sidebar-navigation {
+    width: 100%;
+  }
+
+  .sidebar-nav-item {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .sidebar-nav-item:disabled {
+    display: none;
+  }
+
+  .sidebar-session button {
+    width: 36px;
+    justify-content: center;
+  }
+
+  .my-work-grid,
+  .personal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-card {
+    min-height: auto;
+  }
+
+  .organization-setup-page {
+    grid-template-columns: 255px minmax(0, 1fr);
+  }
+
+  .organization-setup-rail {
+    padding: 25px;
+  }
+
+  .member-row {
+    grid-template-columns: 1fr 1fr 28px;
+  }
+
+  .member-identity {
+    grid-column: 1 / -1;
+  }
+
+  .access-rule-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .access-rule-card {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .sign-in-page {
+    grid-template-columns: 1fr;
+  }
+
+  .sign-in-intro {
+    min-height: auto;
+    padding: 28px 24px 32px;
+    border-right: 0;
+    border-bottom: 1px solid var(--arden-line);
+  }
+
+  .sign-in-intro > div:nth-child(2) {
+    margin: 70px 0;
+  }
+
+  .sign-in-panel {
+    min-height: auto;
+    padding: 48px 24px;
+  }
+
+  .arden-app-shell {
+    display: block;
+  }
+
+  .app-sidebar {
+    position: sticky;
+    z-index: 6;
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    height: 54px;
+    padding: 0 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--arden-line);
+  }
+
+  .sidebar-brand-mark {
+    width: 20px;
+    height: 20px;
+  }
+
+  .sidebar-navigation {
+    display: flex;
+    width: auto;
+  }
+
+  .sidebar-nav-item {
+    width: 36px;
+    min-height: 36px;
+  }
+
+  .sidebar-session {
+    margin: 0;
+  }
+
+  .sidebar-session button {
+    margin: 0;
+  }
+
+  .workspace-topbar {
+    top: 54px;
+    min-height: 50px;
+    padding: 0 16px;
+  }
+
+  .workspace-content {
+    padding: 22px 16px 32px;
+  }
+
+  .knowledge-pane-redesign {
+    position: static;
+    height: auto;
+    min-height: 500px;
+    border-top: 1px solid var(--arden-line);
+    border-left: 0;
+  }
+
+  .knowledge-pane-body {
+    overflow: visible;
+  }
+
+  .status-strip span {
+    max-width: 90%;
+    font-size: 8px;
+  }
+
+  .personal-title-row {
+    flex-direction: column;
+  }
+
+  .personal-title-row .primary-button {
+    margin-top: 0;
+  }
+
+  .organization-setup-page {
+    display: block;
+  }
+
+  .organization-setup-rail {
+    min-height: auto;
+    padding: 22px 18px;
+  }
+
+  .organization-setup-rail-content {
+    margin: 0;
+    padding: 24px 0 0;
+  }
+
+  .organization-setup-rail h1 {
+    max-width: 500px;
+    font-size: 30px;
+  }
+
+  .organization-step-list {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 5px;
+    margin-top: 24px;
+  }
+
+  .organization-step-list li {
+    display: grid;
+    justify-items: start;
+    align-content: center;
+    gap: 7px;
+    min-height: 57px;
+    border-bottom: 1px solid #45494a;
+    font-size: 9px;
+  }
+
+  .organization-setup-rail-footer {
+    display: none;
+  }
+
+  .organization-setup-topbar,
+  .organization-setup-actions {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .organization-setup-content {
+    padding: 30px 18px 36px;
+  }
+
+  .organization-access-heading {
+    align-items: start;
+  }
+}
+
+@media (max-width: 480px) {
+  .sign-in-intro h1 {
+    font-size: 42px;
+  }
+
+  .sign-in-intro > div:nth-child(2) {
+    margin: 54px 0;
+  }
+
+  .preview-state {
+    max-width: 150px;
+    font-size: 8px;
+  }
+
+  .page-title-row h1 {
+    font-size: 25px;
+  }
+
+  .status-strip {
+    min-height: 76px;
+  }
+
+  .status-strip strong {
+    font-size: 16px;
+  }
+
+  .status-strip span {
+    white-space: normal;
+  }
+
+  .workspace-card {
+    padding: 14px;
+  }
+
+  .editor-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .editor-header .secondary-button {
+    width: 100%;
+  }
+
+  .editor-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-top: 10px;
+    padding-bottom: 10px;
+  }
+
+  .organization-template-grid,
+  .member-add-form,
+  .organization-review-summary,
+  .organization-overview {
+    grid-template-columns: 1fr;
+  }
+
+  .organization-overview > div,
+  .organization-review-summary div {
+    border-right: 0;
+    border-bottom: 1px solid var(--arden-line);
+  }
+
+  .organization-overview > div:last-child,
+  .organization-review-summary div:last-child {
+    border-bottom: 0;
+  }
+
+  .organization-setup-topbar span:last-child {
+    display: none;
+  }
+
+  .organization-setup-actions {
+    flex-wrap: wrap;
+  }
+
+  .organization-setup-actions > span {
+    order: 3;
+    width: 100%;
+  }
+
+  .organization-inline-form,
+  .organization-save-bar,
+  .organization-confirm-panel {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .department-row {
+    grid-template-columns: 22px minmax(0, 1fr) 28px;
+  }
+
+  .department-members {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .department-row .organization-icon-button {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .member-row {
+    grid-template-columns: minmax(0, 1fr) 28px;
+  }
+
+  .member-row label {
+    grid-column: 1;
+  }
+
+  .member-row .organization-icon-button {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .organization-confirm-panel > div:last-child {
+    flex-wrap: wrap;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

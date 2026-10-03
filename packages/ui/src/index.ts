@@ -1,1 +1,1 @@
-export { ArdenShell } from "./ArdenShell";
+export { ArdenShell } from "./app/ArdenShell";
