@@ -9,6 +9,7 @@ const extensions = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yam
 const excluded = new Set(['node_modules', 'dist', 'out', 'coverage', 'fixtures', 'backups', 'data']);
 
 // Mirror only code needed by the API. Git ignores are an additional boundary.
+/** Keep the upload boundary limited to backend code; the server checks it independently. */
 export function allowedSource(name) {
   const parts = name.split('/');
   if (parts.some(part => part.startsWith('.') || excluded.has(part))) return false;
@@ -20,6 +21,7 @@ export function allowedSource(name) {
   return scope && extensions.has(path.extname(name));
 }
 
+/** Read saved working files with size and symlink limits, without consulting private values. */
 export async function snapshot(root) {
   const names = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root, maxBuffer: 16 * 1024 * 1024 }).toString().split('\0');
   const files = new Map();
@@ -45,6 +47,7 @@ export async function snapshot(root) {
   return files;
 }
 
+/** Send changed contents alongside a complete manifest so remote deletions can be reconciled. */
 export function delta(previous, current) {
   return {
     files: [...current].filter(([name, value]) => previous.get(name)?.hash !== value.hash).map(([name, value]) => ({ name, ...value })),

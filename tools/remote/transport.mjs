@@ -3,8 +3,10 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 export const sshOptions = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ForwardAgent=no', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=10', '-o', 'ServerAliveCountMax=3'];
+/** Quote a validated argument for the remote POSIX shell, not the local Windows shell. */
 export const shellQuote = value => `'${value.replaceAll("'", "'\\''")}'`;
 
+/** Validate ignored checkout settings before constructing transport arguments. */
 export async function configuration(root, slotArgument) {
   let config;
   try { config = JSON.parse(await readFile(path.join(root, '.private', 'remote.json'), 'utf8')); }
@@ -19,6 +21,7 @@ export async function configuration(root, slotArgument) {
   return { ...config, slot, localApiPort };
 }
 
+/** Bound the subprocess lifetime/output and keep private SSH diagnostics out of ordinary logs. */
 export function run(command, args, { input, timeout = 30000, inherit = false } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { windowsHide: true, stdio: inherit ? 'inherit' : ['pipe', 'pipe', 'pipe'] });
@@ -37,6 +40,7 @@ export function run(command, args, { input, timeout = 30000, inherit = false } =
   });
 }
 
+/** Invoke the unprivileged slot protocol; the token and payload travel only over verified SSH. */
 export async function remote(config, action, token = '', payload = {}) {
   const command = ['python3', `${config.remoteRoot}/ops/sync.py`, config.slot, action, token].map(shellQuote).join(' ');
   const output = await run('ssh', [...sshOptions, config.sshAlias, command], { input: JSON.stringify(payload) });
@@ -45,6 +49,7 @@ export async function remote(config, action, token = '', payload = {}) {
   return result;
 }
 
+/** Elevate only the root-owned development start entry point, never synced source. */
 export async function startBackend(config) {
   const command = ['sudo', '-n', 'python3', `${config.remoteRoot}/ops/start.py`, config.slot].map(shellQuote).join(' ');
   const output = await run('ssh', [...sshOptions, config.sshAlias, command], { timeout: 240000 });
@@ -52,6 +57,7 @@ export async function startBackend(config) {
   if (!result.ok) throw new Error('Backend startup failed. Ask the server operator to inspect its scoped logs.');
 }
 
+/** Start a loopback-only forward whose child-process lifetime belongs to the caller. */
 export function tunnel(config, remotePort) {
   return spawn('ssh', [...sshOptions, '-o', 'ExitOnForwardFailure=yes', '-N', '-L', `127.0.0.1:${config.localApiPort}:127.0.0.1:${remotePort}`, config.sshAlias], { windowsHide: true, stdio: ['ignore', 'ignore', 'ignore'] });
 }

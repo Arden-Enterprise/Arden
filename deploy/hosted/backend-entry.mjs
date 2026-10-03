@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 let child;
 let stopping = false;
+/** Signal the whole backend process group, including pnpm's child API watcher. */
 function requestStop() {
   stopping = true;
   if (child?.pid && child.exitCode === null) {
@@ -14,18 +15,26 @@ function requestStop() {
 process.once('SIGTERM', requestStop);
 process.once('SIGINT', requestStop);
 
+/** Detect dependency-input changes separately from ordinary source hot reload. */
 async function fingerprint() {
-  const names = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/api/package.json'];
+  const required = new Set(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/api/package.json']);
+  const names = [...required];
   for (const parent of ['apps', 'packages']) {
     for (const entry of await readdir(parent, { withFileTypes: true }).catch(error => { if (error.code === 'ENOENT') return []; throw error; })) {
       if (entry.isDirectory()) names.push(`${parent}/${entry.name}/package.json`);
     }
   }
   const hash = createHash('sha256');
-  for (const name of [...new Set(names)].sort()) hash.update(name).update(await readFile(name));
+  for (const name of [...new Set(names)].sort()) {
+    let content;
+    try { content = await readFile(name); }
+    catch (error) { if (error.code === 'ENOENT' && !required.has(name)) continue; throw error; }
+    hash.update(name).update(content);
+  }
   return hash.digest('hex');
 }
 
+/** Drain the supervised process group, then force-stop it after a bounded grace period. */
 async function stopChild() {
   if (!child?.pid || child.exitCode !== null || child.signalCode) return;
   const active = child;
@@ -36,11 +45,13 @@ async function stopChild() {
   clearTimeout(timer);
 }
 
+/** Install Linux dependencies from the frozen lockfile into writable dependency volumes. */
 async function install() {
   child = spawn('pnpm', ['--filter', '@arden/api...', 'install', '--frozen-lockfile', '--prefer-offline', '--store-dir', '/pnpm/store'], { stdio: 'inherit', detached: true });
   await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => code === 0 ? resolve() : reject(new Error('Frozen backend dependency install failed.'))); });
 }
 
+/** Reinstall/restart on dependency changes and fail visibly if the supervised API exits. */
 async function main() {
   let installed;
   while (!stopping) {

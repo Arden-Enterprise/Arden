@@ -13,6 +13,7 @@ let forward;
 let frontend;
 let frontendStop;
 
+/** Stop our frontend process tree so a transport failure cannot leave an orphan Vite listener. */
 function stopFrontend() {
   if (!frontend?.pid || frontend.exitCode !== null || frontend.signalCode) return Promise.resolve();
   if (frontendStop) return frontendStop;
@@ -30,10 +31,12 @@ function stopFrontend() {
   return frontendStop;
 }
 
+/** Begin signal cleanup; main's finally block also awaits cleanup and releases the lease. */
 function requestStop() { stopped = true; forward?.kill(); void stopFrontend(); }
 process.once('SIGINT', requestStop);
 process.once('SIGTERM', requestStop);
 
+/** Delay local frontend startup until the forwarded API reports database readiness. */
 async function ready(port) {
   for (let attempt = 0; attempt < 120 && !stopped; attempt++) {
     try {
@@ -45,6 +48,7 @@ async function ready(port) {
   throw new Error('Backend did not become ready. The local port may be occupied or the connection may have failed.');
 }
 
+/** Own the writer lease, tunnel, frontend, and sync loop through a single cleanup boundary. */
 async function main() {
   if (!['dev', 'preview', 'status'].includes(action) || (args.length && (args.length !== 2 || args[0] !== '--slot'))) {
     throw new Error('Usage: pnpm dev:remote [--slot dev-1] (or remote:preview / remote:status).');

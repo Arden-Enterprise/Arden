@@ -1,4 +1,4 @@
-"""Operator-only bootstrap: python3 provision.py /srv/DEDICATED_ROOT SSH_USER.
+"""Operator bootstrap: provision.py /srv/DEDICATED_ROOT DEV1_USER DEV2_USER DEV3_USER DEV4_USER.
 
 Run through sudo after reviewing these files. Existing installations are refused.
 The bootstrap does not start containers, modify sudo/SSH policy, or expose ports.
@@ -14,6 +14,7 @@ import sys
 
 
 def postgres_service(root, name, database, password):
+    """Keep generated database credentials outside source and expose no database port."""
     secret = root / 'secrets' / f'{name}.password'
     secret.write_text(password)
     secret.chmod(0o600)
@@ -28,32 +29,42 @@ def postgres_service(root, name, database, password):
     }
 
 
-def provision(root, account):
+def provision(root, accounts):
+    """Initialize a new dedicated root without changing access grants or existing state."""
     if os.getuid() != 0 or not re.fullmatch(r'/srv/[A-Za-z0-9_-]+', str(root)):
         raise ValueError('Use sudo and a dedicated directory directly under /srv.')
-    user = pwd.getpwnam(account)
+    if len(accounts) != 4:
+        raise ValueError('Provide four distinct approved SSH accounts, in dev-1 through dev-4 order.')
+    users = [pwd.getpwnam(account) for account in accounts]
+    if len({user.pw_uid for user in users}) != 4 or any(user.pw_uid == 0 for user in users):
+        raise ValueError('Each development slot requires a distinct non-root SSH account.')
     if root.exists() or root.is_symlink():
         raise ValueError('Target already exists; inspect it and update deliberately instead of reprovisioning.')
     source = Path(__file__).resolve().parent
     root.mkdir(mode=0o755)
     (root / 'ops').mkdir(mode=0o755)
     (root / 'secrets').mkdir(mode=0o700)
-    for name in ['sync.py', 'start.py', 'backend.Dockerfile', 'backend-entry.mjs']:
+    for name in ['sync.py', 'start.py', 'slot_access.py', 'backend.Dockerfile', 'backend-entry.mjs']:
         shutil.copyfile(source / name, root / 'ops' / name)
         (root / 'ops' / name).chmod(0o644)
+    assignments = root / 'ops' / 'slot-owners.json'
+    assignments.write_text(json.dumps({f'dev-{number}': user.pw_uid for number, user in enumerate(users, 1)}))
+    assignments.chmod(0o644)
     (root / '.arden-hosted').write_text('1\n')
     admin = secrets.token_hex(32)
     postgres = postgres_service(root, 'development', 'postgres', admin)
     services = {'postgres': postgres}
-    volumes = {'development_data': {}, 'pnpm_store': {}}
+    volumes = {'development_data': {}}
     statements = []
     for number in range(1, 5):
+        user = users[number - 1]
         slot = f'dev-{number}'
         database = f'arden_dev_{number}'
         password = secrets.token_hex(32)
         directory = root / 'dev' / slot
         directory.mkdir(parents=True, mode=0o755)
         (directory / 'source').mkdir(mode=0o755)
+        (directory / 'state').mkdir(mode=0o755)
         # Nested writable volumes need mountpoints before the source bind becomes read-only.
         for relative in ['apps', 'apps/api', 'node_modules', 'apps/api/node_modules']:
             mountpoint = directory / 'source' / relative
@@ -61,7 +72,9 @@ def provision(root, account):
             os.chown(mountpoint, 1000 if relative.endswith('node_modules') else user.pw_uid,
                      1000 if relative.endswith('node_modules') else user.pw_gid)
         (directory / '.arden-slot').write_text(json.dumps({'port': 3100 + number}))
-        for item in [directory, directory / 'source', directory / '.arden-slot']:
+        # Keep slot identity and its parent root-owned; the contributor writes source/state only.
+        (directory / '.arden-slot').chmod(0o644)
+        for item in [directory / 'source', directory / 'state']:
             os.chown(item, user.pw_uid, user.pw_gid)
         env = root / 'secrets' / f'{slot}.env'
         env.write_text(f'DATABASE_URL=postgresql://{database}:{password}@postgres:5432/{database}\nARDEN_API_HOST=0.0.0.0\nARDEN_API_PORT=3001\nNODE_ENV=development\n')
@@ -72,7 +85,7 @@ def provision(root, account):
             'build': {'context': str(root / 'ops'), 'dockerfile': 'backend.Dockerfile'},
             'env_file': [str(env)],
             'ports': [f'127.0.0.1:{3100 + number}:3001'],
-            'volumes': [f'{directory}/source:/workspace:ro', f'{slot}_modules:/workspace/node_modules', f'{slot}_api_modules:/workspace/apps/api/node_modules', 'pnpm_store:/pnpm/store'],
+            'volumes': [f'{directory}/source:/workspace:ro', f'{slot}_modules:/workspace/node_modules', f'{slot}_api_modules:/workspace/apps/api/node_modules', f'{slot}_pnpm_store:/pnpm/store'],
             'depends_on': {'postgres': {'condition': 'service_healthy'}},
             'mem_limit': '384m', 'cpus': 0.4, 'pids_limit': 128,
             'cap_drop': ['ALL'], 'security_opt': ['no-new-privileges:true'], 'init': True,
@@ -82,6 +95,7 @@ def provision(root, account):
         }
         volumes[f'{slot}_modules'] = {}
         volumes[f'{slot}_api_modules'] = {}
+        volumes[f'{slot}_pnpm_store'] = {}
     # Initialization runs as the postgres user; the SQL includes generated dev-only passwords.
     init = root / 'secrets' / 'development-init.sql'
     init.write_text('\n'.join(statements) + '\n')
@@ -100,4 +114,4 @@ def provision(root, account):
 
 
 if __name__ == '__main__':
-    provision(Path(sys.argv[1]), sys.argv[2])
+    provision(Path(sys.argv[1]), sys.argv[2:])

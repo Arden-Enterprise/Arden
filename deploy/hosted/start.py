@@ -1,16 +1,22 @@
 """Root-owned operator entry point; never accepts a source command or path."""
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+from slot_access import require_slot_owner
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def start(slot):
+    """Start only a provisioned development service using root-owned Compose controls."""
     if not re.fullmatch(r'dev-[1-4]', slot):
         raise ValueError('Only development slots can be started here.')
+    if os.getuid() != 0:
+        raise ValueError('Use the approved privileged startup entry point.')
+    require_slot_owner(slot, int(os.environ.get('SUDO_UID', '0')), allow_root=True)
     directory = ROOT / 'dev' / slot
     if directory.is_symlink() or not (directory / '.arden-slot').is_file():
         raise ValueError('Unprovisioned slot.')
@@ -25,6 +31,6 @@ def start(slot):
 if __name__ == '__main__':
     try:
         result = start(sys.argv[1])
-    except (ValueError, IndexError, subprocess.SubprocessError):
+    except (ValueError, KeyError, TypeError, OSError, IndexError, subprocess.SubprocessError):
         result = {'ok': False}
     print(json.dumps(result))

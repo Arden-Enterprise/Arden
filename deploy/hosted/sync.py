@@ -9,6 +9,7 @@ import re
 import sys
 import tempfile
 import time
+from slot_access import require_slot_owner
 
 ROOT = Path(__file__).resolve().parent.parent
 ROOT_FILES = {'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json'}
@@ -19,6 +20,7 @@ LEASE_SECONDS = 300
 
 
 def permitted(name):
+    """Enforce the server upload allowlist independently of the contributor CLI."""
     parts = name.split('/')
     if any(not part or part.startswith('.') or part in EXCLUDED for part in parts):
         return False
@@ -33,6 +35,7 @@ def permitted(name):
 
 
 def safe_file(source, name):
+    """Resolve a permitted regular source path without traversal or symlink escapes."""
     if not isinstance(name, str) or not permitted(name):
         raise ValueError('Source path is outside the upload allowlist.')
     target = source / name
@@ -47,6 +50,7 @@ def safe_file(source, name):
 
 
 def atomic_json(target, value):
+    """Replace slot metadata atomically while keeping writer credentials private."""
     temporary = target.with_suffix('.tmp')
     temporary.write_text(json.dumps(value))
     temporary.chmod(0o600 if target.name == 'lease.json' else 0o644)
@@ -54,6 +58,7 @@ def atomic_json(target, value):
 
 
 def operation(slot, action, token):
+    """Serialize each writer operation; status remains readable without a writer token."""
     if not re.fullmatch(r'dev-[1-4]', slot):
         raise ValueError('Only development slots accept source sync.')
     directory = ROOT / 'dev' / slot
@@ -63,16 +68,20 @@ def operation(slot, action, token):
     if source.is_symlink():
         raise ValueError('Invalid source directory.')
     port = json.loads((directory / '.arden-slot').read_text())['port']
+    state = directory / 'state'
+    if state.is_symlink() or not state.is_dir():
+        raise ValueError('The server operator must prepare protected slot state first.')
     if action == 'status':
         # Viewers may read status without receiving the private writer token or write permission.
-        status_path = directory / 'status.json'
+        status_path = state / 'status.json'
         status = json.loads(status_path.read_text()) if status_path.exists() else {}
         return {'ok': True, 'port': port, 'busy': status.get('expires', 0) > time.time(), 'files': status.get('files', 0)}
-    with (directory / 'sync.lock').open('a') as lock:
-        os.chmod(directory / 'sync.lock', 0o600)
+    require_slot_owner(slot, os.getuid())
+    with (state / 'sync.lock').open('a') as lock:
+        os.chmod(state / 'sync.lock', 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
-        lease_path = directory / 'lease.json'
-        manifest_path = directory / 'manifest.json'
+        lease_path = state / 'lease.json'
+        manifest_path = state / 'manifest.json'
         lease = json.loads(lease_path.read_text()) if lease_path.exists() else {}
         manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else []
         active = lease.get('expires', 0) > time.time()
@@ -82,13 +91,13 @@ def operation(slot, action, token):
             if active and lease.get('token') != token:
                 raise ValueError('This slot has an active writer. Choose another slot or use remote:preview.')
             atomic_json(lease_path, {'token': token, 'expires': time.time() + LEASE_SECONDS})
-            atomic_json(directory / 'status.json', {'expires': time.time() + LEASE_SECONDS, 'files': len(manifest)})
+            atomic_json(state / 'status.json', {'expires': time.time() + LEASE_SECONDS, 'files': len(manifest)})
             return {'ok': True, 'port': port}
         if lease.get('token') != token or not active:
             raise ValueError('Writer lease expired or belongs to another session. Restart the command.')
         if action == 'release':
             lease_path.unlink()
-            atomic_json(directory / 'status.json', {'expires': 0, 'files': len(manifest)})
+            atomic_json(state / 'status.json', {'expires': 0, 'files': len(manifest)})
             return {'ok': True}
         if action != 'apply':
             raise ValueError('Unknown operation.')
@@ -131,7 +140,7 @@ def operation(slot, action, token):
                 target.unlink()
         atomic_json(manifest_path, wanted)
         atomic_json(lease_path, {'token': token, 'expires': time.time() + LEASE_SECONDS})
-        atomic_json(directory / 'status.json', {'expires': time.time() + LEASE_SECONDS, 'files': len(wanted)})
+        atomic_json(state / 'status.json', {'expires': time.time() + LEASE_SECONDS, 'files': len(wanted)})
         return {'ok': True}
 
 
