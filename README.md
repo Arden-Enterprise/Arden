@@ -24,6 +24,10 @@ The web shell runs at `http://127.0.0.1:5180`; the API runs at `http://127.0.0.1
 
 `pnpm db:down` stops the local database without deleting its volume. The Compose password is **for local development only**. Production must supply its own secret and connection string.
 
+## Hosted backend development
+
+Run `pnpm dev:remote` after [private contributor setup](docs/engineering/remote-development.md). Vite stays on your computer; saved backend changes sync to your assigned hosted API/database. Four development slots are supported. Staging/production database templates are prepared; full Supabase integration and release deployment remain to implement.
+
 ## Checks
 
 ```sh

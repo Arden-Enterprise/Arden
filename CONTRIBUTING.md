@@ -40,6 +40,8 @@ Run `pnpm dev:desktop` in another terminal for the Windows desktop shell. Web is
 
 Use synthetic seed data and separate local credentials/volumes. Follow [operations.md](docs/engineering/operations.md) for multiple checkouts, isolation, production configuration, and backup obligations. The current Compose file is not a complete production application.
 
+For local frontend development against a hosted API/database, use `pnpm dev:remote` after the [private setup guide](docs/engineering/remote-development.md). Choose your assigned slot; do not overwrite an active writer or connect development code to a release database.
+
 ## Changes and commits
 
 Commit in units of work when committing is authorized. Each completed, independently reviewable change gets its own descriptive Conventional Commit. Keep related code, documentation, and verification together, and make the commit coherent and reversible. Do not combine unrelated fixes, features, or cleanup, or split tightly coupled changes into broken intermediate commits. Inspect the proposed diff and stage only the intended paths or hunks; preserve other contributors' work.

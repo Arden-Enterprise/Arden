@@ -1,0 +1,6 @@
+{
+  "sshAlias": "REPLACE_WITH_YOUR_APPROVED_ALIAS",
+  "remoteRoot": "/srv/REPLACE_WITH_PROJECT_DIRECTORY",
+  "defaultSlot": "dev-1",
+  "localApiPort": 3001
+}
