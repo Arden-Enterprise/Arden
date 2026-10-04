@@ -77,7 +77,27 @@ Before opening the workflow to more contributors, the environment/code owner mus
 
 Secrets/state live outside synced source. Only development names can sync or start through these commands. Staging/production need immutable release provisioning, migration roles, protected backups, and promotion following [operations.md](operations.md). Full Supabase environments need supported independent service/configuration isolation and capacity planning; do not casually attach several Auth/Storage servers to this shared PostgreSQL cluster.
 
-Bootstrap uses Docker Compose directly; these are **not registered Coolify resources**. Coolify registration and GitHub deployment credentials remain separate integration work. Do not modify Coolify's internal database to imitate registration.
+Bootstrap uses Docker Compose directly. Running those containers alone does **not** register them in Coolify. Follow [Coolify adoption](#coolify-adoption) to create genuine managed resources through its supported UI/API. GitHub release deployment credentials remain separate integration work. Do not modify Coolify's internal database to imitate registration.
+
+## Coolify adoption
+
+Use one Arden project with `development`, `staging`, and `production` environments. Development contains the four API slots and shared development PostgreSQL; staging and production each contain their own PostgreSQL service. The local frontends remain on contributors' computers. The release applications and full Supabase services remain planned.
+
+An operator imports the reviewed Compose definitions as three Docker Compose services, without deploying them immediately. Keep actual service UUIDs, host paths, environment files, database secrets, migration journals, and backups in protected private storage. This is an operator migration, not a daily developer command.
+
+1. Pause writers and retain protected configuration/source backups and logical database dumps. Identify the exact original containers, images, volumes, database catalogs, and PostgreSQL system identifiers. Check backup recovery separately; a nonempty dump does not establish a tested restore.
+2. Register the three services using the authenticated Coolify UI or its supported API. Preserve pinned images, health checks, resource limits, private networks, secret files, loopback development ports, and read-only source binds. A locally built development image needs `pull_policy: never`; build the reviewed image on that host first.
+3. Inspect Coolify's **generated** Compose before deployment. In the observed 4.3.23 service parser, named volumes are prefixed/renamed; an external volume name is not sufficient evidence of reuse. Variable-prefixed source mounts can also be interpreted as named volumes. Use verified absolute private paths for source/init-file binds and check that the generated mounts are binds. Environment variables and secret-file references need explicit resource configuration. Never publish the rendered configuration.
+4. Record the exact original-to-managed volume mapping privately. Stop only the identified original containers and disable their restart policies while retaining them. Preserve the old volumes. For a physical PostgreSQL copy, all original writers/processes must be stopped, the image/version must match, and the managed target must be empty. Copy ownership/modes as well as files. Never copy live PostgreSQL data or overwrite an existing managed database.
+5. Copy the reviewed `coolify_runtime.py` alongside the root-owned start helper. The helper must call `start_managed(ROOT, slot)` before its legacy Compose path. Create a root-owned, non-group/world-writable `ops/coolify-development.json` with the private `service_uuid`. A malformed marker or missing managed container must fail closed; never remove the marker to make ordinary startup recreate legacy volumes.
+6. Use the root-owned `ops/coolify-cutover` marker during migration to reject sync/start requests. Acquire each slot's sync lock and recheck active leases before cutover. Deploy the copied stacks through Coolify after storage validation. Check all seven managed containers, four readiness responses, private port bindings, volume mappings, and preserved database identifiers/catalogs. Then archive/remove the cutover marker and verify the start helper uses the managed containers.
+7. Record the verified resource IDs, helper version, retained originals, and recovery route privately. Complete individual account/slot onboarding before additional contributors use the host; dashboard registration does not establish scoped SSH access.
+
+After adoption, `pnpm dev:remote` starts/waits for the existing managed database and assigned API container. It does not issue a full-stack redeploy, pull new images, or change staging/production. If Coolify removed the containers, the operator must deploy the service in Coolify first. Source uploads and API hot reload continue through the existing SSH workflow. Use Coolify for logs, deployment configuration, and service operations.
+
+**Recovery:** stop the new managed services before any rollback and block writers. Retained original volumes are the cutover snapshot; they do not contain later managed writes. Reconcile those writes or use a reviewed backup/restore procedure before switching back. Restore the matching protected helper/Compose configuration and restart only the identified originals. Do not run both database copies as the active environment or use `down -v`, pruning, or volume deletion as routine recovery.
+
+The management helper has syntax and live operational evidence only. Automated coverage of malformed markers, duplicate/missing containers, health timeouts, and scoped startup remains a follow-up alongside the writer-protocol coverage above.
 
 ## References
 
@@ -85,3 +105,5 @@ Bootstrap uses Docker Compose directly; these are **not registered Coolify resou
 - [pnpm filtering](https://pnpm.io/filtering)
 - [Supabase self-hosting differences](https://supabase.com/docs/guides/self-hosting)
 - [Supabase Docker setup/capacity](https://supabase.com/docs/guides/self-hosting/docker)
+- [Coolify Compose services](https://coolify.io/docs/services/configuration/docker-compose)
+- [Coolify persistent storage](https://coolify.io/docs/services/configuration/persistent-storage)

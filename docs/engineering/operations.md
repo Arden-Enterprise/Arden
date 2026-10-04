@@ -28,7 +28,7 @@ These commands exist now:
 
 There are no root lint, migration, seed, worker, E2E, packaging, deploy, or backup scripts yet. Add the corresponding implementation and documentation together before listing them as runnable procedures.
 
-Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and `pnpm remote:status`. They keep Vite local, use private SSH forwarding, and support four development slots. See [the authoritative setup/operations guide](remote-development.md). The current provisioner creates separate staging/production database templates only; application release deployment and full Supabase service integration remain absent.
+Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and `pnpm remote:status`. They keep Vite local, use private SSH forwarding, and support four development slots. See [the authoritative setup/operations guide](remote-development.md), including [adoption into Coolify](remote-development.md#coolify-adoption). Bootstrap remains separate from Coolify registration; adopted installations use the protected management marker to start existing managed development containers without recreating legacy stacks. The current provisioner creates separate staging/production database templates only; application release deployment and full Supabase service integration remain absent.
 
 ## 2. Ports, environment, and configuration
 
@@ -60,7 +60,7 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 
 ## 4. Staging, production, and the customer install
 
-- Staging and production are separate Coolify projects/stacks with separate domains, database volumes, attachment storage, secrets, connector accounts/scopes, model settings, and backup destinations/access.
+- Staging and production are separate Coolify environments/stacks, optionally in the same project, with separate domains, database volumes, attachment storage, secrets, connector accounts/scopes, model settings, and backup destinations/access. A Coolify project/environment label alone does not enforce data or network isolation.
 - A branch name is not isolation. Preview environments, if added, are disposable separate stacks with synthetic data and disabled/sandboxed outbound actions. Do not point preview code at production DB/files/tokens.
 - Production data goes to staging only through an explicitly approved sanitization process with privacy/access/retention checks. Restoring a private backup into a testing environment is still disclosure.
 - The intended full application Compose includes web, API, worker, Supabase PostgreSQL/Auth/Storage/Realtime, and optional Ollama or a configured private model host. Full Supabase is not provisioned by the lean hosted scaffold. The current root `compose.yaml` only supplies local PostgreSQL.

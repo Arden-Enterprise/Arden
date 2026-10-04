@@ -44,7 +44,7 @@ def provision(root, accounts):
     root.mkdir(mode=0o755)
     (root / 'ops').mkdir(mode=0o755)
     (root / 'secrets').mkdir(mode=0o700)
-    for name in ['sync.py', 'start.py', 'slot_access.py', 'backend.Dockerfile', 'backend-entry.mjs']:
+    for name in ['sync.py', 'start.py', 'slot_access.py', 'coolify_runtime.py', 'backend.Dockerfile', 'backend-entry.mjs']:
         shutil.copyfile(source / name, root / 'ops' / name)
         (root / 'ops' / name).chmod(0o644)
     assignments = root / 'ops' / 'slot-owners.json'

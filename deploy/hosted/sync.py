@@ -80,6 +80,8 @@ def operation(slot, action, token):
     with (state / 'sync.lock').open('a') as lock:
         os.chmod(state / 'sync.lock', 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
+        if (ROOT / 'ops' / 'coolify-cutover').exists():
+            raise ValueError('The operator is switching development management. Try again later.')
         lease_path = state / 'lease.json'
         manifest_path = state / 'manifest.json'
         lease = json.loads(lease_path.read_text()) if lease_path.exists() else {}
