@@ -11,7 +11,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 620,
     title: "Arden",
-    backgroundColor: "#111712",
+    backgroundColor: "#242628",
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,

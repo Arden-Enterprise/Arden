@@ -1,16 +1,14 @@
-/* Permission-aware context pane */
-
 .knowledge-pane-redesign {
   position: sticky;
   top: 0;
   align-self: start;
   display: flex;
   flex-direction: column;
-  height: 100vh;
   height: 100dvh;
   min-width: 0;
   border-left: 1px solid var(--arden-line);
-  background: var(--arden-white);
+  background: var(--arden-sidebar);
+  scroll-margin-top: 120px;
 }
 
 .knowledge-pane-header {
@@ -18,21 +16,31 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 66px;
-  padding: 0 24px;
+  min-height: 72px;
+  padding: 12px 22px;
   border-bottom: 1px solid var(--arden-line);
 }
 
 .knowledge-pane-header strong {
-  font-size: 12px;
-  line-height: 17px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
-.knowledge-pane-header span {
-  color: var(--arden-stone);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.08em;
+.pane-control {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--arden-text-secondary);
+  background: transparent;
+}
+
+.pane-control:hover {
+  background: var(--arden-elevated);
 }
 
 .knowledge-pane-body {
@@ -41,90 +49,76 @@
   flex-direction: column;
   gap: 18px;
   min-height: 0;
-  padding: 24px;
+  padding: 28px 22px;
   overflow: auto;
 }
 
 .knowledge-pane-body h2 {
-  margin: -1px 0 0;
-  font-size: 23px;
-  font-weight: 650;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
   letter-spacing: -0.03em;
-  line-height: 27px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
-.knowledge-pane-body > p,
-.access-boundary p {
+.knowledge-pane-body > p, .access-boundary p {
   margin: 0;
   color: var(--arden-text-secondary);
-  font-size: 12px;
-  line-height: 20px;
-}
-
-.pane-divider {
-  width: 100%;
-  height: 1px;
-  background: var(--arden-line);
-}
-
-.pane-suggestions {
-  display: grid;
-  gap: 9px;
-}
-
-.pane-suggestions button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  width: 100%;
-  min-height: 38px;
-  padding: 0 12px;
-  overflow: hidden;
-  border: 1px solid var(--arden-line);
-  border-radius: var(--arden-radius-sm);
-  color: var(--arden-text-secondary);
-  background: var(--arden-sidebar);
-  font-size: 11px;
-  text-align: left;
-}
-
-.pane-suggestions button > span {
-  flex: none;
-  color: var(--arden-stone);
-  font-size: 8px;
-  font-weight: 650;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: 14px;
+  line-height: 1.7;
 }
 
 .access-boundary {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-height: 150px;
-  padding: 16px;
-  border: 1px solid var(--arden-line);
-  border-radius: var(--arden-radius-md);
-  background: var(--arden-sidebar);
+  gap: 10px;
+  margin-top: 8px;
+  padding: 20px 0;
+  border-top: 1px solid var(--arden-line);
+  border-bottom: 1px solid var(--arden-line);
 }
 
 .access-boundary strong {
-  font-size: 12px;
-  line-height: 17px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .access-boundary p {
-  font-size: 11px;
-  line-height: 17px;
+  color: var(--arden-text-muted);
+  font-size: 13px;
+}
+
+.pane-planned-features {
+  color: var(--arden-text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.pane-planned-features summary {
+  min-height: 40px;
+  padding: 8px 0;
+  cursor: pointer;
+  color: var(--arden-text-secondary);
+  font-size: 13px;
+}
+
+.pane-planned-features p {
+  margin: 8px 0;
+}
+
+.pane-planned-features ul {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+  padding-left: 18px;
 }
 
 .knowledge-pane-composer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-height: 93px;
-  padding: 14px 24px;
+  gap: 10px;
+  padding: 20px 22px;
   border-top: 1px solid var(--arden-line);
 }
 
@@ -132,17 +126,24 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 37px;
-  padding: 0 10px;
-  border: 1px solid var(--arden-line-strong);
-  border-radius: var(--arden-radius-sm);
   color: var(--arden-text-secondary);
-  background: #fbfbf9;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .knowledge-pane-composer > span {
-  color: var(--arden-stone);
-  font-size: 10px;
-  line-height: 14px;
+  color: var(--arden-text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.knowledge-pane-redesign.is-collapsed .knowledge-pane-header {
+  justify-content: center;
+  padding: 12px 6px;
+  border-bottom: 0;
+}
+
+.knowledge-pane-redesign.is-collapsed { display: none; }
+
+.knowledge-pane-redesign.is-collapsed .knowledge-pane-header strong {
+  display: none;
 }

@@ -1,205 +1,268 @@
-/* Sign in */
-
 .sign-in-page {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(420px, 0.9fr);
-  min-height: 100vh;
+  grid-template-columns: minmax(0, 790fr) minmax(0, 722fr);
   min-height: 100dvh;
-  background: var(--arden-warm);
+  background: var(--arden-canvas);
 }
 
-.sign-in-intro {
+.sign-in-page .sign-in-intro {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-height: 100vh;
+  gap: 48px;
+  min-width: 0;
   min-height: 100dvh;
-  padding: 34px 48px 44px;
-  border-right: 1px solid var(--arden-line);
+  padding: clamp(36px, 4.25vw, 64px);
+  background: var(--arden-sidebar);
 }
 
 .sign-in-brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.sign-in-brand > span {
-  width: 22px;
-  height: 22px;
-  border-radius: var(--arden-radius-xs);
-  background: var(--arden-charcoal);
-}
-
-.sign-in-intro > div:nth-child(2) {
-  max-width: 610px;
-}
-
-.sign-in-intro h1 {
-  max-width: 570px;
-  margin: 18px 0 22px;
-  font-size: clamp(42px, 5vw, 70px);
-  font-weight: 620;
-  letter-spacing: -0.05em;
-  line-height: 0.98;
-}
-
-.sign-in-intro > div:nth-child(2) > p {
-  max-width: 535px;
-  margin: 0;
-  color: var(--arden-text-secondary);
-  font-size: 14px;
-  line-height: 1.7;
-}
-
-.sign-in-boundary {
-  display: flex;
-  align-items: flex-start;
   gap: 12px;
-  max-width: 430px;
-  padding-top: 22px;
-  border-top: 1px solid var(--arden-line-strong);
+  font-family: "Sora", sans-serif;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 34px;
 }
 
-.sign-in-boundary svg {
-  flex: none;
-  margin-top: 1px;
-}
+.sign-in-brand img, .sign-in-boundary img, .sign-in-assurance img { flex: none; }
 
-.sign-in-boundary div {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
+.sign-in-welcome-copy { min-width: 0; width: 100%; max-width: 662px; }
 
-.sign-in-boundary strong {
+.welcome-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--arden-line);
+  border-radius: 8px;
+  color: var(--arden-success);
+  background: var(--arden-elevated);
   font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
 }
 
-.sign-in-boundary span {
+.sign-in-page .sign-in-intro h1 {
+  margin: 24px 0;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(34px, 3.45vw, 52px);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: -.035em;
+}
+
+.sign-in-page .sign-in-welcome-copy > p {
+  max-width: 610px;
+  margin: 0 0 24px;
   color: var(--arden-text-secondary);
-  font-size: 11px;
-  line-height: 17px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 27px;
 }
 
-.sign-in-panel {
+.knowledge-connections-viewport { width: min(100%, 640px); aspect-ratio: 640 / 250; overflow: hidden; }
+.knowledge-connections { position: relative; width: 640px; height: 250px; transform-origin: top left; }
+.knowledge-connections-lines { position: absolute; top: 0; left: 0; }
+.connection-node, .connection-label { position: absolute; }
+.connection-label { width: 90px; font-size: 12px; font-weight: 600; line-height: 18px; }
+.connection-runbook { top: 59.22px; left: 44.91px; width: 12px; height: 12px; background: var(--arden-info); }
+.connection-runbook-label { top: 79.22px; left: 28.91px; color: var(--arden-info); }
+.connection-decision { top: 119px; left: 314px; }
+.connection-decision-label { top: 139px; left: 298px; color: var(--arden-accent); }
+.connection-incident { top: 32.04px; left: 572.91px; }
+.connection-incident-label { top: 52.04px; left: 548px; color: var(--arden-success); }
+.connection-guide { top: 211.39px; left: 572.91px; width: 12px; height: 12px; background: var(--arden-info); }
+.connection-guide-label { top: 231.39px; left: 548px; color: var(--arden-info); }
+.connection-draft { top: 205.96px; left: 74px; }
+.connection-draft-label { top: 225.96px; left: 58px; color: var(--arden-text-muted); }
+
+.sign-in-boundary { display: flex; align-items: center; gap: 12px; }
+.sign-in-boundary > div { display: grid; gap: 4px; }
+.sign-in-boundary strong { font-size: 14px; font-weight: 500; line-height: 21px; }
+.sign-in-boundary span { color: var(--arden-text-muted); font-size: 13px; line-height: 20px; }
+
+.sign-in-page .sign-in-panel {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 22px;
-  min-height: 100vh;
+  gap: 24px;
+  min-width: 0;
   min-height: 100dvh;
-  padding: 36px;
-  background: var(--arden-white);
+  padding: 48px clamp(32px, 5.3vw, 80px);
+  background: var(--arden-canvas);
 }
 
-.sign-in-card {
-  width: min(100%, 380px);
-}
+.sign-in-page .sign-in-card { width: 100%; max-width: 562px; }
+.sign-in-card > .meta-label { color: var(--arden-accent); font-size: 12px; letter-spacing: 0; }
 
 .sign-in-card h2 {
-  margin: 15px 0 7px;
-  font-size: 27px;
-  font-weight: 650;
-  letter-spacing: -0.035em;
-  line-height: 32px;
+  margin: 24px 0;
+  font-family: "Sora", sans-serif;
+  font-size: clamp(27px, 2.25vw, 34px);
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: -.025em;
 }
 
-.sign-in-card > p:not(.preview-disclaimer) {
-  margin: 0 0 30px;
+.sign-in-card > p:not(.preview-disclaimer, .sign-in-account-help, .workspace-preview-identity) {
+  margin: 0 0 24px;
   color: var(--arden-text-secondary);
-  font-size: 12px;
-  line-height: 20px;
+  font-size: 16px;
+  line-height: 25px;
 }
 
-.sign-in-card form {
-  display: grid;
-  gap: 17px;
-}
-
-.sign-in-card form label {
-  display: grid;
-  gap: 7px;
-  color: var(--arden-charcoal);
-  font-size: 11px;
-  font-weight: 650;
-}
+.sign-in-card form { display: grid; gap: 18px; }
+.sign-in-card form label { display: grid; gap: 8px; color: var(--arden-text-secondary); font-size: 13px; font-weight: 500; }
 
 .sign-in-card input {
   width: 100%;
-  height: 42px;
-  padding: 0 12px;
-  border: 1px solid var(--arden-line-strong);
-  border-radius: var(--arden-radius-sm);
-  color: var(--arden-charcoal);
-  background: var(--arden-white);
-  font-size: 12px;
+  min-width: 0;
+  height: 50px;
+  padding: 0 14px;
+  border: 1px solid var(--arden-control-border);
+  border-radius: 8px;
+  color: var(--arden-text-primary);
+  background: var(--arden-elevated);
+  font-size: 15px;
   font-weight: 400;
 }
 
-.sign-in-card input::placeholder {
-  color: var(--arden-stone);
-  opacity: 1;
-}
-
-.sign-in-card form .primary-button {
-  width: 100%;
-  margin-top: 3px;
-}
+.sign-in-card input::placeholder { color: var(--arden-text-muted); opacity: 1; }
+.sign-in-card label small { color: var(--arden-text-muted); font-size: 13px; font-weight: 500; line-height: 20px; }
+.sign-in-card form .primary-button { width: 100%; margin-top: 6px; min-height: 46px; }
 
 .sign-in-message {
-  margin-top: 14px;
-  padding: 11px 12px;
-  border: 1px solid var(--arden-line-strong);
-  border-radius: var(--arden-radius-sm);
+  display: grid;
+  gap: 5px;
+  margin-bottom: 24px;
+  padding: 16px 16px 16px 20px;
+  border-left: 3px solid var(--arden-danger);
+  border-radius: 0 8px 8px 0;
   color: var(--arden-text-secondary);
-  background: var(--arden-sidebar);
-  font-size: 11px;
-  line-height: 17px;
+  background: var(--arden-surface);
+  font-size: 14px;
+  line-height: 21px;
 }
+
+.sign-in-message strong { color: var(--arden-danger); font-size: 15px; font-weight: 400; line-height: 23px; }
+
+.sign-in-assurance {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid var(--arden-line);
+  color: var(--arden-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.sign-in-account-help { margin: 16px 0 0; color: var(--arden-text-muted); font-size: 13px; line-height: 20px; }
 
 .sign-in-preview-divider {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 25px 0 15px;
-  color: var(--arden-stone);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.09em;
+  margin: 24px 0 14px;
+  color: var(--arden-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  letter-spacing: .04em;
 }
 
-.sign-in-preview-divider::before,
-.sign-in-preview-divider::after {
-  flex: 1;
-  height: 1px;
-  content: "";
-  background: var(--arden-line);
+.sign-in-preview-divider::before, .sign-in-preview-divider::after { flex: 1; height: 1px; content: ""; background: var(--arden-line); }
+.preview-button { width: 100%; }
+.sign-in-preview-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 14px; margin-top: 8px; }
+
+.sign-in-preview-links button {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  color: var(--arden-text-secondary);
+  background: transparent;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
-.preview-button {
+.preview-disclaimer { margin: 12px 0 0; color: var(--arden-text-muted); font-size: 12px; line-height: 20px; }
+.platform-label { color: var(--arden-text-muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.workspace-memberships { display: grid; gap: 14px; margin: 24px 0; }
+
+.workspace-membership {
+  display: grid;
+  gap: 12px;
   width: 100%;
+  min-width: 0;
+  padding: 24px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--arden-text-primary);
+  background: var(--arden-surface);
+  text-align: left;
 }
 
-.preview-button + .preview-button {
-  margin-top: 9px;
+.workspace-membership.is-selected { border-color: var(--arden-accent); background: var(--arden-elevated); }
+.workspace-membership-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-width: 0; }
+
+.workspace-membership-heading h3, .workspace-membership-heading > strong {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: "Sora", sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 31px;
 }
 
-.preview-disclaimer {
-  margin: 10px 0 0;
-  color: var(--arden-stone);
-  font-size: 10px;
-  line-height: 15px;
-  text-align: center;
+.workspace-membership p, .workspace-membership > span:last-child { margin: 0; color: var(--arden-text-secondary); font-size: 15px; line-height: 23px; }
+
+.workspace-membership-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--arden-line);
+  border-radius: 8px;
+  color: var(--arden-accent);
+  background: var(--arden-elevated);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+  white-space: nowrap;
 }
 
-.platform-label {
-  color: var(--arden-stone);
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.09em;
+.is-unavailable .workspace-membership-status { color: var(--arden-text-muted); }
+.workspace-continue { width: 100%; }
+.workspace-preview-identity { margin: 24px 0 0; padding-top: 24px; border-top: 1px solid var(--arden-line); color: var(--arden-text-muted); font-size: 13px; line-height: 20px; }
+.workspace-back { margin-top: 12px; }
+
+@media (max-width: 1050px) and (min-width: 761px) {
+  .sign-in-page .sign-in-intro { padding: 32px; }
+  .sign-in-page .sign-in-panel { padding: 36px 28px; }
+  .sign-in-page .sign-in-intro h1 { font-size: 34px; }
+  .sign-in-page .sign-in-welcome-copy > p { font-size: 16px; line-height: 25px; }
+  .workspace-membership { padding: 18px; }
+  .workspace-membership-heading h3, .workspace-membership-heading > strong { font-size: 18px; line-height: 26px; }
+  .workspace-membership-status { margin-left: 38px; }
+}
+
+@media (max-width: 760px) {
+  .sign-in-page { grid-template-columns: minmax(0, 1fr); }
+  .sign-in-page .sign-in-intro { min-height: auto; gap: 24px; padding: 24px; }
+  .sign-in-page .sign-in-intro h1 { margin: 0; font-size: 32px; line-height: 1.3; }
+  .sign-in-page .welcome-status, .sign-in-page .sign-in-welcome-copy > p, .knowledge-connections-viewport, .sign-in-page .sign-in-boundary { display: none; }
+  .sign-in-page .sign-in-panel { min-height: auto; padding: 32px 24px; align-items: stretch; }
+  .sign-in-page .sign-in-card { margin: 0 auto; }
+  .sign-in-card h2 { margin: 16px 0; font-size: 27px; }
+  .workspace-membership { padding: 18px; }
+  .workspace-membership-heading h3, .workspace-membership-heading > strong { font-size: 19px; line-height: 27px; }
+  .workspace-membership-status { margin-left: 38px; }
+  .platform-label { text-align: center; }
 }
