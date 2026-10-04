@@ -14,23 +14,32 @@ export const SearchField = forwardRef<HTMLInputElement, SearchFieldProps>(
     ref,
   ) {
     return (
-      <label className="workspace-search">
+      <div className="workspace-search">
         <Icon name="search" size={16} />
         <input
           ref={ref}
           type="search"
+          aria-label={placeholder.replace(/…$/, "")}
+          aria-keyshortcuts="Control+k Meta+k"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder={placeholder}
         />
         {value ? (
-          <button type="button" onClick={() => onChange("")} aria-label="Clear search">
+          <button
+            type="button"
+            onClick={(event) => {
+              onChange("");
+              event.currentTarget.parentElement?.querySelector("input")?.focus();
+            }}
+            aria-label="Clear search"
+          >
             <Icon name="close" size={14} />
           </button>
         ) : (
-          <kbd>{shortcutHint}</kbd>
+          <kbd aria-hidden="true">{shortcutHint}</kbd>
         )}
-      </label>
+      </div>
     );
   },
 );
