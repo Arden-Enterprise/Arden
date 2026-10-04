@@ -14,6 +14,8 @@ Development roles cannot routinely connect to one another's databases, but share
 
 ## Contributor setup
 
+New contributors should follow [Start coding on Arden](teammate-setup.md) for the complete beginner walkthrough, daily commands, Coolify navigation, and troubleshooting. Complete its administrator handoff before broader onboarding. This document is the implementation/operator reference.
+
 1. Install Node.js 24 and the root-pinned pnpm version. Run `pnpm install --frozen-lockfile`.
 2. Obtain your approved SSH account/key and assigned slot through the team's private channel. Follow [server-access.md](server-access.md); independently verify the host fingerprint. Never send passwords/private keys to Codex.
 3. Copy `deploy/hosted/remote.example.json` to **`.private/remote.json`** in this checkout. Replace the alias/root with approved values and set your default slot. Confirm `git check-ignore .private/remote.json` matches and `git ls-files .private` prints nothing.

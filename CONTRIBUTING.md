@@ -40,7 +40,7 @@ Run `pnpm dev:desktop` in another terminal for the Windows desktop shell. Web is
 
 Use synthetic seed data and separate local credentials/volumes. Follow [operations.md](docs/engineering/operations.md) for multiple checkouts, isolation, production configuration, and backup obligations. The current Compose file is not a complete production application.
 
-For local frontend development against a hosted API/database, use `pnpm dev:remote` after the [private setup guide](docs/engineering/remote-development.md). Choose your assigned slot; do not overwrite an active writer or connect development code to a release database.
+For local frontend development against a hosted API/database, follow the beginner [teammate setup walkthrough](docs/engineering/teammate-setup.md), including the administrator handoff, then use `pnpm dev:remote`. Choose your assigned slot; do not overwrite an active writer or connect development code to a release database. The [hosted development reference](docs/engineering/remote-development.md) covers implementation and operator details.
 
 ## Changes and commits
 
