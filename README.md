@@ -26,18 +26,20 @@ The web shell runs at `http://127.0.0.1:5180`; the API runs at `http://127.0.0.1
 
 ## Current UI foundation
 
-The shared React package now contains the first ARD-16 frontend slice for both web and desktop:
+The shared React package implements the [Living Archive Figma redesign](https://www.figma.com/design/UmW5qb5cTWo6lwMYZ4Z9bC/Arden?node-id=147-2) for web and desktop, using dark surfaces, amber/jade/blue accents and locally bundled Sora/DM Sans fonts:
 
 - a minimal sign-in boundary with no public registration;
-- a Figma-aligned `My Work` preview;
-- a responsive `Personal Workspace` with a private-note list, editor, search, keyboard focus shortcut, unsaved state, and empty states;
-- a permission-aware Knowledge Pane that keeps the active access boundary visible;
+- workspace selection and a redesigned `My Work` preview with scoped queue search;
+- a responsive `Personal Workspace` with per-note session drafts that survive navigation, a mobile list/editor flow, scoped search, keyboard focus, unsaved state, and empty states;
+- a collapsible Knowledge Pane that follows the selected private note and keeps the active access boundary visible;
 - a guided first-run organization setup preview (SCR-02) covering template, departments, members/roles and access review;
-- a System Admin organization and access preview (SCR-09) with local edits, validation and a separate confirmation step.
+- organization, department and member administration with reviewed access assignments;
+- invitation creation, renew/revoke, acceptance, pending membership and access readiness states;
+- sample knowledge library/editor, exact-version review with separate approval/publication, handover and prerecorded Ask Arden answers with citations.
 
-Open the first-run setup from the sign-in preview button, or open the member preview to enter My Work directly. Completing setup enters the admin preview, where Organization & Access is available in the sidebar. The template catalogue and member records are illustrative. The two-department minimum is a demo constraint for testing permission boundaries, not a production rule for every organization.
+Open the member preview for workspace selection, the admin preview for Administration, or first-run setup from sign-in. Completing setup enters Administration. For [Mainflow 1](docs/engineering/mainflow-1-preview.md), create an invitation, preview acceptance, return to assign the member's primary department/role, then preview their access and workspace. The template catalogue and member records are synthetic; a configuration needs at least one department and an active organization-scoped System Admin.
 
-This slice is intentionally labeled as a frontend preview. The sign-in action does not create a session, sample work is not live data, organization/role and private-note edits are held only in memory, and access rules are read-only guidance. Real authentication, authorization, audit events, persistence, conflict handling, and server enforcement still depend on the corresponding API and data-model tasks. Hidden UI is never treated as an authorization boundary.
+This is a labeled frontend preview. Sign-in does not authenticate, invitations do not send email, and organization, notes and knowledge transitions are held only in memory. Private drafts survive navigation; refresh or confirmed exit clears them. Switching demo members clears private notes after guarding unsaved changes. Real authentication, authorization, audit events, persistence, conflict handling and server governance still require API/data-model implementation. Hidden UI is never an authorization boundary.
 
 ## Checks
 

@@ -6,7 +6,7 @@ All implementation/testing work also follows [code-quality.md](code-quality.md).
 
 ## 1. Stack inventory
 
-Initial inventory, 2 October 2026:
+Inventory updated 4 October 2026:
 
 | Area | Present in the scaffold | Target, not yet implemented |
 | --- | --- | --- |
@@ -16,12 +16,12 @@ Initial inventory, 2 October 2026:
 | API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15 | Validated domain routes/contracts, identity, SSE |
 | Data | Local `pgvector/pgvector:pg17` container; database health query | Canonical PostgreSQL schema, extension/migrations, Drizzle, full-text/vector search |
 | Identity | None | Better Auth + Drizzle adapter; Arden-owned authorization |
-| Editor | None | BlockNote core behind a versioned Arden document interface |
-| Graph | Custom SVG illustrative network and local interactions | Sigma.js + Graphology on authorized API projections |
+| Editor | React textarea-based session previews for private notes and shared knowledge | BlockNote core behind a versioned Arden document interface |
+| Graph | Local decorative Figma SVGs; no graph view or authorized graph data | Sigma.js + Graphology on authorized API projections |
 | Jobs | None | pg-boss in `apps/worker` |
 | Storage | No content storage implementation | Protected local attachment volume behind a storage interface; optional S3-compatible backend later |
-| AI | None | Arden gateway to customer-controlled Ollama/compatible private endpoint |
-| Tests | Vitest 5.0.1, two API health tests; typecheck/build scripts | Real PostgreSQL integration/policy tests, UI tests, Playwright web/desktop flows |
+| AI | Explicit prerecorded Ask Arden sample; no model request | Arden gateway to customer-controlled Ollama/compatible private endpoint |
+| Tests | Vitest 5.0.1, API health and pure UI preview-model tests; typecheck/build scripts | Real PostgreSQL integration/policy tests, rendered component tests, Playwright web/desktop flows |
 | Deployment | Local database Compose; Ubuntu/Windows CI | Ubuntu 24.04 + Coolify, versioned full application Compose, isolated staging/production |
 
 The container image includes pgvector software; the scaffold does not yet create the extension or prove embedding queries work. The Electron build is not a packaged installer. No installed auth/schema/query/editor/graph/job library should be inferred from this target table.
@@ -42,6 +42,9 @@ The container image includes pgvector software; the scaffold does not yet create
 ## 3. React, Vite, routing, and client state
 
 - Shared product UI lives in `packages/ui` and future feature packages. App entry points should be composition/platform adapters, not independent copies of the product.
+- Living Archive assets are local: exported Figma SVGs and variable Sora/DM Sans TTFs with their OFL notices in `src/assets/fonts`. Preserve the font license files on redistribution. No runtime font-service request is needed. The accepted visual contract lives in [DESIGN.md](../../DESIGN.md).
+- The Electron renderer sets Vite `assetsInlineLimit: 0`: imported SVGs must remain local file assets because its existing self-only image CSP blocks inlined `data:` images. Check the built renderer, not only web development, after asset changes. Do not broaden script/network CSP to make an asset render.
+- Pure session transitions live in `organization/organizationWorkflow.ts` and `knowledge/knowledgePreviewModel.ts`; the shell owns preview identities, organization state and private drafts. [Mainflow 1 preview](mainflow-1-preview.md) distinguishes these demonstrations from future server contracts. Never promote a demo identity selector or a client readiness check into production authentication/authorization.
 - React render must be pure. Keep hooks unconditional; use stable domain IDs as list keys. Clean up effects, requests, subscriptions, graph instances, and timers on replacement/unmount, including development remounts.
 - Keep transient interaction state local. Use the planned TanStack Query for remote server state and React Router for navigation when those features are added. Do not duplicate a server cache in another global store without a demonstrated requirement.
 - Define query keys with organization, identity/permission scope, object/version, and relevant filters. Clear/cancel scoped queries on logout, account/organization switch, revocation, and Core URL change. Never reuse one user's result as another user's placeholder.
