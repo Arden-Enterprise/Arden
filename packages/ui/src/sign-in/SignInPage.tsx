@@ -1,15 +1,18 @@
 import { type FormEvent, useState } from "react";
-import { Icon } from "../shared/Icon";
 import type { Platform } from "../shared/types";
+import { WelcomePanel } from "./WelcomePanel";
+import { entryAssets } from "./entryAssets";
 
 export function SignInPage({
   platform,
   onEnterPreview,
   onOpenSetup,
+  onEnterAdminPreview,
 }: {
   platform: Platform;
   onEnterPreview: () => void;
   onOpenSetup: () => void;
+  onEnterAdminPreview?: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -18,43 +21,30 @@ export function SignInPage({
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setMessage(
-      "Sign-in is not connected yet. The identity API is owned by ARD-13; no session was created.",
+      "Sign-in is not available in this preview. Open the member preview below to explore Arden with sample data.",
     );
   };
 
   return (
     <main className="sign-in-page">
-      <section className="sign-in-intro" aria-labelledby="sign-in-title">
-        <div className="sign-in-brand">
-          <span aria-hidden="true" />
-          ARDEN
-        </div>
-        <div>
-          <span className="meta-label">PRIVATE ORGANIZATIONAL KNOWLEDGE</span>
-          <h1 id="sign-in-title">Knowledge with a clear boundary.</h1>
-          <p>
-            Arden keeps company, department and personal knowledge distinct so people can work
-            with the context they are actually allowed to use.
-          </p>
-        </div>
-        <div className="sign-in-boundary">
-          <Icon name="lock" size={18} />
-          <div>
-            <strong>No public registration</strong>
-            <span>Accounts are provisioned by an organization administrator.</span>
-          </div>
-        </div>
-      </section>
+      <WelcomePanel />
 
       <section className="sign-in-panel" aria-label="Sign in">
         <div className="sign-in-card">
-          <span className="meta-label">ESTABLISHED WORKSPACE</span>
+          <span className="meta-label">YOUR WORKSPACE</span>
           <h2>Sign in to Arden</h2>
-          <p>Use the account assigned by your organization.</p>
+          <p>Use your organization account. Arden only returns knowledge you are permitted to access.</p>
+
+          {message && (
+            <div className="sign-in-message" role="alert">
+              <strong>Sign-in is unavailable in this preview</strong>
+              <span>{message}</span>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit}>
             <label>
-              <span>Work email</span>
+              <span>Organization email</span>
               <input
                 type="email"
                 value={email}
@@ -63,9 +53,11 @@ export function SignInPage({
                   setMessage("");
                 }}
                 autoComplete="username"
-                placeholder="you@company.com"
+                placeholder="name@company.com"
+                aria-describedby="sign-in-email-help"
                 required
               />
+              <small id="sign-in-email-help">Use the email linked to your organization.</small>
             </label>
             <label>
               <span>Password</span>
@@ -78,19 +70,21 @@ export function SignInPage({
                 }}
                 autoComplete="current-password"
                 placeholder="Enter your password"
+                aria-describedby="sign-in-password-help"
                 required
               />
+              <small id="sign-in-password-help">Use the password provided for your organization account.</small>
             </label>
             <button type="submit" className="primary-button">
-              Sign in <Icon name="arrow" size={15} />
+              {message ? "Try again" : "Sign in"}
             </button>
           </form>
 
-          {message && (
-            <div className="sign-in-message" role="alert">
-              {message}
-            </div>
-          )}
+          <div className="sign-in-assurance">
+            <img src={entryAssets.lockForm} alt="" width={16} height={16} />
+            <span>Private by default · No external writes</span>
+          </div>
+          <p className="sign-in-account-help">Accounts are provided by your organization administrator.</p>
 
           <div className="sign-in-preview-divider">
             <span>FRONTEND REVIEW</span>
@@ -98,11 +92,12 @@ export function SignInPage({
           <button type="button" className="secondary-button preview-button" onClick={onEnterPreview}>
             Open member preview
           </button>
-          <button type="button" className="secondary-button preview-button" onClick={onOpenSetup}>
-            Preview first-run organization setup
-          </button>
+          <div className="sign-in-preview-links">
+            <button type="button" onClick={onOpenSetup}>Preview first-run setup</button>
+            {onEnterAdminPreview && <button type="button" onClick={onEnterAdminPreview}>Open admin preview</button>}
+          </div>
           <p className="preview-disclaimer">
-            Both preview routes use synthetic data. They do not authenticate, persist changes or grant access.
+            Preview routes use synthetic data. They do not authenticate, persist changes or grant access.
           </p>
         </div>
         <span className="platform-label">

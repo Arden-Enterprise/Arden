@@ -7,6 +7,9 @@ type AppSidebarProps = {
   platform: Platform;
   previewRole: "member" | "admin";
   organization: OrganizationPreview | null;
+  memberName?: string;
+  memberRole?: string;
+  memberDepartment?: string;
   onNavigate: (view: WorkspaceView) => void;
   onSignOut: () => void;
 };
@@ -20,10 +23,10 @@ type NavigationItem = {
 
 const workspaceNavigation: NavigationItem[] = [
   { label: "My Work", icon: "work", view: "my-work" },
-  { label: "Knowledge", icon: "knowledge", planned: true },
-  { label: "Ask Arden", icon: "search", planned: true },
-  { label: "Review Queue", icon: "document", planned: true },
-  { label: "Knowledge Handover", icon: "arrow", planned: true },
+  { label: "Knowledge", icon: "knowledge", view: "knowledge" },
+  { label: "Ask Arden", icon: "knowledge", view: "ask-arden" },
+  { label: "Review Queue", icon: "check", view: "review-queue" },
+  { label: "Knowledge Handover", icon: "arrow", view: "knowledge-handover" },
 ];
 
 export function AppSidebar({
@@ -31,25 +34,26 @@ export function AppSidebar({
   platform,
   previewRole,
   organization,
+  memberName = "Lan Nguyen",
+  memberRole = "Employee",
+  memberDepartment = "Product Engineering",
   onNavigate,
   onSignOut,
 }: AppSidebarProps) {
   return (
     <aside className="app-sidebar" aria-label="Main navigation">
       <div className="sidebar-brand">
-        <span className="sidebar-brand-mark" aria-hidden="true" />
+        <span className="sidebar-brand-mark" aria-hidden="true"><Icon name="knowledge" size={24} /></span>
         <span>ARDEN</span>
         <small>PREVIEW</small>
       </div>
 
       <section className="access-card" aria-labelledby="access-card-title">
         <span className="meta-label" id="access-card-title">
-          YOUR ACCESS
+          {organization?.name ?? "FPT DIGITAL"}
         </span>
-        <strong>{organization?.name ?? "Northstar Studio"}</strong>
-        <span>{previewRole === "admin" ? "System Admin preview" : "Product Engineering · member preview"}</span>
-        <span>Company-wide published</span>
-        <span>Private workspace</span>
+        <strong>{previewRole === "admin" ? "Organization" : memberDepartment}</strong>
+        <span>{previewRole === "admin" ? "Configuration access" : "Member workspace"}</span>
       </section>
 
       <nav className="sidebar-navigation" aria-label="Workspace">
@@ -61,11 +65,11 @@ export function AppSidebar({
               key={item.label}
               type="button"
               className={`sidebar-nav-item${active ? " is-active" : ""}`}
-              onClick={item.view ? () => onNavigate(item.view!) : undefined}
+              onClick={() => { if (item.view) onNavigate(item.view); }}
               disabled={item.planned}
               aria-label={item.label}
               aria-current={active ? "page" : undefined}
-              title={item.planned ? `${item.label} is not connected yet` : undefined}
+              title={item.planned ? `${item.label} is not connected yet` : item.label}
             >
               <Icon name={item.icon} size={16} />
               <span>{item.label}</span>
@@ -80,36 +84,43 @@ export function AppSidebar({
           className={`sidebar-nav-item${activeView === "personal-workspace" ? " is-active" : ""}`}
           onClick={() => onNavigate("personal-workspace")}
           aria-label="Personal Workspace"
+          title="Personal Workspace"
           aria-current={activeView === "personal-workspace" ? "page" : undefined}
         >
           <Icon name="lock" size={16} />
-          <span>Personal Workspace</span>
+          <span><span className="nav-label-full">Personal Workspace</span><span className="nav-label-short" aria-hidden="true">Notes</span></span>
+        </button>
+        <button type="button" className="sidebar-nav-item" disabled title="Integrations are not connected" aria-label="Integrations — not connected">
+          <Icon name="plus" size={16} /><span>Integrations</span><small>Planned</small>
         </button>
 
         {previewRole === "admin" && (
           <>
-            <span className="meta-label navigation-label">ADMINISTRATION</span>
+            <span className="meta-label navigation-label">MANAGE</span>
             <button
               type="button"
               className={`sidebar-nav-item${activeView === "organization-access" ? " is-active" : ""}`}
               onClick={() => onNavigate("organization-access")}
               aria-label="Organization & Access"
+              title="Organization & Access"
               aria-current={activeView === "organization-access" ? "page" : undefined}
             >
-              <Icon name="knowledge" size={16} />
-              <span>Organization &amp; Access</span>
+              <Icon name="work" size={16} />
+              <span><span className="nav-label-full">Administration</span><span className="nav-label-short" aria-hidden="true">Admin</span></span>
             </button>
           </>
         )}
       </nav>
 
       <div className="sidebar-session">
-        <strong>{previewRole === "admin" ? "ALEX MORGAN" : "LAN NGUYEN"}</strong>
-        <span>{previewRole === "admin" ? "SYSTEM ADMIN" : "EMPLOYEE"} · PREVIEW SESSION</span>
-        <span>{platform === "desktop" ? "WINDOWS DESKTOP" : "WEB"}</span>
+        <div className="sidebar-member">
+          <span className="sidebar-avatar" aria-hidden="true">{memberName.split(/\s+/).map(part => part[0]).slice(0, 2).join("")}</span>
+          <div><strong>{memberName}</strong><span>{memberRole}</span></div>
+        </div>
+        <span>{platform === "desktop" ? "WINDOWS" : "WEB"} · SAMPLE SESSION</span>
         <button type="button" onClick={onSignOut} aria-label="Exit preview">
           <Icon name="logout" size={15} />
-          <span>Exit preview</span>
+          <span><span className="nav-label-full">Exit preview</span><span className="nav-label-short" aria-hidden="true">Exit</span></span>
         </button>
       </div>
     </aside>

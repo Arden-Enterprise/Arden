@@ -1,151 +1,68 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Icon } from "../shared/Icon";
 import { PrivateNoteEditor } from "./PrivateNoteEditor";
 import { PrivateNoteList } from "./PrivateNoteList";
 import { SearchField } from "../shared/SearchField";
-import type { PrivateNote } from "../shared/types";
+import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { useSearchShortcut } from "../shared/useSearchShortcut";
+import type { PrivateNotesController } from "./usePrivateNotes";
 
-type PersonalWorkspacePageProps = {
-  notes: PrivateNote[];
-  onNotesChange: (notes: PrivateNote[]) => void;
-};
-
-export function PersonalWorkspacePage({
-  notes,
-  onNotesChange,
-}: PersonalWorkspacePageProps) {
-  const [selectedId, setSelectedId] = useState(notes[0]?.id ?? "");
+export function PersonalWorkspacePage({ controller, contextOpen, onToggleContext }: {
+  controller: PrivateNotesController;
+} & ContextControlProps) {
   const [query, setQuery] = useState("");
-  const [draftTitle, setDraftTitle] = useState(notes[0]?.title ?? "");
-  const [draftBody, setDraftBody] = useState(notes[0]?.body ?? "");
-  const [savedMessage, setSavedMessage] = useState("");
-  const searchRef = useSearchShortcut();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const revealSearch = useCallback(() => setEditorOpen(false), []);
+  const searchRef = useSearchShortcut(revealSearch);
+  const { state, selectedNote, draft, isDirty } = controller;
+  const visibleNotes = useMemo(() => state.notes.filter((note) => {
+    const current = state.drafts[note.id] ?? note;
+    return `${current.title} ${current.body}`.toLowerCase().includes(query.trim().toLowerCase());
+  }), [state.notes, state.drafts, query]);
 
-  const selectedNote = notes.find((note) => note.id === selectedId) ?? null;
-  const isDirty = Boolean(
-    selectedNote &&
-      (selectedNote.title !== draftTitle || selectedNote.body !== draftBody),
-  );
-
-  const visibleNotes = useMemo(
-    () =>
-      notes.filter((note) =>
-        `${note.title} ${note.body}`
-          .toLowerCase()
-          .includes(query.trim().toLowerCase()),
-      ),
-    [notes, query],
-  );
-
-  useEffect(() => {
-    const warnOnUnload = (event: BeforeUnloadEvent) => {
-      if (!isDirty) return;
-      event.preventDefault();
-    };
-    window.addEventListener("beforeunload", warnOnUnload);
-    return () => window.removeEventListener("beforeunload", warnOnUnload);
-  }, [isDirty]);
-
-  const selectNote = (note: PrivateNote) => {
-    setSelectedId(note.id);
-    setDraftTitle(note.title);
-    setDraftBody(note.body);
-    setSavedMessage("");
-  };
-
-  const createPreviewNote = () => {
-    const next: PrivateNote = {
-      id: `preview-${Date.now()}`,
-      title: "Untitled private note",
-      body: "",
-      updatedLabel: "Not saved",
-    };
-    onNotesChange([next, ...notes]);
-    selectNote(next);
-  };
-
-  const savePreview = () => {
-    if (!selectedNote) return;
-    onNotesChange(
-      notes.map((note) =>
-        note.id === selectedNote.id
-          ? {
-              ...note,
-              title: draftTitle.trim() || "Untitled private note",
-              body: draftBody,
-              updatedLabel: "Saved in this preview",
-            }
-          : note,
-      ),
-    );
-    setDraftTitle(draftTitle.trim() || "Untitled private note");
-    setSavedMessage("Saved in memory only. Refreshing the app will discard this change.");
+  const openEditor = () => {
+    setEditorOpen(true);
+    // Focus after React reveals the mobile editor; no content leaves this session.
+    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".editor-title-label textarea")?.focus());
   };
 
   return (
-    <section className="workspace-page" aria-labelledby="personal-workspace-title">
-      <header className="workspace-topbar">
-        <span>ARDEN / PERSONAL WORKSPACE</span>
-        <span className="preview-state">PRIVATE UI PREVIEW · NOT PERSISTED</span>
-      </header>
-
-      <div className="workspace-content personal-content">
+    <main id="arden-main" className="workspace-page" aria-labelledby="personal-workspace-title" tabIndex={-1}>
+      <WorkspaceTopbar breadcrumb="Arden / Personal Workspace" previewLabel="SAMPLE NOTES · SESSION ONLY" contextOpen={contextOpen} onToggleContext={onToggleContext} />
+      <div className={`workspace-content personal-content${editorOpen ? " is-editing-note" : ""}`}>
         <div className="page-title-row personal-title-row">
           <div>
-            <span className="privacy-kicker">
-              <Icon name="lock" size={14} /> ONLY YOU
-            </span>
-            <h1 id="personal-workspace-title">Personal Workspace</h1>
-            <p>Capture private notes before deciding whether anything should be shared.</p>
+            <span className="meta-label">PERSONAL / OWNER PRIVATE</span>
+            <h1 id="personal-workspace-title">{editorOpen ? draft.title.trim() || "Untitled private note" : "Private notes"}</h1>
+            <p>{editorOpen ? isDirty ? "Unsaved changes · Your draft is kept while you work." : "Saved in this preview session." : "Only you can view these notes. Sharing always creates a separate governed copy."}</p>
           </div>
-          <button type="button" className="primary-button" onClick={createPreviewNote}>
-            <Icon name="plus" size={15} /> New private note
-          </button>
+          {!editorOpen && <button type="button" className="primary-button" onClick={() => { controller.createNote(); setQuery(""); openEditor(); }}>
+            <Icon name="plus" size={16} /> New private note
+          </button>}
         </div>
-
-        <SearchField
-          ref={searchRef}
-          value={query}
-          onChange={setQuery}
-          placeholder="Search your private notes…"
-        />
-
-        <div className="privacy-banner" role="note">
-          <Icon name="lock" size={17} />
-          <div>
-            <strong>Private by default</strong>
-            <span>
-              These preview notes are separated from shared knowledge and are not used in shared answers.
-            </span>
-          </div>
-        </div>
-
+        {!editorOpen && <SearchField ref={searchRef} value={query} onChange={setQuery} placeholder="Search your private notes…" />}
+        {editorOpen && <div className="private-editor-toolbar">
+          <span className="private-state"><Icon name="lock" size={14} /> PRIVATE · ONLY YOU</span>
+          <button type="button" className="secondary-button" onClick={() => {
+          setEditorOpen(false);
+          requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".note-list .is-selected")?.focus());
+        }}>Back to notes</button>
+          <button type="button" className="primary-button" disabled={!isDirty} onClick={controller.save}>Save preview note</button>
+        </div>}
         <div className="personal-grid">
-          <PrivateNoteList
-            notes={visibleNotes}
-            selectedId={selectedId}
-            onSelect={selectNote}
-            onClearSearch={() => setQuery("")}
-          />
-          <PrivateNoteEditor
-            selectedNote={selectedNote}
-            draftTitle={draftTitle}
-            draftBody={draftBody}
-            isDirty={isDirty}
-            savedMessage={savedMessage}
-            onTitleChange={(value) => {
-              setDraftTitle(value);
-              setSavedMessage("");
-            }}
-            onBodyChange={(value) => {
-              setDraftBody(value);
-              setSavedMessage("");
-            }}
-            onSave={savePreview}
-          />
+          {editorOpen ? <PrivateNoteEditor selectedNote={selectedNote} draftTitle={draft.title} draftBody={draft.body} isDirty={isDirty} savedMessage={state.savedMessage} onTitleChange={controller.editTitle} onBodyChange={controller.editBody} /> : <PrivateNoteList notes={visibleNotes} drafts={state.drafts} selectedId={state.selectedId} searching={Boolean(query.trim())} onSelect={(note) => { controller.selectNote(note); openEditor(); }} onClearSearch={() => setQuery("")} />}
+          <aside className="private-ownership-card" aria-label="Private note ownership">
+            <Icon name="lock" size={32} />
+            <span className="meta-label">{editorOpen ? "PRIVACY" : "PRIVATE BY DEFAULT"}</span>
+            <h2>{editorOpen ? "Only you" : <>Your working <br />memory</>}</h2>
+            <p>A private note is visible only to its owner.</p>
+            <hr />
+            <p>Publishing or contributing creates a separate governed item. It never changes this note silently.</p>
+            <span className="private-guidance-badge">YOU DECIDE WHAT TO SHARE</span>
+            {editorOpen && <p className="private-save-status" aria-live="polite">{isDirty ? "Your draft has unsaved changes." : state.savedMessage || "No pending changes."}</p>}
+          </aside>
         </div>
       </div>
-    </section>
+    </main>
   );
 }

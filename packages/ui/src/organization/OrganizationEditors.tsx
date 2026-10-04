@@ -1,192 +1,56 @@
 import { useState, type FormEvent } from "react";
 import { Icon } from "../shared/Icon";
-import { primaryRoles, type OrganizationPreview, type PrimaryRole } from "./previewModel";
+import { OrganizationDialog } from "./OrganizationDialog";
+import type { Department, OrganizationPreview } from "./previewModel";
 
-type EditorProps = {
+export function DepartmentEditor({ organization, onChange }: {
   organization: OrganizationPreview;
   onChange: (organization: OrganizationPreview) => void;
-};
-
-export function DepartmentEditor({ organization, onChange }: EditorProps) {
-  const [newName, setNewName] = useState("");
-  const [message, setMessage] = useState("");
-
-  const addDepartment = (event: FormEvent<HTMLFormElement>) => {
+}) {
+  const [editing, setEditing] = useState<Department | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [discarding, setDiscarding] = useState(false);
+  const close = () => { setEditing(null); setAdding(false); setError(""); setDiscarding(false); };
+  const requestClose = () => { if (name !== (editing?.name ?? "")) setDiscarding(true); else close(); };
+  const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const name = newName.trim();
-    if (!name) return;
-    if (organization.departments.some((department) => department.name.toLowerCase() === name.toLowerCase())) {
-      setMessage("That department already exists.");
-      return;
+    const nextName = name.trim();
+    if (!nextName) { setError("Enter a department name."); return; }
+    if (organization.departments.some((department) => department.id !== editing?.id && department.name.trim().toLowerCase() === nextName.toLowerCase())) {
+      setError("That department already exists. Choose a unique name."); return;
     }
-    onChange({
-      ...organization,
-      departments: [...organization.departments, { id: crypto.randomUUID(), name }],
-    });
-    setNewName("");
-    setMessage("");
+    const departments = editing
+      ? organization.departments.map((department) => department.id === editing.id ? { ...department, name: nextName } : department)
+      : [...organization.departments, { id: crypto.randomUUID(), name: nextName }];
+    onChange({ ...organization, departments }); close();
   };
-
   return (
-    <div className="organization-editor-stack">
-      <div className="organization-section-heading">
-        <div>
-          <span className="meta-label">ORGANIZATION STRUCTURE</span>
-          <h2>Departments</h2>
-          <p>Departments are the lowest required level. The demo uses at least two to show distinct access boundaries.</p>
-        </div>
-        <span className="organization-count">{organization.departments.length} departments</span>
-      </div>
-
+    <section className="organization-editor-stack">
+      <div className="organization-section-heading"><div><span className="meta-label">ORGANIZATION → DEPARTMENT</span><h2>Departments</h2><p>A clear home for each member and their department knowledge.</p></div><button className="secondary-button" type="button" onClick={() => { setAdding(true); setName(""); }}><Icon name="plus" size={16} />Add department</button></div>
       <div className="department-list">
         {organization.departments.map((department, index) => {
-          const memberCount = organization.members.filter((member) => member.departmentId === department.id).length;
-          return (
-            <div className="department-row" key={department.id}>
-              <span className="department-index">{String(index + 1).padStart(2, "0")}</span>
-              <label>
-                <span className="sr-only">Department {index + 1} name</span>
-                <input
-                  value={department.name}
-                  maxLength={80}
-                  onChange={(event) => {
-                    onChange({
-                      ...organization,
-                      departments: organization.departments.map((item) =>
-                        item.id === department.id ? { ...item, name: event.target.value } : item,
-                      ),
-                    });
-                  }}
-                />
-              </label>
-              <span className="department-members">{memberCount} members</span>
-              <button
-                type="button"
-                className="organization-icon-button"
-                aria-label={`Remove ${department.name || `department ${index + 1}`}`}
-                title={memberCount ? "Move members before removing this department" : "Remove department"}
-                disabled={memberCount > 0}
-                onClick={() => onChange({ ...organization, departments: organization.departments.filter((item) => item.id !== department.id) })}
-              >
-                <Icon name="close" size={15} />
-              </button>
-            </div>
-          );
+          const count = organization.members.filter((member) => member.departmentId === department.id).length;
+          return <div className="department-row" key={department.id}>
+            <span className="department-index">{String(index + 1).padStart(2, "0")}</span>
+            <div className="department-copy"><strong>{department.name}</strong><small>{count} {count === 1 ? "member" : "members"}</small></div>
+            <button type="button" className="secondary-button" onClick={() => { setEditing(department); setName(department.name); }}>Edit</button>
+            <button type="button" className="organization-icon-button" aria-label={`Remove ${department.name}`} title={count ? "Move members before removing this department" : organization.departments.length === 1 ? "Keep at least one department" : "Remove department"} disabled={count > 0 || organization.departments.length === 1} onClick={() => onChange({ ...organization, departments: organization.departments.filter((item) => item.id !== department.id) })}><Icon name="close" size={15} /></button>
+          </div>;
         })}
       </div>
-
-      <form className="organization-inline-form" onSubmit={addDepartment}>
-        <label>
-          <span className="sr-only">New department name</span>
-          <input value={newName} maxLength={80} onChange={(event) => setNewName(event.target.value)} placeholder="New department name" />
-        </label>
-        <button type="submit" className="secondary-button"><Icon name="plus" size={15} /> Add department</button>
-      </form>
-      {message && <p className="organization-form-error" role="alert">{message}</p>}
-    </div>
+      <p className="organization-helper">Departments with assigned members cannot be removed. Move those members first.</p>
+      {(editing || adding) && <OrganizationDialog title={discarding ? "Discard department changes?" : editing ? "Edit department" : "Add department"} description="Department names are unique within this organization. Changes stay in this preview session." onClose={requestClose}>
+        {discarding ? <div className="organization-dialog-actions"><button type="button" className="secondary-button" autoFocus onClick={() => setDiscarding(false)}>Keep editing</button><button type="button" className="primary-button" onClick={close}>Discard changes</button></div> : <form className="organization-form" onSubmit={save}>
+          <label className="organization-field"><span>Department name</span><input value={name} maxLength={80} onChange={(event) => { setName(event.target.value); setError(""); }} autoFocus required placeholder="e.g. Product Engineering" /></label>
+          {error && <p className="organization-form-error" role="alert">{error}</p>}
+          <div className="organization-dialog-actions"><button type="button" className="secondary-button" onClick={requestClose}>Cancel</button><button type="submit" className="primary-button">{editing ? "Save department" : "Add department"}</button></div>
+        </form>}
+      </OrganizationDialog>}
+    </section>
   );
 }
 
-export function MemberEditor({ organization, onChange }: EditorProps) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [departmentId, setDepartmentId] = useState(organization.departments[0]?.id ?? "");
-  const [role, setRole] = useState<PrimaryRole>("Employee");
-  const [message, setMessage] = useState("");
-  const selectedDepartmentId = organization.departments.some((department) => department.id === departmentId)
-    ? departmentId
-    : organization.departments[0]?.id ?? "";
-
-  const addMember = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const normalizedEmail = email.trim().toLowerCase();
-    if (!name.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail) || !selectedDepartmentId) {
-      setMessage("Enter a name, valid email and department.");
-      return;
-    }
-    if (organization.members.some((member) => member.email.toLowerCase() === normalizedEmail)) {
-      setMessage("That email is already in this preview organization.");
-      return;
-    }
-    onChange({
-      ...organization,
-      members: [...organization.members, {
-        id: crypto.randomUUID(),
-        name: name.trim(),
-        email: normalizedEmail,
-        departmentId: selectedDepartmentId,
-        role,
-      }],
-    });
-    setName("");
-    setEmail("");
-    setRole("Employee");
-    setMessage("");
-  };
-
-  return (
-    <div className="organization-editor-stack">
-      <div className="organization-section-heading">
-        <div>
-          <span className="meta-label">MEMBERSHIP &amp; ROLE</span>
-          <h2>Members</h2>
-          <p>Assign a department and one primary role to each synthetic member. Roles do not override document ownership.</p>
-        </div>
-        <span className="organization-count">{organization.members.length} members</span>
-      </div>
-
-      <div className="member-list">
-        {organization.members.map((member) => (
-          <div className="member-row" key={member.id}>
-            <div className="member-identity">
-              <strong>{member.name}</strong>
-              <span>{member.email}</span>
-            </div>
-            <label>
-              <span className="sr-only">Department for {member.name}</span>
-              <select
-                value={member.departmentId}
-                onChange={(event) => onChange({
-                  ...organization,
-                  members: organization.members.map((item) => item.id === member.id ? { ...item, departmentId: event.target.value } : item),
-                })}
-              >
-                {organization.departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
-              </select>
-            </label>
-            <label>
-              <span className="sr-only">Role for {member.name}</span>
-              <select
-                value={member.role}
-                onChange={(event) => onChange({
-                  ...organization,
-                  members: organization.members.map((item) => item.id === member.id ? { ...item, role: event.target.value as PrimaryRole } : item),
-                })}
-              >
-                {primaryRoles.map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="organization-icon-button"
-              aria-label={`Remove ${member.name}`}
-              onClick={() => onChange({ ...organization, members: organization.members.filter((item) => item.id !== member.id) })}
-            >
-              <Icon name="close" size={15} />
-            </button>
-          </div>
-        ))}
-        {organization.members.length === 0 && <p className="organization-empty">No members in this preview yet.</p>}
-      </div>
-
-      <form className="member-add-form" onSubmit={addMember}>
-        <label><span>Name</span><input value={name} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="Member name" required /></label>
-        <label><span>Work email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="name@company.example" required /></label>
-        <label><span>Department</span><select value={selectedDepartmentId} onChange={(event) => setDepartmentId(event.target.value)}>{organization.departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
-        <label><span>Primary role</span><select value={role} onChange={(event) => setRole(event.target.value as PrimaryRole)}>{primaryRoles.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-        <button type="submit" className="secondary-button"><Icon name="plus" size={15} /> Add member</button>
-      </form>
-      {message && <p className="organization-form-error" role="alert">{message}</p>}
-    </div>
-  );
-}
+// Retained for existing setup imports; the member workflow now includes invitations and reviewed assignments.
+export { MemberDirectory as MemberEditor } from "./MemberDirectory";

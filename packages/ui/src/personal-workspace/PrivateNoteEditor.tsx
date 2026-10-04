@@ -1,3 +1,4 @@
+import { useAutosizeTextarea } from "../shared/useAutosizeTextarea";
 import { Icon } from "../shared/Icon";
 import type { PrivateNote } from "../shared/types";
 
@@ -9,7 +10,6 @@ type PrivateNoteEditorProps = {
   savedMessage: string;
   onTitleChange: (value: string) => void;
   onBodyChange: (value: string) => void;
-  onSave: () => void;
 };
 
 export function PrivateNoteEditor({
@@ -20,8 +20,9 @@ export function PrivateNoteEditor({
   savedMessage,
   onTitleChange,
   onBodyChange,
-  onSave,
 }: PrivateNoteEditorProps) {
+  const titleRef = useAutosizeTextarea(draftTitle, 82);
+
   return (
     <section className="note-editor-card" aria-label="Private note editor">
       {selectedNote ? (
@@ -30,16 +31,15 @@ export function PrivateNoteEditor({
             <div>
               <span className="meta-label">PRIVATE · PERSONAL WORKSPACE</span>
               <span className={`edit-state${isDirty ? " is-dirty" : ""}`}>
-                {isDirty ? "Unsaved preview changes" : "No pending changes"}
+                {isDirty ? "Unsaved draft · Kept while you switch notes" : "No pending changes"}
               </span>
             </div>
-            <button type="button" className="secondary-button" onClick={onSave} disabled={!isDirty}>
-              Save preview
-            </button>
           </header>
           <label className="editor-title-label">
             <span className="sr-only">Note title</span>
-            <input
+            <textarea
+              ref={titleRef}
+              rows={2}
               value={draftTitle}
               onChange={(event) => onTitleChange(event.target.value)}
               placeholder="Untitled private note"
@@ -54,7 +54,7 @@ export function PrivateNoteEditor({
             />
           </label>
           <footer className="editor-footer" aria-live="polite">
-            <span>{savedMessage || "Preview mode does not write to the notes API."}</span>
+            <span>{savedMessage || "Session preview. Refreshing or exiting clears your notes."}</span>
             <span>{draftBody.length} characters</span>
           </footer>
         </>

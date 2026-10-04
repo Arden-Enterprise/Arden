@@ -4,9 +4,16 @@ import { KnowledgePane } from "./KnowledgePane";
 import { MyWorkPage } from "../my-work/MyWorkPage";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
 import { SignInPage } from "../sign-in/SignInPage";
+import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
+import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
+import { InvitationAcceptPage } from "../organization/InvitationAcceptPage";
+import { MembershipAccessPage } from "../organization/MembershipAccessPage";
 import { OrganizationSetupPage } from "../organization/OrganizationSetupPage";
 import { OrganizationAccessPage } from "../organization/OrganizationAccessPage";
-import type { OrganizationPreview } from "../organization/previewModel";
+import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
+import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
+import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
+import { membershipReadiness } from "../organization/organizationWorkflow";
 import type { PaneContent, Platform, PrivateNote, WorkspaceView } from "../shared/types";
 
 type ArdenShellProps = { platform: Platform };
@@ -14,24 +21,24 @@ type ArdenShellProps = { platform: Platform };
 const initialNotes: PrivateNote[] = [
   {
     id: "architecture-review",
-    title: "Questions for architecture review",
+    title: "Discovery notes — private workflow",
     body:
-      "Confirm whether retry ownership sits with the gateway or the calling service.\n\nAsk for the exact rollback signal before the review.",
-    updatedLabel: "Updated today · Preview",
+      "Observations\nMembers need a place to capture incomplete thoughts before they are ready for a governed shared item.\n\nAssumptions to validate\n• Privacy must be explicit at every entry point.\n• Save acknowledgement must reflect the server response.\n• Publication creates a separate immutable snapshot.",
+    updatedLabel: "Updated 2m ago · Sample",
   },
   {
     id: "handover-observations",
-    title: "Handover observations",
+    title: "Weekly reflection",
     body:
-      "The receiving owner still needs access to the operational dashboard and the incident archive.",
-    updatedLabel: "Updated yesterday · Preview",
+      "A private summary of what worked, what changed, and what to revisit.",
+    updatedLabel: "Updated yesterday · Sample",
   },
   {
     id: "incident-follow-up",
-    title: "Incident follow-up prompts",
+    title: "API questions",
     body:
-      "Which decision changed after the incident, and where is the reviewed evidence stored?",
-    updatedLabel: "Updated 4 days ago · Preview",
+      "Open questions about note save acknowledgement and version conflicts.",
+    updatedLabel: "Updated 3d ago · Sample",
   },
 ];
 
@@ -68,79 +75,220 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
     boundaryTitle: "Server authority required",
     boundaryBody: "This admin UI is a local preview. A real session, server authorization and audit event are required before any access change takes effect.",
   },
+  "knowledge": {
+    eyebrow: "KNOWLEDGE CONTEXT", title: "Your shared library",
+    description: "Explore sample runbooks, decisions and source evidence.",
+    suggestions: ["Inspect the source version", "Review the intended audience"],
+    boundaryTitle: "Shared knowledge", boundaryBody: "Sample records only. Real results must be selected by server-authorized scope.",
+  },
+  "ask-arden": {
+    eyebrow: "ANSWER CONTEXT", title: "Evidence before answers",
+    description: "Inspect a sample answer and its exact-version citations.",
+    suggestions: ["Inspect cited sources", "Check freshness"],
+    boundaryTitle: "No live AI", boundaryBody: "This preview uses an explicitly labeled sample answer. No prompt is sent to a model.",
+  },
+  "review-queue": {
+    eyebrow: "REVIEW CONTEXT", title: "A snapshot to review",
+    description: "Approval and publication are separate preview transitions.",
+    suggestions: ["Check the intended audience", "Request a specific revision"],
+    boundaryTitle: "Immutable review snapshot", boundaryBody: "Review applies to the submitted version. Private originals remain excluded.",
+  },
+  "knowledge-handover": {
+    eyebrow: "HANDOVER CONTEXT", title: "Clear ownership",
+    description: "Review a sample transfer of responsibilities and shared knowledge.",
+    suggestions: ["Check receiving owner", "Review readiness"],
+    boundaryTitle: "Shared items only", boundaryBody: "Handover does not grant access to personal notes. Server checks remain required.",
+  },
 };
+
+type EntryView = "sign-in" | "workspace-select" | "workspace" | "setup" | "invitation" | "access";
 
 export function ArdenShell({ platform }: ArdenShellProps) {
   const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
-  const [setupOpen, setSetupOpen] = useState(false);
+  const [entryView, setEntryView] = useState<EntryView>("sign-in");
+  const [previewMemberId, setPreviewMemberId] = useState("sample-employee");
+  const [invitationId, setInvitationId] = useState("");
+  const [accessMemberId, setAccessMemberId] = useState("");
+  const [pendingMemberEntry, setPendingMemberEntry] = useState<string | null>(null);
   const [organization, setOrganization] = useState<OrganizationPreview | null>(null);
   const [organizationDirty, setOrganizationDirty] = useState(false);
   const [activeView, setActiveView] = useState<WorkspaceView>("my-work");
-  const [notes, setNotes] = useState(initialNotes);
+  const privateNotes = usePrivateNotes(initialNotes);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | null>(null);
+
+  useEffect(() => {
+    const compactWindow = window.matchMedia("(max-width: 1180px)");
+    const updateContext = (event: MediaQueryListEvent) => { if (event.matches) setContextOpen(false); };
+    compactWindow.addEventListener("change", updateContext);
+    return () => compactWindow.removeEventListener("change", updateContext);
+  }, []);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
-  }, [activeView, previewRole, setupOpen]);
+  }, [activeView, previewRole, entryView]);
 
-  if (setupOpen) {
+  const enterMemberWorkspace = (memberId: string) => {
+    if (!organization || membershipReadiness(organization, memberId).state !== "ready") return;
+    const member = organization.members.find(item => item.id === memberId);
+    setPreviewRole(member?.role === "System Admin" ? "admin" : "member");
+    setPreviewMemberId(memberId);
+    if (memberId !== previewMemberId) privateNotes.reset([]);
+    setActiveView("my-work");
+    setEntryView("workspace");
+    setPendingMemberEntry(null);
+  };
+
+  if (entryView === "setup") {
     return (
       <OrganizationSetupPage
-        onCancel={() => setSetupOpen(false)}
+        initialOrganization={organization ?? undefined}
+        onSaveDraft={setOrganization}
+        onCancel={() => setEntryView(previewRole ? "workspace" : "sign-in")}
         onComplete={(configuredOrganization) => {
           setOrganization(configuredOrganization);
-          setSetupOpen(false);
+          if (previewMemberId !== "sample-admin") privateNotes.reset([]);
+          setEntryView("workspace");
           setPreviewRole("admin");
-          setActiveView("my-work");
+          setPreviewMemberId("sample-admin");
+          setActiveView("organization-access");
         }}
       />
     );
   }
 
-  if (!previewRole) {
+  if (entryView === "sign-in") {
     return (
       <SignInPage
         platform={platform}
-        onEnterPreview={() => setPreviewRole("member")}
-        onOpenSetup={() => setSetupOpen(true)}
+        onEnterPreview={() => {
+          setOrganization(createPreviewOrganization());
+          setPreviewRole("member");
+          setPreviewMemberId("sample-employee");
+          privateNotes.reset();
+          setEntryView("workspace-select");
+        }}
+        onEnterAdminPreview={() => {
+          setOrganization(createPreviewOrganization());
+          setPreviewRole("admin");
+          setPreviewMemberId("sample-admin");
+          privateNotes.reset([]);
+          setActiveView("organization-access");
+          setEntryView("workspace");
+        }}
+        onOpenSetup={() => setEntryView("setup")}
       />
     );
   }
 
+  if (entryView === "workspace-select") {
+    return <WorkspaceSelectPage organizationName={organization?.name ?? "FPT Digital"} onBack={() => { setPreviewRole(null); setOrganization(null); privateNotes.reset(); setEntryView("sign-in"); }} onContinue={() => { setActiveView("my-work"); setEntryView("workspace"); }} />;
+  }
+
+  const returnToAdmin = () => {
+    setPreviewRole("admin");
+    setPreviewMemberId("sample-admin");
+    setActiveView("organization-access");
+    setEntryView("workspace");
+  };
+
+  if (entryView === "invitation" && organization) {
+    return <InvitationAcceptPage organization={organization} invitationId={invitationId} onChange={setOrganization} onBack={returnToAdmin} onContinue={(memberId) => { setAccessMemberId(memberId); setEntryView("access"); }} />;
+  }
+
+  if (entryView === "access" && organization) {
+    return <><MembershipAccessPage organization={organization} memberId={accessMemberId} onBack={returnToAdmin} onContinue={(memberId) => {
+      if (membershipReadiness(organization, memberId).state !== "ready") return;
+      if (memberId !== previewMemberId && privateNotes.hasUnsavedDrafts) setPendingMemberEntry(memberId);
+      else enterMemberWorkspace(memberId);
+    }} />{pendingMemberEntry && <DiscardChangesDialog exiting={false} switchingMember onCancel={() => setPendingMemberEntry(null)} onDiscard={() => enterMemberWorkspace(pendingMemberEntry)} />}</>;
+  }
+
   const navigate = (view: WorkspaceView) => {
-    if (organizationDirty && activeView === "organization-access" && view !== activeView && !window.confirm("Discard unsaved organization preview changes?")) return;
+    if (organizationDirty && activeView === "organization-access" && view !== activeView) {
+      setPendingAction(view);
+      return;
+    }
     setOrganizationDirty(false);
     setActiveView(view);
   };
 
-  const signOut = () => {
-    if (organizationDirty && !window.confirm("Discard unsaved organization preview changes and exit?")) return;
+  const finishSignOut = () => {
     setPreviewRole(null);
+    setEntryView("sign-in");
     setOrganization(null);
     setOrganizationDirty(false);
     setActiveView("my-work");
-    setNotes(initialNotes);
+    privateNotes.reset();
+    setInvitationId("");
+    setAccessMemberId("");
+    setPendingMemberEntry(null);
   };
 
+  const signOut = () => {
+    if (organizationDirty || privateNotes.hasUnsavedDrafts) {
+      setPendingAction("exit");
+      return;
+    }
+    finishSignOut();
+  };
+
+  const contextControl = { contextOpen, onToggleContext: () => setContextOpen((open) => !open) };
+  const previewMember = organization?.members.find(member => member.id === previewMemberId);
+  const isKnowledgeView = activeView === "knowledge" || activeView === "ask-arden" || activeView === "review-queue" || activeView === "knowledge-handover";
+  const knowledgeView = isKnowledgeView ? activeView : "knowledge";
+  const activeContext = activeView === "personal-workspace" && privateNotes.selectedNote
+    ? {
+      ...paneContent[activeView],
+      title: privateNotes.draft.title.trim() || "Untitled private note",
+      description: "Your selected private note. Drafts stay in this preview session when you switch notes or screens.",
+      boundaryBody: "Only you can work with this preview note. It is excluded from shared answers. Refreshing or exiting clears this session.",
+    }
+    : paneContent[activeView];
+
   return (
-    <div className="arden-app-shell">
+    <div className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}`}>
+      <a className="skip-link" href="#arden-main">Skip to content</a>
       <AppSidebar
         activeView={activeView}
         platform={platform}
-        previewRole={previewRole}
+        previewRole={previewRole ?? "member"}
         organization={organization}
+        memberName={previewMember?.name}
+        memberRole={previewMember?.role || "Awaiting assignment"}
+        memberDepartment={organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
         onNavigate={navigate}
         onSignOut={signOut}
       />
 
       {activeView === "my-work" ? (
-        <MyWorkPage onOpenPrivateNotes={() => navigate("personal-workspace")} />
+        <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
       ) : activeView === "organization-access" && organization && previewRole === "admin" ? (
-        <OrganizationAccessPage organization={organization} onChange={setOrganization} onDirtyChange={setOrganizationDirty} />
-      ) : (
-        <PersonalWorkspacePage notes={notes} onNotesChange={setNotes} />
-      )}
+        <OrganizationAccessPage organization={organization} onChange={setOrganization} onDirtyChange={setOrganizationDirty} onOpenSetup={() => { if (organizationDirty) setPendingAction("setup"); else setEntryView("setup"); }} onPreviewInvitation={(id) => { setInvitationId(id); setEntryView("invitation"); }} onPreviewAccess={(id) => { setAccessMemberId(id); setEntryView("access"); }} {...contextControl} />
+      ) : activeView === "personal-workspace" ? (
+        <PersonalWorkspacePage key={previewMemberId} controller={privateNotes} {...contextControl} />
+      ) : null}
 
-      <KnowledgePane content={paneContent[activeView]} />
+      <div className="knowledge-feature-slot" hidden={!isKnowledgeView}>
+        <KnowledgeFeaturePage view={knowledgeView} active={isKnowledgeView} organizationName={organization?.name} departmentName={organization?.departments.find(department => department.id === previewMember?.departmentId)?.name} showPrivateSample={previewMemberId === "sample-employee"} onNavigate={navigate} {...contextControl} />
+      </div>
+
+      <KnowledgePane content={activeContext} open={contextOpen} onToggle={contextControl.onToggleContext} />
+      {pendingAction && (
+        <DiscardChangesDialog
+          exiting={pendingAction === "exit"}
+          onCancel={() => setPendingAction(null)}
+          onDiscard={() => {
+            if (pendingAction === "exit") finishSignOut();
+            else if (pendingAction === "setup") { setOrganizationDirty(false); setEntryView("setup"); }
+            else {
+              setOrganizationDirty(false);
+              setActiveView(pendingAction);
+            }
+            setPendingAction(null);
+          }}
+        />
+      )}
     </div>
   );
 }
