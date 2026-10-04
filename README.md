@@ -35,6 +35,7 @@ Run `pnpm dev:remote` after the guide's setup and administrator handoff. Vite st
 ```sh
 pnpm typecheck
 pnpm test
+pnpm test:remote
 pnpm build
 ```
 

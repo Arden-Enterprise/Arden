@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 from slot_access import require_slot_owner
+from operation_fence import development_operation
 
 ROOT = Path(__file__).resolve().parent.parent
 ROOT_FILES = {'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig.base.json'}
@@ -77,11 +78,9 @@ def operation(slot, action, token):
         status = json.loads(status_path.read_text()) if status_path.exists() else {}
         return {'ok': True, 'port': port, 'busy': status.get('expires', 0) > time.time(), 'files': status.get('files', 0)}
     require_slot_owner(slot, os.getuid())
-    with (state / 'sync.lock').open('a') as lock:
+    with development_operation(ROOT), (state / 'sync.lock').open('a') as lock:
         os.chmod(state / 'sync.lock', 0o600)
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if (ROOT / 'ops' / 'coolify-cutover').exists():
-            raise ValueError('The operator is switching development management. Try again later.')
         lease_path = state / 'lease.json'
         manifest_path = state / 'manifest.json'
         lease = json.loads(lease_path.read_text()) if lease_path.exists() else {}

@@ -44,9 +44,12 @@ def provision(root, accounts):
     root.mkdir(mode=0o755)
     (root / 'ops').mkdir(mode=0o755)
     (root / 'secrets').mkdir(mode=0o700)
-    for name in ['sync.py', 'start.py', 'slot_access.py', 'coolify_runtime.py', 'backend.Dockerfile', 'backend-entry.mjs']:
+    for name in ['sync.py', 'start.py', 'slot_access.py', 'coolify_runtime.py', 'operation_fence.py', 'backend.Dockerfile', 'backend-entry.mjs']:
         shutil.copyfile(source / name, root / 'ops' / name)
         (root / 'ops' / name).chmod(0o644)
+    fence = root / 'ops' / 'development.lock'
+    fence.touch(mode=0o644)
+    fence.chmod(0o644)
     assignments = root / 'ops' / 'slot-owners.json'
     assignments.write_text(json.dumps({f'dev-{number}': user.pw_uid for number, user in enumerate(users, 1)}))
     assignments.chmod(0o644)

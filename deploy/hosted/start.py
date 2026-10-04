@@ -7,6 +7,7 @@ import subprocess
 import sys
 from slot_access import require_slot_owner
 from coolify_runtime import start_managed
+from operation_fence import development_operation
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -24,10 +25,11 @@ def start(slot):
     source = directory / 'source'
     if source.is_symlink() or not source.is_dir():
         raise ValueError('Invalid development source directory.')
-    if start_managed(ROOT, slot):
-        return {'ok': True}
-    # The reviewed Compose and build context are root-owned, outside synced source.
-    subprocess.run(['docker', 'compose', '--project-name', 'arden-hosted-dev', '--file', str(ROOT / 'ops' / 'development.yaml'), 'up', '-d', '--wait', '--wait-timeout', '180', 'postgres', slot], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with development_operation(ROOT):
+        if start_managed(ROOT, slot):
+            return {'ok': True}
+        # The reviewed Compose and build context are root-owned, outside synced source.
+        subprocess.run(['docker', 'compose', '--project-name', 'arden-hosted-dev', '--file', str(ROOT / 'ops' / 'development.yaml'), 'up', '-d', '--wait', '--wait-timeout', '180', 'postgres', slot], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=210)
     return {'ok': True}
 
 

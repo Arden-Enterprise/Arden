@@ -21,7 +21,7 @@ Initial inventory, 2 October 2026:
 | Jobs | None | pg-boss in `apps/worker` |
 | Storage | No content storage implementation | Private Supabase Storage behind Arden's storage/policy interface |
 | AI | None | Arden gateway to customer-controlled Ollama/compatible private endpoint |
-| Tests | Vitest 5.0.1, two API health tests; typecheck/build scripts | Real PostgreSQL integration/policy tests, UI tests, Playwright web/desktop flows |
+| Tests | Vitest 5.0.1, two API health tests; Node hosted-development workflow tests; Linux Python protocol/ownership/maintenance fixtures with mocked Docker; typecheck/build scripts | Real PostgreSQL integration/policy tests, UI tests, Playwright web/desktop flows |
 | Deployment | Local PostgreSQL Compose; hosted API/database bootstrap and local frontend/SSH commands; Ubuntu/Windows CI | Supported isolated Supabase, Coolify release integration, immutable staging/production |
 
 The container image includes pgvector software; the scaffold does not yet create the extension or prove embedding queries work. The Electron build is not a packaged installer. No installed auth/schema/query/editor/graph/job library should be inferred from this target table.

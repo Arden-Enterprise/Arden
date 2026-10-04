@@ -2,7 +2,7 @@
 
 This guide takes a new teammate from installing tools to editing Arden, seeing changes, and opening a pull request. Use it for the **local frontend with hosted development backend** workflow.
 
-**Setup status, 4 October 2026:** the hosted development services are registered in Coolify. Individual teammate accounts, protected slot assignments, scoped startup permissions, and the required workflow failure/authorization coverage still need an administrator handoff before broader onboarding. The development commands are currently in [PR #2](https://github.com/Arden-Enterprise/Arden/pull/2), not yet merged into `main`. You can prepare your computer now; start a hosted coding session after the maintainer confirms your access is ready.
+**Setup status, 4 October 2026:** the hosted development services are registered in Coolify. Individual teammate accounts, protected slot assignments, scoped startup permissions, and deployment of the reviewed helper/backend-image updates still need an administrator handoff before broader onboarding. [PR #2](https://github.com/Arden-Enterprise/Arden/pull/2) contains the development commands and workflow regression tests; use its branch while it is open and `main` after it merges. You can prepare your computer now; start a hosted coding session after the maintainer confirms your access is ready.
 
 This is an application scaffold. The sample graph UI and API health checks exist; Supabase Auth, Storage, Realtime, product features, and staging/production application releases are still to implement. The staging and production resources currently contain databases only.
 
@@ -521,6 +521,7 @@ Close another local development/preview command first if it already uses ports `
 | Host key verification fails or the fingerprint changed | Stop and verify with the administrator. Do not disable checking or blindly delete the known-host entry. |
 | Missing/invalid `.private/remote.json` | Check the exact filename, valid JSON, alias, assigned `dev-N`, and administrator-provided root. Keep the contents private. |
 | Upload/start is denied, or sudo requires a password | Ask the operator to check your protected slot assignment, source/state ownership, and scoped startup grant. Do not change accounts, use someone else's key, or grant yourself general sudo. |
+| Maintenance is active / the operator is switching management | Stop and wait for the operator to finish the migration or recovery, then restart your session. Do not remove locks or pause markers. |
 | `writer connected`, lease busy, or writer conflict | Close your other writer session. After a crash, wait five minutes for expiry. Ask the operator if it remains occupied; do not take over another writer. |
 | Backend did not become ready / startup failed | Repeat the unattended SSH check, check your local API port, and inspect permitted API logs or ask the operator. A missing managed container needs an operator deployment in Coolify. |
 | Local API port `3001` is occupied | Stop your other owned development command or choose a free `localApiPort` in private settings, then restart. |
@@ -628,9 +629,9 @@ Follow the same readiness, editing, shutdown, and PR steps. Do not use `sudo pnp
 
 - [ ] Approve the source revision and integration order; PR #2 currently requires independent human review before merge.
 - [ ] Prepare each contributor's distinct approved SSH account/key. Share the verified fingerprint and connection values privately.
-- [ ] For the existing host, complete the protected account-assignment/source-state migration and deploy the reviewed helper/backend-image updates. **Do not rerun fresh provisioning on an existing project root.** Preserve source/state/configuration and a recovery route.
+- [ ] For the existing host, complete the protected account-assignment/source-state migration and deploy the reviewed helper/backend-image updates, including the shared operation fence and its protected stable lock file. **Do not rerun fresh provisioning on an existing project root.** Preserve source/state/configuration and a recovery route. Coordinate cutover and rollback using the operator guide's exclusive maintenance context.
 - [ ] Establish root-owned slot identities/control files, assigned source/state ownership, and only the permitted startup helper invocation for each contributor. Verify effective sudo restrictions and that another account cannot write/start the slot.
-- [ ] Complete the required automated competing-writer, cross-slot denial, deletion reconciliation, disconnect cleanup, and failed-start coverage before broader onboarding. Cover managed-start marker/container/health failures as documented in the operator guide. Scaffold CI does not establish this coverage.
+- [ ] Check that CI passed the remote workflow tests on Windows/Linux and the Linux protocol/ownership/maintenance tests on the approved revision. These fixtures do not prove the live host's SSH/sudo permissions or end-to-end hot reload; verify those during handoff.
 - [ ] Confirm managed development resources, private ports/mounts, and readiness; preserve database volumes. A dashboard label is not evidence of account isolation.
 - [ ] Give the contributor their internal slot ID and matching `YOUR_NAME-local` label privately. Invite their own GitHub/Coolify accounts with the required scope.
 - [ ] Supply the SSH hostname/port/account/fingerprint and approved private remote root through the approved private channel. Keep passwords/private keys and database credentials out of the packet.
