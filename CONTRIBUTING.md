@@ -40,6 +40,8 @@ Run `pnpm dev:desktop` in another terminal for the Windows desktop shell. Web is
 
 Use synthetic seed data and separate local credentials/volumes. Follow [operations.md](docs/engineering/operations.md) for multiple checkouts, isolation, production configuration, and backup obligations. The current Compose file is not a complete production application.
 
+For local frontend development against a hosted API/database, follow the beginner [teammate setup walkthrough](docs/engineering/teammate-setup.md), including the administrator handoff, then use `pnpm dev:remote`. Choose your assigned slot; do not overwrite an active writer or connect development code to a release database. The [hosted development reference](docs/engineering/remote-development.md) covers implementation and operator details.
+
 ## Changes and commits
 
 Commit in units of work when committing is authorized. Each completed, independently reviewable change gets its own descriptive Conventional Commit. Keep related code, documentation, and verification together, and make the commit coherent and reversible. Do not combine unrelated fixes, features, or cleanup, or split tightly coupled changes into broken intermediate commits. Inspect the proposed diff and stage only the intended paths or hunks; preserve other contributors' work.
@@ -61,10 +63,13 @@ For code/config/dependency changes, run relevant focused tests and the root chec
 ```sh
 pnpm typecheck
 pnpm test
+pnpm test:remote
 pnpm build
 ```
 
-CI performs a frozen-lockfile install and these checks on Ubuntu and Windows. Passing them currently proves scaffold checks only: web/UI have no test scripts yet, API tests are health-route tests, and installer/end-to-end/security coverage is not implemented. Add the relevant evidence as features grow.
+CI performs a frozen-lockfile install and these checks on Ubuntu and Windows. `test:remote` exercises the local hosted-development workflow without SSH. On Linux, CI also runs `sudo --non-interactive python3 -m unittest discover -s deploy/hosted/tests -v`: it needs root only to set up disposable ownership fixtures and spawn non-root test processes; Docker is mocked and no live services/accounts are changed. See the [operator guide](docs/engineering/remote-development.md#operator-setup-and-maintenance) for coverage and host handoff limits.
+
+Passing CI proves scaffold and focused development-workflow checks only: web/UI have no test scripts yet, API tests are health-route tests, and installer/product end-to-end/authorization coverage is not implemented. Add the relevant evidence as features grow.
 
 UI changes also need actual web/desktop visual and interaction checks where applicable. Database changes need disposable PostgreSQL migration/constraint/authorization tests. Security and governance changes need denial/revocation/exact-version tests. Docs-only changes need links and consistency checks; do not imply application tests ran when they did not.
 

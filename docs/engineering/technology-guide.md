@@ -13,16 +13,16 @@ Initial inventory, 2 October 2026:
 | Runtime/tooling | Node.js 24 CI; pnpm 11.19.0; TypeScript 5.9.3; pnpm workspaces | Same baseline, reviewed upgrades |
 | Web/shared UI | React/react-dom 19.3.0; Vite 7.3.6; React plugin 5.2.0 | React Router and TanStack Query |
 | Desktop | Electron 44.4.3; electron-vite 5.0.0; shared React UI | Typed preload/native adapters, secure cache/auth, signed Windows installer/update flow |
-| API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15 | Validated domain routes/contracts, identity, SSE |
+| API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15 | Validated domain routes/contracts, Supabase identity/events |
 | Data | Local `pgvector/pgvector:pg17` container; database health query | Canonical PostgreSQL schema, extension/migrations, Drizzle, full-text/vector search |
-| Identity | None | Better Auth + Drizzle adapter; Arden-owned authorization |
+| Identity | None | Supabase Auth; Arden-owned authorization |
 | Editor | None | BlockNote core behind a versioned Arden document interface |
 | Graph | Custom SVG illustrative network and local interactions | Sigma.js + Graphology on authorized API projections |
 | Jobs | None | pg-boss in `apps/worker` |
-| Storage | No content storage implementation | Protected local attachment volume behind a storage interface; optional S3-compatible backend later |
+| Storage | No content storage implementation | Private Supabase Storage behind Arden's storage/policy interface |
 | AI | None | Arden gateway to customer-controlled Ollama/compatible private endpoint |
-| Tests | Vitest 5.0.1, two API health tests; typecheck/build scripts | Real PostgreSQL integration/policy tests, UI tests, Playwright web/desktop flows |
-| Deployment | Local database Compose; Ubuntu/Windows CI | Ubuntu 24.04 + Coolify, versioned full application Compose, isolated staging/production |
+| Tests | Vitest 5.0.1, two API health tests; Node hosted-development workflow tests; Linux Python protocol/ownership/maintenance fixtures with mocked Docker; typecheck/build scripts | Real PostgreSQL integration/policy tests, UI tests, Playwright web/desktop flows |
+| Deployment | Local PostgreSQL Compose; hosted API/database bootstrap and local frontend/SSH commands; Ubuntu/Windows CI | Supported isolated Supabase, Coolify release integration, immutable staging/production |
 
 The container image includes pgvector software; the scaffold does not yet create the extension or prove embedding queries work. The Electron build is not a packaged installer. No installed auth/schema/query/editor/graph/job library should be inferred from this target table.
 
@@ -69,7 +69,7 @@ The container image includes pgvector software; the scaffold does not yet create
 
 Consult [Electron's security checklist](https://www.electronjs.org/docs/latest/tutorial/security) and electron-vite documentation matching installed majors before changing process boundaries or packaging.
 
-## 5. Fastify, HTTP contracts, and SSE
+## 5. Fastify, HTTP contracts, and notifications
 
 - Keep construction/testability separate from process startup: extend the existing `buildApp` pattern. Centralize config validation, dependencies, policy services, and shutdown; avoid opening a pool/listener merely by importing a testable module.
 - Validate body, query, parameters, relevant headers, and response shape. Reject unsupported content types and oversize input. Type annotations alone are not validators.
@@ -80,20 +80,20 @@ Consult [Electron's security checklist](https://www.electronjs.org/docs/latest/t
 - Normalize errors into safe client codes/messages and correlation IDs. Preserve diagnostics in redacted logs; do not expose stack traces, SQL, connector responses containing secrets, or inaccessible object existence.
 - Configure cookie/CSRF protections, exact allowed origins, proxy trust, timeouts, rate limits, upload quotas, and TLS deliberately. Do not enable wildcard credentialed CORS or trust forwarded headers from arbitrary clients.
 - Liveness remains cheap and independent of database readiness. Readiness checks required dependencies with bounded time and generic output; do not turn public health endpoints into configuration disclosure.
-- SSE is the planned notification transport, not implemented now. Authorize the subscription and each event, limit/expire connections, handle reconnect/cursors and duplicates, and release resources on disconnect. Notification payloads must not leak forbidden titles/content.
-- Choose a reviewed SSE authentication transport compatible with both clients. Do not put bearer/session secrets in query strings. Reauthorize when membership/session changes; replay IDs must not cross tenant scopes.
+- Supabase Realtime is the planned notification service, not implemented now. Authorize subscriptions and each event with current Arden permissions, limit/expire connections, handle reconnect/duplicates, and release resources on disconnect. Payloads must not leak forbidden titles/content.
+- Review channel authentication, policies, and revocation for both clients. Do not put long-lived secrets in public URLs. Reauthorize when membership/session changes; replay/delivery must not cross tenant scopes.
 - Document compatibility before changing contracts used by installed desktop versions. Additive changes are preferred; introduce a version/deprecation strategy deliberately rather than breaking older binaries silently.
 
-## 6. Better Auth and Arden authorization
+## 6. Supabase Auth and Arden authorization
 
-- Better Auth is planned for identities/sessions/invitations with the Drizzle adapter. Do not implement a second home-grown login stack or run it beside Supabase Auth.
-- Validate the installed Better Auth/adapter versions, supported schema generation, migrations, trusted origins/base URL, secure cookies, session revocation, invitation behavior, and reverse-proxy setup using official documentation before integration.
-- Integrate generated auth tables with the **single** reviewed migration history. Do not let a second schema tool silently mutate production or treat generated auth schema as the full Arden domain model.
-- Auth plugin organization roles are not content ACLs. Arden domain policy owns organization membership, team scope, content grants, review/publication, source audience, downloads, graph/search, and AI visibility.
+- Supabase Auth is planned for identities/sessions; it replaces Better Auth. Do not run two auth stacks. The custom Arden login UI is separate from the service.
+- Validate actual SDK/service versions, redirects/trusted origins, session verification/revocation, cookies/tokens, invitations, SMTP/recovery, and reverse proxy before integration. Service-role keys stay server-only.
+- Supabase owns supported internal service schemas; Arden owns reviewed domain SQL migrations. Do not treat auth tables as the domain model or let independent schema tools mutate Arden tables.
+- Identities/JWTs are not content ACLs. Arden policy owns organization membership, team scope, grants, review/publication, source audiences, downloads, graph/search, and AI. Direct SDK reads, Storage, and Realtime must enforce equivalent restrictions.
 - Invitations and role changes need server checks for target organization, actor capability, escalation, expiration, audit, and session/cache invalidation. Test expired/revoked sessions and multi-organization users.
 - Sign-in/bootstrap/recovery must not create a permanent universal bypass. Open private-data recovery and reviewer/publisher separation decisions require explicit policy before implementation.
 
-References: [Better Auth Drizzle adapter](https://better-auth.com/docs/adapters/drizzle), [organization plugin](https://better-auth.com/docs/plugins/organization).
+References: [Supabase Auth](https://supabase.com/docs/guides/auth), [self-hosting](https://supabase.com/docs/guides/self-hosting), [decision 0001](../decisions/0001-supabase-and-hybrid-development.md).
 
 ## 7. PostgreSQL, pgvector, Drizzle, and search
 
@@ -145,7 +145,7 @@ References: [Sigma documentation](https://www.sigmajs.org/docs/), [Graphology do
 - Make the canonical write and job scheduling reliable through a verified shared transaction or outbox/reconciliation design. Do not acknowledge saved/indexed content when a failure silently lost its ingestion work.
 - Revalidate current source revision, organization, permissions, approval state, and cancellation before side effects. Stale jobs must not republish, restore revoked sources, or overwrite a newer extraction/embedding.
 - Use small validated job payloads with IDs/version references, not secrets or unrestricted snapshots. Limit worker privileges and concurrency; stop/drain safely during deployment.
-- Store attachments outside public/static roots on a protected volume. Validate size/type/content, filenames, paths, quotas, extraction limits, and scanning policy. Prevent traversal, symlink escapes, archives/decompression bombs, and unsafe parser execution.
+- Store attachments in private Supabase Storage behind Arden's policy/storage interface, outside public/static roots. Validate content, keys, quotas, extraction limits, and scanning policy. Prevent public bucket exposure, traversal, symlink escapes, decompression bombs, and unsafe parser execution. Storage is not implemented yet.
 - Track files and DB references consistently across retry/failure/deletion. Downloads/exports require authorization; temporary URLs must be narrowly scoped/expiring and not leak through logs.
 - V1 input scope: Markdown/plain text, DOCX, and text PDFs. Scans get an explicit unsupported/OCR-needed status; OCR is not secretly implemented by sending files to a cloud service.
 - Connector sync records source ID/revision/hash, audience, timestamps, extractor/model versions, cursors, and failures. Preserve provenance; unchanged content should not be reprocessed unnecessarily.

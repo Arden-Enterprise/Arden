@@ -6,7 +6,7 @@ These standards apply to application code and tests alongside [AGENTS.md](../../
 
 At this guide's creation, the API has a testable `buildApp` factory and two health-route tests. The shared UI is concentrated in a large `ArdenShell.tsx`; it contains sample data, icon rendering, graph interaction, and composition. That is scaffold debt to improve incrementally, not a pattern for adding every future feature to the same file.
 
-The repository has strict TypeScript and typecheck/test/build scripts. It does **not** yet have configured lint/format checks, UI tests, real database integration tests, or end-to-end coverage. Documentation does not install these tools or prove existing code meets every standard. Keep this inventory current when the corresponding work is implemented.
+The repository has strict TypeScript and typecheck/test/build scripts. Hosted development also has Node session/source regression tests and Linux protocol/ownership/maintenance tests in CI; Docker is mocked and these do not verify a live host. It does **not** yet have configured lint/format checks, UI tests, real database integration tests, or product end-to-end coverage. Documentation does not install these tools or prove existing code meets every standard. Keep this inventory current when the corresponding work is implemented.
 
 ## Readable and cohesive code
 

@@ -22,7 +22,7 @@ Self-hosted first: a customer controls Arden Core, its data, backups, connectors
 
 - Web and Windows desktop clients share the same product interface; Linux desktop packaging is later.
 - The graph is the home screen. A left navigation opens Graph, My Work, Intake/Sources, Reviews, and Administration. Selecting a node opens a Knowledge Pane. A full editor supports sustained writing. The Arden Agent can use an explicit context basket.
-- Developers run isolated local stacks. Staging and production are separate deployments on customer-controlled Ubuntu infrastructure using Coolify. The team's pilot allocation is 4 vCPU, 12 GB RAM, and 100 GB disk, with private AI on another customer-controlled machine.
+- Developers may run isolated local stacks or local frontends against four hosted development APIs/databases. Staging and production use separate release deployments and database instances. Full Supabase service placement and capacity must be measured before provisioning; the earlier pilot hardware target is not a verified allocation. Private AI remains on a separate customer-controlled machine. See [hybrid development](docs/engineering/remote-development.md).
 
 ## Capabilities and Constraints
 

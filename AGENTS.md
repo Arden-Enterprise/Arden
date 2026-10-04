@@ -41,9 +41,9 @@ The blueprint's unresolved choices remain unresolved: supported Windows/hardware
 At this ruleset's creation, the repository is a scaffold: shared illustrative React graph UI, web/Electron shells, Fastify liveness/readiness routes, two API tests, and a local PostgreSQL Compose service. Authentication, canonical content schema, live graph, editor, governance, ingestion, connectors, AI, worker, production deployment, and signed installers are **not implemented**.
 
 - Current tooling: Node.js 24 in CI, pnpm 11.19.0, strict TypeScript, React/Vite, Electron/electron-vite, Fastify with `pg`, PostgreSQL 17 via a pgvector image, and Vitest. Exact versions come from manifests and lockfile.
-- Planned: React Router, TanStack Query, BlockNote core, Sigma.js/Graphology, Better Auth with its Drizzle adapter, Drizzle migrations, pg-boss worker, protected local file storage, an Ollama/private-endpoint model gateway, SSE notifications, and Playwright coverage.
+- Planned: React Router, TanStack Query, BlockNote core, Sigma.js/Graphology, Supabase Auth/Storage/Realtime with PostgreSQL, Drizzle migrations, pg-boss worker, an Ollama/private-endpoint model gateway, and Playwright coverage. See [decision 0001](docs/decisions/0001-supabase-and-hybrid-development.md).
 - Planned does not mean installed, configured, secure, licensed for every use, or tested. Add only the part needed for the authorized feature, with compatibility/license review and tests.
-- Earlier Supabase/Convex full-stack proposals are superseded by this direction. Do not add parallel auth systems, a graph database, Redis, Elasticsearch, Kubernetes, or a separate vector database without a documented need and accepted architecture decision.
+- Supabase replaces the earlier Better Auth/local-storage/SSE target; its application integration is not implemented. The [hybrid development guide](docs/engineering/remote-development.md) covers four hosted API/database slots with local frontends, not four full Supabase projects. Do not add parallel auth systems, a graph database, Redis, Elasticsearch, Kubernetes, or a separate vector database without a documented need and accepted architecture decision.
 
 ## 4. Architecture and module boundaries
 
