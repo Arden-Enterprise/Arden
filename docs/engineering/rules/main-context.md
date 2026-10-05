@@ -17,11 +17,11 @@ git rev-parse --show-toplevel
 git status --short
 git branch --show-current
 git remote get-url origin
-git fetch origin main
-git rev-parse HEAD origin/main
+git fetch origin refs/heads/main:refs/remotes/origin/main
+git rev-parse HEAD refs/remotes/origin/main
 ```
 
-Confirm that `origin` is the approved Arden application repository before fetching; do not invent or change a remote to make the command succeed. The final command reports the checkout commit followed by the fetched main commit. Record both. Fetch updates remote-tracking references, not working files or the current branch.
+Confirm that `origin` is the approved Arden application repository before fetching; do not invent or change a remote to make the command succeed. The explicit source/destination refspec updates the main reference even in a checkout configured to fetch only another branch. Only proceed after fetch succeeds; a failed fetch does not establish freshness. The final command reports the checkout commit followed by the fetched main commit. Record both, and substitute the full main commit hash for `FETCHED_MAIN_SHA` in the examples below. Fetch updates remote-tracking references, not working files or the current branch.
 
 Do not automatically pull, switch a busy branch, reset, clean, stash, overwrite local edits or rebase existing work. Read the fetched documents with `git show` when the checkout differs. A clean, explicitly authorized update may use a fast-forward; a new implementation branch normally starts from the inspected main. Preserve intentional work on an older release or dependent branch and identify its compatibility differences.
 
@@ -36,24 +36,24 @@ Read these from the fetched main revision, even when local copies exist:
 For example, these commands read main without replacing a dirty checkout:
 
 ```sh
-git show origin/main:AGENTS.md
-git show origin/main:CONTRIBUTING.md
-git show origin/main:docs/engineering/technology-guide.md
-git show origin/main:docs/decisions/README.md
-git show origin/main:docs/decisions/0001-supabase-and-hybrid-development.md
+git show FETCHED_MAIN_SHA:AGENTS.md
+git show FETCHED_MAIN_SHA:CONTRIBUTING.md
+git show FETCHED_MAIN_SHA:docs/engineering/technology-guide.md
+git show FETCHED_MAIN_SHA:docs/decisions/README.md
+git show FETCHED_MAIN_SHA:docs/decisions/0001-supabase-and-hybrid-development.md
 ```
 
-Use the same recorded main SHA throughout this inspection. If the reference changes during the task, review the affected changes again. Inspect manifests, lockfile, source and configuration in the actual target checkout separately: an accepted plan does not prove its libraries or behavior are implemented. For example, a superseded Better Auth proposal must not silently replace the accepted Supabase Auth direction.
+Use that immutable recorded main SHA throughout this inspection, even if another fetch moves the remote-tracking reference. If the task needs a newer baseline, record its SHA and review the affected changes again. Inspect manifests, lockfile, source and configuration in the actual target checkout separately: an accepted plan does not prove its libraries or behavior are implemented. For example, a superseded Better Auth proposal must not silently replace the accepted Supabase Auth direction.
 
 ## 3. Read changes and resolve differences
 
-When a previous reviewed main SHA is known, compare it to fetched main. Replace `LAST_REVIEWED_MAIN` below with that verified commit:
+When a previous reviewed main SHA is known, discover all changed paths before narrowing the review. Replace `LAST_REVIEWED_MAIN` with that verified commit and `FETCHED_MAIN_SHA` with the recorded fetched commit:
 
 ```sh
-git diff --name-status LAST_REVIEWED_MAIN..origin/main -- AGENTS.md CONTRIBUTING.md PRODUCT.md ARDEN_BLUEPRINT.md DESIGN.md docs
+git diff --name-status LAST_REVIEWED_MAIN..FETCHED_MAIN_SHA
 ```
 
-Read the changed task-relevant documents and patches, plus affected source/config changes. If no previous SHA is available, read the current required documents in full and inspect recent history with `git log -n 10 --oneline origin/main -- AGENTS.md CONTRIBUTING.md docs`; this history sample does not replace reading the current contract.
+From this complete path inventory, read changed task-relevant documents and patches, plus affected source, manifests, lockfile and deployment configuration. If no previous SHA is available, read the current required documents in full and inspect recent history with `git log -n 10 --oneline FETCHED_MAIN_SHA`; this history sample does not replace reading the current contract.
 
 Compare those contracts with the working branch's committed changes and uncommitted edits. Follow the current accepted direction by default; earlier or superseded documents remain historical context. A new proposal or newer timestamp alone is not an accepted replacement. Higher-priority instructions and explicit user decisions take precedence. Name material conflicts and resolve them before dependent implementation or consequential operations; do not silently choose a stack or overwrite work to remove a disagreement.
 
