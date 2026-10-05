@@ -7,6 +7,9 @@ type AppSidebarProps = {
   platform: Platform;
   previewRole: "member" | "admin";
   organization: OrganizationPreview | null;
+  organizationLabel?: string;
+  authenticated?: boolean;
+  showAdmin?: boolean;
   memberName?: string;
   memberRole?: string;
   memberDepartment?: string;
@@ -34,6 +37,9 @@ export function AppSidebar({
   platform,
   previewRole,
   organization,
+  organizationLabel,
+  authenticated = false,
+  showAdmin = false,
   memberName = "Lan Nguyen",
   memberRole = "Employee",
   memberDepartment = "Product Engineering",
@@ -45,19 +51,19 @@ export function AppSidebar({
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark" aria-hidden="true"><Icon name="knowledge" size={24} /></span>
         <span>ARDEN</span>
-        <small>PREVIEW</small>
+        {!authenticated && <small>PREVIEW</small>}
       </div>
 
       <section className="access-card" aria-labelledby="access-card-title">
         <span className="meta-label" id="access-card-title">
-          {organization?.name ?? "FPT DIGITAL"}
+          {organizationLabel ?? organization?.name ?? "FPT DIGITAL"}
         </span>
         <strong>{previewRole === "admin" ? "Organization" : memberDepartment}</strong>
         <span>{previewRole === "admin" ? "Configuration access" : "Member workspace"}</span>
       </section>
 
       <nav className="sidebar-navigation" aria-label="Workspace">
-        <span className="meta-label navigation-label">WORKSPACE</span>
+          <span className="meta-label navigation-label">WORKSPACE</span>
         {workspaceNavigation.map((item) => {
           const active = item.view === activeView;
           return (
@@ -66,7 +72,7 @@ export function AppSidebar({
               type="button"
               className={`sidebar-nav-item${active ? " is-active" : ""}`}
               onClick={() => { if (item.view) onNavigate(item.view); }}
-              disabled={item.planned}
+              disabled={item.planned || authenticated}
               aria-label={item.label}
               aria-current={active ? "page" : undefined}
               title={item.planned ? `${item.label} is not connected yet` : item.label}
@@ -94,7 +100,7 @@ export function AppSidebar({
           <Icon name="plus" size={16} /><span>Integrations</span><small>Planned</small>
         </button>
 
-        {previewRole === "admin" && (
+        {((previewRole === "admin" && !authenticated) || showAdmin) && (
           <>
             <span className="meta-label navigation-label">MANAGE</span>
             <button
@@ -117,10 +123,10 @@ export function AppSidebar({
           <span className="sidebar-avatar" aria-hidden="true">{memberName.split(/\s+/).map(part => part[0]).slice(0, 2).join("")}</span>
           <div><strong>{memberName}</strong><span>{memberRole}</span></div>
         </div>
-        <span>{platform === "desktop" ? "WINDOWS" : "WEB"} · SAMPLE SESSION</span>
+        <span>{platform === "desktop" ? "WINDOWS" : "WEB"} · {authenticated ? "SIGNED IN" : "SAMPLE SESSION"}</span>
         <button type="button" onClick={onSignOut} aria-label="Exit preview">
           <Icon name="logout" size={15} />
-          <span><span className="nav-label-full">Exit preview</span><span className="nav-label-short" aria-hidden="true">Exit</span></span>
+          <span><span className="nav-label-full">{authenticated ? "Sign out" : "Exit preview"}</span><span className="nav-label-short" aria-hidden="true">Exit</span></span>
         </button>
       </div>
     </aside>

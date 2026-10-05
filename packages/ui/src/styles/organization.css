@@ -318,3 +318,31 @@
   .organization-setup-content .organization-department-nav { grid-template-columns: 1fr; }
   .organization-template-preview { padding: 18px; }
 }
+
+.organization-live-admin-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 18px; }
+.organization-live-admin .organization-editor-stack > ul { display: grid; gap: 10px; padding: 0; list-style: none; }
+.organization-live-admin .organization-editor-stack > ul > li { display: flex; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid var(--arden-line); border-radius: var(--arden-radius-sm); }
+.organization-live-admin .organization-editor-stack > ul > li span { color: var(--arden-text-secondary); }
+.organization-live-admin .organization-editor-stack > form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; }
+.organization-live-admin .organization-live-invite-form { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 12px; }
+.organization-live-members { display: grid; gap: 10px; }
+.organization-live-members article { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, 0.8fr) minmax(150px, 0.8fr); align-items: end; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--arden-line); }
+.organization-live-members article > div { display: grid; gap: 4px; align-self: center; min-width: 0; }
+.organization-live-members article > div > span, .organization-live-members article small { color: var(--arden-text-secondary); overflow-wrap: anywhere; }
+.organization-live-invitations { display: grid; gap: 8px; padding: 0; list-style: none; }
+.organization-live-invitations li { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 12px; border-bottom: 1px solid var(--arden-line); }
+.organization-live-invitations li > div:first-child { display: grid; gap: 4px; min-width: 0; }
+.organization-live-invitations li span { color: var(--arden-text-secondary); }
+
+@media (max-width: 900px) {
+  .organization-live-admin-grid { grid-template-columns: 1fr; }
+  .organization-live-members article { grid-template-columns: 1fr 1fr; }
+  .organization-live-members article > div { grid-column: 1 / -1; }
+}
+@media (max-width: 600px) {
+  .organization-live-admin .organization-editor-stack > form,
+  .organization-live-admin .organization-live-invite-form,
+  .organization-live-members article { grid-template-columns: 1fr; }
+  .organization-live-admin .organization-editor-stack > ul > li,
+  .organization-live-invitations li { align-items: flex-start; flex-direction: column; }
+}

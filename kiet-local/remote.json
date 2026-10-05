@@ -1,0 +1,6 @@
+{
+  "sshAlias": "arden-kiet-local",
+  "remoteRoot": "/srv/arden-hosted",
+  "defaultSlot": "dev-2",
+  "localApiPort": 3001
+}

@@ -5,6 +5,7 @@ out/
 coverage/
 .env
 .env.*.local
+.private/
 *.log
 *.tsbuildinfo
 .DS_Store

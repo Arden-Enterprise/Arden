@@ -27,9 +27,10 @@ Self-hosted first: a customer controls Arden Core, its data, backups, connectors
 ## Capabilities and Constraints
 
 - Personal notes, governed Arden knowledge, and external work context have different ownership, visibility, and authority.
+- Org Admins create organization-scoped custom roles and assign them to members. A matching role audience grants access to published content; one matching role is sufficient for viewing, authorized search, and submitting a separate contribution copy. This rule is accepted but not yet implemented.
 - The server is authoritative for shared knowledge, permissions, review, indexing, and AI. The first desktop release is not fully offline-first.
 - Graph results, search, citations, and AI context must be permission-filtered. AI may propose work, but may not silently publish or send data to external systems.
-- The current repository is a frontend preview on a foundation scaffold. Shared web/Electron screens include session-memory private-note drafts, organization setup, invitations, acceptance, pending membership, department/role assignment and access readiness. Knowledge editing, immutable review snapshots, explicit sample publication and handover demonstrate local transitions; Ask Arden displays a prerecorded sample answer. Real authentication, server authorization/governance, durable notes, email delivery, audit events, connectors, live graph and AI inference are not implemented. Demonstration content must remain plainly labeled and isolated from real organization data.
+- The current repository combines the shared web/Electron preview with a first backend slice: Supabase Auth email/password sessions through a Fastify BFF, server-side membership/role checks, owner-private note create/list/read/update, PostgreSQL RLS setup, and persistent file-backed note storage. The authenticated UI connects only the private-note view; organization setup, invitations, role administration, knowledge editing/review/publication, and handover remain sample previews. Ask Arden displays a prerecorded sample answer. Email delivery, role-audience enforcement, broader governance, connectors, live graph and AI inference are not implemented. Demonstration content must remain plainly labeled and isolated from real organization data.
 - The chosen architecture and remaining product decisions are detailed in [ARDEN_BLUEPRINT.md](ARDEN_BLUEPRINT.md). Standalone personal-only accounts and full offline synchronization remain open decisions.
 
 ## Brand Commitments
@@ -42,7 +43,7 @@ Self-hosted first: a customer controls Arden Core, its data, backups, connectors
 
 - [ARDEN_BLUEPRINT.md](ARDEN_BLUEPRINT.md) records the agreed product direction, architecture, and boundaries. It is a proposed plan, not evidence of shipped features.
 - The repository has a shared React UI shell used by the web and Electron clients. It contains no customer data or live knowledge graph.
-- [Mainflow 1 preview](docs/engineering/mainflow-1-preview.md) records the implemented UI journey and sample-only assumptions. Accepting an invitation creates a pending membership; an administrator subsequently confirms its primary department, one of three fixed preview roles and role scope. These client transitions are not production authorization or a decision that replaces the blueprint's unresolved identity and role policy.
+- [Mainflow 1 preview](docs/engineering/mainflow-1-preview.md) records the implemented UI journey and sample-only assumptions. Accepting an invitation creates a pending membership; an administrator subsequently confirms its primary department, one of three fixed preview roles and role scope. These client transitions are not production authorization. Supabase Auth provides identity and sessions; custom organization roles, invites, and role-audience enforcement are accepted direction but remain unimplemented.
 
 ## Product Principles
 
