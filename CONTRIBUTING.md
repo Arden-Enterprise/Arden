@@ -2,6 +2,10 @@
 
 Read [AGENTS.md](AGENTS.md) first. It is the repository-wide rules entry point, not an optional agent-only note. Detailed guides cover [code quality/testability](docs/engineering/code-quality.md), [technologies](docs/engineering/technology-guide.md), [security/data](docs/engineering/security-and-data.md), and [operations](docs/engineering/operations.md).
 
+## Before every task
+
+Follow [current main context](docs/engineering/rules/main-context.md) before planning, recommending a stack, editing, reviewing, or operating the server. Fetch the approved main, read current rules and accepted architecture/technology decisions, inspect relevant changes since the last reviewed main revision, and compare the working checkout. Record the fetched main SHA and any freshness/conflict limitation in the task handoff. A fetch does not update your working files; preserve unfinished work and use the guide's safe comparison procedure.
+
 ## Branch convention
 
 Use `<type>/<specific-kebab-case-description>`. The type must match the purpose:
