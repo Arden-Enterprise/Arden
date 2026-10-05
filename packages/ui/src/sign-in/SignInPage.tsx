@@ -2,27 +2,38 @@ import { type FormEvent, useState } from "react";
 import type { Platform } from "../shared/types";
 import { WelcomePanel } from "./WelcomePanel";
 import { entryAssets } from "./entryAssets";
+import { signIn, type CurrentSession } from "../shared/api-client";
 
 export function SignInPage({
   platform,
   onEnterPreview,
   onOpenSetup,
   onEnterAdminPreview,
+  onAuthenticated,
 }: {
   platform: Platform;
   onEnterPreview: () => void;
   onOpenSetup: () => void;
   onEnterAdminPreview?: () => void;
+  onAuthenticated: (session: CurrentSession) => Promise<void>;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setMessage(
-      "Sign-in is not available in this preview. Open the member preview below to explore Arden with sample data.",
-    );
+    setBusy(true);
+    setMessage("");
+    try {
+      await onAuthenticated(await signIn(platform, email.trim(), password));
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Sign in could not be completed.");
+    } finally {
+      setBusy(false);
+      setPassword("");
+    }
   };
 
   return (
@@ -36,10 +47,7 @@ export function SignInPage({
           <p>Use your organization account. Arden only returns knowledge you are permitted to access.</p>
 
           {message && (
-            <div className="sign-in-message" role="alert">
-              <strong>Sign-in is unavailable in this preview</strong>
-              <span>{message}</span>
-            </div>
+            <div className="sign-in-message" role="alert"><strong>Sign in could not be completed</strong><span>{message}</span></div>
           )}
 
           <form onSubmit={handleSubmit}>
@@ -75,8 +83,8 @@ export function SignInPage({
               />
               <small id="sign-in-password-help">Use the password provided for your organization account.</small>
             </label>
-            <button type="submit" className="primary-button">
-              {message ? "Try again" : "Sign in"}
+            <button type="submit" className="primary-button" disabled={busy}>
+              {busy ? "Signing in…" : "Sign in"}
             </button>
           </form>
 

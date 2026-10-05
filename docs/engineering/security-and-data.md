@@ -1,6 +1,6 @@
 # Security, privacy, and data rules
 
-These are application design and implementation requirements. The current scaffold does not implement authentication, content ACLs, secure caching, AI, connectors, or governance; do not put real customer secrets into it or call it a secure release. Read [AGENTS.md](../../AGENTS.md), [the blueprint](../../ARDEN_BLUEPRINT.md), and the relevant [technology rules](technology-guide.md).
+These are application design and implementation requirements. The current backend also implements organization bootstrap, Org Admin-checked department/custom-role/member administration APIs, and hashed-token invitation create/resend/revoke/accept behind Supabase Auth and configurable SMTP. Those new database flows have synthetic HTTP tests only; migration 0002, RLS, live Supabase, and SMTP delivery remain unverified. Recovery, complete user lifecycle/last-admin handling, publication governance, live Coolify deployment, and production security release evidence remain incomplete. Read [AGENTS.md](../../AGENTS.md), [the blueprint](../../ARDEN_BLUEPRINT.md), and the relevant [technology rules](technology-guide.md).
 
 ## 1. Trust model and truthful guarantees
 
@@ -17,11 +17,15 @@ These are application design and implementation requirements. The current scaffo
 - Stable IDs, obscure URLs, hiding a button, filtering in the renderer, and a broad connector token are not access controls.
 - Operational roles and content permissions are separate. Managers/admin UI roles must not implicitly grant read access to another user's personal workspace. Each personal workspace belongs to its user **within an organization**.
 - Central domain functions determine actor + scope + object/version + action. Use them consistently from HTTP, jobs, events, search, graph, citation resolution, file download/export, AI, and native-cache access.
+- Published Arden content may use organization-scoped custom-role audiences. A verified active member with at least one matching assigned role may view, search, and submit a separate contribution copy of the published version. Apply this rule on the server; Org Admin capability is not an implicit content grant. See [decision 0004](../decisions/0004-role-tagged-published-audiences.md).
 - Test grants, membership removal, role changes, revoked/expired sessions, multiple organization memberships, and attempted cross-organization references. Unknown policy/source audience fails closed.
 - Privileged workers/migration accounts do not replace end-user authorization. Use narrow service capabilities and explicitly trace the initiating actor where a task acts for someone.
 - RLS is defense in depth, not the sole policy layer. Test real runtime roles and pooled tenant context; development DB superuser success proves neither production denial nor RLS correctness.
 - Denied/missing object responses should follow a deliberate non-enumerating contract. Never disclose forbidden names, paths, existence, counts, or source errors just to make debugging easier.
 - Administration, recovery, export, grants, connector settings, invitations, review/publish, and external actions need auditable actor/scope/decision metadata. Audit access itself is permission-controlled.
+- Invitation bearer tokens are generated with cryptographic randomness, stored only as SHA-256 hashes, excluded from API responses/logs, and accepted once before expiry. The invite landing page does not query account existence; account setup and sign-in share the same invitation entry screen. Acceptance requires a verified Supabase email equal to the normalized invite address, then creates membership, its one primary department, and that department's default role in one database transaction. SMTP failure never reports successful delivery; admins can resend with a newly rotated token or revoke a pending invite. The transaction/RLS behavior requires disposable PostgreSQL verification before deployment.
+
+The organization, session-context, and owner-private note contract for the first backend slice is accepted and partially implemented. SQL authorization has a gated real-PostgreSQL test that has not run in this environment; API request tests use a synthetic Supabase adapter rather than a live project. See [first-slice permission and API contracts](first-slice-permission-and-api-contracts.md), [decision 0002](../decisions/0002-first-slice-private-notes-contract.md), and the active [Supabase decision 0001](../decisions/0001-supabase-and-hybrid-development.md).
 
 ## 3. Knowledge ownership and governance
 
@@ -37,6 +41,7 @@ These are application design and implementation requirements. The current scaffo
 
 - Every derivative carries a traceable source/version/organization and appropriate audience: chunk, embedding, full-text entry, graph edge, label/layout, summary, citation, notification, cached page, AI history, and export.
 - Authorize candidates before exposing snippets/counts/answers and recheck before response emission or delayed action. Never retrieve all private content then hide it in React or trust the model not to quote it.
+- For role-audience RAG, constrain the retrieval candidate set by current membership and the any-matching-role rule before text/vector retrieval and model-context construction. Recheck the publication version and audience before emitting results, citations, or contribution actions. Private originals are excluded from organization-wide search.
 - Graph edges require access to both endpoints and the edge itself. Unauthorized nodes must not affect visible cluster labels, degree counts, ranking explanations, sample previews, or layouts that disclose their existence.
 - Source deletion, source permission loss, membership removal, unpublishing, and grant revocation block visibility synchronously. Asynchronous purge/reindex may follow, but stale projections cannot remain readable during cleanup.
 - Cancel or revalidate pending jobs, subscriptions, downloads, and AI runs after a policy change. Prevent old tasks from recreating visibility or an obsolete index.

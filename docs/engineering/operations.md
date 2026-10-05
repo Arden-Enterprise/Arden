@@ -1,6 +1,6 @@
 # Development, deployment, and operations rules
 
-Read [AGENTS.md](../../AGENTS.md), [the technology guide](technology-guide.md), and [security/data rules](security-and-data.md). This is the operational policy for the intended product. The current repository only has a local database Compose file and scaffold CI; it has no complete Coolify release, worker, migration command, installer, or backup automation yet.
+Read [AGENTS.md](../../AGENTS.md), [the technology guide](technology-guide.md), and [security/data rules](security-and-data.md). This is the operational policy for the intended product. The repository now has a reviewed initial SQL migration command and local database Compose file, but it still has no complete Coolify release, worker, installer, or backup automation.
 
 ## 1. Supported baseline and current commands
 
@@ -16,17 +16,26 @@ These commands exist now:
 | `pnpm install --frozen-lockfile` | CI/reproducibility install; fails on manifest/lockfile mismatch |
 | `pnpm db:up` | Start the local PostgreSQL Compose service |
 | `pnpm db:down` | Stop Compose without requesting volume removal |
+| `pnpm --filter @arden/api db:migrate` | Apply every pending numbered migration in order, one transaction at a time, to the configured migration database |
 | `pnpm dev` | Start API and web host processes |
 | `pnpm dev:api` | API hot reload with tsx |
 | `pnpm dev:web` | Vite web development server |
 | `pnpm dev:desktop` | electron-vite desktop development |
 | `pnpm typecheck` | Run package typecheck scripts |
-| `pnpm test` | Run existing package test scripts (currently API health tests only) |
+| `pnpm test` | Run package unit/request tests; skip real PostgreSQL unless `ARDEN_TEST_DATABASE_URL` is configured |
 | `pnpm build` | Run existing package build scripts; does not produce a signed installer |
 | `pnpm --filter @arden/api start` | Run built API, after build and required environment setup |
 | `pnpm --filter @arden/desktop preview` | Preview a built desktop application, not a deployment/signing check |
 
-There are no root lint, migration, seed, worker, E2E, packaging, deploy, or backup scripts yet. Add the corresponding implementation and documentation together before listing them as runnable procedures.
+There are no root lint, seed, worker, E2E, packaging, deploy, or backup scripts. Apply pending database migrations explicitly with `pnpm --filter @arden/api db:migrate`; they are not run automatically by API startup. Migration 0002 adds organization bootstrap, departments/default roles, role-tag permissions, and invitations; it has not been verified against PostgreSQL in this checkout.
+
+The migrations create Arden's `arden` schema, enable and force row-level security on domain tables, and create the non-login, non-superuser `arden_runtime` role. Supabase owns its Auth schema and credentials; Arden migrations must not create, alter, or grant access to Supabase-managed Auth tables. The API database login must be provisioned separately and granted membership in `arden_runtime`. Apply domain migrations with a distinct reviewed migration connection and verify the target is disposable/local before first use. The command serializes and records each application in `public.arden_schema_migrations`; never edit an applied migration. Migration 0002 deliberately fails if organizations already exist without a creator mapping; review and prepare an explicit admin backfill before applying it to a populated installation.
+
+Supabase Auth owns passwords and email confirmation. Invitation account setup is non-enumerating; after verification, the invite link must be reopened and accepted by a matching session. Arden stores the verified Supabase UUID and profile, not password hashes or rows in Supabase's internal `auth` schema. Organization creation provisions the creator as first Org Admin and assigns the initial department/default role in one transaction. Configure Supabase Auth email confirmation/SMTP separately from Arden's invitation SMTP. Invitation delivery uses the all-or-nothing server settings `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, and `ARDEN_PUBLIC_WEB_ORIGIN`; keep credentials in Coolify runtime secrets. If SMTP/origin is missing, invitation routes return unavailable and do not report email sent. These flows have synthetic request tests only; real database/RLS and delivery are unverified.
+
+`pnpm --filter @arden/api test` includes opt-in live Supabase Auth and PostgreSQL/RLS suites. Configure `ARDEN_TEST_SUPABASE_*` with a synthetic account in a dedicated Supabase project. Configure `ARDEN_TEST_DATABASE_URL` with a dedicated PostgreSQL URL to an already-migrated disposable database named `arden_test_*`; the suite creates and removes its own synthetic Arden profiles, organization, memberships, roles, and notes. Both suites skip when their settings are absent. Never point either at shared Coolify environments.
+
+For Coolify, mount `ARDEN_PRIVATE_STORAGE_ROOT` to persistent private storage with API-only access and include it in the protected backup/restore plan with PostgreSQL. Production API startup refuses to run when this path is unset. Set `ARDEN_CORE_URL` in the desktop launch environment to the public HTTPS origin; the desktop bridge rejects non-loopback HTTP and URL paths. A packaged settings UI and an actual Coolify stack are not implemented.
 
 ## 2. Ports, environment, and configuration
 
@@ -37,13 +46,23 @@ There are no root lint, migration, seed, worker, E2E, packaging, deploy, or back
 | `ARDEN_API_HOST` | `127.0.0.1` | Deliberate bind address; container/service binding is a deployment decision |
 | `ARDEN_API_PORT` | `3001` | Validate numeric port/range when central configuration is implemented |
 | `ARDEN_POSTGRES_PORT` | `5433` | Local Compose host mapping; PostgreSQL inside container uses 5432 |
-| `DATABASE_URL` | Local dev URL in `.env.example` / API fallback | Required when `NODE_ENV=production`; never a public client setting |
+| `DATABASE_URL` | Local dev URL in `.env.example` / API fallback | API connection; production login must be non-superuser/non-`BYPASSRLS` and permitted to `SET ROLE arden_runtime` |
+| `ARDEN_MIGRATION_DATABASE_URL` | Unset | Optional locally; production migration connection when the API `DATABASE_URL` is restricted. Never expose it to the running API or client |
+| `SUPABASE_URL` | Unset locally | Supabase project Auth/API URL reachable from the API container |
+| `SUPABASE_PUBLISHABLE_KEY` | Unset locally | Project publishable/anon key used by the server-side Supabase Auth adapter; never substitute a service-role key |
+| `ARDEN_AUTH_TRUSTED_ORIGINS` | Local Vite origins | Comma-separated exact client origins allowed to use Arden's cookie-authenticated API; production requires HTTPS |
+| `ARDEN_PUBLIC_WEB_ORIGIN` | Unset | Exact public web origin for invitation links; required to send invitations |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Unset | Configure all six together for organization invitation email; runtime secrets stay API-side |
+| `ARDEN_PRIVATE_STORAGE_ROOT` | `.private/note-content` default | Required in production; must resolve to a protected persistent mount outside the image/static web root |
+| `ARDEN_CORE_URL` | `http://127.0.0.1:3001` for local desktop | Public HTTPS Core origin for the Windows desktop process; loopback HTTP is allowed only for local development |
+| `ARDEN_TEST_DATABASE_URL` | Unset | Optional real-PostgreSQL integration target; must be a disposable, pre-migrated database named `arden_test_*` |
+| `ARDEN_TEST_SUPABASE_*` | Unset | Optional live Supabase Auth smoke test using a synthetic account in a dedicated test project |
 
 - Current API reads shell/process environment and dev defaults; `.env.example` is a reference. It does not mean Fastify/tsx automatically load an API `.env` file. Introduce explicit loading/validation if needed and document precedence.
 - Keep secret values out of tracked env/config files. Track sanitized examples with descriptions, defaults, required status, consumer, and restart/build implications. Treat `.env.production` as sensitive even if the current ignore patterns do not cover it.
 - Vite client env values are build-time public values. Future runtime public config must remain distinct from server secrets and support the same immutable artifact in staging/production.
 - Production startup must fail closed on missing/invalid critical configuration. No dev password, default administrator, disabled auth/TLS, or cloud fallback may become an implicit production setting.
-- Core URL, auth origins, connector credentials, storage roots, model profiles, resource limits, and retention are future configuration surfaces. Do not invent undocumented environment names or claim they already work.
+- Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice; connector credentials, model profiles, resource limits, and retention remain future configuration surfaces. Keep actual values out of tracked files.
 
 ## 3. Isolated local development for every developer
 

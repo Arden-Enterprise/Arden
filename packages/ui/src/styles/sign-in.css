@@ -238,6 +238,11 @@
   white-space: nowrap;
 }
 
+.invitation-entry-tabs { display: flex; gap: 8px; margin: 22px 0 18px; border-bottom: 1px solid var(--arden-line); }
+.invitation-entry-tabs button { min-height: 40px; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--arden-text-secondary); cursor: pointer; }
+.invitation-entry-tabs button[aria-pressed="true"] { border-bottom-color: var(--arden-accent); color: var(--arden-text-primary); }
+.workspace-select-card > small { display: block; margin-top: 18px; color: var(--arden-text-muted); line-height: 1.5; }
+
 .is-unavailable .workspace-membership-status { color: var(--arden-text-muted); }
 .workspace-continue { width: 100%; }
 .workspace-preview-identity { margin: 24px 0 0; padding-top: 24px; border-top: 1px solid var(--arden-line); color: var(--arden-text-muted); font-size: 13px; line-height: 20px; }
