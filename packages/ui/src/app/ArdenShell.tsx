@@ -113,7 +113,7 @@ function tokenFromInvitationPath(pathname: string): string | null {
 
 export function ArdenShell({ platform }: ArdenShellProps) {
   const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
-  const [invitationToken] = useState(() => tokenFromInvitationPath(window.location.pathname));
+  const [invitationToken, setInvitationToken] = useState<string | null>(() => tokenFromInvitationPath(window.location.pathname));
   const [entryView, setEntryView] = useState<EntryView>(() => invitationToken ? "invite-link" : "sign-in");
   const [previewMemberId, setPreviewMemberId] = useState("sample-employee");
   const [invitationId, setInvitationId] = useState("");
@@ -140,6 +140,10 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   };
 
   const acceptServerSession = async (current: CurrentSession) => {
+    if (invitationToken) {
+      window.history.replaceState(null, "", "/");
+      setInvitationToken(null);
+    }
     setServerSession(current);
     const allowed = current.memberships.filter((membership) => membership.status === "active" && membership.canUsePrivateWorkspace);
     if (allowed.length === 1) enterServerOrganization(allowed[0]);
@@ -228,7 +232,16 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   }
 
   if (entryView === "invite-link" && invitationToken) {
-    return <InvitationLinkPage platform={platform} token={invitationToken} authenticated={Boolean(serverSession)} onAccepted={acceptServerSession} />;
+    return (
+      <InvitationLinkPage
+        platform={platform}
+        token={invitationToken}
+        authenticated={Boolean(serverSession)}
+        session={serverSession}
+        onSessionChange={setServerSession}
+        onAccepted={acceptServerSession}
+      />
+    );
   }
 
   if (entryView === "workspace-select") {
@@ -236,6 +249,7 @@ export function ArdenShell({ platform }: ArdenShellProps) {
       return <WorkspaceSelectPage
         organizationName="organization"
         memberships={serverSession.memberships}
+        testMode={serverSession.testMode}
         onCreateOrganization={async (name, departmentName) => {
           await apiCreateOrganization(platform, name, departmentName);
           await acceptServerSession(await currentSession(platform));
@@ -330,6 +344,7 @@ export function ArdenShell({ platform }: ArdenShellProps) {
         memberName={serverSession ? "Signed-in member" : previewMember?.name}
         memberRole={serverSession ? serverSession.memberships.find((item) => item.organization.id === serverOrganizationId)?.roleCodes.join(", ") || "Organization member" : previewMember?.role || "Awaiting assignment"}
         memberDepartment={serverSession ? "Member" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+        environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
         onNavigate={navigate}
         onSignOut={signOut}
       />

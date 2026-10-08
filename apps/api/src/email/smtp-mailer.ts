@@ -26,7 +26,11 @@ export function createSmtpMailer(configuration: SmtpConfiguration): InvitationMa
     host: configuration.host,
     port: configuration.port,
     secure: configuration.secure,
+    requireTLS: !configuration.secure,
     auth: { user: configuration.user, pass: configuration.password },
+    connectionTimeout: 15_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
   });
   return {
     async sendInvitation(message) {

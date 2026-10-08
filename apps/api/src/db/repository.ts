@@ -56,7 +56,8 @@ export interface ArdenDataRepository {
   updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }>;
 }
 
-const membershipPermissionSql = `
+function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): string {
+  return `
   EXISTS (
     SELECT 1 FROM user_account ua
      WHERE ua.user_id = om.user_id AND ua.status = 'ACTIVE'
@@ -73,7 +74,7 @@ const membershipPermissionSql = `
        AND ra.status = 'ACTIVE'
        AND ra.valid_from <= now()
        AND (ra.valid_until IS NULL OR ra.valid_until > now())
-       AND p.code = $3
+       AND p.code = ${permissionParameter}
        AND (
          s.scope_type = 'ORGANIZATION'
          OR EXISTS (
@@ -85,6 +86,7 @@ const membershipPermissionSql = `
          )
        )
   )`;
+}
 
 export class ArdenRepository implements ArdenDataRepository {
   constructor(private readonly pool: Pool) {}
@@ -102,7 +104,7 @@ export class ArdenRepository implements ArdenDataRepository {
              o.name AS organization_name,
              om.status,
              COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), '{}') AS role_codes,
-             (${membershipPermissionSql}) AS can_use_private_workspace
+             (${membershipPermissionSql("$2")}) AS can_use_private_workspace
         FROM organization_membership om
         JOIN organization o ON o.organization_id = om.organization_id
         JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
@@ -114,7 +116,7 @@ export class ArdenRepository implements ArdenDataRepository {
         LEFT JOIN role r ON r.role_id = ra.role_id AND r.status = 'ACTIVE'
        WHERE om.user_id = $1
        GROUP BY o.organization_id, o.name, om.membership_id, om.status
-       ORDER BY o.name, o.organization_id`, [userId, null, "PRIVATE_WORKSPACE_READ"]);
+       ORDER BY o.name, o.organization_id`, [userId, "PRIVATE_WORKSPACE_READ"]);
 
     return result.rows.map((row) => ({
       organizationId: row.organization_id,
@@ -559,7 +561,7 @@ export class ArdenRepository implements ArdenDataRepository {
         JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
        WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
-         AND ${membershipPermissionSql}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ"]);
+         AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ"]);
     const row = result.rows[0];
     return row ? {
       id: row.draft_id,
@@ -632,7 +634,7 @@ export class ArdenRepository implements ArdenDataRepository {
       JOIN organization_membership om ON om.membership_id = w.membership_id
      WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
        AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
-       AND ${membershipPermissionSql}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
+       AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
     return result.rowCount === 1;
     });
   }
@@ -658,7 +660,7 @@ export class ArdenRepository implements ArdenDataRepository {
           JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
          WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
            AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
-           AND ${membershipPermissionSql}
+           AND ${membershipPermissionSql("$4")}
          FOR UPDATE OF d`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
       const current = currentResult.rows[0];
       if (!current) return { kind: "not-found" };
@@ -710,7 +712,7 @@ export class ArdenRepository implements ArdenDataRepository {
         FROM organization_membership om
         JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
        WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
-         AND ${membershipPermissionSql}`, [userId, organizationId, permissionCode]);
+         AND ${membershipPermissionSql("$3")}`, [userId, organizationId, permissionCode]);
     return result.rows[0]?.membership_id ?? null;
   }
 

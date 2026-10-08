@@ -13,6 +13,7 @@ type AppSidebarProps = {
   memberName?: string;
   memberRole?: string;
   memberDepartment?: string;
+  environmentLabel?: string;
   onNavigate: (view: WorkspaceView) => void;
   onSignOut: () => void;
 };
@@ -43,6 +44,7 @@ export function AppSidebar({
   memberName = "Lan Nguyen",
   memberRole = "Employee",
   memberDepartment = "Product Engineering",
+  environmentLabel,
   onNavigate,
   onSignOut,
 }: AppSidebarProps) {
@@ -51,7 +53,7 @@ export function AppSidebar({
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark" aria-hidden="true"><Icon name="knowledge" size={24} /></span>
         <span>ARDEN</span>
-        {!authenticated && <small>PREVIEW</small>}
+        <small>{environmentLabel ?? (!authenticated ? "PREVIEW" : null)}</small>
       </div>
 
       <section className="access-card" aria-labelledby="access-card-title">

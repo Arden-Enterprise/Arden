@@ -19,6 +19,8 @@ type AppDependencies = {
   storage: PrivateContentStorage;
   invitationMailer?: InvitationMailer | null;
   publicWebOrigin?: string | null;
+  invitationDeliveryMode?: "email" | "local-test-no-email";
+  testActor?: SessionContext;
 };
 
 type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean };
@@ -34,12 +36,28 @@ export function buildApp(dependencies: AppDependencies) {
     bodyLimit: 128 * 1024,
     ajv: { customOptions: { removeAdditional: false } },
   });
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_req, body, done) => {
+    if (typeof body === "string" && body.trim().length === 0) {
+      done(null, {});
+      return;
+    }
+    try {
+      done(null, JSON.parse(body as string));
+    } catch (error) {
+      done(error as Error, undefined);
+    }
+  });
+  const requestActor = (request: FastifyRequest, reply: FastifyReply) =>
+    requestContext(request, reply, dependencies.auth, dependencies.secureCookies, dependencies.testActor);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
       return reply.code(400).send(safeError("INVALID_REQUEST", "The request is invalid.", request.id));
     }
     if (error.statusCode === 413) {
       return reply.code(413).send(safeError("REQUEST_TOO_LARGE", "The request is too large.", request.id));
+    }
+    if (error.statusCode && error.statusCode >= 400 && error.statusCode < 500) {
+      return reply.code(error.statusCode).send(safeError("INVALID_REQUEST", "The request is invalid.", request.id));
     }
     request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Request failed");
     return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
@@ -84,7 +102,7 @@ export function buildApp(dependencies: AppDependencies) {
       if (error instanceof Error && error.message === "INVALID_CREDENTIALS") {
         return reply.code(401).send(safeError("INVALID_CREDENTIALS", "Email or password is incorrect.", request.id));
       }
-      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Supabase sign-in failed");
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Authentication provider sign-in failed");
       return authUnavailable(reply, request);
     }
   });
@@ -122,6 +140,7 @@ export function buildApp(dependencies: AppDependencies) {
   });
 
   app.post("/api/v1/auth/sign-out", async (request, reply) => {
+    if (dependencies.testActor) return reply.code(204).send();
     if (!dependencies.auth) return authUnavailable(reply, request);
     const tokens = readAuthCookies(request.headers.cookie, dependencies.secureCookies);
     try {
@@ -136,12 +155,13 @@ export function buildApp(dependencies: AppDependencies) {
   });
 
   app.get("/api/v1/me", async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     try {
       const memberships = await dependencies.repository.listMemberships(context.userId);
       return {
-        actor: { id: context.userId },
+        actor: { id: context.userId, email: context.email },
+        ...(dependencies.testActor ? { testMode: true } : {}),
         memberships: memberships.map((membership) => ({
           organization: { id: membership.organizationId, name: membership.organizationName },
           status: membership.status.toLowerCase(),
@@ -166,7 +186,7 @@ export function buildApp(dependencies: AppDependencies) {
       },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     const name = request.body.name.trim();
     const departmentName = request.body.departmentName.trim();
@@ -191,7 +211,7 @@ export function buildApp(dependencies: AppDependencies) {
   app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/administration", {
     schema: { params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } } },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     try {
       const administration = await dependencies.repository.getOrganizationAdministration(context.userId, request.params.organizationId);
@@ -209,7 +229,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: { type: "object", additionalProperties: false, required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 80 } } },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     const name = request.body.name.trim();
     if (!isValidLabel(name, 80)) return reply.code(400).send(safeError("INVALID_REQUEST", "Enter a valid department name.", request.id));
@@ -229,7 +249,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: { type: "object", additionalProperties: false, required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 80 } } },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     const name = request.body.name.trim();
     if (!isValidLabel(name, 80)) return reply.code(400).send(safeError("INVALID_REQUEST", "Enter a valid role name.", request.id));
@@ -252,7 +272,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: { type: "object", additionalProperties: false, required: ["roleId"], properties: { roleId: { type: "string", pattern: uuidPattern } } },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     try {
       const assigned = await dependencies.repository.assignOrganizationRole(context.userId, request.params.organizationId, request.params.membershipId, request.body.roleId, request.id);
@@ -273,7 +293,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: { type: "object", additionalProperties: false, required: ["departmentId"], properties: { departmentId: { type: "string", pattern: uuidPattern } } },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     try {
       const changed = await dependencies.repository.changePrimaryDepartment(context.userId, request.params.organizationId, request.params.membershipId, request.body.departmentId, request.id);
@@ -297,7 +317,7 @@ export function buildApp(dependencies: AppDependencies) {
       },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     if (!context.emailVerified) return reply.code(403).send(safeError("VERIFIED_EMAIL_REQUIRED", "Verify your account email before inviting a member.", request.id));
     if (!dependencies.invitationMailer || !dependencies.publicWebOrigin) {
@@ -321,7 +341,12 @@ export function buildApp(dependencies: AppDependencies) {
         request.log.error({ errorType: safeErrorType(error), invitationId: invitation.invitationId, requestId: request.id }, "Invitation email delivery failed");
         return reply.code(502).send({ ...safeError("INVITATION_DELIVERY_FAILED", "The invitation was saved but its email was not delivered. Retry sending it from organization administration.", request.id), invitationId: invitation.invitationId });
       }
-      return reply.code(202).send({ invitationId: invitation.invitationId, status: "pending", expiresAt: invitation.expiresAt.toISOString() });
+      return reply.code(202).send({
+        invitationId: invitation.invitationId,
+        status: "pending",
+        deliveryMode: dependencies.invitationDeliveryMode ?? "email",
+        expiresAt: invitation.expiresAt.toISOString(),
+      });
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation creation failed");
       return reply.code(isUniqueViolation(error) ? 409 : 500).send(safeError(isUniqueViolation(error) ? "INVITATION_CONFLICT" : "INTERNAL_ERROR", isUniqueViolation(error) ? "A pending invitation already exists for this email." : "The request could not be completed.", request.id));
@@ -336,7 +361,7 @@ export function buildApp(dependencies: AppDependencies) {
       },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     if (!context.emailVerified) return reply.code(403).send(safeError("VERIFIED_EMAIL_REQUIRED", "Verify your account email before resending an invitation.", request.id));
     if (!dependencies.invitationMailer || !dependencies.publicWebOrigin) return reply.code(503).send(safeError("INVITATIONS_UNAVAILABLE", "Invitation email is not configured.", request.id));
@@ -356,7 +381,12 @@ export function buildApp(dependencies: AppDependencies) {
         to: invitation.email, organizationName: invitation.organizationName,
         invitationUrl: `${dependencies.publicWebOrigin}/invite/${token}`, expiresAt: invitation.expiresAt,
       });
-      return reply.code(202).send({ invitationId: invitation.invitationId, status: "pending", expiresAt: invitation.expiresAt.toISOString() });
+      return reply.code(202).send({
+        invitationId: invitation.invitationId,
+        status: "pending",
+        deliveryMode: dependencies.invitationDeliveryMode ?? "email",
+        expiresAt: invitation.expiresAt.toISOString(),
+      });
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), invitationId: request.params.invitationId, requestId: request.id }, "Invitation resend failed");
       return reply.code(502).send(safeError("INVITATION_DELIVERY_FAILED", "The invitation could not be delivered. Retry sending it from organization administration.", request.id));
@@ -371,7 +401,7 @@ export function buildApp(dependencies: AppDependencies) {
       },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     try {
       const revoked = await dependencies.repository.revokeInvitation(
@@ -390,7 +420,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: { type: "object", additionalProperties: false, required: ["token"], properties: { token: { type: "string", minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]+$" } } },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     try {
       const accepted = await dependencies.repository.acceptInvitation(
@@ -411,7 +441,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: draftBodySchema,
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     const organizationId = request.params.organizationId;
     const write = normalizeWrite(request.body);
@@ -449,7 +479,7 @@ export function buildApp(dependencies: AppDependencies) {
       },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     const limit = request.query.limit ? Number(request.query.limit) : defaultListLimit;
     const cursor = request.query.cursor ? decodeCursor(request.query.cursor) : null;
@@ -475,7 +505,7 @@ export function buildApp(dependencies: AppDependencies) {
       },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     try {
       const draft = await dependencies.repository.getDraft(context.userId, request.params.organizationId, request.params.draftId);
@@ -505,7 +535,7 @@ export function buildApp(dependencies: AppDependencies) {
       headers: { type: "object", properties: { "if-match": { type: "string", maxLength: 64 } } },
     },
   }, async (request, reply) => {
-    const context = await requestContext(request, reply, dependencies.auth, dependencies.secureCookies);
+    const context = await requestActor(request, reply);
     if (!context) return;
     const expectedVersion = parseEtag(request.headers["if-match"]);
     if (expectedVersion === "missing") return reply.code(428).send(safeError("PRECONDITION_REQUIRED", "Reload the note before saving.", request.id));
@@ -540,7 +570,8 @@ export function buildApp(dependencies: AppDependencies) {
   return app;
 }
 
-async function requestContext(request: FastifyRequest, reply: FastifyReply, auth: AuthProvider | null, secureCookies: boolean): Promise<SessionContext | null> {
+async function requestContext(request: FastifyRequest, reply: FastifyReply, auth: AuthProvider | null, secureCookies: boolean, testActor?: SessionContext): Promise<SessionContext | null> {
+  if (testActor) return testActor;
   if (!auth) {
     authUnavailable(reply, request);
     return null;
@@ -569,7 +600,7 @@ async function requestContext(request: FastifyRequest, reply: FastifyReply, auth
     reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
     return null;
   } catch (error) {
-    request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Supabase session validation failed");
+    request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Session validation failed");
     authUnavailable(reply, request);
     return null;
   }

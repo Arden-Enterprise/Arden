@@ -7,7 +7,7 @@ export type OrganizationMembership = {
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
 };
-export type CurrentSession = { actor: { id: string }; memberships: OrganizationMembership[] };
+export type CurrentSession = { actor: { id: string; email?: string }; memberships: OrganizationMembership[]; testMode?: boolean };
 export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
@@ -89,12 +89,12 @@ export async function changePrimaryDepartment(platform: Platform, organizationId
   await request(platform, `/api/v1/organizations/${organizationId}/members/${membershipId}/department`, { method: "POST", body: JSON.stringify({ departmentId }) });
 }
 
-export async function inviteOrganizationMember(platform: Platform, organizationId: string, departmentId: string, email: string): Promise<void> {
-  await request(platform, `/api/v1/organizations/${organizationId}/invitations`, { method: "POST", body: JSON.stringify({ departmentId, email }) });
+export async function inviteOrganizationMember(platform: Platform, organizationId: string, departmentId: string, email: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
+  return request(platform, `/api/v1/organizations/${organizationId}/invitations`, { method: "POST", body: JSON.stringify({ departmentId, email }) });
 }
 
-export async function resendOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<void> {
-  await request(platform, `/api/v1/organizations/${organizationId}/invitations/${invitationId}/resend`, { method: "POST" });
+export async function resendOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
+  return request(platform, `/api/v1/organizations/${organizationId}/invitations/${invitationId}/resend`, { method: "POST" });
 }
 
 export async function revokeOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<void> {
@@ -128,10 +128,14 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
         ifMatch: headers.get("if-match") ?? undefined,
       });
     } else {
+      const requestHeaders: Record<string, string> = { ...Object.fromEntries(headers.entries()) };
+      if (init.body !== undefined) {
+        requestHeaders["Content-Type"] = "application/json";
+      }
       const webResponse = await fetch(`${window.location.origin}${path}`, {
         ...init,
         credentials: "include",
-        headers: { "Content-Type": "application/json", ...Object.fromEntries(headers.entries()) },
+        headers: requestHeaders,
       });
       response = {
         status: webResponse.status,
