@@ -35,9 +35,9 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     return () => { active = false; };
   }, [platform, organizationId]);
 
-  const perform = async (action: () => Promise<void>, successMessage: string) => {
+  const perform = async (action: () => Promise<string | void>, successMessage: string) => {
     setBusy(true); setError(""); setMessage("");
-    try { await action(); await reload(); setMessage(successMessage); }
+    try { const actionMessage = await action(); await reload(); setMessage(actionMessage ?? successMessage); }
     catch (cause) {
       setError(cause instanceof ApiError ? cause.message : "The change could not be saved. Refresh and try again.");
       try { await reload(); } catch { /* Keep the action error visible; the Refresh button remains available. */ }
@@ -55,7 +55,13 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const submitInvite = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void perform(async () => { await inviteOrganizationMember(platform, organizationId, inviteDepartmentId, inviteEmail.trim()); setInviteEmail(""); }, "Invitation email sent.");
+    void perform(async () => {
+      const result = await inviteOrganizationMember(platform, organizationId, inviteDepartmentId, inviteEmail.trim());
+      setInviteEmail("");
+      return result.deliveryMode === "local-test-no-email"
+        ? "Invitation saved in the local test database. No email was sent."
+        : "Invitation email sent.";
+    }, "Invitation email sent.");
   };
 
   return <main id="arden-main" className="workspace-page organization-live-admin" aria-labelledby="organization-live-admin-title" tabIndex={-1}>
@@ -94,7 +100,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           </article>)}</div>
         </section>
         <section className="organization-surface organization-editor-stack"><h2>Invitations</h2>
-          {data.invitations.length === 0 ? <p>No invitations yet.</p> : <ul className="organization-live-invitations">{data.invitations.map((invitation) => <li key={invitation.id}><div><strong>{invitation.email}</strong><span>{invitation.status.toLowerCase()} · expires {new Date(invitation.expiresAt).toLocaleDateString()}</span></div>{invitation.status === "PENDING" && <div className="organization-row-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(() => resendOrganizationInvitation(platform, organizationId, invitation.id), "Invitation resent.")}>Resend</button><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(() => revokeOrganizationInvitation(platform, organizationId, invitation.id), "Invitation revoked.")}>Revoke</button></div>}</li>)}</ul>}
+          {data.invitations.length === 0 ? <p>No invitations yet.</p> : <ul className="organization-live-invitations">{data.invitations.map((invitation) => <li key={invitation.id}><div><strong>{invitation.email}</strong><span>{invitation.status.toLowerCase()} · expires {new Date(invitation.expiresAt).toLocaleDateString()}</span></div>{invitation.status === "PENDING" && <div className="organization-row-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(async () => {
+            const result = await resendOrganizationInvitation(platform, organizationId, invitation.id);
+            return result.deliveryMode === "local-test-no-email" ? "Invitation updated locally. No email was sent." : "Invitation resent.";
+          }, "Invitation resent.")}>Resend</button><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(() => revokeOrganizationInvitation(platform, organizationId, invitation.id), "Invitation revoked.")}>Revoke</button></div>}</li>)}</ul>}
         </section>
       </>}
     </div>

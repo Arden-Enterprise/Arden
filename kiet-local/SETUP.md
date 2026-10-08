@@ -10,6 +10,8 @@ Your named Coolify slot is **kiet-local** (internal ID `dev-2`). Its API and log
 
 Your slot currently uses the Fastify/PostgreSQL scaffold. Zack alone has the full Supabase pilot. Auth/Storage/Realtime/Studio have not been deployed separately for your slot. This packet does not grant access to Zack's Supabase administrator account or staging/production. Product screens/functions are still being implemented.
 
+For manual frontend testing without login, no project-wide test-mode variable is needed. The API automatically selects the fixed mock account only for the dedicated `dev-2` target (`NODE_ENV=development`, PostgreSQL host `postgres`, database `arden_dev_2`, no Supabase URL/key). The API remains loopback-only and is reached through the SSH tunnel. Run `pnpm.cmd dev:remote` from your checkout and open `http://127.0.0.1:5180/`; the fixed test actor can create core Flow 1 records without login. Invitations are stored in the development database. They send actual email only after all six SMTP settings (`SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`) are configured in Coolify. The emailed test link points to your local frontend and cannot be opened from another device.
+
 ## 1. Install/check the tools on your own computer
 
 Use the official [Git installer](https://git-scm.com/install/) and [Node download](https://nodejs.org/en/download), selecting **Node 24 LTS** for the repository's pinned toolchain. Windows normally supplies OpenSSH; if `ssh -V` is missing, ask your computer administrator to enable the Windows OpenSSH Client optional feature. Close and reopen your terminal after installation.

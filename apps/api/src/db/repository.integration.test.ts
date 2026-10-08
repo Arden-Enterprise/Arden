@@ -89,6 +89,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
   it("scopes owner writes, manager reads, conflicts, and audit records through RLS", async () => {
     if (!repository || !pool) throw new Error("Test database is unavailable");
+    await expect(repository.listMemberships(ids.owner)).resolves.toHaveLength(1);
     const created = await repository.createDraft(ids.owner, ids.organization, { title: "Private", body: "Sensitive text" }, {
       sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain", contentHash: "a".repeat(64),
     }, "integration-create");

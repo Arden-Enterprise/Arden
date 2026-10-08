@@ -3,9 +3,10 @@ import { entryAssets } from "./entryAssets";
 import type { OrganizationMembership } from "../shared/api-client";
 import { useState } from "react";
 
-export function WorkspaceSelectPage({ organizationName, memberships, onContinue, onBack, onCreateOrganization }: {
+export function WorkspaceSelectPage({ organizationName, memberships, onContinue, onBack, onCreateOrganization, testMode = false }: {
   organizationName: string;
   memberships?: OrganizationMembership[];
+  testMode?: boolean;
   onContinue: (organizationId?: string) => void;
   onBack: () => void;
   onCreateOrganization?: (name: string, departmentName: string) => Promise<void>;
@@ -23,6 +24,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
         <div className="sign-in-card workspace-select-card">
           <span className="meta-label">01 / YOUR ORGANIZATION</span>
           <h2 id="workspace-select-title">Choose your workspace</h2>
+          {testMode && <p className="preview-disclaimer" role="status">Kiet Local test session · no login · changes are saved to the development database; invitation emails are not sent.</p>}
           <p>Your selection establishes organization context. It does not grant access by itself.</p>
           {isLive ? <div className="workspace-memberships">
             {choices.map((membership) => <button type="button" key={membership.organization.id} className="workspace-membership" onClick={() => onContinue(membership.organization.id)}>

@@ -7,6 +7,7 @@ import type { AuthProvider } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftListItem, DraftPatch, DraftWrite, MembershipSummary, OrganizationAdminData, PrivateDraft, StoredContentFields } from "./db/repository.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationEmail, InvitationMailer } from "./email/smtp-mailer.js";
+import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
 
 const ownerId = "11111111-1111-4111-8111-111111111111";
 const otherId = "22222222-2222-4222-8222-222222222222";
@@ -79,12 +80,42 @@ describe("API auth and private draft routes", () => {
     const response = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      actor: { id: ownerId },
+      actor: { id: ownerId, email: "owner@example.test" },
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
         status: "active", roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
       }],
     });
+  });
+
+  it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
+    const noLoginApp = buildApp({
+      checkDatabase: async () => undefined,
+      auth: null,
+      authTrustedOrigins: ["http://127.0.0.1:5180"],
+      secureCookies: false,
+      repository,
+      storage,
+      invitationMailer: new LocalFlow1TestInvitationMailer(),
+      invitationDeliveryMode: "local-test-no-email",
+      publicWebOrigin: "http://127.0.0.1:5180",
+      testActor: { userId: ownerId, email: "kiet-local@example.test", fullName: "Kiet Local Test Actor", emailVerified: true },
+    });
+    try {
+      const session = await noLoginApp.inject("/api/v1/me");
+      expect(session.statusCode).toBe(200);
+      expect(session.json()).toMatchObject({ actor: { id: ownerId }, testMode: true, memberships: [{ organization: { id: organizationId } }] });
+
+      const created = await noLoginApp.inject({
+        method: "POST", url: "/api/v1/organizations", headers: { origin: "http://127.0.0.1:5180" },
+        payload: { name: "Kiet Test Org", departmentName: "Engineering" },
+      });
+      expect(created.statusCode).toBe(201);
+      expect(repository.createdOrganization).toMatchObject({ userId: ownerId, email: "kiet-local@example.test" });
+      expect((await noLoginApp.inject({ method: "POST", url: "/api/v1/auth/sign-out", headers: { origin: "http://127.0.0.1:5180" } })).statusCode).toBe(204);
+    } finally {
+      await noLoginApp.close();
+    }
   });
 
   it("creates an organization with the verified caller as its first admin and primary-department member", async () => {
@@ -183,6 +214,33 @@ describe("API auth and private draft routes", () => {
     expect(invitationMailer.sent).toHaveLength(0);
   });
 
+  it("labels local-test invitations as saved without sending email", async () => {
+    const localTestApp = buildApp({
+      checkDatabase: async () => undefined,
+      auth: authProvider,
+      authTrustedOrigins: ["http://localhost:5180"],
+      secureCookies: false,
+      repository,
+      storage,
+      invitationMailer: new LocalFlow1TestInvitationMailer(),
+      invitationDeliveryMode: "local-test-no-email",
+      publicWebOrigin: "http://127.0.0.1:5180",
+    });
+    try {
+      const session = await desktopSession(localTestApp, "owner@example.test");
+      const response = await localTestApp.inject({
+        method: "POST", url: `/api/v1/organizations/${organizationId}/invitations`,
+        headers: { cookie: session, origin: "http://localhost:5180" },
+        payload: { departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", email: "local.member@example.test" },
+      });
+      expect(response.statusCode).toBe(202);
+      expect(response.json().deliveryMode).toBe("local-test-no-email");
+      expect(repository.pendingInvitation?.email).toBe("local.member@example.test");
+    } finally {
+      await localTestApp.close();
+    }
+  });
+
   it("revokes a pending invitation and blocks later acceptance", async () => {
     const adminSession = await desktopSession(app, "owner@example.test");
     const created = await app.inject({
@@ -240,6 +298,12 @@ describe("API auth and private draft routes", () => {
     expect(response.statusCode).toBe(204);
     expect(authProvider.revokedSessions).toEqual(["access-owner"]);
     expect(JSON.stringify(response.headers["set-cookie"])).toContain("arden_access=");
+
+    const withEmptyJson = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-out",
+      headers: { origin: "http://localhost:5180", "content-type": "application/json", cookie: "arden_access=access-owner; arden_refresh=refresh-owner" },
+    });
+    expect(withEmptyJson.statusCode).toBe(204);
   });
 
   it("creates and reads only the authorized owner's note after canonical persistence", async () => {

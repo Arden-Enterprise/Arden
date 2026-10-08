@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Pool } from "pg";
+import { assertLocalFlow1TestTarget } from "../auth/local-flow1-test.js";
 
 const databaseUrl = process.env.ARDEN_MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL ??
   (process.env.NODE_ENV === "production"
@@ -8,7 +9,11 @@ const databaseUrl = process.env.ARDEN_MIGRATION_DATABASE_URL ?? process.env.DATA
     : "postgresql://arden:arden_dev_only@127.0.0.1:5433/arden");
 
 if (!databaseUrl) throw new Error("ARDEN_MIGRATION_DATABASE_URL or DATABASE_URL is required");
-
+if (process.env.ARDEN_LOCAL_FLOW1_TEST_MODE === "true") {
+  assertLocalFlow1TestTarget(databaseUrl, process.env.ARDEN_API_HOST ?? "127.0.0.1", process.env.NODE_ENV, Boolean(
+    process.env.SUPABASE_URL || process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY,
+  ));
+}
 const migrationDirectory = resolve(process.cwd(), "migrations");
 const migrationIds = (await readdir(migrationDirectory))
   .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file))

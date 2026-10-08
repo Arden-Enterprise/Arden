@@ -12,6 +12,8 @@
     "dev": "concurrently -k -n api,web \"pnpm dev:api\" \"pnpm dev:web\"",
     "dev:api": "pnpm --filter @arden/api dev",
     "dev:web": "pnpm --filter @arden/web dev",
+    "remote:status": "node scripts/remote-development.mjs status",
+    "dev:remote": "node scripts/remote-development.mjs dev",
     "dev:desktop": "pnpm --filter @arden/desktop dev",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
