@@ -35,10 +35,12 @@ The organization, session-context, and owner-private note contract for the first
 - Personal originals remain private. Sharing/contributing is explicit, with a preview of copied text/files, audience, and authority. A separate copy is not an implicit live mirror.
 - Prevent private back-links through provenance, attachments, mentions, derived summaries, citations, graph edges, or review history. Shared readers receive only provenance they are permitted to inspect.
 - Distinguish personal notes, shared drafts, official publications, external source objects, and work briefs in data and UI. External sync does not confer official approval.
+- Check a reviewer's current authority for the responsible department, any team/project attribute filters, intended audience, and submitted version at decision time; deny self-approval. Department is the highest reviewer-authority scope; team/project attributes do not create hierarchy or inherited approval permission. One eligible reviewer may approve unless the organization's recorded policy requires additional review steps. Assignment to a request does not itself confer broader access to personal originals or other content.
+- Enforce the accepted `INTERNAL`, `CONFIDENTIAL` and `RESTRICTED` knowledge classifications separately from audience. Confidential review needs the applicable reviewer grant; Restricted review needs a specialist or senior grant. An extra review step exists only where recorded organization policy requires it. If the effective access model cannot restrict a Restricted document to its intended readers, deny final approval and publication. Changing classification or widening audience after submission requires a new snapshot and review.
 - Bind review/approval to an immutable content version/hash **and** intended scope. Store reviewer, decision, timestamp, and relevant policy version. Editing approved content requires another review cycle.
-- Publication is a separate authorized transition pointing at the approved snapshot. A mutable draft cannot accidentally become the visible publication through a generic update endpoint.
+- Final approval automatically triggers server publication pointing at the same approved snapshot. There is no manual publisher action in Mainflow 2. Record review and publication as distinct audit events, and commit the decision, published version and current pointer consistently so a partial failure exposes no unapproved content. A mutable draft cannot become visible through a generic update endpoint.
 - Enforce transitions transactionally and reject stale version/conflicting approvals. Archival, unpublishing, and revocation must have explicit visibility semantics and audit evidence.
-- Whether reviewer and publisher may be the same person, and who may recover private content, remains a decision; do not create an undocumented bypass while implementing convenience tools.
+- Who may recover private content remains a separate decision; do not create an undocumented bypass while implementing convenience tools.
 
 ## 4. Derived data, search, graph, and revocation
 
@@ -73,7 +75,7 @@ The organization, session-context, and owner-private note contract for the first
 - AI may draft a proposed action. Server policy authorizes the exact operation/destination and checks the current actor. The user previews content/audience/destination and explicitly confirms before data leaves.
 - Bind confirmation to action content/version/destination/actor, with expiry and concurrency protection. A later edit or permission change invalidates it.
 - Persist an idempotency/action record before performing a supported write, then reconcile uncertain outcomes. A timeout is not proof of failure; do not retry a Jira create blindly.
-- No autonomous publishing, permission administration, GitHub writing, or arbitrary MCP/tool connector system is assumed in pilot scope.
+- No AI-initiated publishing, permission administration, GitHub writing, or arbitrary MCP/tool connector system is assumed in pilot scope. System publication following final human approval is part of Mainflow 2.
 
 ## 7. AI and private inference
 

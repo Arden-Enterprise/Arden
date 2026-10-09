@@ -8,7 +8,7 @@ web
 
 ## Users
 
-People in an organization who need to capture, find, connect, and verify knowledge while doing their work. Reviewers and publishers govern what becomes official shared guidance; administrators manage the customer installation and access.
+People in an organization who need to capture, find, connect, and verify knowledge while doing their work. Reviewers govern what becomes official shared guidance; the system publishes the approved snapshot automatically. Administrators manage the customer installation and access.
 
 ## Product Purpose
 
@@ -16,7 +16,7 @@ Arden is a private organizational memory and work-context system. It brings note
 
 ## Positioning
 
-Self-hosted first: a customer controls Arden Core, its data, backups, connectors, and model endpoint. Personal knowledge stays private by default. Shared official guidance passes through human review and explicit publication. External source-owned information remains labeled as such.
+Self-hosted first: a customer controls Arden Core, its data, backups, connectors, and model endpoint. Personal knowledge stays private by default. Shared official guidance passes through human review, then the system publishes the approved snapshot automatically. External source-owned information remains labeled as such.
 
 ## Operating Context
 
@@ -28,6 +28,8 @@ Self-hosted first: a customer controls Arden Core, its data, backups, connectors
 
 - Personal notes, governed Arden knowledge, and external work context have different ownership, visibility, and authority.
 - Org Admins create organization-scoped custom roles and assign them to members. A matching role audience grants access to published content; one matching role is sufficient for viewing, authorized search, and submitting a separate contribution copy. This rule is accepted but not yet implemented.
+- The organization's review policy may permit one authorized Knowledge Reviewer to approve a submitted version; extra review steps apply only where the policy requires them. Final approval automatically triggers system publication of the exact approved snapshot. See [the proposed governance review policy](ARDEN_BLUEPRINT.md#proposed-governance-review-policy).
+- Knowledge classification has three accepted levels: `INTERNAL`, `CONFIDENTIAL` and `RESTRICTED`. Classification is distinct from the publication audience. Restricted knowledge requires a suitably authorized specialist or senior reviewer and must not be published to an audience the access controls cannot safely enforce. See [the classification decision](docs/decisions/0002-three-level-knowledge-classification.md).
 - The server is authoritative for shared knowledge, permissions, review, indexing, and AI. The first desktop release is not fully offline-first.
 - Graph results, search, citations, and AI context must be permission-filtered. AI may propose work, but may not silently publish or send data to external systems.
 - The current repository combines the shared web/Electron preview with a first backend slice: Supabase Auth email/password sessions through a Fastify BFF, server-side membership/role checks, owner-private note create/list/read/update, PostgreSQL RLS setup, and persistent file-backed note storage. The authenticated UI connects only the private-note view; organization setup, invitations, role administration, knowledge editing/review/publication, and handover remain sample previews. Ask Arden displays a prerecorded sample answer. Email delivery, role-audience enforcement, broader governance, connectors, live graph and AI inference are not implemented. Demonstration content must remain plainly labeled and isolated from real organization data.

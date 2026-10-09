@@ -17,17 +17,17 @@ One customer installation should be useful without Arden-operated infrastructure
 | Kind | Ownership and authority | How it enters Arden | Sharing rule |
 | --- | --- | --- | --- |
 | Personal knowledge | User-authored, private by default, not official | Notes, uploads, personal captures | User explicitly submits a **separate copy** for review. Private original stays private. |
-| Shared Arden knowledge | Team, department, or organization content with versioned governance | Draft or contribution from an authorized member | Reviewed snapshot is approved, then explicitly published. Visibility and official status are separate. |
+| Shared Arden knowledge | Department-owned content with optional team/project attributes and a department or organization audience | Draft or contribution from an authorized member | Final approval triggers system publication of the exact snapshot. Visibility and official status are separate. |
 | External work context | Jira, GitHub, and other source-owned objects | Scoped connector sync or on-demand fetch | Inherits the connector's permitted audience and remains labeled external/unapproved. Promotion to Arden knowledge requires review. |
 
 The home screen is a **permission-filtered graph**, not a decorative graph tab. A left rail opens Graph, My Work, Intake/Sources, Reviews, and Administration. Selecting a node opens a right-side Knowledge Pane with content, provenance, freshness, links, and actions. A full editor handles sustained writing. The floating Arden Agent can use an explicit context basket containing selected nodes, passages, or tasks; users can inspect what will be sent to the model.
 
-Graph nodes include notes, published pages, external issues and pull requests, people/teams where policy permits, work briefs, and source files. Edges include `links_to`, `references`, `supports`, `supersedes`, `belongs_to_task`, and `derived_from`. The server must authorize **both endpoints and the edge itself** before returning graph data. There must be no hidden-node counts, labels, search suggestions, or graph layouts that reveal inaccessible information. Start with focused neighborhoods, filters, search, and an onboarding sample, not an unreadable whole-company hairball.
+Graph nodes include notes, published pages, external issues and pull requests, people/departments where policy permits, work briefs, and source files. Edges include `links_to`, `references`, `supports`, `supersedes`, `belongs_to_task`, and `derived_from`. The server must authorize **both endpoints and the edge itself** before returning graph data. There must be no hidden-node counts, labels, search suggestions, or graph layouts that reveal inaccessible information. Start with focused neighborhoods, filters, search, and an onboarding sample, not an unreadable whole-company hairball.
 
 ### Core journeys
 
 1. **Capture → understand:** write a private note or upload a file; Arden extracts text, records source/version, indexes it, suggests links, and answers questions with citations.
-2. **Contribute → govern:** copy selected private content into a shared draft; clean and preview it; submit an immutable snapshot; reviewer requests changes or approves; publisher promotes the approved snapshot; later revisions repeat this path.
+2. **Contribute → govern:** copy selected private content into a shared draft; clean and preview it; submit an immutable snapshot; reviewer requests changes, rejects, or approves; final approval automatically publishes the approved snapshot; later revisions repeat this path.
 3. **Work → context:** connect a Jira project and selected GitHub repositories; a task's Knowledge Pane shows relevant code changes, decisions, runbooks, and notes. A work brief records current context and sources without pretending to be official policy.
 4. **Ask → verify:** AI retrieves only authorized and current material, distinguishes official/shared/external/personal sources, cites exact versions, and states uncertainty or conflict.
 5. **Draft → act externally:** if authorized, Arden may prepare a Jira issue with a precise preview of text and destination. The user confirms. Arden records idempotency and reconciles uncertain outcomes before any retry.
@@ -83,7 +83,7 @@ The API is the only routine writer to Arden content; browser and desktop never c
 
 The trust boundary is the **customer installation**. Arden's company does not need access to its data. The customer controls host, backups, model endpoint, connectors, outbound network policy, and updates. Optional Jira/GitHub integrations still exchange data with those external providers, and confirmed outbound actions send the previewed content to the selected provider. However, this is not end-to-end encryption against the customer's own server/root/DB administrators: server-side search, review, and AI need plaintext processing. Do not market it as such.
 
-Within an installation, model organization → departments → teams → users. Users can belong to multiple teams; each has a personal workspace **per organization**. A standalone personal-only account is an open product decision, not an assumed feature. Operational roles (instance admin, org admin, team manager, reviewer, publisher, member) and content permissions are distinct. Being a manager does **not** automatically grant read access to private notes. Only the owner, a deliberate share, or a narrowly defined administrative recovery mechanism can make private content available at the application layer. Customer infrastructure administrators are outside that guarantee.
+Within an installation, the required hierarchy is organization → departments, with users assigned to departments. Team and project are optional document attributes, not mandatory entities or permission-inheritance levels. Each user has a personal workspace **per organization**. A standalone personal-only account is an open product decision, not an assumed feature. Operational roles (instance admin, org admin, department manager, reviewer, member) and content permissions are distinct. Being a manager does **not** automatically grant read access to private notes. Only the owner, a deliberate share, or a narrowly defined administrative recovery mechanism can make private content available at the application layer. Customer infrastructure administrators are outside that guarantee.
 
 Org Admins manage organization members, departments, and organization-scoped custom roles. For published Arden content, a member may view an item when their active organization membership has **at least one** role included in that item's audience. That same audience grant permits authorized search and submitting a separate contribution copy; it does not permit editing or publishing the source item. Org Admin status by itself is not a content audience grant. Private originals remain owner-only and are excluded from organization-wide role audiences and retrieval. This policy is accepted; role administration, published-audience enforcement, and search/contribution behavior are not yet implemented. See [decision 0004](docs/decisions/0004-role-tagged-published-audiences.md).
 
@@ -101,7 +101,7 @@ Core tables/entities:
 
 | Group | Records |
 | --- | --- |
-| Identity and scope | `user`, `session`, `organization`, `department`, `team`, memberships, invitations, content grants |
+| Identity and scope | `user`, `session`, `organization`, `department`, memberships, invitations, content grants; optional team/project document attributes |
 | Knowledge | `knowledge_item`, `knowledge_version`, `draft`, `attachment`, `publication`, `review_request`, `review_decision` |
 | External intake | `source_connection`, `source_scope`, `source_object`, `source_revision`, `sync_cursor`, `intake_event` |
 | Discovery | `content_chunk`, `embedding`, `graph_edge`, `search_document`, `source_citation` |
@@ -114,13 +114,22 @@ private original ──explicit copy──▶ shared draft
 shared draft ──submit snapshot──▶ in review
 in review ──changes requested──▶ new draft
 in review ──reject───────────────▶ closed
-in review ──approve──────────────▶ approved snapshot
-approved snapshot ──publish──────▶ current publication
+in review ──final approve────────▶ system publishes approved snapshot ──▶ current publication
 current publication ──revise─────▶ new shared draft
 current publication ──archive/revoke──▶ hidden/tombstone
 ```
 
-Approval is bound to a content hash/version and scope. Any edit after approval invalidates that approval. Publishing requires separate authorization, even if the same person may hold both reviewer and publisher roles under the customer's policy. External source objects are not silently rewritten into official Arden knowledge. A contribution copy preserves provenance internally, but shared viewers must not gain a backdoor link to a private original.
+Approval is bound to a content hash/version and scope. Any edit after approval invalidates that approval. When the final required approval succeeds, the server automatically creates the publication for that exact snapshot; there is no publisher role or manual Publish action in Mainflow 2. The review decision and publication event remain distinct audit records. External source objects are not silently rewritten into official Arden knowledge. A contribution copy preserves provenance internally, but shared viewers must not gain a backdoor link to a private original.
+
+### Proposed governance review policy
+
+The organization defines a review policy before accepting submissions: who owns each knowledge area, which reviewer grants cover the responsible department and optional team/project attribute filters, the intended publication audience, how classification affects release, and when escalation or periodic re-review is needed. Department is the highest reviewer-authority scope; organization is the tenant boundary and may be the publication audience, but does not imply an organization-wide reviewer role. A reviewer responsible for department-wide documents does not automatically approve every narrower team/project category. Delegating a narrower grant is a separate permission. This is Arden's proposed operational interpretation of [ISO/IEC 38505-1:2026](https://www.iso.org/standard/87195.html) data-governance guidance, not a review sequence or reviewer count mandated by that standard.
+
+The accepted classification levels are `INTERNAL`, `CONFIDENTIAL` and `RESTRICTED` (see [decision 0002](docs/decisions/0002-three-level-knowledge-classification.md)). Classification measures content sensitivity, while intended audience and effective access grants determine who may read it. Internal and Confidential normally use one reviewer with the appropriate authority; Restricted requires an authorized specialist or senior reviewer. Additional review steps apply only under an explicit organization policy. No classification adds a human Publish action: final approval automatically publishes the exact snapshot. If the intended audience cannot be safely enforced, approval must be denied or returned for revision.
+
+Submission fixes the content, metadata, classification, owner, intended audience and version/hash for review. An eligible, assigned reviewer checks quality, evidence, currency, ownership and release scope; the submitter cannot approve their own version. Authority is checked again at decision time. The reviewer records approval, a reasoned rejection, or requested changes that lead to a new snapshot. One reviewer with all required authority may give final approval. Additional review steps apply only when the organization's policy explicitly requires them; all required decisions must cover the same snapshot and scope. Intermediate approvals do not publish.
+
+The server automatically promotes exactly the finally approved snapshot to the current publication and records the decision, policy version and publication event. Approval and publication must commit consistently; a failed publication must not expose a partial or unapproved version. Indexing may finish later, and search/AI must wait until the current publication is indexed and authorized. The owner or responsible reviewer monitors review dates, feedback and changes in validity or access. A revised version repeats review while the existing publication remains current, and loss of current access or validity blocks search and AI use.
 
 ## 6. Ingestion, search, and AI
 
@@ -167,7 +176,7 @@ Treat the existing approximately 14-week academic window as a **pilot demonstrat
 
 | Window | Build and acceptance gate |
 | --- | --- |
-| Weeks 1–2 | Repo, Compose, CI, domain model, auth, org/team membership, threat model. A fresh developer can start locally with seed data. |
+| Weeks 1–2 | Repo, Compose, CI, domain model, auth, organization/department membership, threat model. A fresh developer can start locally with seed data. |
 | Weeks 3–4 | Shared web/desktop shell, personal notes/files, versioned storage, graph home with manual links. Personal data does not leak to another member. |
 | Weeks 5–6 | Shared draft/review/approval/publication states, audit events, access tests, right-side Knowledge Pane. Editing an approved version invalidates approval. |
 | Weeks 7–8 | Extraction, full-text search, embeddings, local AI gateway, cited Q&A. AI refuses or marks missing evidence; revocation removes results. |
@@ -175,7 +184,7 @@ Treat the existing approximately 14-week academic window as a **pilot demonstrat
 | Weeks 11–12 | Link suggestions, useful graph filters/neighborhoods, intake failures, installer flow, staging environment and restore test. |
 | Weeks 13–14 | Security regression, Windows desktop packaging, workload/AI benchmark, user testing, documentation, demo rehearsal. One thin Jira-create flow only if all earlier gates are green. |
 
-Pilot scope deliberately excludes real-time co-editing, full offline sync, browser extension, arbitrary MCP connectors, automatic publication, GitHub writing, OCR, SAML/SCIM, fine-tuning, and multi-node HA. These are later phases, not implicit V1 promises.
+Pilot scope deliberately excludes real-time co-editing, full offline sync, browser extension, arbitrary MCP connectors, AI-initiated publication, GitHub writing, OCR, SAML/SCIM, fine-tuning, and multi-node HA. These are later phases, not implicit V1 promises.
 
 After the pilot, the first sellable self-hosted release needs security review, packaging/signing, install/upgrade/rollback tests, documented support matrix, rate limits and quotas, hardening of connector permission mapping, audited backup/restore, observability, license review for distributed models/dependencies, and a license/update mechanism that works without mandatory egress. Optional hosted Arden Cloud follows only after the single-customer product is operationally sound.
 
@@ -195,7 +204,7 @@ Decisions to make with the team/customer before implementation locks them in:
 
 1. Minimum AI hardware/capacity target and supported Windows versions for the pilot.
 2. Whether pilot connectors are personal-only or whether the customer can supply a reliable source-to-Arden group mapping for shared sync.
-3. Whether reviewer and publisher may be the same person, and who can perform administrative recovery of private data.
+3. Who can perform administrative recovery of private data.
 4. Required backup RPO/RTO, retention/deletion policy, and whether air-gapped installation is a contractual requirement from day one.
 5. Whether standalone personal spaces outside an organization are in scope.
 6. Which specific Jira/GitHub editions and authentication modes the pilot must support.
