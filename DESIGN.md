@@ -54,6 +54,8 @@ Use Sora for headings and DM Sans for body, controls and metadata, with Segoe UI
 
 Corners remain square with small softening: 4px for small controls, 6px for buttons/navigation and 8px for major containers. Avoid card nesting when spacing and a divider can express the same relationship. Shadows are unnecessary on ordinary dark workspace surfaces.
 
+Interaction depth is selective: featured/raised surfaces use a soft dark shadow and quiet top edge, while actionable rows, navigation and buttons respond with a small lift or lateral shift. Short entrance motion is limited to page sections, the context pane, feedback and dialogs; there is no continuous decorative animation. Hover motion applies only to fine pointers, keyboard focus remains visible without requiring motion, and reduced-motion preferences remove transforms and entrance effects.
+
 ## Shell and responsive behavior
 
 The desktop shell has a 216px sidebar and a flexible workspace. Context starts collapsed and occupies no rail; opening it adds a 320px Knowledge Pane. At 1280px and below, navigation is 208px and the expanded pane 280px. Crossing into 1180px or below collapses context; the user can reopen it. From 761–980px, navigation is a 72px icon rail with accessible names and tooltips.

@@ -1,5 +1,6 @@
 export type KnowledgeScope = "Department" | "Company-wide" | "Private";
 export type KnowledgeDocumentType = "Runbook" | "Decision" | "Checklist";
+export type KnowledgeClassification = "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED";
 
 export type KnowledgeSection = { heading: string; body: string };
 export type KnowledgeDraft = {
@@ -7,6 +8,7 @@ export type KnowledgeDraft = {
   introduction: string;
   sections: KnowledgeSection[];
   scope: KnowledgeScope;
+  classification: KnowledgeClassification;
   documentType: KnowledgeDocumentType;
   tags: string;
   recoveryReady: boolean;
@@ -34,8 +36,7 @@ export type KnowledgePreviewAction =
   | { type: "save" }
   | { type: "submit" }
   | { type: "request-revision" }
-  | { type: "approve"; version: number }
-  | { type: "publish"; version: number };
+  | { type: "approve"; version: number };
 
 export const sampleQuestion = "How should we respond to an API gateway outage?";
 
@@ -49,6 +50,7 @@ export function createSampleDraft(): KnowledgeDraft {
       { heading: "3. Escalate and communicate", body: "Notify Platform Reliability when impact persists beyond ten minutes. Add timeline and decision links." },
     ],
     scope: "Department",
+    classification: "INTERNAL",
     documentType: "Runbook",
     tags: "gateway · incident · recovery",
     recoveryReady: false,
@@ -98,10 +100,15 @@ export function reduceKnowledgePreview(state: KnowledgePreviewState, action: Kno
       return { ...state, submitted: { ...state.submitted, decision: "revision-requested" }, revisionRequested: true, message: "Sample revision requested. Resolve the source visibility and recovery checklist before resubmitting." };
     case "approve":
       if (!state.submitted || state.submitted.version !== action.version || state.submitted.decision !== "pending" || !draftReadyForReview(state.submitted.draft)) return { ...state, message: "This snapshot is not ready for approval. Resolve the checks and submit a new snapshot." };
-      return { ...state, submitted: { ...state.submitted, decision: "approved" }, message: "Sample snapshot approved. Publication still requires explicit confirmation." };
-    case "publish":
-      if (!state.submitted || state.submitted.version !== action.version || state.submitted.decision !== "approved" || !draftReadyForReview(state.submitted.draft)) return { ...state, message: "Only the exact approved shared snapshot can be published in this preview." };
-      return { ...state, publication: { ...state.submitted, draft: copyDraft(state.submitted.draft) }, message: "The approved sample snapshot is published in this session. No real publication or audit record was created." };
+      {
+        const approved: KnowledgeSnapshot = { ...state.submitted, decision: "approved" };
+        return {
+          ...state,
+          submitted: approved,
+          publication: { ...approved, draft: copyDraft(approved.draft) },
+          message: "The sample snapshot was approved and automatically published in this session. No real publication or audit record was created.",
+        };
+      }
   }
 }
 

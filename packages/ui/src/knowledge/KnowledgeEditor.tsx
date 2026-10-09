@@ -12,7 +12,7 @@ export function KnowledgeEditor({ state, dispatch, onBack, onSubmitted }: { stat
 
   return <>
     <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title={state.revisionRequested ? "Revision requested" : draft.title || "Untitled knowledge"} description={state.revisionRequested ? "Address reviewer feedback before submitting this draft again." : `Draft · Product Engineering · ${draft.scope} scope`} action={<button type="button" className="primary-button" disabled={!ready} onClick={submit}>{state.revisionRequested ? "Resubmit for review" : "Submit for review"}</button>} />
-    <div className="knowledge-draft-controls"><KnowledgeBadge tone="amber">{state.revisionRequested ? "Revision required" : "Sample draft"}</KnowledgeBadge><span>{knowledgeDraftChanged(state) ? "Unsaved changes" : "Saved in this session"}</span><button type="button" className="secondary-button" onClick={() => dispatch({ type: "save" })}>Save draft</button></div>
+    <div className="knowledge-draft-controls"><KnowledgeBadge tone="amber">{state.revisionRequested ? "Revision required" : "Sample draft"}</KnowledgeBadge><KnowledgeBadge tone="blue">{draft.classification}</KnowledgeBadge><span>{knowledgeDraftChanged(state) ? "Unsaved changes" : "Saved in this session"}</span><button type="button" className="secondary-button" onClick={() => dispatch({ type: "save" })}>Save draft</button></div>
     {state.revisionRequested && <KnowledgeNotice title="Two changes requested by Minh Tran" tone="amber">Replace the private dashboard source and link incident INC-2841. This feedback belongs to the sample review.</KnowledgeNotice>}
     <div className="knowledge-editor-grid">
       <article className="knowledge-article">
