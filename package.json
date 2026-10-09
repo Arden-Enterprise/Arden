@@ -15,8 +15,12 @@
     "remote:status": "node scripts/remote-development.mjs status",
     "dev:remote": "node scripts/remote-development.mjs dev",
     "dev:desktop": "pnpm --filter @arden/desktop dev",
+    "dev:remote": "node tools/remote/cli.mjs dev",
+    "remote:preview": "node tools/remote/cli.mjs preview",
+    "remote:status": "node tools/remote/cli.mjs status",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:remote": "node --test tools/remote/workflow.test.mjs",
     "build": "pnpm -r build"
   },
   "devDependencies": {

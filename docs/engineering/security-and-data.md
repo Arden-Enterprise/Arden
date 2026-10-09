@@ -56,7 +56,7 @@ The organization, session-context, and owner-private note contract for the first
 
 - Validate actual file type/content and size, not only filename/MIME. Use bounded parsers, time/memory limits, quotas, safe extraction, and a defined malware/quarantine policy.
 - Treat DOCX/archives and PDFs as hostile inputs. Defend against traversal/symlink escapes, decompression bombs, parser bugs, executable/macro payloads, and active/external content. Extractors should run with minimal privileges/network access.
-- Store originals/attachments on a protected non-public volume behind the API/storage interface. Do not expose an upload directory as static assets or use user-supplied absolute paths as storage keys.
+- The accepted target uses private Supabase Storage buckets behind Arden's API/storage policy; it is not implemented yet. Bucket policies, scoped signed URLs, and current authorization must preserve private originals and revocation. Do not expose a public bucket/upload directory or use user-supplied absolute paths as storage keys. Keep service-role keys server-only; they bypass ordinary policy checks.
 - Downloads, export jobs, previews, and signed URLs need current authorization and scoped expiration. Sanitize filenames/content disposition; do not log credentialed download URLs.
 - Mark unsupported/scanned content honestly. OCR/cloud extraction is not an invisible fallback for a private upload.
 - Sanitize rendered imported HTML/Markdown/editor content; validate URL schemes and embeds. Remote images/embeds can disclose IP/referrer/context, so use an explicit customer privacy policy instead of fetching them silently.
