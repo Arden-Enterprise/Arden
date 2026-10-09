@@ -71,9 +71,7 @@ pnpm test:remote
 pnpm build
 ```
 
-CI performs a frozen-lockfile install and these checks on Ubuntu and Windows. `test:remote` exercises the local hosted-development workflow without SSH. On Linux, CI also runs `sudo --non-interactive python3 -m unittest discover -s deploy/hosted/tests -v`: it needs root only to set up disposable ownership fixtures and spawn non-root test processes; Docker is mocked and no live services/accounts are changed. See the [operator guide](docs/engineering/remote-development.md#operator-setup-and-maintenance) for coverage and host handoff limits.
-
-Passing CI proves scaffold and focused development-workflow checks only: web/UI have no test scripts yet, API tests are health-route tests, and installer/product end-to-end/authorization coverage is not implemented. Add the relevant evidence as features grow.
+CI performs a frozen-lockfile install and these checks on Ubuntu and Windows. UI tests cover pure session-preview models for private drafts, organization invitations/access and knowledge review/publication. API tests cover health routes. Passing these checks does not prove server authorization, persistence, native installers or end-to-end coverage. Add the relevant evidence as features grow.
 
 UI changes also need actual web/desktop visual and interaction checks where applicable. Database changes need disposable PostgreSQL migration/constraint/authorization tests. Security and governance changes need denial/revocation/exact-version tests. Docs-only changes need links and consistency checks; do not imply application tests ran when they did not.
 

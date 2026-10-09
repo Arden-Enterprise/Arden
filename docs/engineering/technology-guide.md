@@ -6,23 +6,23 @@ All implementation/testing work also follows [code-quality.md](code-quality.md).
 
 ## 1. Stack inventory
 
-Initial inventory, 2 October 2026:
+Inventory updated 5 October 2026:
 
 | Area | Present in the scaffold | Target, not yet implemented |
 | --- | --- | --- |
 | Runtime/tooling | Node.js 24 CI; pnpm 11.19.0; TypeScript 5.9.3; pnpm workspaces | Same baseline, reviewed upgrades |
-| Web/shared UI | React/react-dom 19.3.0; Vite 7.3.6; React plugin 5.2.0 | React Router and TanStack Query |
-| Desktop | Electron 44.4.3; electron-vite 5.0.0; shared React UI | Typed preload/native adapters, secure cache/auth, signed Windows installer/update flow |
-| API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15 | Validated domain routes/contracts, Supabase identity/events |
-| Data | Local `pgvector/pgvector:pg17` container; database health query | Canonical PostgreSQL schema, extension/migrations, Drizzle, full-text/vector search |
-| Identity | None | Supabase Auth; Arden-owned authorization |
-| Editor | None | BlockNote core behind a versioned Arden document interface |
-| Graph | Custom SVG illustrative network and local interactions | Sigma.js + Graphology on authorized API projections |
+| Web/shared UI | React/react-dom 19.3.0; Vite 7.3.6; React plugin 5.2.0; typed fetch client for auth/private notes | React Router and TanStack Query |
+| Desktop | Electron 44.4.3; electron-vite 5.0.0; shared React UI; narrow preload IPC backed by Electron safeStorage | Signed Windows installer/update flow |
+| API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15; Supabase Auth via `@supabase/supabase-js` 2.117.2; BFF sign-in/sign-up/session/org-create/invitation/private-draft routes; ordered SQL migration runner | Organization admin list/role/department/member lifecycle routes, Supabase Realtime notifications |
+| Data | Local `pgvector/pgvector:pg17` container; ordered SQL migrations 0001/0002; transaction-local actor/org/admin/invitation RLS context and non-bypass Arden runtime role; protected local note-object storage | Drizzle Kit migration authoring for future domain schema, full-text/vector search, Supabase Storage integration |
+| Identity | Supabase Auth email/password through a server-only Fastify adapter; verified user UUID maps to `user_account.user_id`; Arden-owned organization bootstrap and hashed-token email invitation lifecycle; SMTP through Nodemailer 10.0.10. Fenced test adapters support loopback-only local sign-in and a no-login synthetic actor for the SSH-only Kiet Local `dev-2` slot | Recovery |
+| Editor | React textarea-based session previews for private notes and shared knowledge | BlockNote core behind a versioned Arden document interface |
+| Graph | Local decorative Figma SVGs; no graph view or authorized graph data | Sigma.js + Graphology on authorized API projections |
 | Jobs | None | pg-boss in `apps/worker` |
-| Storage | No content storage implementation | Private Supabase Storage behind Arden's storage/policy interface |
-| AI | None | Arden gateway to customer-controlled Ollama/compatible private endpoint |
-| Tests | Vitest 5.0.1, two API health tests; Node hosted-development workflow tests; Linux Python protocol/ownership/maintenance fixtures with mocked Docker; typecheck/build scripts | Real PostgreSQL integration/policy tests, UI tests, Playwright web/desktop flows |
-| Deployment | Local PostgreSQL Compose; hosted API/database bootstrap and local frontend/SSH commands; Ubuntu/Windows CI | Supported isolated Supabase, Coolify release integration, immutable staging/production |
+| Storage | Protected local note-content volume via `LocalPrivateContentStorage`; opaque UUID `source_uri`, SHA-256 integrity check, production persistent mount required | Broader attachment/document storage; optional S3-compatible backend later |
+| AI | Explicit prerecorded Ask Arden sample; no model request | Arden gateway to customer-controlled Ollama/compatible private endpoint |
+| Tests | Vitest 5.0.1, Fastify auth/private-note tests, real-PostgreSQL repository/RLS test gated by `ARDEN_TEST_DATABASE_URL`, pure UI preview and API-client tests | Live Supabase Auth smoke, native Electron interaction, broader Playwright flows |
+| Deployment | Local database Compose; Ubuntu/Windows CI | Ubuntu 24.04 + Coolify, versioned full application Compose, isolated staging/production |
 
 The container image includes pgvector software; the scaffold does not yet create the extension or prove embedding queries work. The Electron build is not a packaged installer. No installed auth/schema/query/editor/graph/job library should be inferred from this target table.
 
@@ -42,6 +42,9 @@ The container image includes pgvector software; the scaffold does not yet create
 ## 3. React, Vite, routing, and client state
 
 - Shared product UI lives in `packages/ui` and future feature packages. App entry points should be composition/platform adapters, not independent copies of the product.
+- Living Archive assets are local: exported Figma SVGs and variable Sora/DM Sans TTFs with their OFL notices in `src/assets/fonts`. Preserve the font license files on redistribution. No runtime font-service request is needed. The accepted visual contract lives in [DESIGN.md](../../DESIGN.md).
+- The Electron renderer sets Vite `assetsInlineLimit: 0`: imported SVGs must remain local file assets because its existing self-only image CSP blocks inlined `data:` images. Check the built renderer, not only web development, after asset changes. Do not broaden script/network CSP to make an asset render.
+- Pure session transitions live in `organization/organizationWorkflow.ts` and `knowledge/knowledgePreviewModel.ts`; the shell owns preview identities, organization state and private drafts. [Mainflow 1 preview](mainflow-1-preview.md) distinguishes these demonstrations from future server contracts. Never promote a demo identity selector or a client readiness check into production authentication/authorization.
 - React render must be pure. Keep hooks unconditional; use stable domain IDs as list keys. Clean up effects, requests, subscriptions, graph instances, and timers on replacement/unmount, including development remounts.
 - Keep transient interaction state local. Use the planned TanStack Query for remote server state and React Router for navigation when those features are added. Do not duplicate a server cache in another global store without a demonstrated requirement.
 - Define query keys with organization, identity/permission scope, object/version, and relevant filters. Clear/cancel scoped queries on logout, account/organization switch, revocation, and Core URL change. Never reuse one user's result as another user's placeholder.
@@ -57,7 +60,7 @@ The container image includes pgvector software; the scaffold does not yet create
 ## 4. Electron and electron-vite
 
 - The main process is privileged; the renderer is not. Keep `nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`, and `webSecurity: true`. Permission requests, new windows, and navigation remain denied unless a narrow feature explicitly permits them.
-- The scaffold has no configured preload. Add a separately built, minimal typed preload when a feature actually needs it; do not expose `ipcRenderer`, `require`, raw shell/filesystem methods, or a general command channel.
+- The desktop now has a separately built, minimal typed preload for secure session persistence and Core URL retrieval. It uses a narrow allowlist with main-frame checks; do not expose `ipcRenderer`, `require`, raw shell/filesystem methods, or a general command channel.
 - Validate IPC payloads, calling frame/origin, authenticated actor, operation scope, file paths, and resource limits. A renderer-supplied path/URL is not trusted because it came from Arden's UI.
 - Main/native capabilities must return only necessary data. Do not return arbitrary filesystem contents, full credentials, or unrestricted handles to the renderer. Browser UI must continue working without Electron globals.
 - Use a strict production CSP and exact approved Core origins. The scaffold's localhost HTTP/WebSocket allowances are for development, not a production policy. Do not add wildcard network access or `unsafe-eval` to silence an integration error.
@@ -69,7 +72,7 @@ The container image includes pgvector software; the scaffold does not yet create
 
 Consult [Electron's security checklist](https://www.electronjs.org/docs/latest/tutorial/security) and electron-vite documentation matching installed majors before changing process boundaries or packaging.
 
-## 5. Fastify, HTTP contracts, and notifications
+## 5. Fastify, HTTP contracts, and Supabase Realtime
 
 - Keep construction/testability separate from process startup: extend the existing `buildApp` pattern. Centralize config validation, dependencies, policy services, and shutdown; avoid opening a pool/listener merely by importing a testable module.
 - Validate body, query, parameters, relevant headers, and response shape. Reject unsupported content types and oversize input. Type annotations alone are not validators.
@@ -80,20 +83,26 @@ Consult [Electron's security checklist](https://www.electronjs.org/docs/latest/t
 - Normalize errors into safe client codes/messages and correlation IDs. Preserve diagnostics in redacted logs; do not expose stack traces, SQL, connector responses containing secrets, or inaccessible object existence.
 - Configure cookie/CSRF protections, exact allowed origins, proxy trust, timeouts, rate limits, upload quotas, and TLS deliberately. Do not enable wildcard credentialed CORS or trust forwarded headers from arbitrary clients.
 - Liveness remains cheap and independent of database readiness. Readiness checks required dependencies with bounded time and generic output; do not turn public health endpoints into configuration disclosure.
-- Supabase Realtime is the planned notification service, not implemented now. Authorize subscriptions and each event with current Arden permissions, limit/expire connections, handle reconnect/duplicates, and release resources on disconnect. Payloads must not leak forbidden titles/content.
-- Review channel authentication, policies, and revocation for both clients. Do not put long-lived secrets in public URLs. Reauthorize when membership/session changes; replay/delivery must not cross tenant scopes.
+- Supabase Realtime is the planned notification transport, not implemented now. Authorize each subscription and event against current Arden policy, limit/expire connections, handle reconnect and duplicate delivery, and release resources on disconnect. Notification payloads must not leak forbidden titles/content.
+- Review Realtime authentication and channel policies for both clients. Reauthorize when membership/session changes; event replay must not cross tenant scopes. Keep session secrets out of public URLs.
 - Document compatibility before changing contracts used by installed desktop versions. Additive changes are preferred; introduce a version/deprecation strategy deliberately rather than breaking older binaries silently.
 
 ## 6. Supabase Auth and Arden authorization
 
-- Supabase Auth is planned for identities/sessions; it replaces Better Auth. Do not run two auth stacks. The custom Arden login UI is separate from the service.
-- Validate actual SDK/service versions, redirects/trusted origins, session verification/revocation, cookies/tokens, invitations, SMTP/recovery, and reverse proxy before integration. Service-role keys stay server-only.
-- Supabase owns supported internal service schemas; Arden owns reviewed domain SQL migrations. Do not treat auth tables as the domain model or let independent schema tools mutate Arden tables.
-- Identities/JWTs are not content ACLs. Arden policy owns organization membership, team scope, grants, review/publication, source audiences, downloads, graph/search, and AI. Direct SDK reads, Storage, and Realtime must enforce equivalent restrictions.
+- `apps/api/src/auth/local-flow1-test.ts` is a test-only exception for manual local organization/department/invitation checks before the team's Supabase project is ready. It accepts only configured synthetic `@example.test` users and in-memory sessions. Startup rejects production, any Supabase config, non-loopback API/database hosts, and databases not named `arden_test_*`. Never deploy or expose this mode, connect it through an SSH tunnel, or use real identities/data. Invitation delivery is a no-op sink and the UI labels it as not sent.
+
+- Supabase Auth is the identity/session provider. `apps/api/src/auth/provider.ts` uses `@supabase/supabase-js` 2.117.2 with persistence and auto-refresh disabled; credentials and tokens are handled only in the API process. Sign-up always returns the same generic confirmation response and never indicates whether the email already had an account. Never install a parallel Better Auth stack.
+- Fastify owns `/api/v1/auth/sign-in` and `/api/v1/auth/sign-out`. It exchanges email/password with Supabase and stores the access/refresh pair in `HttpOnly`, `SameSite=Lax` cookies; production cookies use `Secure` and `__Host-` names. Exact configured web origins are required on cookie-authenticated mutations.
+- This is a BFF session boundary for the rich client: the renderer never receives the Supabase token pair. The API validates access tokens with Supabase `getUser` on protected requests and refreshes expired sessions through Supabase Auth. Treat provider/network outages separately from invalid credentials; fail closed without clearing a valid session on transient failure.
+- Keep Supabase publishable/anon keys in API runtime configuration for this design. A service-role/secret key is not required and must never be placed in a client bundle. Email/password sign-up remains controlled by Supabase project settings; a verified user does not gain Arden organization access by signing in.
+- A Supabase Auth user UUID maps to `arden.user_account.user_id`; domain PostgreSQL stores the profile and Arden membership without duplicating password hashes or assuming access to Supabase's internal `auth` schema. Every domain route then checks Arden account status, membership, role, scope, and object ownership. Auth-provider metadata/groups do not replace Arden policy.
+- Invitation records store a SHA-256 token hash, never the bearer token. The generic `/invite/<token>` page offers sign-in or account setup without looking up account existence; accept requires a verified Supabase email matching the invitation, and is single-use/expiry-checked in a PostgreSQL transaction. SMTP uses Nodemailer 10.0.10; all `SMTP_*` settings are server-only and must be supplied together. Port 465 uses implicit TLS; other supported SMTP setups require STARTTLS, with bounded connection timeouts. SMTP auth currently uses username/password credentials; Gmail OAuth2 is not wired. Gmail and Mailjet can use the generic transport through runtime configuration; SMTP delivery has not been live-tested in this checkout.
+- Desktop session cookies are stored encrypted with Electron `safeStorage`. A narrow main-process IPC bridge injects cookies into an allowlisted set of API requests and returns data/headers without exposing cookies to the renderer. Keep context isolation, sandbox, and `webSecurity` enabled; require a trusted `ARDEN_CORE_URL` HTTPS origin in production.
+- The domain migration creates only the non-bypass `arden_runtime` role. Supabase Auth owns credential/session data; Arden's PostgreSQL repository uses transaction-local `arden_runtime`. Apply domain migrations with a separate privileged migration connection.
 - Invitations and role changes need server checks for target organization, actor capability, escalation, expiration, audit, and session/cache invalidation. Test expired/revoked sessions and multi-organization users.
 - Sign-in/bootstrap/recovery must not create a permanent universal bypass. Open private-data recovery and reviewer/publisher separation decisions require explicit policy before implementation.
 
-References: [Supabase Auth](https://supabase.com/docs/guides/auth), [self-hosting](https://supabase.com/docs/guides/self-hosting), [decision 0001](../decisions/0001-supabase-and-hybrid-development.md).
+References: [Supabase Auth](https://supabase.com/docs/guides/auth), [server-side auth/session guidance](https://supabase.com/docs/guides/auth/server-side), [Supabase `signInWithPassword`](https://supabase.com/docs/reference/javascript/auth-signinwithpassword), [Supabase `signUp`](https://supabase.com/docs/reference/javascript/auth-signup), [Supabase `getUser`](https://supabase.com/docs/reference/javascript/auth-getuser), [Supabase `refreshSession`](https://supabase.com/docs/reference/javascript/auth-refreshsession), [Nodemailer SMTP transport](https://nodemailer.com/smtp), [Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage), [Electron contextBridge](https://www.electronjs.org/docs/latest/api/context-bridge), [electron-vite preload discovery](https://electron-vite.org/guide/dev).
 
 ## 7. PostgreSQL, pgvector, Drizzle, and search
 
@@ -103,7 +112,9 @@ References: [Supabase Auth](https://supabase.com/docs/guides/auth), [self-hostin
 - Apply RLS as defense in depth on sensitive tables. PostgreSQL superusers/`BYPASSRLS` always bypass it and owners normally do; use non-bypass/non-owner runtime roles and review `FORCE ROW LEVEL SECURITY` where appropriate. Test the actual roles and policies. See [PostgreSQL 17 row security](https://www.postgresql.org/docs/17/ddl-rowsecurity.html).
 - If request scope is carried in PostgreSQL session settings, set it transaction-locally and test connection-pool reuse. Never let one request's tenant/actor context leak to the next connection borrower.
 - Use bound parameters for values; identifiers/order options must come from validated allowlists. Bound text length, result count, pagination, and expensive query work. Do not dump broad rows and filter permissions in React.
-- Drizzle schema is planned, with generated **reviewed SQL migrations**. Updating a TypeScript schema does not apply a database change or populate existing rows. Specify defaults, nullable transitions, backfills, and validation explicitly.
+- Supabase Auth owns its internal auth schema; Arden's reviewed SQL migrations manage only the domain schema and do not create or modify Supabase-owned tables. Drizzle Kit authoring for broader domain schema remains planned. The ordered runner records `public.arden_schema_migrations`; migrations are not applied at API startup. Organization bootstrap/administration and invitation acceptance create Arden membership/role assignments transactionally after validating the Supabase session.
+- The API wraps every repository operation in a transaction, switches locally to `arden_runtime`, sets actor/organization transaction-local settings, and restores connection role/settings at commit/rollback. Keep a separate privileged migration connection.
+- Private note text is written to a protected local directory behind `PrivateContentStorage` before a corresponding database version is acknowledged. Its opaque `source_uri` and SHA-256 hash are canonical metadata; production must mount `ARDEN_PRIVATE_STORAGE_ROOT` persistently outside the image and static web root. A Coolify Compose/storage/backup deployment is not included.
 - Do not use schema push as the shared staging/production workflow. Keep schema, migration SQL/metadata, backfill plan, tests, and application compatibility in one change. Never edit already-applied migration history to hide a new change.
 - Run migrations once per deployment with serialization/locking, not on every API/worker replica startup. Use expand -> backfill/migrate -> contract and keep older desktop/API compatibility until the support window allows removal.
 - Test fresh installation and upgrades from a populated prior schema with realistic denied-access cases. Record lock/runtime impact, disk requirements, restoration plan, and unsupported downgrade behavior.

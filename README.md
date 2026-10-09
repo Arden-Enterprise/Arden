@@ -24,6 +24,22 @@ The web shell runs at `http://127.0.0.1:5180`; the API runs at `http://127.0.0.1
 
 `pnpm db:down` stops the local database without deleting its volume. The Compose password is **for local development only**. Production must supply its own secret and connection string.
 
+## Current UI foundation
+
+The shared React package implements the [Living Archive Figma redesign](https://www.figma.com/design/UmW5qb5cTWo6lwMYZ4Z9bC/Arden?node-id=147-2) for web and desktop, using dark surfaces, amber/jade/blue accents and locally bundled Sora/DM Sans fonts:
+
+- a minimal sign-in boundary with no public registration;
+- workspace selection and a redesigned `My Work` preview with scoped queue search;
+- a responsive `Personal Workspace` with per-note session drafts that survive navigation, a mobile list/editor flow, scoped search, keyboard focus, unsaved state, and empty states;
+- a collapsible Knowledge Pane that follows the selected private note and keeps the active access boundary visible;
+- a guided first-run organization setup preview (SCR-02) covering template, departments, members/roles and access review;
+- organization, department and member administration with reviewed access assignments;
+- invitation creation, renew/revoke, acceptance, pending membership and access readiness states;
+- sample knowledge library/editor, exact-version review with separate approval/publication, handover and prerecorded Ask Arden answers with citations.
+
+Open the member preview for workspace selection, the admin preview for Administration, or first-run setup from sign-in. Completing setup enters Administration. For [Mainflow 1](docs/engineering/mainflow-1-preview.md), create an invitation, preview acceptance, return to assign the member's primary department/role, then preview their access and workspace. The template catalogue and member records are synthetic; a configuration needs at least one department and an active organization-scoped System Admin.
+
+This is a labeled frontend preview. Sign-in does not authenticate, invitations do not send email, and organization, notes and knowledge transitions are held only in memory. Private drafts survive navigation; refresh or confirmed exit clears them. Switching demo members clears private notes after guarding unsaved changes. Real authentication, authorization, audit events, persistence, conflict handling and server governance still require API/data-model implementation. Hidden UI is never an authorization boundary.
 ## Hosted backend development
 
 **New teammate? Start with [Start coding on Arden](docs/engineering/teammate-setup.md).** It covers installing tools, obtaining individual access, SSH/private settings, your first edit, Coolify, troubleshooting, and GitHub review. The guide records the remaining administrator onboarding requirements and the approved source branch while the setup PR is unmerged.
