@@ -39,6 +39,8 @@ The API uses Nodemailer as its SMTP client; no provider SDK is needed for Gmail 
 
 For Coolify, mount `ARDEN_PRIVATE_STORAGE_ROOT` to persistent private storage with API-only access and include it in the protected backup/restore plan with PostgreSQL. Production API startup refuses to run when this path is unset. Set `ARDEN_CORE_URL` in the desktop launch environment to the public HTTPS origin; the desktop bridge rejects non-loopback HTTP and URL paths. A packaged settings UI and an actual Coolify stack are not implemented.
 
+Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and `pnpm remote:status`. They keep Vite local, use private SSH forwarding, and support four development slots. See [the authoritative setup/operations guide](remote-development.md), including [adoption into Coolify](remote-development.md#coolify-adoption). Bootstrap remains separate from Coolify registration; adopted installations use the protected management marker to start existing managed development containers without recreating legacy stacks. The current provisioner creates separate staging/production database templates only; application release deployment and full Supabase service integration remain absent.
+
 ## 2. Ports, environment, and configuration
 
 | Setting | Current local default | Requirements |
@@ -82,20 +84,20 @@ For manual frontend testing without login on Kiet Local, no project-wide test-mo
 - Test databases must be explicitly disposable, separate from developer and customer data. Create/reset only the named test target; do not use a broad cleanup command or automatic volume deletion.
 - `docker compose down` preserves named volumes by default; `down -v` is destructive and is not normal shutdown. Obtain explicit data-loss authorization for non-disposable targets.
 - Keep connector sandbox tokens/destinations separate and use fakes for routine tests. Do not let a test create real Jira issues or send private documents to an external model inadvertently.
-- Local development may run host web/API/worker for hot reload with database/model containers. Do not require every developer deployment on the shared Coolify host unless a later accepted workflow explicitly needs it.
+- Local development may run host web/API/worker with database/model containers. The accepted hybrid alternative runs four hosted development APIs/databases with local Vite frontends; see [remote-development.md](remote-development.md). No public development ports or production database access are implicit.
 - Prefer cross-platform package scripts and literal-path PowerShell operations on Windows. Do not solve Docker/runtime issues by deleting broad Docker/user directories, bypassing security, or disabling unrelated system protections.
 
 ## 4. Staging, production, and the customer install
 
-- Staging and production are separate Coolify projects/stacks with separate domains, database volumes, attachment storage, secrets, connector accounts/scopes, model settings, and backup destinations/access.
+- Staging and production are separate Coolify environments/stacks, optionally in the same project, with separate domains, database volumes, attachment storage, secrets, connector accounts/scopes, model settings, and backup destinations/access. A Coolify project/environment label alone does not enforce data or network isolation.
 - A branch name is not isolation. Preview environments, if added, are disposable separate stacks with synthetic data and disabled/sandboxed outbound actions. Do not point preview code at production DB/files/tokens.
 - Production data goes to staging only through an explicitly approved sanitization process with privacy/access/retention checks. Restoring a private backup into a testing environment is still disclosure.
-- The intended full application Compose includes web, API, worker, PostgreSQL/pgvector, attachment volumes, and optional Ollama or a configured private model host. The current root `compose.yaml` only supplies local PostgreSQL.
+- The intended full application Compose includes web, API, worker, Supabase PostgreSQL/Auth/Storage/Realtime, and optional Ollama or a configured private model host. Full Supabase is not provisioned by the lean hosted scaffold. The current root `compose.yaml` only supplies local PostgreSQL.
 - Expose web/API through the customer reverse proxy with TLS. Database, worker, storage internals, and model ports stay private. Scope proxy trust and origins; do not expose an admin DB console as a convenience.
 - Use versioned/pinned images and reviewed digests for released deployments, verified base images, least-privilege users/capabilities where feasible, and explicit volume ownership/resource limits. Never give application containers the host Docker socket for ordinary product functions.
 - Persistent state must live in named protected volumes/storage, not the writable image layer. Keep uploads/model caches out of the static web root. Establish disk quotas and free-space alerts.
 - A clean installation needs a documented/setup-validated path for domain, initial administrator, secrets, storage, model endpoint/capacity, and backups. Bootstrap must be single-use/controlled, never a permanent unauthenticated admin route.
-- The chosen pilot application host is **4 vCPU, 12 GB RAM, 100 GB disk**, with developers local, staging started when needed, and private AI on a separate customer-controlled machine. This is a starting allocation, not a guaranteed customer capacity or HA specification.
+- The earlier 4 vCPU/12 GB pilot target is not a verified allocation. Measure current capacity for four hosted development APIs plus release/Supabase services; increase or split infrastructure when needed. Private AI stays on a separate customer-controlled machine. No fixed allocation guarantees customer capacity or HA.
 - Measure CPU/RAM/disk, indexing lag, concurrent requests, and model latency. Apply backpressure/concurrency limits; do not let extraction/inference exhaust the API/database host.
 
 Reference: [Coolify Compose deployments](https://coolify.io/docs/applications/builds/docker-compose). Check the installed Coolify version/features before writing a concrete setup procedure.
