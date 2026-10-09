@@ -1,0 +1,10 @@
+Host arden-kiet-local
+    HostName ssh.kitsuracloud.com
+    Port 22225
+    User arden-kiet
+    IdentityFile ~/.ssh/arden_dev_ed25519
+    IdentitiesOnly yes
+    ForwardAgent no
+    StrictHostKeyChecking yes
+    ServerAliveInterval 10
+    ServerAliveCountMax 3

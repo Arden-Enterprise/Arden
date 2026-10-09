@@ -1,0 +1,92 @@
+### 1. Authentication & Session
+- `POST /api/v1/auth/sign-in`
+- `POST /api/v1/auth/sign-out`
+- `GET /api/v1/me`
+
+### 2. Organization & Setup
+- `GET /api/v1/organization/status`
+- `GET /api/v1/templates`
+- `POST /api/v1/organization/setup`
+- `GET /api/v1/organization`
+- `PATCH /api/v1/organization`
+
+### 3. Department Management
+- `GET /api/v1/departments`
+- `POST /api/v1/departments`
+- `GET /api/v1/departments/:id`
+- `PATCH /api/v1/departments/:id`
+- `POST /api/v1/departments/:id/deactivate`
+
+### 4. Member & Role Management
+- `GET /api/v1/members`
+- `POST /api/v1/members`
+- `GET /api/v1/members/:id`
+- `PATCH /api/v1/members/:id`
+- `POST /api/v1/members/:id/deactivate`
+
+### 5. Personal Workspace (My Work)
+- `GET /api/v1/my-work`
+
+### 6. Document Management & Knowledge Editor
+- `POST /api/v1/documents`
+- `POST /api/v1/documents/upload`
+- `GET /api/v1/documents/:id`
+- `PUT /api/v1/documents/:id`
+- `POST /api/v1/documents/:id/update-version`
+- `POST /api/v1/documents/:id/archive`
+- `GET /api/v1/documents/:id/versions`
+- `GET /api/v1/documents/:id/versions/:versionId`
+- `GET /api/v1/documents/:id/compare-versions`
+- `POST /api/v1/documents/:id/access-grants`
+- `DELETE /api/v1/documents/:id/access-grants/:grantId`
+- `GET /api/v1/documents/:id/attachment`
+
+### 7. Review & Publication Workflow
+- `POST /api/v1/documents/:id/versions/:versionId/submit`
+- `GET /api/v1/reviews`
+- `GET /api/v1/reviews/:id`
+- `POST /api/v1/reviews/:id/request-changes`
+- `POST /api/v1/reviews/:id/reject`
+- `POST /api/v1/reviews/:id/publish`
+- `GET /api/v1/documents/:id/review-history`
+
+### 8. Knowledge Handover
+- `POST /api/v1/handovers`
+- `GET /api/v1/handovers`
+- `GET /api/v1/handovers/:id`
+- `PUT /api/v1/handovers/:id/items/:itemId`
+- `POST /api/v1/handovers/:id/confirm`
+
+### 9. Knowledge Library & Search
+- `GET /api/v1/knowledge`
+- `POST /api/v1/search`
+- `GET /api/v1/search/facets`
+- `GET /api/v1/tags`
+
+### 10. Permission-Aware AI Knowledge Retrieval
+- `POST /api/v1/ai/query`
+- `POST /api/v1/ai/chat`
+- `GET /api/v1/ai/citations/:citationId/source`
+- `POST /api/v1/ai/interactions/:id/feedback`
+- `GET /api/v1/ai/history`
+
+### 11. Knowledge Graph
+- `GET /api/v1/graph`
+
+### 12. Audit Logging
+- `GET /api/v1/admin/audit-logs`
+
+### 13. System Policies & Integrations
+- `GET /api/v1/admin/integrations`
+- `PATCH /api/v1/admin/integrations/ai`
+- `GET /api/v1/admin/policies`
+- `PATCH /api/v1/admin/policies`
+
+### 14. Notifications & Events
+- `GET /api/v1/notifications/stream`
+- `GET /api/v1/notifications`
+- `PATCH /api/v1/notifications/:id/read`
+
+### 15. Health & Diagnostics
+- `GET /api/v1/health/live`
+- `GET /api/v1/health/ready`

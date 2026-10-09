@@ -1,0 +1,217 @@
+@font-face {
+  font-family: "DM Sans";
+  src: url("../assets/fonts/DMSans-Variable.ttf") format("truetype");
+  font-weight: 100 1000;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Sora";
+  src: url("../assets/fonts/Sora-Variable.ttf") format("truetype");
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+  font-family: "DM Sans", "Segoe UI", sans-serif;
+  color: var(--arden-text-primary);
+  background: var(--arden-canvas);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --arden-charcoal: #242628;
+  --arden-warm: #f4f3ef;
+  --arden-mist: #d4d5d5;
+  --arden-stone: #929698;
+  --arden-white: #ffffff;
+  --arden-canvas: #242628;
+  --arden-sidebar: #1c1e20;
+  --arden-surface: #2d3032;
+  --arden-elevated: #363a3d;
+  --arden-line: #33373a;
+  --arden-line-strong: #656b6e;
+  --arden-control-border: #929698;
+  --arden-text-primary: #f4f3ef;
+  --arden-text-secondary: #d4d5d5;
+  --arden-text-muted: #a5aaac;
+  --arden-accent: #e7b970;
+  --arden-accent-hover: #f0c98b;
+  --arden-success: #80c5b8;
+  --arden-info: #a4b9e8;
+  --arden-danger: #e9978a;
+  --arden-font-heading: "Sora", "Segoe UI", sans-serif;
+  --arden-radius-xs: 4px;
+  --arden-radius-sm: 6px;
+  --arden-radius-md: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 320px;
+  background: var(--arden-canvas);
+}
+
+body {
+  min-width: 320px;
+  min-height: 100dvh;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+h1, h2, h3 {
+  font-family: var(--arden-font-heading);
+  font-weight: 600;
+  text-wrap: balance;
+}
+
+input, textarea, select { accent-color: var(--arden-accent); }
+button, input, textarea, select { max-width: 100%; }
+button { overflow-wrap: anywhere; }
+input, textarea { caret-color: var(--arden-accent); }
+
+button, input, textarea, select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+::selection {
+  color: var(--arden-charcoal);
+  background: var(--arden-mist);
+}
+
+:focus-visible {
+  outline: 2px solid var(--arden-warm);
+  outline-offset: 3px;
+}
+
+main:focus {
+  outline: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.meta-label {
+  color: var(--arden-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.07em;
+}
+
+.primary-button, .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: var(--arden-radius-sm);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 20px;
+  text-align: center;
+}
+
+.primary-button {
+  border: 1px solid var(--arden-accent);
+  color: var(--arden-charcoal);
+  background: var(--arden-accent);
+}
+
+.primary-button:hover:not(:disabled) {
+  border-color: var(--arden-accent-hover);
+  background: var(--arden-accent-hover);
+}
+
+.secondary-button {
+  border: 1px solid var(--arden-line-strong);
+  color: var(--arden-text-primary);
+  background: var(--arden-surface);
+}
+
+.secondary-button:hover:not(:disabled) {
+  background: var(--arden-elevated);
+  border-color: var(--arden-stone);
+}
+
+.primary-button:disabled, .secondary-button:disabled {
+  color: var(--arden-text-muted);
+  border-color: var(--arden-line);
+  background: var(--arden-surface);
+}
+
+.skip-link {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 20;
+  padding: 10px 16px;
+  color: var(--arden-charcoal);
+  background: var(--arden-warm);
+  border-radius: 4px;
+  transform: translateY(-150%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.discard-dialog {
+  width: min(480px, calc(100% - 32px));
+  padding: 28px;
+  border: 1px solid var(--arden-line-strong);
+  border-radius: 8px;
+  color: var(--arden-text-primary);
+  background: var(--arden-surface);
+}
+
+.discard-dialog::backdrop {
+  background: rgb(0 0 0 / 65%);
+}
+
+.discard-dialog h2 {
+  margin: 12px 0;
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.discard-dialog p {
+  color: var(--arden-text-secondary);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
