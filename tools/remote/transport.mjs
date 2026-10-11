@@ -30,6 +30,7 @@ export function run(command, args, { input, timeout = 30000, inherit = false } =
     const timer = setTimeout(() => child.kill(), timeout);
     if (!inherit) {
       child.stdout.on('data', chunk => { bytes += chunk.length; if (bytes > 20 * 1024 * 1024) child.kill(); else output += chunk; });
+      // SSH errors can contain private host/account metadata. Report a safe error.
       child.stderr.on('data', () => {});
       child.stdin.on('error', () => {});
       child.stdin.end(input);

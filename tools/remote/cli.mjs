@@ -8,15 +8,21 @@ import { configuration, remote, startBackend, tunnel } from './transport.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const [action, ...args] = process.argv.slice(2);
-
 /** Stop our frontend process tree so a transport failure cannot leave an orphan Vite listener. */
 function stopFrontend(frontend) {
   if (!frontend?.pid || frontend.exitCode !== null || frontend.signalCode) return Promise.resolve();
   return new Promise(resolve => {
     if (process.platform === 'win32') {
+      // Stop only the process tree we started; otherwise pnpm can leave Vite behind.
       const cleanup = spawn('taskkill', ['/PID', String(frontend.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      cleanup.once('error', () => { console.error('Could not stop local frontend; close its terminal.'); resolve(); });
-      cleanup.once('close', resolve);
+      const stopDirectChild = () => {
+        // A restricted Windows session may deny taskkill even for our child.
+        // This fallback cannot drain grandchildren, but it closes the process we own.
+        if (frontend.exitCode === null && !frontend.signalCode) frontend.kill('SIGTERM');
+        resolve();
+      };
+      cleanup.once('error', stopDirectChild);
+      cleanup.once('close', code => code === 0 ? resolve() : stopDirectChild());
     } else {
       try { process.kill(-frontend.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') console.error('Could not stop local frontend.'); }
       resolve();
@@ -37,11 +43,20 @@ async function ready(port, isStopped) {
   throw new Error('Backend did not become ready. The local port may be occupied or the connection may have failed.');
 }
 
-/** Launch the local frontend using the same pinned pnpm CLI that invoked us. */
-function launchFrontend(config) {
-  const pnpmCli = process.env.npm_execpath;
+/** Resolve frontend command and args, directly executing standalone binary .exe on Windows. */
+export function frontendCommand(pnpmCli = process.env.npm_execpath) {
   if (!pnpmCli) throw new Error('Run this command with pnpm, so the frontend uses the pinned package manager.');
-  return spawn(process.execPath, [pnpmCli, 'dev:web'], { cwd: root, windowsHide: true, detached: process.platform !== 'win32', stdio: 'inherit', env: { ...process.env, ARDEN_DEV_API_PORT: String(config.localApiPort) } });
+  const isExe = path.extname(pnpmCli).toLowerCase() === '.exe';
+  return {
+    executable: isExe ? pnpmCli : process.execPath,
+    args: isExe ? ['dev:web'] : [pnpmCli, 'dev:web'],
+  };
+}
+
+/** Launch the local frontend using the same pinned pnpm CLI that invoked us. */
+export function launchFrontend(config, spawnProcess = spawn) {
+  const { executable, args } = frontendCommand();
+  return spawnProcess(executable, args, { cwd: root, windowsHide: true, detached: process.platform !== 'win32', stdio: 'inherit', env: { ...process.env, ARDEN_DEV_API_PORT: String(config.localApiPort) } });
 }
 
 /** Own one session's lease/processes; injected I/O exercises cleanup without SSH. */

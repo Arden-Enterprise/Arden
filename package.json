@@ -18,6 +18,7 @@
     "remote:status": "node tools/remote/cli.mjs status",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:remote": "node --test tools/remote/workflow.test.mjs",
     "build": "pnpm -r build"
   },
   "devDependencies": {

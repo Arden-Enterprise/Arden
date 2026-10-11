@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { Icon } from "../shared/Icon";
+import { KnowledgeDialog } from "./KnowledgeDialog";
 import { KnowledgeBadge, KnowledgeHeading, KnowledgeNotice, KnowledgeRow, KnowledgeSteps } from "./KnowledgePrimitives";
 import { draftReadyForReview, formatSampleVersion, type KnowledgePreviewAction, type KnowledgePreviewState } from "./knowledgePreviewModel";
 
 export function KnowledgeReview({ state, dispatch, onOpenDraft }: { state: KnowledgePreviewState; dispatch: (action: KnowledgePreviewAction) => void; onOpenDraft: () => void }) {
+  const [confirmVersion, setConfirmVersion] = useState<number | null>(null);
   const snapshot = state.submitted;
   const ready = snapshot ? draftReadyForReview(snapshot.draft) : false;
   const checksRemaining = snapshot ? Number(!snapshot.draft.recoveryReady) + Number(!snapshot.draft.sourceReady) : 2;
@@ -20,18 +23,19 @@ export function KnowledgeReview({ state, dispatch, onOpenDraft }: { state: Knowl
       </article>
       <aside className="knowledge-panel knowledge-review-readiness"><span className="meta-label knowledge-tone-amber">PUBLICATION READINESS</span><h2>{ready ? "Ready for a decision" : `${checksRemaining} checks remaining`}</h2>
         <div className="knowledge-review-check"><Icon name="check" /><div><strong>Owner confirmed</strong><small>Lan Nguyen remains responsible.</small></div></div>
-        <div className="knowledge-review-check"><Icon name="check" /><div><strong>Reviewer policy matched</strong><small>{snapshot.draft.classification === "RESTRICTED" ? "Synthetic specialist reviewer: Minh Tran." : "Synthetic reviewer: Minh Tran."}</small></div></div>
+        <div className="knowledge-review-check"><Icon name="check" /><div><strong>Reviewers assigned</strong><small>Synthetic reviewer: Minh Tran.</small></div></div>
         <div className={`knowledge-review-check ${snapshot.draft.sourceReady ? "" : "needs-attention"}`}><Icon name={snapshot.draft.sourceReady ? "check" : "lock"} /><div><strong>Source access</strong><small>{snapshot.draft.sourceReady ? "Evidence audience confirmed in the sample." : "Private source → Department publication"}</small></div></div>
         <div className={`knowledge-review-check ${snapshot.draft.recoveryReady ? "" : "needs-attention"}`}><Icon name={snapshot.draft.recoveryReady ? "check" : "lock"} /><div><strong>Incident evidence</strong><small>{snapshot.draft.recoveryReady ? "Recovery checklist / INC-2841 confirmed." : "Link INC-2841 to the recovery procedure."}</small></div></div>
         <span className="meta-label">MINH TRAN · SAMPLE REVIEWER</span><p>“The safer restart condition is clear. Resolve evidence scope before publishing.”</p>
         {!ready && <KnowledgeNotice title="Permission check" tone="amber">Replace restricted evidence with a source available to the intended readers, then submit a new snapshot.</KnowledgeNotice>}
         {snapshot.decision === "revision-requested" && <KnowledgeNotice title="Revision requested" tone="amber">The author can revise the draft and submit a new snapshot.</KnowledgeNotice>}
-        {published && <KnowledgeNotice title={`Sample ${formatSampleVersion(snapshot.version)} approved and published`} tone="jade">Final approval automatically published this exact snapshot in the preview. Real publication and audit history are not connected.</KnowledgeNotice>}
+        {published && <KnowledgeNotice title={`Sample ${formatSampleVersion(snapshot.version)} published`} tone="jade">This session now points to the approved snapshot. Real publication and audit history are not connected.</KnowledgeNotice>}
         <div className="knowledge-review-actions"><button type="button" className="secondary-button" onClick={() => { dispatch({ type: "request-revision" }); onOpenDraft(); }} disabled={snapshot.decision !== "pending"}>Request changes</button>
-          <button type="button" className="primary-button" disabled={!ready || snapshot.decision !== "pending"} onClick={() => dispatch({ type: "approve", version: snapshot.version })}>Approve &amp; publish</button>
+          {snapshot.decision === "approved" ? <button type="button" className="primary-button" disabled={published} onClick={() => setConfirmVersion(snapshot.version)}>Publish approved snapshot</button> : <button type="button" className="primary-button" disabled={!ready || snapshot.decision !== "pending"} onClick={() => dispatch({ type: "approve", version: snapshot.version })}>Approve sample snapshot</button>}
           <button type="button" className="knowledge-back-button" onClick={onOpenDraft}>Open working draft →</button></div>
-        <small>Final approval automatically publishes the exact submitted snapshot. Server authorization is not implemented.</small>
+        <small>Approval and publication are separate sample actions. Server authorization is not implemented.</small>
       </aside>
     </div>}
+    {confirmVersion !== null && <KnowledgeDialog title="Publish this approved sample snapshot?" onClose={() => setConfirmVersion(null)}><p>The sample publication will point to <strong>{formatSampleVersion(confirmVersion)}</strong> of <strong>{snapshot?.draft.title}</strong>, for <strong>{snapshot?.draft.scope}</strong> readers.</p><p>The working draft remains separate. This creates no real publication or audit record.</p><div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setConfirmVersion(null)}>Cancel</button><button type="button" className="primary-button" onClick={() => { dispatch({ type: "publish", version: confirmVersion }); setConfirmVersion(null); }}>Confirm sample publication</button></div></KnowledgeDialog>}
   </>;
 }

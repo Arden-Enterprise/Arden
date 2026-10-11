@@ -22,4 +22,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm test:remote
+      - name: Hosted protocol and maintenance fence tests (Linux)
+        if: runner.os == 'Linux'
+        run: sudo --non-interactive python3 -m unittest discover -s deploy/hosted/tests -v
       - run: pnpm build

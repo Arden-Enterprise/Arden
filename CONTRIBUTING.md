@@ -2,6 +2,10 @@
 
 Read [AGENTS.md](AGENTS.md) first. It is the repository-wide rules entry point, not an optional agent-only note. Detailed guides cover [code quality/testability](docs/engineering/code-quality.md), [technologies](docs/engineering/technology-guide.md), [security/data](docs/engineering/security-and-data.md), and [operations](docs/engineering/operations.md).
 
+## Before every task
+
+Follow [current main context](docs/engineering/rules/main-context.md) before planning, recommending a stack, editing, reviewing, or operating the server. Fetch the approved main, read current rules and accepted architecture/technology decisions, inspect relevant changes since the last reviewed main revision, and compare the working checkout. Record the fetched main SHA and any freshness/conflict limitation in the task handoff. A fetch does not update your working files; preserve unfinished work and use the guide's safe comparison procedure.
+
 ## Branch convention
 
 Use `<type>/<specific-kebab-case-description>`. The type must match the purpose:
@@ -40,7 +44,11 @@ Run `pnpm dev:desktop` in another terminal for the Windows desktop shell. Web is
 
 Use synthetic seed data and separate local credentials/volumes. Follow [operations.md](docs/engineering/operations.md) for multiple checkouts, isolation, production configuration, and backup obligations. The current Compose file is not a complete production application.
 
+For local frontend development against a hosted API/database, follow the beginner [teammate setup walkthrough](docs/engineering/teammate-setup.md), including the administrator handoff, then use `pnpm dev:remote`. Choose your assigned slot; do not overwrite an active writer or connect development code to a release database. The [hosted development reference](docs/engineering/remote-development.md) covers implementation and operator details.
+
 ## Changes and commits
+
+Commit in units of work when committing is authorized. Each completed, independently reviewable change gets its own descriptive Conventional Commit. Keep related code, documentation, and verification together, and make the commit coherent and reversible. Do not combine unrelated fixes, features, or cleanup, or split tightly coupled changes into broken intermediate commits. Inspect the proposed diff and stage only the intended paths or hunks; preserve other contributors' work.
 
 - Keep a change focused, preserve unrelated work, and stage explicit owned files. Review the diff and any new files before committing.
 - Use conventional subjects: `feat(graph): add scope filters`, `fix(api): reject invalid upload sizes`, or `docs: clarify private AI deployment`.
@@ -59,6 +67,7 @@ For code/config/dependency changes, run relevant focused tests and the root chec
 ```sh
 pnpm typecheck
 pnpm test
+pnpm test:remote
 pnpm build
 ```
 
@@ -81,3 +90,9 @@ Review specifically for:
 - Updated rules/docs and explicit unresolved decisions or unverified checks.
 
 Intended `main` protections are reviewed PRs, required CI checks on both OS jobs, resolved review conversations, and restricted force-push/deletion. Security-sensitive changes should receive a reviewer familiar with the affected boundary. These are policy requirements; a maintainer must separately configure/verify GitHub protections. This documentation does not configure remote settings or add mechanical branch-name enforcement.
+
+## Private configuration and public documentation
+
+This repository is public. Follow the [private files guide](docs/engineering/private-files.md) before adding configuration, operational notes, or data files. Keep private or security-critical values in excluded local files or approved secret storage, and document setup with placeholders. Check exclusions and existing tracking before committing; never force-add private files. Share actual values through an approved private channel.
+
+For authorized server work, follow the [private server setup guide](docs/engineering/server-access.md). Keep connection profiles in local Git metadata and personal SSH configuration.

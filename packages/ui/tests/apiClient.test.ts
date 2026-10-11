@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiRequest, signIn, signOut } from "../src/shared/api-client";
+import { apiRequest, signIn, signOut, signUp } from "../src/shared/api-client";
 
 const actorId = "11111111-1111-4111-8111-111111111111";
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -26,6 +26,27 @@ describe("Supabase session transport", () => {
       method: "POST", credentials: "include", body: JSON.stringify({ email: "member@example.test", password: "synthetic-password" }),
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "https://arden.example.test/api/v1/me", expect.objectContaining({ credentials: "include" }));
+  });
+
+  it("submits registration through the sign-up endpoint on web", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ status: "check_email" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(signUp("web", "new@example.test", "secure-password", "Jane Doe")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith("https://arden.example.test/api/v1/auth/sign-up", expect.objectContaining({
+      method: "POST", credentials: "include", body: JSON.stringify({ email: "new@example.test", password: "secure-password", fullName: "Jane Doe" }),
+    }));
+  });
+
+  it("submits registration through the desktop bridge", async () => {
+    const requestApi = vi.fn().mockResolvedValueOnce({ status: 202, body: JSON.stringify({ status: "check_email" }) });
+    vi.stubGlobal("window", { location: { origin: "file://" }, ardenDesktop: { requestApi } });
+
+    await expect(signUp("desktop", "new@example.test", "secure-password", "Jane Doe")).resolves.toBeUndefined();
+    expect(requestApi).toHaveBeenCalledWith({
+      path: "/api/v1/auth/sign-up", method: "POST", body: JSON.stringify({ email: "new@example.test", password: "secure-password", fullName: "Jane Doe" }), ifMatch: undefined,
+    });
   });
 
   it("keeps desktop cookies inside the secure main-process bridge", async () => {

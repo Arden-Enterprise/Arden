@@ -40,13 +40,27 @@ The shared React package implements the [Living Archive Figma redesign](https://
 Open the member preview for workspace selection, the admin preview for Administration, or first-run setup from sign-in. Completing setup enters Administration. For [Mainflow 1](docs/engineering/mainflow-1-preview.md), create an invitation, preview acceptance, return to assign the member's primary department/role, then preview their access and workspace. The template catalogue and member records are synthetic; a configuration needs at least one department and an active organization-scoped System Admin.
 
 This is a labeled frontend preview. Sign-in does not authenticate, invitations do not send email, and organization, notes and knowledge transitions are held only in memory. Private drafts survive navigation; refresh or confirmed exit clears them. Switching demo members clears private notes after guarding unsaved changes. Real authentication, authorization, audit events, persistence, conflict handling and server governance still require API/data-model implementation. Hidden UI is never an authorization boundary.
+## Hosted backend development
+
+**New teammate? Start with [Start coding on Arden](docs/engineering/teammate-setup.md).** It covers installing tools, obtaining individual access, SSH/private settings, your first edit, Coolify, troubleshooting, and GitHub review. The guide records the remaining administrator onboarding requirements and the approved source branch while the setup PR is unmerged.
+
+Run `pnpm dev:remote` after the guide's setup and administrator handoff. Vite stays on your computer; saved backend changes sync to your assigned hosted API/database. Four development slots are supported. Coolify manages the development APIs and the separate staging/production databases; full Supabase integration and release applications/deployment remain to implement. Operators can use the [hosted development reference](docs/engineering/remote-development.md).
 
 ## Checks
 
 ```sh
 pnpm typecheck
 pnpm test
+pnpm test:remote
 pnpm build
 ```
 
-The API exposes `/api/health/live` and `/api/health/ready`; readiness checks PostgreSQL. This is a scaffold, not a deployable Arden release: authentication, authorization, the canonical data model, persisted notes, ingestion, graph data, AI, installers, and Coolify production configuration are not implemented yet.
+The API exposes `/api/health/live` and `/api/health/ready`; readiness checks PostgreSQL. This is a scaffold, not a deployable Arden release: authentication, the data model, ingestion, graph data, AI, installers, and Coolify production configuration are not implemented yet.
+
+## Private local configuration and server access
+
+For local environment files, credentials, sensitive notes, and data exports, follow the [private files guide](docs/engineering/private-files.md). It explains where to keep private material, how to check Git exclusions, and how to ask Codex for setup help without sharing secret values. Public configuration examples contain placeholders only.
+
+For authorized server work, follow the [private server setup guide](docs/engineering/server-access.md). Connection details belong in each contributor's local Git metadata and personal SSH configuration; the public guide contains placeholders, and Codex's instructions remain scoped to this project through [AGENTS.md](AGENTS.md).
+
+Public environment templates contain placeholders only. Set real values locally using the team's private setup instructions.
