@@ -35,7 +35,7 @@ export function CreateKnowledge({ draft, onSave, onContinue, onBack }: { draft: 
         {error && <p className="knowledge-form-error" id="knowledge-create-error" role="alert">{error}</p>}
         <div className="knowledge-form-pair"><label>Type<select value={metadata.documentType} onChange={(event) => { const value = event.target.value; if (value === "Runbook" || value === "Decision" || value === "Checklist") setMetadata({ ...metadata, documentType: value }); }}><option>Runbook</option><option>Decision</option><option>Checklist</option></select></label><label>Owner<input value="Lan Nguyen" readOnly /></label></div>
         <div className="knowledge-form-pair"><label>Responsible department<input value="Product Engineering" readOnly /></label><label>Classification<select value={metadata.classification} onChange={(event) => { const value = event.target.value; if (value === "INTERNAL" || value === "CONFIDENTIAL" || value === "RESTRICTED") setMetadata({ ...metadata, classification: value }); }}>{classifications.map((classification) => <option key={classification.value} value={classification.value}>{classification.label}</option>)}</select></label></div>
-        <small>Classification sets the review policy. It does not change who can access the published knowledge.</small>
+        <small>Sample classification is separate from publication audience; its review policy is not connected.</small>
         <label>Tags<input value={metadata.tags} maxLength={240} onChange={(event) => setMetadata({ ...metadata, tags: event.target.value })} /></label>
         <small>Project and team references are optional metadata.</small>
         <button type="button" className="knowledge-back-button" onClick={onBack}>← Back to library</button>

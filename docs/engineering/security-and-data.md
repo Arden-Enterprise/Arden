@@ -1,6 +1,6 @@
 # Security, privacy, and data rules
 
-These are application design and implementation requirements. The current backend also implements organization bootstrap, Org Admin-checked department/custom-role/member administration APIs, and hashed-token invitation create/resend/revoke/accept behind Supabase Auth and configurable SMTP. The new database flows have synthetic HTTP tests. Migrations 0003/0004 and a rollback-only organization-bootstrap transaction were verified on Kiet Local `arden_dev_2`; the `/api/v1/me` membership read succeeds there. Invitation writes, other RLS paths, live Supabase, and SMTP delivery remain unverified. Recovery, complete user lifecycle/last-admin handling, publication governance, live Coolify release deployment, and production security release evidence remain incomplete. Read [AGENTS.md](../../AGENTS.md), [the blueprint](../../ARDEN_BLUEPRINT.md), and the relevant [technology rules](technology-guide.md).
+These are application design and implementation requirements. The current backend also implements organization bootstrap, Org Admin-checked department/custom-role/member administration APIs, and hashed-token invitation create/resend/revoke/accept behind Supabase Auth and configurable SMTP. The new database flows have synthetic HTTP tests. Migrations 0003/0004/0005 and a rollback-only organization-bootstrap transaction were verified on Kiet Local `arden_dev_2`; the `/api/v1/me` membership read succeeds there. Invitation acceptance RLS was verified via rehearsal under `arden_runtime`. Live Supabase, SMTP delivery, and broader RLS paths remain unverified. Recovery, complete user lifecycle/last-admin handling, publication governance, live Coolify release deployment, and production security release evidence remain incomplete. Read [AGENTS.md](../../AGENTS.md), [the blueprint](../../ARDEN_BLUEPRINT.md), and the relevant [technology rules](technology-guide.md).
 
 ## 1. Trust model and truthful guarantees
 
@@ -36,12 +36,10 @@ The organization, session-context, and owner-private note contract for the first
 - The first shared-draft API permits only an authenticated author to copy an owned private-note version into a separate protected object. It does not expose the private source ID/URI to shared readers, grant audience access, or submit the copy for review. See [Group 1 create contract](mainflow-2-group-1-create.md).
 - Prevent private back-links through provenance, attachments, mentions, derived summaries, citations, graph edges, or review history. Shared readers receive only provenance they are permitted to inspect.
 - Distinguish personal notes, shared drafts, official publications, external source objects, and work briefs in data and UI. External sync does not confer official approval.
-- Check a reviewer's current authority for the responsible department, any team/project attribute filters, intended audience, and submitted version at decision time; deny self-approval. Department is the highest reviewer-authority scope; team/project attributes do not create hierarchy or inherited approval permission. One eligible reviewer may approve unless the organization's recorded policy requires additional review steps. Assignment to a request does not itself confer broader access to personal originals or other content.
-- Enforce the accepted `INTERNAL`, `CONFIDENTIAL` and `RESTRICTED` knowledge classifications separately from audience. Confidential review needs the applicable reviewer grant; Restricted review needs a specialist or senior grant. An extra review step exists only where recorded organization policy requires it. If the effective access model cannot restrict a Restricted document to its intended readers, deny final approval and publication. Changing classification or widening audience after submission requires a new snapshot and review.
 - Bind review/approval to an immutable content version/hash **and** intended scope. Store reviewer, decision, timestamp, and relevant policy version. Editing approved content requires another review cycle.
-- Final approval automatically triggers server publication pointing at the same approved snapshot. There is no manual publisher action in Mainflow 2. Record review and publication as distinct audit events, and commit the decision, published version and current pointer consistently so a partial failure exposes no unapproved content. A mutable draft cannot become visible through a generic update endpoint.
+- Publication is a separate authorized transition pointing at the approved snapshot. A mutable draft cannot accidentally become the visible publication through a generic update endpoint.
 - Enforce transitions transactionally and reject stale version/conflicting approvals. Archival, unpublishing, and revocation must have explicit visibility semantics and audit evidence.
-- Who may recover private content remains a separate decision; do not create an undocumented bypass while implementing convenience tools.
+- Whether reviewer and publisher may be the same person, and who may recover private content, remains a decision; do not create an undocumented bypass while implementing convenience tools.
 
 ## 4. Derived data, search, graph, and revocation
 
@@ -59,7 +57,7 @@ The organization, session-context, and owner-private note contract for the first
 
 - Validate actual file type/content and size, not only filename/MIME. Use bounded parsers, time/memory limits, quotas, safe extraction, and a defined malware/quarantine policy.
 - Treat DOCX/archives and PDFs as hostile inputs. Defend against traversal/symlink escapes, decompression bombs, parser bugs, executable/macro payloads, and active/external content. Extractors should run with minimal privileges/network access.
-- Store originals/attachments on a protected non-public volume behind the API/storage interface. Do not expose an upload directory as static assets or use user-supplied absolute paths as storage keys.
+- The accepted target uses private Supabase Storage buckets behind Arden's API/storage policy; it is not implemented yet. Bucket policies, scoped signed URLs, and current authorization must preserve private originals and revocation. Do not expose a public bucket/upload directory or use user-supplied absolute paths as storage keys. Keep service-role keys server-only; they bypass ordinary policy checks.
 - Downloads, export jobs, previews, and signed URLs need current authorization and scoped expiration. Sanitize filenames/content disposition; do not log credentialed download URLs.
 - Mark unsupported/scanned content honestly. OCR/cloud extraction is not an invisible fallback for a private upload.
 - Sanitize rendered imported HTML/Markdown/editor content; validate URL schemes and embeds. Remote images/embeds can disclose IP/referrer/context, so use an explicit customer privacy policy instead of fetching them silently.
@@ -76,7 +74,7 @@ The organization, session-context, and owner-private note contract for the first
 - AI may draft a proposed action. Server policy authorizes the exact operation/destination and checks the current actor. The user previews content/audience/destination and explicitly confirms before data leaves.
 - Bind confirmation to action content/version/destination/actor, with expiry and concurrency protection. A later edit or permission change invalidates it.
 - Persist an idempotency/action record before performing a supported write, then reconcile uncertain outcomes. A timeout is not proof of failure; do not retry a Jira create blindly.
-- No AI-initiated publishing, permission administration, GitHub writing, or arbitrary MCP/tool connector system is assumed in pilot scope. System publication following final human approval is part of Mainflow 2.
+- No autonomous publishing, permission administration, GitHub writing, or arbitrary MCP/tool connector system is assumed in pilot scope.
 
 ## 7. AI and private inference
 
