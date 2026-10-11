@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { canCreateSharedDraft, type KnowledgeClassification } from "../knowledge/policy.js";
 
 export type MembershipStatus = "INVITED" | "ACTIVE" | "SUSPENDED" | "LEFT";
 export type MembershipSummary = {
@@ -9,6 +10,7 @@ export type MembershipSummary = {
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
 };
+export type ActiveMembership = { membershipId: string; organizationId: string; userId: string };
 
 export type PrivateDraft = {
   id: string;
@@ -26,6 +28,48 @@ export type PrivateDraft = {
 export type DraftListItem = Omit<PrivateDraft, "versionId" | "sourceUri" | "mimeType" | "contentHash">;
 export type DraftWrite = { title: string; body: string };
 export type DraftPatch = { title?: string; body?: string };
+export type PrivateContributionSource = {
+  versionId: string;
+  organizationId: string;
+  ownerMembershipId: string;
+  title: string;
+  sourceUri: string;
+  mimeType: string;
+  contentHash: string;
+};
+export type SharedKnowledgeDraft = {
+  id: string;
+  organizationId: string;
+  title: string;
+  classification: KnowledgeClassification;
+  sourcePrivateVersionId: string;
+  versionId: string;
+  sourceUri: string;
+  mimeType: string;
+  contentHash: string;
+  currentVersion: number;
+  createdAt: Date;
+  updatedAt: Date;
+};
+export type CreateSharedDraftResult =
+  | { kind: "created"; draft: SharedKnowledgeDraft }
+  | { kind: "replayed"; draft: SharedKnowledgeDraft }
+  | { kind: "unavailable" }
+  | { kind: "idempotency-conflict" };
+type SharedDraftRow = {
+  shared_draft_id: string;
+  title: string;
+  classification: KnowledgeClassification;
+  source_private_version_id: string;
+  create_request_hash: string;
+  shared_draft_version_id: string;
+  content_uri: string;
+  mime_type: string;
+  content_hash: string;
+  current_version_no: number;
+  created_at: Date;
+  updated_at: Date;
+};
 export type OrganizationSetup = { name: string; departmentName: string };
 export type CreatedOrganization = { organizationId: string; name: string; departmentId: string; departmentName: string };
 export type CreatedInvitation = { invitationId: string; email: string; organizationName: string; expiresAt: Date };
@@ -38,6 +82,7 @@ export type OrganizationAdminData = {
 
 export interface ArdenDataRepository {
   listMemberships(userId: string): Promise<MembershipSummary[]>;
+  requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
   createOrganization(userId: string, email: string, fullName: string | null, setup: OrganizationSetup, requestId: string): Promise<CreatedOrganization>;
   createInvitation(userId: string, organizationId: string, departmentId: string, email: string, tokenHash: string, expiresAt: Date, requestId: string): Promise<CreatedInvitation | null>;
   rotateInvitation(userId: string, organizationId: string, invitationId: string, tokenHash: string, requestId: string): Promise<CreatedInvitation | null>;
@@ -54,6 +99,16 @@ export interface ArdenDataRepository {
   createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, requestId: string): Promise<PrivateDraft | null>;
   canUpdateDraft(userId: string, organizationId: string, draftId: string): Promise<boolean>;
   updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }>;
+  getPrivateContributionSource(userId: string, organizationId: string, sourceVersionId: string): Promise<PrivateContributionSource | null>;
+  createKnowledgeDraft(userId: string, organizationId: string, input: {
+    actorMembershipId: string;
+    sourceVersionId: string;
+    classification: KnowledgeClassification;
+    idempotencyKey: string;
+    expectedSource: PrivateContributionSource;
+    copiedContent: StoredContentFields;
+    requestId: string;
+  }): Promise<CreateSharedDraftResult>;
 }
 
 function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): string {
@@ -90,6 +145,19 @@ function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): strin
 
 export class ArdenRepository implements ArdenDataRepository {
   constructor(private readonly pool: Pool) {}
+
+  async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const result = await client.query<{ membership_id: string }>(`
+        SELECT om.membership_id
+          FROM organization_membership om
+          JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
+          JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
+         WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
+      const membershipId = result.rows[0]?.membership_id;
+      return membershipId ? { membershipId, organizationId, userId } : null;
+    });
+  }
 
   async listMemberships(userId: string): Promise<MembershipSummary[]> {
     return this.withActorContext(userId, null, async (client) => {
@@ -578,6 +646,66 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
+  async getPrivateContributionSource(userId: string, organizationId: string, sourceVersionId: string): Promise<PrivateContributionSource | null> {
+    return this.withActorContext(userId, organizationId, (client) =>
+      this.findPrivateContributionSource(client, userId, organizationId, sourceVersionId));
+  }
+
+  async createKnowledgeDraft(userId: string, organizationId: string, input: {
+    actorMembershipId: string;
+    sourceVersionId: string;
+    classification: KnowledgeClassification;
+    idempotencyKey: string;
+    expectedSource: PrivateContributionSource;
+    copiedContent: StoredContentFields;
+    requestId: string;
+  }): Promise<CreateSharedDraftResult> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const createRequestHash = createHash("sha256")
+        .update(`${input.sourceVersionId}:${input.classification}`)
+        .digest("hex");
+      const source = await this.findPrivateContributionSource(client, userId, organizationId, input.sourceVersionId);
+      if (!source || !canCreateSharedDraft({
+        actor: { membershipId: input.actorMembershipId, organizationId, status: "ACTIVE" },
+        source: { kind: "private", organizationId: source.organizationId, ownerMembershipId: source.ownerMembershipId },
+        now: new Date(),
+      })) return { kind: "unavailable" };
+      if (source.sourceUri !== input.expectedSource.sourceUri || source.contentHash !== input.expectedSource.contentHash
+        || source.mimeType !== "text/plain" || input.copiedContent.mimeType !== source.mimeType
+        || input.copiedContent.contentHash !== source.contentHash
+        || input.copiedContent.sourceUri === source.sourceUri) return { kind: "unavailable" };
+
+      const existing = await this.findSharedDraftByCreateRequest(client, source.ownerMembershipId, organizationId, input.idempotencyKey);
+      if (existing) return existing.createRequestHash === createRequestHash
+        ? { kind: "replayed", draft: existing.draft } : { kind: "idempotency-conflict" };
+
+      const inserted = await client.query<{ shared_draft_id: string }>(`
+        INSERT INTO shared_draft (organization_id, author_membership_id, source_private_version_id,
+                                  title, classification, create_request_id, create_request_hash)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (author_membership_id, create_request_id) WHERE create_request_id IS NOT NULL DO NOTHING
+        RETURNING shared_draft_id`, [organizationId, source.ownerMembershipId, input.sourceVersionId,
+        source.title, input.classification, input.idempotencyKey, createRequestHash]);
+      const draftId = inserted.rows[0]?.shared_draft_id;
+      if (!draftId) {
+        const raced = await this.findSharedDraftByCreateRequest(client, source.ownerMembershipId, organizationId, input.idempotencyKey);
+        if (!raced) throw new Error("Shared draft idempotency row disappeared");
+        return raced.createRequestHash === createRequestHash
+          ? { kind: "replayed", draft: raced.draft } : { kind: "idempotency-conflict" };
+      }
+
+      await client.query(`
+        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash)
+        VALUES ($1, 1, $2, $3, $4)`, [draftId, input.copiedContent.sourceUri,
+        input.copiedContent.mimeType, input.copiedContent.contentHash]);
+      await this.appendAudit(client, organizationId, source.ownerMembershipId,
+        "SHARED_DRAFT_CREATED", draftId, 1, input.requestId);
+      const created = await this.findSharedDraftByCreateRequest(client, source.ownerMembershipId, organizationId, input.idempotencyKey);
+      if (!created) throw new Error("Created shared draft is not readable");
+      return { kind: "created", draft: created.draft };
+    });
+  }
+
   async canCreateDraft(userId: string, organizationId: string): Promise<boolean> {
     return this.withActorContext(userId, organizationId, async (client) =>
       Boolean(await this.findMembership(userId, organizationId, "PRIVATE_WORKSPACE_WRITE", client)));
@@ -704,6 +832,62 @@ export class ArdenRepository implements ArdenDataRepository {
         },
       };
     });
+  }
+
+  private async findPrivateContributionSource(client: PoolClient, userId: string, organizationId: string, sourceVersionId: string): Promise<PrivateContributionSource | null> {
+    const result = await client.query<{
+      draft_version_id: string; membership_id: string; title: string;
+      source_uri: string; mime_type: string; content_hash: string;
+    }>(`
+      SELECT v.draft_version_id, om.membership_id, d.title, v.source_uri, v.mime_type, v.content_hash
+        FROM draft_version v
+        JOIN draft_document d ON d.draft_id = v.draft_id
+        JOIN private_workspace w ON w.workspace_id = d.workspace_id
+        JOIN organization_membership om ON om.membership_id = w.membership_id
+        JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
+        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
+       WHERE v.draft_version_id = $1 AND om.user_id = $2 AND om.organization_id = $3
+         AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
+         AND ${membershipPermissionSql("$4")}`, [sourceVersionId, userId, organizationId, "PRIVATE_WORKSPACE_READ"]);
+    const row = result.rows[0];
+    return row ? {
+      versionId: row.draft_version_id,
+      organizationId,
+      ownerMembershipId: row.membership_id,
+      title: row.title,
+      sourceUri: row.source_uri,
+      mimeType: row.mime_type,
+      contentHash: row.content_hash,
+    } : null;
+  }
+
+  private async findSharedDraftByCreateRequest(client: PoolClient, membershipId: string, organizationId: string, requestKey: string): Promise<{ draft: SharedKnowledgeDraft; createRequestHash: string } | null> {
+    const result = await client.query<SharedDraftRow>(`
+      SELECT d.shared_draft_id, d.title, d.classification, d.source_private_version_id, d.create_request_hash,
+             v.shared_draft_version_id, v.content_uri, v.mime_type, v.content_hash,
+             d.current_version_no, d.created_at, d.updated_at
+        FROM shared_draft d
+        JOIN shared_draft_version v ON v.shared_draft_id = d.shared_draft_id AND v.version_no = d.current_version_no
+       WHERE d.organization_id = $1 AND d.author_membership_id = $2 AND d.create_request_id = $3`,
+    [organizationId, membershipId, requestKey]);
+    const row = result.rows[0];
+    return row ? {
+      createRequestHash: row.create_request_hash,
+      draft: {
+        id: row.shared_draft_id,
+        organizationId,
+        title: row.title,
+        classification: row.classification,
+        sourcePrivateVersionId: row.source_private_version_id,
+        versionId: row.shared_draft_version_id,
+        sourceUri: row.content_uri,
+        mimeType: row.mime_type,
+        contentHash: row.content_hash,
+        currentVersion: row.current_version_no,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      },
+    } : null;
   }
 
   private async findMembership(userId: string, organizationId: string, permissionCode: string, client: Pool | PoolClient = this.pool): Promise<string | null> {

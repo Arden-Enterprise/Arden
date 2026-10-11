@@ -30,27 +30,31 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     }
     if (!identity.rows[0]?.is_superuser) throw new Error("The isolated integration database connection must be a superuser for fixture cleanup");
     const migration = await pool.query<{ count: string }>(`
-      SELECT count(*)::text AS count FROM public.arden_schema_migrations WHERE migration_id = '0001_initial_schema'`);
-    if (migration.rows[0]?.count !== "1") throw new Error("Apply the initial schema migration to the isolated test database first");
+      SELECT count(*)::text AS count FROM public.arden_schema_migrations
+       WHERE migration_id IN ('0001_initial_schema', '0008_enable_private_shared_draft_creation')`);
+    if (migration.rows[0]?.count !== "2") throw new Error("Apply the current schema migrations to the isolated test database first");
 
-    await pool.query("BEGIN");
+    const client = await pool.connect();
     try {
-      await pool.query("SET LOCAL search_path TO arden, public");
-      await pool.query(`INSERT INTO organization (organization_id, name, slug) VALUES ($1, 'Arden Integration Test', $2)`, [ids.organization, `arden-test-${ids.organization}`]);
-      await pool.query(`INSERT INTO user_account (user_id, email, full_name) VALUES ($1, $2, 'Synthetic Owner'), ($3, $4, 'Synthetic Manager')`, [ids.owner, `${ids.owner}@example.test`, ids.manager, `${ids.manager}@example.test`]);
-      await pool.query(`INSERT INTO organization_membership (membership_id, organization_id, user_id) VALUES ($1, $2, $3), ($4, $2, $5)`, [ids.ownerMembership, ids.organization, ids.owner, ids.managerMembership, ids.manager]);
-      await pool.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Synthetic private-note owner'), ($4, $2, $5, 'Synthetic manager')`, [ids.ownerRole, ids.organization, roleCodes[0], ids.managerRole, roleCodes[1]]);
-      await pool.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type) VALUES ($1, $2, 'ORGANIZATION')`, [ids.organizationScope, ids.organization]);
-      await pool.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id) VALUES ($1, $2, $3), ($4, $5, $3)`, [ids.ownerMembership, ids.ownerRole, ids.organizationScope, ids.managerMembership, ids.managerRole]);
-      await pool.query(`INSERT INTO role_permission (role_id, permission_id)
+      await client.query("BEGIN");
+      await client.query("SET LOCAL search_path TO arden, public");
+      await client.query(`INSERT INTO organization (organization_id, name, slug) VALUES ($1, 'Arden Integration Test', $2)`, [ids.organization, `arden-test-${ids.organization}`]);
+      await client.query(`INSERT INTO user_account (user_id, email, full_name) VALUES ($1, $2, 'Synthetic Owner'), ($3, $4, 'Synthetic Manager')`, [ids.owner, `${ids.owner}@example.test`, ids.manager, `${ids.manager}@example.test`]);
+      await client.query(`INSERT INTO organization_membership (membership_id, organization_id, user_id) VALUES ($1, $2, $3), ($4, $2, $5)`, [ids.ownerMembership, ids.organization, ids.owner, ids.managerMembership, ids.manager]);
+      await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Synthetic private-note owner'), ($4, $2, $5, 'Synthetic manager')`, [ids.ownerRole, ids.organization, roleCodes[0], ids.managerRole, roleCodes[1]]);
+      await client.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type) VALUES ($1, $2, 'ORGANIZATION')`, [ids.organizationScope, ids.organization]);
+      await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id) VALUES ($1, $2, $3), ($4, $5, $3)`, [ids.ownerMembership, ids.ownerRole, ids.organizationScope, ids.managerMembership, ids.managerRole]);
+      await client.query(`INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission WHERE code IN ('PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE')`, [ids.ownerRole]);
-      await pool.query(`INSERT INTO role_permission (role_id, permission_id)
+      await client.query(`INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission WHERE code = 'PRIVATE_WORKSPACE_READ'`, [ids.managerRole]);
-      await pool.query("COMMIT");
+      await client.query("COMMIT");
       fixtureReady = true;
     } catch (error) {
-      await pool.query("ROLLBACK");
+      await client.query("ROLLBACK");
       throw error;
+    } finally {
+      client.release();
     }
   });
 
@@ -58,28 +62,35 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     if (!pool) return;
     try {
       if (fixtureReady) {
-        await pool.query("BEGIN");
+        const client = await pool.connect();
         try {
-          await pool.query("SET LOCAL search_path TO arden, public");
-          await pool.query("ALTER TABLE audit_event DISABLE TRIGGER USER");
-          await pool.query("ALTER TABLE draft_version DISABLE TRIGGER USER");
-          await pool.query("DELETE FROM audit_event WHERE organization_id = $1", [ids.organization]);
-          await pool.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
-          await pool.query("DELETE FROM draft_document WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
-          await pool.query("DELETE FROM private_workspace WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
-          await pool.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
-          await pool.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
-          await pool.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
-          await pool.query("DELETE FROM role WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
-          await pool.query("DELETE FROM access_scope WHERE access_scope_id = $1", [ids.organizationScope]);
-          await pool.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])", [[ids.owner, ids.manager]]);
-          await pool.query("DELETE FROM organization WHERE organization_id = $1", [ids.organization]);
-          await pool.query("ALTER TABLE draft_version ENABLE TRIGGER USER");
-          await pool.query("ALTER TABLE audit_event ENABLE TRIGGER USER");
-          await pool.query("COMMIT");
+          await client.query("BEGIN");
+          await client.query("SET LOCAL search_path TO arden, public");
+          await client.query("ALTER TABLE audit_event DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE draft_version DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE shared_draft_version DISABLE TRIGGER USER");
+          await client.query("DELETE FROM audit_event WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE author_membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM shared_draft WHERE author_membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM draft_document WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM private_workspace WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
+          await client.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM role WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
+          await client.query("DELETE FROM access_scope WHERE access_scope_id = $1", [ids.organizationScope]);
+          await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])", [[ids.owner, ids.manager]]);
+          await client.query("DELETE FROM organization WHERE organization_id = $1", [ids.organization]);
+          await client.query("ALTER TABLE draft_version ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE shared_draft_version ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE audit_event ENABLE TRIGGER USER");
+          await client.query("COMMIT");
         } catch (error) {
-          await pool.query("ROLLBACK");
+          await client.query("ROLLBACK");
           throw error;
+        } finally {
+          client.release();
         }
       }
     } finally {
@@ -89,6 +100,13 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
   it("scopes owner writes, manager reads, conflicts, and audit records through RLS", async () => {
     if (!repository || !pool) throw new Error("Test database is unavailable");
+    await expect(repository.requireActiveMembership(ids.owner, ids.organization)).resolves.toEqual({
+      membershipId: ids.ownerMembership, organizationId: ids.organization, userId: ids.owner,
+    });
+    await expect(repository.requireActiveMembership(ids.owner, randomUUID())).resolves.toBeNull();
+    await expect(repository.requireActiveMembership(ids.manager, ids.organization)).resolves.toEqual({
+      membershipId: ids.managerMembership, organizationId: ids.organization, userId: ids.manager,
+    });
     await expect(repository.listMemberships(ids.owner)).resolves.toHaveLength(1);
     const created = await repository.createDraft(ids.owner, ids.organization, { title: "Private", body: "Sensitive text" }, {
       sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain", contentHash: "a".repeat(64),
@@ -112,10 +130,64 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(concurrentUpdates.filter((result) => result.kind === "updated")).toHaveLength(1);
     expect(concurrentUpdates.filter((result) => result.kind === "conflict")).toEqual([{ kind: "conflict", currentVersion: 3 }]);
     await expect(repository.getDraft(ids.owner, ids.organization, created.id)).resolves.toMatchObject({ currentVersion: 3 });
-    const audit = await pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM arden.audit_event WHERE organization_id = $1`, [ids.organization]);
+    const audit = await pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM arden.audit_event WHERE organization_id = $1 AND event_type LIKE 'PRIVATE_DRAFT_%'`, [ids.organization]);
     expect(audit.rows[0]?.count).toBe("3");
     const connectionContext = await pool.query<{ role_name: string; actor_id: string | null }>(`SELECT current_user AS role_name, current_setting('arden.actor_id', true) AS actor_id`);
     expect(connectionContext.rows[0]?.role_name).not.toBe("arden_runtime");
     expect([null, ""]).toContain(connectionContext.rows[0]?.actor_id);
+  });
+
+  it("copies only an authorized private version and keeps shared rows invisible to another member", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+    const privateDraft = await repository.createDraft(ids.owner, ids.organization, { title: "Author-only original", body: "Private" }, {
+      sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain", contentHash: "b".repeat(64),
+    }, "shared-test-private-create");
+    expect(privateDraft).not.toBeNull();
+    if (!privateDraft) return;
+    const source = await repository.getPrivateContributionSource(ids.owner, ids.organization, privateDraft.versionId);
+    expect(source).toMatchObject({ ownerMembershipId: ids.ownerMembership, organizationId: ids.organization });
+    expect(await repository.getPrivateContributionSource(ids.manager, ids.organization, privateDraft.versionId)).toBeNull();
+    expect(await repository.getPrivateContributionSource(ids.owner, randomUUID(), privateDraft.versionId)).toBeNull();
+    if (!source) return;
+
+    const input = {
+      actorMembershipId: ids.ownerMembership,
+      sourceVersionId: source.versionId,
+      classification: "INTERNAL" as const,
+      idempotencyKey: randomUUID(),
+      expectedSource: source,
+      copiedContent: { sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain" as const, contentHash: source.contentHash },
+      requestId: "integration-shared-create",
+    };
+    const created = await repository.createKnowledgeDraft(ids.owner, ids.organization, input);
+    expect(created).toMatchObject({ kind: "created", draft: { currentVersion: 1, sourcePrivateVersionId: source.versionId } });
+    if (created.kind !== "created") return;
+    expect(created.draft.sourceUri).not.toBe(source.sourceUri);
+    expect(await repository.createKnowledgeDraft(ids.owner, ids.organization, {
+      ...input, copiedContent: { ...input.copiedContent, sourceUri: `arden-private-object://${randomUUID()}` },
+    })).toMatchObject({ kind: "replayed", draft: { id: created.draft.id } });
+    expect(await repository.createKnowledgeDraft(ids.owner, ids.organization, {
+      ...input, classification: "CONFIDENTIAL", copiedContent: { ...input.copiedContent, sourceUri: `arden-private-object://${randomUUID()}` },
+    })).toEqual({ kind: "idempotency-conflict" });
+    expect(await repository.createKnowledgeDraft(ids.manager, ids.organization, {
+      ...input, actorMembershipId: ids.managerMembership, idempotencyKey: randomUUID(),
+    })).toEqual({ kind: "unavailable" });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE arden_runtime");
+      await client.query("SET LOCAL search_path TO arden, public");
+      await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [ids.manager, ids.organization]);
+      const hidden = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM shared_draft WHERE shared_draft_id = $1", [created.draft.id]);
+      const hiddenVersion = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM shared_draft_version WHERE shared_draft_id = $1", [created.draft.id]);
+      expect(hidden.rows[0]?.count).toBe("0");
+      expect(hiddenVersion.rows[0]?.count).toBe("0");
+      await client.query("ROLLBACK");
+    } finally {
+      client.release();
+    }
+    const audit = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM arden.audit_event WHERE organization_id = $1 AND event_type = 'SHARED_DRAFT_CREATED'", [ids.organization]);
+    expect(audit.rows[0]?.count).toBe("1");
   });
 });

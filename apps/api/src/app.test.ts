@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider } from "./auth/provider.js";
-import type { ArdenDataRepository, DraftCursor, DraftListItem, DraftPatch, DraftWrite, MembershipSummary, OrganizationAdminData, PrivateDraft, StoredContentFields } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, CreateSharedDraftResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, SharedKnowledgeDraft, StoredContentFields } from "./db/repository.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationEmail, InvitationMailer } from "./email/smtp-mailer.js";
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
@@ -15,6 +15,9 @@ const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const otherOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const draftId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const versionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const sharedDraftId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+const sharedVersionId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+const createKey = "99999999-9999-4999-8999-999999999999";
 
 describe("API auth and private draft routes", () => {
   let root: string;
@@ -411,6 +414,64 @@ describe("API auth and private draft routes", () => {
     expect(tooLarge.statusCode).toBe(413);
   });
 
+  it("creates an independent shared copy of the author's private version and replays the same request", async () => {
+    repository.currentSource = await storage.write(repository.currentBody);
+    const originalUri = repository.currentSource.sourceUri;
+    const session = await desktopSession(app, "owner@example.test");
+    const url = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const headers = { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey };
+    const payload = { sourcePrivateVersionId: versionId, classification: "INTERNAL" };
+
+    const created = await app.inject({ method: "POST", url, headers, payload });
+    expect(created.statusCode).toBe(201);
+    expect(created.headers["cache-control"]).toBe("no-store");
+    expect(created.headers.etag).toBe('"1"');
+    expect(created.json()).toMatchObject({
+      id: sharedDraftId, title: "Review notes", classification: "INTERNAL", status: "ACTIVE",
+      body: "Private body", currentVersion: { version: 1 },
+    });
+    expect(repository.currentSource.sourceUri).toBe(originalUri);
+    expect(repository.sharedDraft?.sourceUri).not.toBe(originalUri);
+    expect(await storage.read(originalUri, repository.currentSource.contentHash)).toBe("Private body");
+    expect(await storage.read(repository.sharedDraft!.sourceUri, repository.sharedDraft!.contentHash)).toBe("Private body");
+
+    const replay = await app.inject({ method: "POST", url, headers, payload });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().id).toBe(sharedDraftId);
+    expect(repository.sharedCreates).toBe(1);
+    const conflict = await app.inject({ method: "POST", url, headers, payload: { ...payload, classification: "CONFIDENTIAL" } });
+    expect(conflict.statusCode).toBe(409);
+  });
+
+  it("denies missing sessions, foreign organizations or versions, and malformed create requests", async () => {
+    repository.currentSource = await storage.write(repository.currentBody);
+    const url = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const payload = { sourcePrivateVersionId: versionId, classification: "INTERNAL" };
+    const session = await desktopSession(app, "owner@example.test");
+    const headers = { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey };
+    expect((await app.inject({ method: "POST", url, headers: { origin: "http://localhost:5180", "idempotency-key": createKey }, payload })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: `/api/v1/organizations/${otherOrganizationId}/knowledge/drafts`, headers, payload })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, sourcePrivateVersionId: otherId } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, classification: "PUBLIC" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url, headers: { cookie: session, origin: "http://localhost:5180" }, payload })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, actorId: ownerId } })).statusCode).toBe(400);
+    expect(repository.sharedDraft).toBeNull();
+  });
+
+  it("keeps a content copy when database commit outcome is unknown", async () => {
+    repository.currentSource = await storage.write(repository.currentBody);
+    repository.failSharedCreate = true;
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({
+      method: "POST", url: `/api/v1/organizations/${organizationId}/knowledge/drafts`,
+      headers: { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey },
+      payload: { sourcePrivateVersionId: versionId, classification: "INTERNAL" },
+    });
+    expect(response.statusCode).toBe(500);
+    expect(repository.attemptedSharedCopyUri).not.toBeNull();
+    await expect(storage.read(repository.attemptedSharedCopyUri!, repository.currentSource.contentHash)).resolves.toBe(repository.currentBody);
+  });
+
   it("routes desktop-compatible sign-in through the same HttpOnly Supabase session", async () => {
     const response = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
@@ -468,6 +529,16 @@ class MemoryRepository implements ArdenDataRepository {
   currentBody = "Private body";
   currentVersion = 2;
   currentSource: StoredContentFields = { sourceUri: "arden-private-object://dddddddd-dddd-4ddd-8ddd-dddddddddddd", mimeType: "text/plain", contentHash: "not-used-in-forged-note" };
+  sharedDraft: SharedKnowledgeDraft | null = null;
+  sharedCreates = 0;
+  failSharedCreate = false;
+  attemptedSharedCopyUri: string | null = null;
+  private sharedRequestKey: string | null = null;
+
+  async requireActiveMembership(userId: string, requestedOrganization: string): Promise<ActiveMembership | null> {
+    return userId === ownerId && requestedOrganization === organizationId
+      ? { membershipId: ownerId, organizationId, userId } : null;
+  }
 
   async listMemberships(userId: string): Promise<MembershipSummary[]> {
     if (userId !== ownerId) return [];
@@ -531,6 +602,36 @@ class MemoryRepository implements ArdenDataRepository {
   async getDraft(userId: string, requestedOrganization: string, requestedDraft: string): Promise<PrivateDraft | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId || requestedDraft !== draftId) return null;
     return this.note();
+  }
+
+  async getPrivateContributionSource(userId: string, requestedOrganization: string, requestedVersion: string): Promise<PrivateContributionSource | null> {
+    if (userId !== ownerId || requestedOrganization !== organizationId || requestedVersion !== versionId) return null;
+    return {
+      versionId, organizationId, ownerMembershipId: ownerId, title: "Review notes",
+      sourceUri: this.currentSource.sourceUri, mimeType: this.currentSource.mimeType, contentHash: this.currentSource.contentHash,
+    };
+  }
+
+  async createKnowledgeDraft(_userId: string, _organizationId: string, input: {
+    sourceVersionId: string; classification: "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED";
+    idempotencyKey: string; expectedSource: PrivateContributionSource; copiedContent: StoredContentFields; requestId: string;
+  }): Promise<CreateSharedDraftResult> {
+    this.attemptedSharedCopyUri = input.copiedContent.sourceUri;
+    if (this.failSharedCreate) throw new Error("Synthetic database failure");
+    if (this.sharedDraft && this.sharedRequestKey === input.idempotencyKey) {
+      return this.sharedDraft.sourcePrivateVersionId === input.sourceVersionId && this.sharedDraft.classification === input.classification
+        ? { kind: "replayed", draft: this.sharedDraft } : { kind: "idempotency-conflict" };
+    }
+    this.sharedRequestKey = input.idempotencyKey;
+    this.sharedCreates += 1;
+    this.sharedDraft = {
+      id: sharedDraftId, organizationId, title: input.expectedSource.title,
+      classification: input.classification, sourcePrivateVersionId: input.sourceVersionId,
+      versionId: sharedVersionId, sourceUri: input.copiedContent.sourceUri,
+      mimeType: input.copiedContent.mimeType, contentHash: input.copiedContent.contentHash,
+      currentVersion: 1, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
+    };
+    return { kind: "created", draft: this.sharedDraft };
   }
 
   async canCreateDraft(userId: string, requestedOrganization: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
