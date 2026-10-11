@@ -37,11 +37,20 @@ async function ready(port, isStopped) {
   throw new Error('Backend did not become ready. The local port may be occupied or the connection may have failed.');
 }
 
-/** Launch the local frontend using the same pinned pnpm CLI that invoked us. */
-function launchFrontend(config) {
-  const pnpmCli = process.env.npm_execpath;
+/** Resolve frontend command and args, directly executing standalone binary .exe on Windows. */
+export function frontendCommand(pnpmCli = process.env.npm_execpath) {
   if (!pnpmCli) throw new Error('Run this command with pnpm, so the frontend uses the pinned package manager.');
-  return spawn(process.execPath, [pnpmCli, 'dev:web'], { cwd: root, windowsHide: true, detached: process.platform !== 'win32', stdio: 'inherit', env: { ...process.env, ARDEN_DEV_API_PORT: String(config.localApiPort) } });
+  const isExe = path.extname(pnpmCli).toLowerCase() === '.exe';
+  return {
+    executable: isExe ? pnpmCli : process.execPath,
+    args: isExe ? ['dev:web'] : [pnpmCli, 'dev:web'],
+  };
+}
+
+/** Launch the local frontend using the same pinned pnpm CLI that invoked us. */
+export function launchFrontend(config, spawnProcess = spawn) {
+  const { executable, args } = frontendCommand();
+  return spawnProcess(executable, args, { cwd: root, windowsHide: true, detached: process.platform !== 'win32', stdio: 'inherit', env: { ...process.env, ARDEN_DEV_API_PORT: String(config.localApiPort) } });
 }
 
 /** Own one session's lease/processes; injected I/O exercises cleanup without SSH. */
