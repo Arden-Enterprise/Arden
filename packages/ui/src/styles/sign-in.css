@@ -148,6 +148,8 @@
 }
 
 .sign-in-message strong { color: var(--arden-danger); font-size: 15px; font-weight: 400; line-height: 23px; }
+.sign-in-message.is-success { border-left-color: var(--arden-success); }
+.sign-in-message.is-success strong { color: var(--arden-success); }
 
 .sign-in-assurance {
   display: flex;
@@ -162,6 +164,9 @@
 }
 
 .sign-in-account-help { margin: 16px 0 0; color: var(--arden-text-muted); font-size: 13px; line-height: 20px; }
+.sign-in-mode-toggle { margin-top: 14px; text-align: center; color: var(--arden-text-muted); font-size: 13px; line-height: 20px; }
+.sign-in-mode-toggle button { padding: 0 2px; border: 0; background: transparent; color: var(--arden-accent); font-family: inherit; font-size: 13px; font-weight: 500; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.sign-in-mode-toggle button:hover { color: var(--arden-amber-hover); }
 
 .sign-in-preview-divider {
   display: flex;
@@ -238,9 +243,10 @@
   white-space: nowrap;
 }
 
-.invitation-entry-tabs { display: flex; gap: 8px; margin: 22px 0 18px; border-bottom: 1px solid var(--arden-line); }
-.invitation-entry-tabs button { min-height: 40px; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--arden-text-secondary); cursor: pointer; }
-.invitation-entry-tabs button[aria-pressed="true"] { border-bottom-color: var(--arden-accent); color: var(--arden-text-primary); }
+.sign-in-entry-tabs, .invitation-entry-tabs { display: flex; gap: 8px; margin: 22px 0 18px; border-bottom: 1px solid var(--arden-line); }
+.sign-in-entry-tabs button, .invitation-entry-tabs button { min-height: 40px; padding: 8px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--arden-text-secondary); cursor: pointer; font-family: inherit; font-size: 14px; font-weight: 500; transition: color 0.15s ease, border-color 0.15s ease; }
+.sign-in-entry-tabs button:hover, .invitation-entry-tabs button:hover { color: var(--arden-text-primary); }
+.sign-in-entry-tabs button[aria-pressed="true"], .invitation-entry-tabs button[aria-pressed="true"] { border-bottom-color: var(--arden-accent); color: var(--arden-text-primary); font-weight: 600; }
 .workspace-select-card > small { display: block; margin-top: 18px; color: var(--arden-text-muted); line-height: 1.5; }
 
 .is-unavailable .workspace-membership-status { color: var(--arden-text-muted); }

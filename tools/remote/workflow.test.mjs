@@ -5,7 +5,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { runSession } from './cli.mjs';
+import { runSession, frontendCommand } from './cli.mjs';
 import { allowedSource, snapshot, delta } from './source.mjs';
 import { fingerprint } from '../../deploy/hosted/backend-entry.mjs';
 
@@ -188,3 +188,14 @@ test('fingerprint tolerates deleted optional manifests but rejects required dele
   await rm(path.join(root, 'apps/api/package.json'));
   await assert.rejects(fingerprint(root), { code: 'ENOENT' });
 });
+
+test('frontendCommand resolves standalone .exe directly and wraps js in node', () => {
+  const exeResult = frontendCommand('C:\\Users\\user\\AppData\\Local\\pnpm\\pnpm.exe');
+  assert.equal(exeResult.executable, 'C:\\Users\\user\\AppData\\Local\\pnpm\\pnpm.exe');
+  assert.deepEqual(exeResult.args, ['dev:web']);
+
+  const jsResult = frontendCommand('/usr/local/lib/node_modules/pnpm/bin/pnpm.cjs');
+  assert.equal(jsResult.executable, process.execPath);
+  assert.deepEqual(jsResult.args, ['/usr/local/lib/node_modules/pnpm/bin/pnpm.cjs', 'dev:web']);
+});
+
