@@ -33,6 +33,7 @@ The organization, session-context, and owner-private note contract for the first
 ## 3. Knowledge ownership and governance
 
 - Personal originals remain private. Sharing/contributing is explicit, with a preview of copied text/files, audience, and authority. A separate copy is not an implicit live mirror.
+- The first shared-draft API permits only an authenticated author to copy an owned private-note version into a separate protected object. It does not expose the private source ID/URI to shared readers, grant audience access, or submit the copy for review. See [Group 1 create contract](mainflow-2-group-1-create.md).
 - Prevent private back-links through provenance, attachments, mentions, derived summaries, citations, graph edges, or review history. Shared readers receive only provenance they are permitted to inspect.
 - Distinguish personal notes, shared drafts, official publications, external source objects, and work briefs in data and UI. External sync does not confer official approval.
 - Check a reviewer's current authority for the responsible department, any team/project attribute filters, intended audience, and submitted version at decision time; deny self-approval. Department is the highest reviewer-authority scope; team/project attributes do not create hierarchy or inherited approval permission. One eligible reviewer may approve unless the organization's recorded policy requires additional review steps. Assignment to a request does not itself confer broader access to personal originals or other content.

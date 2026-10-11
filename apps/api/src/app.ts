@@ -4,6 +4,7 @@ import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
+import type { KnowledgeClassification } from "./knowledge/policy.js";
 
 const maxBodyBytes = 100_000;
 const maxTitleCodePoints = 200;
@@ -24,6 +25,7 @@ type AppDependencies = {
 };
 
 type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean };
+type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification: KnowledgeClassification };
 
 export function buildApp(dependencies: AppDependencies) {
   const app = Fastify({
@@ -48,7 +50,7 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
   const requestActor = (request: FastifyRequest, reply: FastifyReply) =>
-    requestContext(request, reply, dependencies.auth, dependencies.secureCookies, dependencies.testActor);
+    requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, dependencies.testActor);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
       return reply.code(400).send(safeError("INVALID_REQUEST", "The request is invalid.", request.id));
@@ -435,6 +437,95 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  app.post<{ Params: { organizationId: string }; Body: CreateSharedDraftBody }>("/api/v1/organizations/:organizationId/knowledge/drafts", {
+    schema: {
+      params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
+      headers: { type: "object", required: ["idempotency-key"], properties: {
+        "idempotency-key": { type: "string", pattern: uuidPattern },
+      } },
+      body: { type: "object", additionalProperties: false, required: ["sourcePrivateVersionId", "classification"], properties: {
+        sourcePrivateVersionId: { type: "string", pattern: uuidPattern },
+        classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+      } },
+    },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    const { organizationId } = request.params;
+    let copied: Awaited<ReturnType<PrivateContentStorage["write"]>> | null = null;
+    let committed = false;
+    let creationAttempted = false;
+    try {
+      const actor = await dependencies.repository.requireActiveMembership(context.userId, organizationId);
+      if (!actor) return reply.code(404).send(resourceNotAvailable(request.id));
+      const source = await dependencies.repository.getPrivateContributionSource(
+        context.userId, organizationId, request.body.sourcePrivateVersionId,
+      );
+      if (!source) return reply.code(404).send(resourceNotAvailable(request.id));
+      if (source.mimeType !== "text/plain" || !isValidText(source.title, 800, maxTitleCodePoints)) {
+        return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note version cannot be copied.", request.id));
+      }
+      const body = await dependencies.storage.read(source.sourceUri, source.contentHash);
+      if (!isValidText(body, maxBodyBytes, maxBodyBytes)) {
+        return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note version cannot be copied.", request.id));
+      }
+      copied = await dependencies.storage.write(body);
+      creationAttempted = true;
+      const result = await dependencies.repository.createKnowledgeDraft(context.userId, organizationId, {
+        actorMembershipId: actor.membershipId,
+        sourceVersionId: source.versionId,
+        classification: request.body.classification,
+        idempotencyKey: request.headers["idempotency-key"] as string,
+        expectedSource: source,
+        copiedContent: copied,
+        requestId: request.id,
+      });
+      if (result.kind === "unavailable" || result.kind === "idempotency-conflict") {
+        await dependencies.storage.remove(copied.sourceUri);
+        copied = null;
+        return result.kind === "unavailable"
+          ? reply.code(404).send(resourceNotAvailable(request.id))
+          : reply.code(409).send(safeError("IDEMPOTENCY_CONFLICT", "Use a new idempotency key for a different request.", request.id));
+      }
+      if (result.kind === "created") committed = true;
+      else {
+        await dependencies.storage.remove(copied.sourceUri);
+        copied = null;
+      }
+      const responseBody = result.kind === "created" ? body
+        : await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
+      reply.header("Cache-Control", "no-store");
+      reply.header("ETag", etag(result.draft.currentVersion));
+      return reply.code(result.kind === "created" ? 201 : 200).send({
+        id: result.draft.id,
+        organizationId,
+        title: result.draft.title,
+        classification: result.draft.classification,
+        status: "ACTIVE",
+        body: responseBody,
+        currentVersion: {
+          id: result.draft.versionId,
+          version: result.draft.currentVersion,
+          mimeType: result.draft.mimeType,
+          contentHash: result.draft.contentHash,
+        },
+        createdAt: result.draft.createdAt.toISOString(),
+        updatedAt: result.draft.updatedAt.toISOString(),
+      });
+    } catch (error) {
+      // A failed COMMIT acknowledgement is ambiguous: the database may already
+      // reference this copy. Keep it until a reconciler can prove it is orphaned.
+      if (copied && !committed && !creationAttempted) {
+        try { await dependencies.storage.remove(copied.sourceUri); }
+        catch (cleanupError) {
+          request.log.error({ errorType: safeErrorType(cleanupError), requestId: request.id }, "Shared draft copy cleanup failed");
+        }
+      }
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft creation failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
   app.post<{ Params: { organizationId: string }; Body: DraftWrite }>("/api/v1/organizations/:organizationId/private-workspace/drafts", {
     schema: {
       params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
@@ -570,7 +661,7 @@ export function buildApp(dependencies: AppDependencies) {
   return app;
 }
 
-async function requestContext(request: FastifyRequest, reply: FastifyReply, auth: AuthProvider | null, secureCookies: boolean, testActor?: SessionContext): Promise<SessionContext | null> {
+async function requireAuthenticatedActor(request: FastifyRequest, reply: FastifyReply, auth: AuthProvider | null, secureCookies: boolean, testActor?: SessionContext): Promise<SessionContext | null> {
   if (testActor) return testActor;
   if (!auth) {
     authUnavailable(reply, request);

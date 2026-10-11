@@ -37,6 +37,8 @@ The API uses Nodemailer as its SMTP client; no provider SDK is needed for Gmail 
 
 `pnpm --filter @arden/api test` includes opt-in live Supabase Auth and PostgreSQL/RLS suites. Configure `ARDEN_TEST_SUPABASE_*` with a synthetic account in a dedicated Supabase project. Configure `ARDEN_TEST_DATABASE_URL` with a dedicated PostgreSQL URL to an already-migrated disposable database named `arden_test_*`; the suite creates and removes its own synthetic Arden profiles, organization, memberships, roles, and notes. Both suites skip when their settings are absent. Never point either at shared Coolify environments.
 
+Mainflow 2 shared-draft creation requires migrations 0006, 0007, and 0008 in sequence before the new API route is used. Migration 0008 adds an author-scoped idempotency key and private-source-only runtime RLS; it does not enable editing, submission, review, or publication. See [the function-1 contract](mainflow-2-group-1-create.md). Verify 0008 with the opt-in disposable PostgreSQL/RLS suite before deployment; local unit tests alone cannot establish SQL policy behavior.
+
 For Coolify, mount `ARDEN_PRIVATE_STORAGE_ROOT` to persistent private storage with API-only access and include it in the protected backup/restore plan with PostgreSQL. Production API startup refuses to run when this path is unset. Set `ARDEN_CORE_URL` in the desktop launch environment to the public HTTPS origin; the desktop bridge rejects non-loopback HTTP and URL paths. A packaged settings UI and an actual Coolify stack are not implemented.
 
 ## 2. Ports, environment, and configuration
