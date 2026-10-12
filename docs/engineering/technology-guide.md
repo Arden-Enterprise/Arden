@@ -6,7 +6,7 @@ All implementation/testing work also follows [code-quality.md](code-quality.md).
 
 ## 1. Stack inventory
 
-Inventory updated 5 October 2026:
+Deployment and hosted identity status updated 12 October 2026. Library versions below retain the 5 October inventory; verify current manifests and lockfile before using them:
 
 | Area | Present in the scaffold | Target, not yet implemented |
 | --- | --- | --- |
@@ -15,14 +15,14 @@ Inventory updated 5 October 2026:
 | Desktop | Electron 44.4.3; electron-vite 5.0.0; shared React UI; narrow preload IPC backed by Electron safeStorage | Signed Windows installer/update flow |
 | API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15; Supabase Auth via `@supabase/supabase-js` 2.117.2; BFF sign-in/sign-up/session/org-create/invitation/private-draft routes; ordered SQL migration runner | Organization admin list/role/department/member lifecycle routes, Supabase Realtime notifications |
 | Data | Local `pgvector/pgvector:pg17` container; ordered SQL migrations 0001/0002; transaction-local actor/org/admin/invitation RLS context and non-bypass Arden runtime role; protected local note-object storage | Drizzle Kit migration authoring for future domain schema, full-text/vector search, Supabase Storage integration |
-| Identity | Supabase Auth email/password through a server-only Fastify adapter; verified user UUID maps to `user_account.user_id`; Arden-owned organization bootstrap and hashed-token email invitation lifecycle; SMTP through Nodemailer 10.0.10. Fenced test adapters support loopback-only local sign-in and a no-login synthetic actor for the SSH-only Kiet Local `dev-2` slot | Recovery |
+| Identity | Supabase Auth email/password through a server-only Fastify adapter; verified user UUID maps to `user_account.user_id`; Arden-owned organization bootstrap and hashed-token email invitation lifecycle; SMTP through Nodemailer 10.0.10. Fenced test adapters support loopback-only local sign-in and the historical SSH-only dev-2 no-login target; the latter is inactive in the current four Supabase-authenticated hosted slots | Recovery |
 | Editor | React textarea-based session previews for private notes and shared knowledge | BlockNote core behind a versioned Arden document interface |
 | Graph | Local decorative Figma SVGs; no graph view or authorized graph data | Sigma.js + Graphology on authorized API projections |
 | Jobs | None | pg-boss in `apps/worker` |
 | Storage | Protected local note-content volume via `LocalPrivateContentStorage`; opaque UUID `source_uri`, SHA-256 integrity check, production persistent mount required | Broader attachment/document storage; optional S3-compatible backend later |
 | AI | Explicit prerecorded Ask Arden sample; no model request | Arden gateway to customer-controlled Ollama/compatible private endpoint |
 | Tests | Vitest 5.0.1, Fastify auth/private-note tests, real-PostgreSQL repository/RLS test gated by `ARDEN_TEST_DATABASE_URL`, pure UI preview and API-client tests | Live Supabase Auth smoke, native Electron interaction, broader Playwright flows |
-| Deployment | Local database Compose; Ubuntu/Windows CI | Ubuntu 24.04 + Coolify, versioned full application Compose, isolated staging/production |
+| Deployment | Local database Compose; Ubuntu/Windows CI; hosted development commands and four Coolify-managed development API/database slots with local Vite frontends | Immutable release application images, complete isolated staging/production deployments and recovery evidence |
 
 The container image includes pgvector software; the scaffold does not yet create the extension or prove embedding queries work. The Electron build is not a packaged installer. No installed auth/schema/query/editor/graph/job library should be inferred from this target table.
 
