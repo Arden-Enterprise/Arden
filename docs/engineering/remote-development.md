@@ -4,13 +4,32 @@
 
 | Environment | Frontend | API | Database |
 | --- | --- | --- | --- |
-| `dev-1` through `dev-4` | Each developer's computer, Vite hot reload | Separate non-root container per slot | Separate database/login per slot in one development PostgreSQL instance |
+| `dev-1` through `dev-4` | Each developer's computer, Vite hot reload | Separate non-root container per slot | Separate Arden application database/login per slot; placement described below |
 | Staging | Immutable release, when provisioned | Reviewed release image, when provisioned | Dedicated PostgreSQL instance, volume, secret |
 | Production | Same approved release artifact | Same approved image digest | Dedicated PostgreSQL instance, volume, secret |
 
-This replaces the two hosted frontend slot proposal. The implementation supports the existing API health scaffold. It is **not four full Supabase projects**: Auth, Storage, Realtime, domain migrations, worker, release applications, and deployment automation remain to implement. Supabase is the accepted platform direction; see [decision 0001](../decisions/0001-supabase-and-hybrid-development.md). Four logical databases do not create four self-hosted Supabase projects.
+This replaces the two hosted frontend slot proposal. The development command supports the current Fastify API, including Supabase Auth and the merged organization/private-note flows. It is **not four full Supabase projects**. Supabase Storage/Realtime integration, workers and release applications remain separate work. Supabase is the accepted platform direction; see [decision 0001](../decisions/0001-supabase-and-hybrid-development.md).
 
 Development roles cannot routinely connect to one another's databases, but share compute, maintenance, and a failure domain. Administrator/host access can inspect all environments. Use synthetic data, separate external sandboxes, and no production credentials. Staging/production never share the development database instance.
+
+### Current team layout
+
+The operating layout reconciled on 12 October 2026 differs from the fresh bootstrap template. Do not infer an API's database from its Coolify display label or from an unused logical database with a similar name. Inspect its private runtime configuration before any migration.
+
+| Person / label | Slot | Arden application data | Supabase identity |
+| --- | --- | --- | --- |
+| Zack / `zack-local` | `dev-1` | Own Arden schema in the Zack Supabase PostgreSQL service | Zack Supabase Auth |
+| Kiet / `kiet-local` | `dev-2` | Own Arden schema in the Kiet Supabase PostgreSQL service | Kiet Supabase Auth |
+| Khoi / `khoi-local` | `dev-3` | Own Arden schema in the existing Khoi Supabase PostgreSQL service | Shared Khoi/Hung Supabase Auth |
+| Hung / `hung-local` | `dev-4` | Dedicated logical application database in the managed development PostgreSQL service | Shared Khoi/Hung Supabase Auth |
+
+All four APIs are Coolify-managed resources in the development Compose service. Each has its own uploaded source/state, dependency volumes, persistent private-note directory and loopback API port. Coolify may render personal labels with spaces/capital letters. The `-local` label describes the development workflow; these backends run on the server.
+
+Khoi and Hung share identity accounts, not Arden application records. An Arden organization or note created in one slot is not automatically copied to another. This saves the cost of operating a fourth full Supabase stack. It also shares Auth configuration, availability and test-email effects, so coordinate changes to that Auth service. Separate databases on a shared host are not independent machines or high availability.
+
+Zack and Hung were initialized from application main `972f0f9` with migrations 0001–0005. Existing Kiet/Khoi source and application data were preserved. A slot may therefore contain teammate work newer than main. Starting `dev:remote` reconciles that slot's backend to **your local checkout**, including removals from its prior manifest; preserve unmerged work and choose the intended branch before starting.
+
+The command was started successfully from the owner's computer. First login and coding-session acceptance on each other teammate's computer are separate onboarding steps. Service health does not establish complete application authorization, SMTP delivery, backup restoration or production readiness.
 
 ## Contributor setup
 
@@ -71,7 +90,21 @@ The bootstrap requires four distinct existing non-root SSH accounts in slot orde
 
 The development PostgreSQL instance has a 768 MiB limit; each API has 384 MiB, plus CPU/process/log limits. These are scaffold limits, not full-product capacity guarantees. Database initialization creates four non-superuser logins, prohibits role/database creation, and revokes public `CONNECT` grants. Initialization runs only for a fresh named volume. Never delete a volume to rerun it. Normal shutdown does not use `down -v`.
 
-The operator grants each account only its required root-owned `start.py` invocation before onboarding writers. Do not share accounts, grant general sudo/Docker access to contributors, or assign one account multiple slots. The root-owned `slot-owners.json` records the permitted Unix UID for each slot; upload checks the login UID and startup checks sudo's caller UID. Host administrators retain control of every slot. Code sync is unprivileged; container start is privileged and limited to the caller's assigned development slot.
+The default contributor policy grants only the required root-owned `start.py` invocation. Use separate accounts and one assigned writer slot per person. The team's separately authorized full passwordless-sudo grants are administrator access: they can bypass slot/filesystem checks and reach other services, data and secrets. Inspect actual policy and keep these two access levels distinct; do not broaden permissions automatically when a command fails. The root-owned `slot-owners.json` records the permitted Unix UID for each slot; normal uploads check the login UID and normal startup checks sudo's caller UID. Code sync is unprivileged; the start helper admits only assigned development slots.
+
+### Database and storage readiness before onboarding
+
+An empty database container is not a migrated Arden backend. Before the first coding session:
+
+1. Identify the API's **actual** database and Auth targets from protected runtime settings. Back up the affected source/configuration and database; check writer occupancy and use the maintenance fence for coordinated changes.
+2. Inspect `public.arden_schema_migrations`, schema ownership, populated organizations and the current approved migration set. A partially completed setup must resume only pending migrations. Do not edit applied SQL or erase a database to retry setup.
+3. Apply the exact reviewed migrations through the approved operator migration connection. The initial migration manages extensions and a cluster role; PostgreSQL reserves changes to the `BYPASSRLS` attribute for a superuser. Later setup migrations seed tables with forced RLS. A restricted normal API/schema-owner connection is insufficient for these administrative operations. Keep administrator credentials outside API containers; preserve or assign domain object ownership to the separate migration role after bootstrap. Review later migrations individually rather than granting permanent superuser access to the API. [PostgreSQL ALTER ROLE](https://www.postgresql.org/docs/17/sql-alterrole.html), [row security](https://www.postgresql.org/docs/17/ddl-rowsecurity.html).
+4. Verify the API login is non-superuser, non-bypass, cannot create roles/databases, and can assume `arden_runtime`. Confirm its application database is separate from other slots. Do not modify Supabase-owned Auth schemas as part of Arden migrations.
+5. Configure the approved Supabase URL and public anon/publishable key. Compare the API's key with the managed gateway's configuration and check Auth health separately from database readiness. The auth adapter does not require a service-role key.
+6. Mount `ARDEN_PRIVATE_STORAGE_ROOT` to a separate writable persistent directory. When its container target is nested inside the read-only `/workspace` bind, create the empty target directories before startup; Docker cannot create them inside an already read-only mount. Retain any existing note bodies and database references. Inspect the resulting bind type, canonical source path, write flag and container-user access.
+7. Inspect the complete generated Compose service inventory and persistent-volume mappings. Validation success alone does not prove an existing database service or its storage was retained. Deploy only after these checks; confirm API readiness and Auth health for each slot, then clear maintenance through successful completion of its context.
+
+Logical database dumps and retained configuration provide a recovery starting point. A valid dump listing is not evidence of a successful restore. Keep the protected recovery procedure and migration journal with the operator, and verify restoration separately before promising release readiness.
 
 For an older installation that used one owner, stop its development writers and prevent startup during the operator update. Back up source and lease metadata privately, copy the reviewed helpers including `slot_access.py` and `operation_fence.py`, create protected root-owned slot assignments, keep each slot directory/identity root-owned, and move lease/manifest/status/lock files into an individually owned `state` directory alongside `source`. Assign distinct source/state owners, update Compose to use a separate pnpm cache volume per slot, and verify the scoped sudo grants. Create `ops/development.lock` once as a root-owned regular file with mode `0644`, inside root-owned `ops` without group/world write permission. Preserve the previous configuration for rollback. Do not rerun provisioning or delete database volumes. Old clients cannot upload until this migration is complete. This PR does not migrate an existing host.
 
@@ -85,7 +118,7 @@ Bootstrap uses Docker Compose directly. Running those containers alone does **no
 
 ## Coolify adoption
 
-Use one Arden project with `development`, `staging`, and `production` environments. Development contains the four API slots and shared development PostgreSQL; staging and production each contain their own PostgreSQL service. The local frontends remain on contributors' computers. The release applications and full Supabase services remain planned.
+Use one Arden project with `development`, `staging`, and `production` environments. The fresh bootstrap template places four databases in shared development PostgreSQL. The [current team layout](#current-team-layout) also uses existing managed Supabase services; preserve their actual placement rather than rerunning that template. Staging and production each contain their own database resources. The local frontends remain on contributors' computers. Release applications remain separate work.
 
 An operator imports the reviewed Compose definitions as three Docker Compose services, without deploying them immediately. Keep actual service UUIDs, host paths, environment files, database secrets, migration journals, and backups in protected private storage. This is an operator migration, not a daily developer command.
 

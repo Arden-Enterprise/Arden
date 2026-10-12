@@ -2,9 +2,30 @@
 
 This guide takes a new teammate from installing tools to editing Arden, seeing changes, and opening a pull request. Use it for the **local frontend with hosted development backend** workflow.
 
-**Setup status, 4 October 2026:** the hosted development services are registered in Coolify. Individual teammate accounts, protected slot assignments, scoped startup permissions, and deployment of the reviewed helper/backend-image updates still need an administrator handoff before broader onboarding. [PR #2](https://github.com/Arden-Enterprise/Arden/pull/2) contains the development commands and workflow regression tests; use its branch while it is open and `main` after it merges. You can prepare your computer now; start a hosted coding session after the maintainer confirms your access is ready.
+**Source to use:** the development commands are merged into `main`. Start from current `main`, then create your task branch. Each teammate needs their own private SSH setup and `.private/remote.json`; these are deliberately absent from GitHub. Use the slot mapping below and have the operator confirm your handoff is ready.
 
-This is an application scaffold. The sample graph UI and API health checks exist; Supabase Auth, Storage, Realtime, product features, and staging/production application releases are still to implement. The staging and production resources currently contain databases only.
+The current application includes Supabase Auth through the Fastify API, organization and invitation flows, and private-note APIs. Some screens are still previews. Supabase Storage/Realtime integration and staging/production application releases remain unfinished; see the [technology inventory](technology-guide.md#1-stack-inventory).
+
+## The short version
+
+**Once per computer:** install Git, Node 24 and pinned pnpm; clone Arden; install dependencies; configure your own SSH key and the private settings supplied by the operator. Sections 2–6 explain every step.
+
+**Every coding session:** open a terminal in the Arden folder and run:
+
+```powershell
+pnpm.cmd dev:remote
+```
+
+Open `http://127.0.0.1:5180`. Leave that terminal running while coding. Saving a UI file updates your local browser; saving an allowed backend file sends it to your assigned server slot and reloads the API. Press **Ctrl+C** when finished. You do not need to push a Git commit or press Deploy in Coolify to see a saved development edit.
+
+| Teammate | Coolify label | `defaultSlot` in private settings |
+| --- | --- | --- |
+| Zack | `zack-local` | `dev-1` |
+| Kiet | `kiet-local` | `dev-2` |
+| Khoi | `khoi-local` | `dev-3` |
+| Hung | `hung-local` | `dev-4` |
+
+The names are display labels. Commands use the internal `dev-N` value automatically from your private file. Your server login is supplied privately and can differ from the label. Each person keeps their own SSH key; no shared password is needed for daily coding.
 
 ## Contents
 
@@ -47,7 +68,7 @@ flowchart LR
     Git[Commits and pull requests] --> GitHub[GitHub repository]
 ```
 
-There are four development slots. Each has its own API and database login; the four databases share one development PostgreSQL service. Staging and production have separate PostgreSQL services. Use synthetic development data.
+There are four development slots. Each has its own API, Arden application database/login, uploaded source, dependency volumes and private-note storage. PostgreSQL placement can differ by slot; consult the [current hosted layout](remote-development.md#current-team-layout) rather than assuming every API uses the same database service. Khoi and Hung share a Supabase Auth service, so their sign-in accounts are in the same Auth pool; their Arden organization and note data remain in separate databases. Use synthetic development data.
 
 Your Coolify display label follows `YOUR_NAME-local`. Despite the label, the API and database run on the server. The frontend runs on your computer. Coolify may display the label with spaces and capital letters.
 
@@ -118,21 +139,14 @@ Set-Location "$env:USERPROFILE\Documents\GitHub"
 
 **If an `Arden` folder already exists, do not overwrite it.** Use your existing checkout after checking `git status`, or choose a different empty clone destination and ask the maintainer which branch to use. Do not discard existing changes to follow this guide.
 
-While PR #2 is open, the approved setup branch is:
-
-```powershell
-git clone --branch codex/feat/hosted-development https://github.com/Arden-Enterprise/Arden.git Arden
-Set-Location Arden
-```
-
-**After PR #2 merges**, new teammates should instead clone `main`:
+New teammates clone `main`:
 
 ```powershell
 git clone https://github.com/Arden-Enterprise/Arden.git Arden
 Set-Location Arden
 ```
 
-Run only the clone command for the maintainer-approved source. If the setup branch no longer exists, use `main` after confirming the PR merged.
+For an existing checkout, inspect `git status`, then fetch current main following [current main context](rules/main-context.md). A clean checkout on `main` can use `git pull --ff-only origin main`. Preserve unfinished branches and edits; ask Codex to help integrate current main if needed. Do not discard work to follow this guide.
 
 Check the folder and install dependencies:
 
@@ -161,7 +175,7 @@ Create a topic branch for your work. Replace the example with a specific task na
 git switch -c feat/your-task-description
 ```
 
-Until PR #2 is merged, this branch depends on it. Tell the maintainer about that dependency when opening your PR; merge the setup PR first. After it merges, new tasks should start from current `main` as described in [daily use](#10-save-work-and-open-a-pull-request).
+Start new task branches from current `main` as described in [daily use](#10-save-work-and-open-a-pull-request). If your task deliberately depends on other unmerged work, agree on its base and integration order with the maintainer.
 
 ## 5. Set up SSH access
 
@@ -338,17 +352,21 @@ The command:
 5. Starts your local frontend after API/database readiness succeeds.
 6. Watches saved backend changes while Vite watches your frontend.
 
-Wait for **`backend ready`** and the frontend's **Local** URL. Open the exact URL printed, using port `5180` on your computer. Keep the terminal running. The sample Arden UI should appear.
+Wait for **`backend ready`** and the frontend's **Local** URL. Open the exact URL printed, using port `5180` on your computer. Keep the terminal running. A new browser normally shows **Sign in to Arden**. An existing signed-in session can show its current workspace.
 
-To check the connection from your browser, append `/api/health/ready` to that Local URL; for example, `http://localhost:5180/api/health/ready` if Local uses `localhost`. Expected response: `{"status":"ok"}`. This checks the scaffold API's database connection, not all future product features.
+To check the connection from your browser, append `/api/health/ready` to that Local URL; for example, `http://localhost:5180/api/health/ready` if Local uses `localhost`. Expected response: `{"status":"ok"}`. This checks API/database readiness; it does not prove Supabase sign-in, membership or every product feature works.
+
+Your **SSH account** connects your computer to the development slot. Your **Arden application account** signs you into the product; they are different accounts. Use an approved development account for real backend flows. If account creation requires email verification and no message arrives, ask the operator to check the development Auth/email configuration. Do not disable authentication to bypass the problem.
+
+For screen-only work, the sign-in page has **Open member preview**, **Preview first-run setup**, and **Open admin preview** options. They use synthetic data and do not authenticate or save records to the server. Use a real application session when verifying persistent backend behavior.
 
 ### See your first change
 
-Open `packages/ui/src/ArdenShell.tsx` in your editor. Find the sample node title `Release readiness`, change that text temporarily, and **save**. Your local page should update. Restore the original text and save once more unless that edit is part of your actual task.
+While viewing the sign-in page, open `packages/ui/src/sign-in/SignInPage.tsx`. Find the heading text `Sign in to Arden`, change it temporarily to `Sign in to Arden - development`, and **save**. The visible heading should update without running another upload/deploy command. Restore the original text and save once more unless the edit belongs to your actual task. If already signed in, use a separate private browser window to view the sign-in screen without disrupting that session.
 
 ### Stop at the end of a session
 
-Press **Ctrl+C** in the development terminal and wait for the prompt to return. Your local frontend and tunnel stop; your writer reservation is released. The server API/database keep running and database data is preserved.
+Press **Ctrl+C** in the development terminal and wait for the prompt to return. Normal cleanup stops your local frontend/tunnel and releases the writer reservation. The server API/database keep running and database data is preserved. If Windows asks **Terminate batch job (Y/N)?**, answer `Y` to close your development launcher. A launcher that terminates the process before cleanup can leave the reservation active until its five-minute expiry; check `pnpm.cmd remote:status` before starting another session.
 
 After a crash or lost connection, an unreleased reservation expires after **five minutes**. Restore connectivity and restart `pnpm.cmd dev:remote`; it reconciles the allowed backend files again. Do not delete another writer's reservation.
 
@@ -356,7 +374,8 @@ After a crash or lost connection, an unreleased reservation expires after **five
 
 | Path | What belongs here | What happens when you save |
 | --- | --- | --- |
-| `packages/ui/src/ArdenShell.tsx` | Current shared sample UI | Local frontend hot reload |
+| `packages/ui/src/app/ArdenShell.tsx` | Shared application shell and screen composition | Local frontend hot reload |
+| `packages/ui/src/sign-in/SignInPage.tsx` | Sign-in/account-creation screen | Local frontend hot reload |
 | `packages/ui/src/styles.css` | Shared UI styles | Local frontend hot reload |
 | `apps/web/src/main.tsx` | Web entry point | Local frontend hot reload |
 | `apps/api/src/` | Current API routes and server code | Allowed files upload; the hosted API restarts |
@@ -404,7 +423,7 @@ Keep logs private. Before sharing an excerpt, remove server endpoints, account n
 | Use a server terminal or database console | Only within explicitly approved access/task scope |
 | Delete resources/volumes, restore backups, change staging/production | Authorized operator using a reviewed procedure |
 
-The development database service is shared infrastructure. Stopping it affects all four slots. Full-stack deploy/restart can also interrupt teammates. Keep routine code changes in the development command and ask the operator about service operations. [Coolify Compose service documentation](https://coolify.io/docs/services/configuration/docker-compose)
+The development database service is shared infrastructure; inspect the [actual slot placement](remote-development.md#current-team-layout) to see which APIs depend on it. Stopping a Supabase service can also interrupt its dependent APIs or shared Auth. Full-stack deploy/restart can interrupt teammates. Keep routine code changes in the development command and ask the operator about service operations. [Coolify Compose service documentation](https://coolify.io/docs/services/configuration/docker-compose)
 
 Staging is intended for reviewed release validation and production for approved releases. Their database resources being healthy does not mean Arden applications are deployed there. The current `dev:remote` workflow cannot publish a release to either environment.
 
@@ -418,7 +437,7 @@ Staging is intended for reviewed release validation and production for approved 
 4. Confirm the SSH agent has your key loaded, then run `pnpm.cmd remote:status` and `pnpm.cmd dev:remote`.
 5. Open the Local URL printed in the terminal and code normally.
 
-**For a new task after the setup PR merges**, first stop the development command and finish/preserve your existing work. Only with a clean checkout:
+**For a new task**, first stop the development command and finish/preserve your existing work. Only with a clean checkout:
 
 ```powershell
 git switch main
@@ -448,7 +467,7 @@ If a private file appears in the tracked changes, stop before displaying/publish
 Stage **only the paths belonging to your task**. Example for a UI task; adjust the list to match your actual changes:
 
 ```powershell
-git add -- packages/ui/src/ArdenShell.tsx packages/ui/src/styles.css
+git add -- packages/ui/src/app/ArdenShell.tsx packages/ui/src/styles.css
 git diff --cached --name-only
 ```
 
@@ -477,9 +496,9 @@ On GitHub:
 2. Use **Compare & pull request**, or **Pull requests → New pull request** and select your task branch.
 3. Normally use `main` as the base. For a branch depending on the unmerged setup work, agree on its base/merge order with the maintainer first.
 4. Fill in the template: purpose, behavior, actual verification, limitations, and any migration/setup implications. Include sanitized screenshots for UI changes.
-5. Create the PR and request a teammate review. Let the configured AI reviewers run; inspect their actual comments and coverage, including skipped or unavailable runs.
+5. Create the PR. Human review is optional. Let the configured AI reviewers run; inspect their actual comments and coverage, including skipped or unavailable runs.
 6. Evaluate feedback, commit related fixes together, and push one follow-up batch after an active review finishes.
-7. Merge only after independent human review, required CI/checks, resolved required discussions, and maintainer authorization. A green AI badge alone is not approval.
+7. Merge only after required CI/checks, resolved required discussions, reviewed feedback and maintainer authorization. A green AI badge alone is not approval.
 
 Aim for one focused task per PR. Follow the repository's current review-size and reviewer-capacity rules in [AGENTS.md](../../AGENTS.md) and [CONTRIBUTING.md](../../CONTRIBUTING.md). Creating a PR, merging it, and deploying a release are separate milestones.
 
@@ -513,7 +532,7 @@ Close another local development/preview command first if it already uses ports `
 | --- | --- |
 | `git`, `node`, npm, or pnpm is not recognized | Reopen the terminal after installation. Recheck step 3. If still missing, ask for help fixing the tool's PATH rather than changing the repository. |
 | PowerShell says `pnpm.ps1`/`npm.ps1` cannot run | Use `pnpm.cmd`/`npm.cmd` as shown. |
-| Missing `dev:remote` script, template, or API source | Confirm you are in the complete checkout root and on the approved setup branch. `main` does not contain this workflow until PR #2 merges. |
+| Missing `dev:remote` script, template, or API source | Confirm you are in the complete Arden checkout root. Fetch current `main` and safely update your branch; the command is already merged. |
 | Frozen-lockfile install fails | Confirm Node 24/pinned pnpm and the approved branch. Keep the lockfile; report the error. For an intentional dependency edit, update manifests and lockfile together. |
 | `Could not resolve hostname YOUR_SERVER_ALIAS` | Check `%USERPROFILE%\.ssh\config`, especially `config.txt`, the `Host` alias, and the real `HostName`. Use the private `ssh -G` check in step 5. |
 | SSH says permission denied or asks for a server password | Ask the administrator to confirm your account/public key. Check `IdentityFile`, run `ssh-add`, then repeat the unattended login check. |
@@ -545,7 +564,7 @@ For help, send the step number, operating system, tool versions, command name wi
 - [ ] My private settings contain my assigned slot; Git ignores them and does not track them.
 - [ ] My task branch is selected and another writer is not using my slot.
 - [ ] `dev:remote` reaches backend readiness and prints the local frontend URL.
-- [ ] I can see the sample UI and a saved local UI edit updates it.
+- [ ] I can see the sign-in/workspace UI and a saved local UI edit updates it.
 - [ ] I know how to stop with Ctrl+C, commit a coherent change, and open a reviewed PR.
 
 After one-time setup, the normal start command is:
@@ -627,10 +646,10 @@ Follow the same readiness, editing, shutdown, and PR steps. Do not use `sudo pnp
 
 **This section is for the environment/code owner and server operator. Teammates should receive a completed handoff before their first hosted session.** Use the [operator guide](remote-development.md#operator-setup-and-maintenance) for implementation details; this checklist does not grant new server privileges.
 
-- [ ] Approve the source revision and integration order; PR #2 currently requires independent human review before merge.
+- [ ] Approve the current main source revision and integration order. Human PR review is optional; follow current required checks and merge authorization.
 - [ ] Prepare each contributor's distinct approved SSH account/key. Share the verified fingerprint and connection values privately.
 - [ ] For the existing host, complete the protected account-assignment/source-state migration and deploy the reviewed helper/backend-image updates, including the shared operation fence and its protected stable lock file. **Do not rerun fresh provisioning on an existing project root.** Preserve source/state/configuration and a recovery route. Coordinate cutover and rollback using the operator guide's exclusive maintenance context.
-- [ ] Establish root-owned slot identities/control files, assigned source/state ownership, and only the permitted startup helper invocation for each contributor. Verify effective sudo restrictions and that another account cannot write/start the slot.
+- [ ] Establish root-owned slot identities/control files and assigned source/state ownership. Verify normal upload/start commands admit the assigned account and reject another account. Inspect the actual sudo policy separately: the team's existing full-sudo grants give whole-host administrator power and can bypass these normal checks. Do not describe them as a restricted sandbox.
 - [ ] Check that CI passed the remote workflow tests on Windows/Linux and the Linux protocol/ownership/maintenance tests on the approved revision. These fixtures do not prove the live host's SSH/sudo permissions or end-to-end hot reload; verify those during handoff.
 - [ ] Confirm managed development resources, private ports/mounts, and readiness; preserve database volumes. A dashboard label is not evidence of account isolation.
 - [ ] Give the contributor their internal slot ID and matching `YOUR_NAME-local` label privately. Invite their own GitHub/Coolify accounts with the required scope.

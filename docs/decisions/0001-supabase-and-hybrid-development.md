@@ -3,7 +3,8 @@
 Status: accepted  
 Date: 2026-10-04  
 Decision owner/approval: user relayed the leader's updated team direction and repository decision 0001  
-Implementation: partial — Supabase Auth is integrated through the Arden API BFF; Supabase Storage, Realtime, deployment topology, and production release remain incomplete  
+Implementation: partial — Supabase Auth is integrated through the Arden API BFF; four development API/database slots are managed in Coolify with local frontend commands; Supabase Storage/Realtime integration and release deployment remain incomplete
+
 Supersedes / superseded by: supersedes the blueprint's earlier Better Auth/local-storage/SSE direction and the proposal for four hosted frontend slots
 
 ## Context and requirement
@@ -32,7 +33,7 @@ Arden is self-hosted first and must keep organization membership, scoped roles, 
 - Only Arden domain PostgreSQL is managed by the initial Arden migration. It stores the Supabase user UUID as an external identity link and does not create or alter Supabase-owned `auth` tables.
 - Supabase Storage and Realtime are target services but are not part of this auth/private-note slice. Current private note bodies remain on protected persistent file storage as previously selected; changing that storage decision needs an explicit implementation/migration update.
 - Supported project placement, exact self-hosted service images, environment resource budgets, per-environment Auth/Storage/Realtime configuration, private bucket/event authorization, and migration/restore procedures remain operational work. Four databases on one PostgreSQL process share resource, maintenance, and failure boundaries.
-- The current frontend-development implementation does not yet include the private SSH profile resolution, bounded source deltas, writer lease, operator controls, or four-slot switching described by the separate hybrid-development guide; do not claim those operational features exist based on this decision.
+- The merged frontend-development commands now resolve ignored private settings, synchronize bounded source deltas, reserve one writer per slot, start the managed API through protected operator controls, and forward it to a local Vite frontend. The [hosted development guide](../engineering/remote-development.md) owns the actual current placement and onboarding evidence. Four separate application databases can use shared supporting Auth services; this does not establish four independent identity pools or production readiness.
 
 ## Verification and rollout
 
