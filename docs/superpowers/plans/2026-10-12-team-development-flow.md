@@ -13,12 +13,12 @@
 ## Global constraints
 
 - Baseline: application main `972f0f9d87f2fcac420d88a664f4ffef4d8d3f01`.
-- Assign Zack `dev-1`, Kiet `dev-2`, Khoi `dev-3`, Hung `dev-4`; show personal labels in Coolify.
+- Assign one developer to each of `dev-1` through `dev-4`; distribute personal labels and assignments in private handoffs.
 - Preserve existing teammate source and database contents; stop if an active writer prevents maintenance.
 - Keep frontend and forwarded API listeners on loopback. Do not expose development APIs publicly.
 - Keep all real server profiles, credentials, resource identifiers, backups, and handoff packets private.
 - Source synchronization does not apply SQL migrations. Never edit or reapply an applied migration.
-- Existing administrator sudo grants are whole-host access. Slot checks prevent routine mistakes, not access by an administrator.
+- Full sudo gives whole-host administrator access. Slot checks prevent routine mistakes; they cannot constrain an administrator. Keep actual access grants private.
 - Repository publication is a separate milestone and requires authorization.
 
 ## Review focus
@@ -39,7 +39,7 @@
 - [x] Identify incomplete schema setup and differences between intended and actual Compose services.
 - [x] Back up affected source/configuration and databases under protected operator storage.
 - [x] Apply only pending reviewed SQL through the approved administrative migration connection; preserve runtime role restrictions.
-- [x] Give Hung a dedicated application database/API while preserving Kiet's and Khoi's data and source.
+- [x] Give `dev-4` a dedicated application database/API while preserving existing `dev-2` and `dev-3` data and source.
 - [x] Map four separate source/state directories to the four approved account identities.
 - [x] Inspect and deploy complete Compose with retained database storage, loopback ports and persistent note storage.
 - [x] Record four healthy API readiness responses and the cleared maintenance fence.

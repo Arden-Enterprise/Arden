@@ -18,16 +18,16 @@ The operating layout reconciled on 12 October 2026 differs from the fresh bootst
 
 | Person / label | Slot | Arden application data | Supabase identity |
 | --- | --- | --- | --- |
-| Zack / `zack-local` | `dev-1` | Own Arden schema in the Zack Supabase PostgreSQL service | Zack Supabase Auth |
-| Kiet / `kiet-local` | `dev-2` | Own Arden schema in the Kiet Supabase PostgreSQL service | Kiet Supabase Auth |
-| Khoi / `khoi-local` | `dev-3` | Own Arden schema in the existing Khoi Supabase PostgreSQL service | Shared Khoi/Hung Supabase Auth |
-| Hung / `hung-local` | `dev-4` | Dedicated logical application database in the managed development PostgreSQL service | Shared Khoi/Hung Supabase Auth |
+| Developer 1 | `dev-1` | Own Arden schema in a dedicated Supabase PostgreSQL service | Dedicated Supabase Auth |
+| Developer 2 | `dev-2` | Own Arden schema in a dedicated Supabase PostgreSQL service | Dedicated Supabase Auth |
+| Developer 3 | `dev-3` | Own Arden schema in a third Supabase PostgreSQL service | Supabase Auth shared with `dev-4` |
+| Developer 4 | `dev-4` | Dedicated logical application database in the managed development PostgreSQL service | Supabase Auth shared with `dev-3` |
 
 All four APIs are Coolify-managed resources in the development Compose service. Each has its own uploaded source/state, dependency volumes, persistent private-note directory and loopback API port. Coolify may render personal labels with spaces/capital letters. The `-local` label describes the development workflow; these backends run on the server.
 
-Khoi and Hung share identity accounts, not Arden application records. An Arden organization or note created in one slot is not automatically copied to another. This saves the cost of operating a fourth full Supabase stack. It also shares Auth configuration, availability and test-email effects, so coordinate changes to that Auth service. Separate databases on a shared host are not independent machines or high availability.
+The `dev-3` and `dev-4` slots share identity accounts, not Arden application records. An Arden organization or note created in one slot is not automatically copied to another. This saves the cost of operating a fourth full Supabase stack. It also shares Auth configuration, availability and test-email effects, so coordinate changes to that Auth service. Separate databases on a shared host are not independent machines or high availability. Person-to-slot assignments and actual Coolify display labels belong in the private administrator handoff.
 
-Zack and Hung were initialized from application main `972f0f9` with migrations 0001–0005. Existing Kiet/Khoi source and application data were preserved. A slot may therefore contain teammate work newer than main. Starting `dev:remote` reconciles that slot's backend to **your local checkout**, including removals from its prior manifest; preserve unmerged work and choose the intended branch before starting.
+Slots `dev-1` and `dev-4` were initialized from application main `972f0f9` with migrations 0001–0005. Existing `dev-2`/`dev-3` source and application data were preserved. A slot may therefore contain teammate work newer than main. Starting `dev:remote` reconciles that slot's backend to **your local checkout**, including removals from its prior manifest; preserve unmerged work and choose the intended branch before starting.
 
 The command was started successfully from the owner's computer. First login and coding-session acceptance on each other teammate's computer are separate onboarding steps. Service health does not establish complete application authorization, SMTP delivery, backup restoration or production readiness.
 
@@ -90,7 +90,7 @@ The bootstrap requires four distinct existing non-root SSH accounts in slot orde
 
 The development PostgreSQL instance has a 768 MiB limit; each API has 384 MiB, plus CPU/process/log limits. These are scaffold limits, not full-product capacity guarantees. Database initialization creates four non-superuser logins, prohibits role/database creation, and revokes public `CONNECT` grants. Initialization runs only for a fresh named volume. Never delete a volume to rerun it. Normal shutdown does not use `down -v`.
 
-The default contributor policy grants only the required root-owned `start.py` invocation. Use separate accounts and one assigned writer slot per person. The team's separately authorized full passwordless-sudo grants are administrator access: they can bypass slot/filesystem checks and reach other services, data and secrets. Inspect actual policy and keep these two access levels distinct; do not broaden permissions automatically when a command fails. The root-owned `slot-owners.json` records the permitted Unix UID for each slot; normal uploads check the login UID and normal startup checks sudo's caller UID. Code sync is unprivileged; the start helper admits only assigned development slots.
+The default contributor policy grants only the required root-owned `start.py` invocation. Use separate accounts and one assigned writer slot per person. Full sudo, if separately authorized, gives whole-host administrator access: it can bypass slot/filesystem checks and reach other services, data and secrets. Inspect actual policy privately and keep these two access levels distinct; do not publish current grants or broaden permissions automatically when a command fails. The root-owned `slot-owners.json` records the permitted Unix UID for each slot; normal uploads check the login UID and normal startup checks sudo's caller UID. Code sync is unprivileged; the start helper admits only assigned development slots.
 
 ### Database and storage readiness before onboarding
 
