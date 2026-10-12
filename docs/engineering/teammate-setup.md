@@ -20,10 +20,10 @@ Open `http://127.0.0.1:5180`. Leave that terminal running while coding. Saving a
 
 | Teammate | Coolify label | `defaultSlot` in private settings |
 | --- | --- | --- |
-| Zack | `zack-local` | `dev-1` |
-| Kiet | `kiet-local` | `dev-2` |
-| Khoi | `khoi-local` | `dev-3` |
-| Hung | `hung-local` | `dev-4` |
+| Developer 1 | Personal label supplied privately | `dev-1` |
+| Developer 2 | Personal label supplied privately | `dev-2` |
+| Developer 3 | Personal label supplied privately | `dev-3` |
+| Developer 4 | Personal label supplied privately | `dev-4` |
 
 The names are display labels. Commands use the internal `dev-N` value automatically from your private file. Your server login is supplied privately and can differ from the label. Each person keeps their own SSH key; no shared password is needed for daily coding.
 
@@ -68,7 +68,7 @@ flowchart LR
     Git[Commits and pull requests] --> GitHub[GitHub repository]
 ```
 
-There are four development slots. Each has its own API, Arden application database/login, uploaded source, dependency volumes and private-note storage. PostgreSQL placement can differ by slot; consult the [current hosted layout](remote-development.md#current-team-layout) rather than assuming every API uses the same database service. Khoi and Hung share a Supabase Auth service, so their sign-in accounts are in the same Auth pool; their Arden organization and note data remain in separate databases. Use synthetic development data.
+There are four development slots. Each has its own API, Arden application database/login, uploaded source, dependency volumes and private-note storage. PostgreSQL placement can differ by slot; consult the [current hosted layout](remote-development.md#current-team-layout) rather than assuming every API uses the same database service. Slots `dev-3` and `dev-4` share a Supabase Auth service, so their sign-in accounts are in the same Auth pool; their Arden organization and note data remain in separate databases. Your private handoff identifies your slot and personal Coolify label. Use synthetic development data.
 
 Your Coolify display label follows `YOUR_NAME-local`. Despite the label, the API and database run on the server. The frontend runs on your computer. Coolify may display the label with spaces and capital letters.
 
@@ -649,7 +649,7 @@ Follow the same readiness, editing, shutdown, and PR steps. Do not use `sudo pnp
 - [ ] Approve the current main source revision and integration order. Human PR review is optional; follow current required checks and merge authorization.
 - [ ] Prepare each contributor's distinct approved SSH account/key. Share the verified fingerprint and connection values privately.
 - [ ] For the existing host, complete the protected account-assignment/source-state migration and deploy the reviewed helper/backend-image updates, including the shared operation fence and its protected stable lock file. **Do not rerun fresh provisioning on an existing project root.** Preserve source/state/configuration and a recovery route. Coordinate cutover and rollback using the operator guide's exclusive maintenance context.
-- [ ] Establish root-owned slot identities/control files and assigned source/state ownership. Verify normal upload/start commands admit the assigned account and reject another account. Inspect the actual sudo policy separately: the team's existing full-sudo grants give whole-host administrator power and can bypass these normal checks. Do not describe them as a restricted sandbox.
+- [ ] Establish root-owned slot identities/control files and assigned source/state ownership. Verify normal upload/start commands admit the assigned account and reject another account. Inspect the actual sudo policy privately: full sudo gives whole-host administrator power and can bypass these normal checks. Do not describe it as a restricted sandbox or publish current grants.
 - [ ] Check that CI passed the remote workflow tests on Windows/Linux and the Linux protocol/ownership/maintenance tests on the approved revision. These fixtures do not prove the live host's SSH/sudo permissions or end-to-end hot reload; verify those during handoff.
 - [ ] Confirm managed development resources, private ports/mounts, and readiness; preserve database volumes. A dashboard label is not evidence of account isolation.
 - [ ] Give the contributor their internal slot ID and matching `YOUR_NAME-local` label privately. Invite their own GitHub/Coolify accounts with the required scope.
