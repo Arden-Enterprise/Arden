@@ -74,10 +74,10 @@ export function AppSidebar({
               type="button"
               className={`sidebar-nav-item${active ? " is-active" : ""}`}
               onClick={() => { if (item.view) onNavigate(item.view); }}
-              disabled={item.planned || authenticated}
+              disabled={item.planned || (authenticated && item.view !== "knowledge")}
               aria-label={item.label}
               aria-current={active ? "page" : undefined}
-              title={item.planned ? `${item.label} is not connected yet` : item.label}
+              title={authenticated && item.view === "knowledge" ? "View server draft and labeled sample library" : item.planned ? `${item.label} is not connected yet` : item.label}
             >
               <Icon name={item.icon} size={16} />
               <span>{item.label}</span>

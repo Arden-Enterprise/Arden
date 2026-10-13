@@ -7,6 +7,7 @@ export type PrivateNote = {
   title: string;
   body: string;
   updatedLabel: string;
+  sourceVersionId?: string;
 };
 
 export type PaneContent = {

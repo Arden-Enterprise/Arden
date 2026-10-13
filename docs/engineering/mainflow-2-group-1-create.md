@@ -1,5 +1,7 @@
 # Mainflow 2 — Group 1, function 1: createKnowledgeDraft
 
+> Historical slice note: this describes the earlier function-1-only state. For the current draft, submission, review and publication contract, see [mainflow-2-workflow.md](./mainflow-2-workflow.md). The statements below that list/read/edit/submit routes do not exist are no longer current.
+
 This slice implements only the first Group 1 function. It creates an author-owned shared draft as a separate copy of one existing private-note version. It does not implement `updateKnowledgeDraft`, `submitKnowledgeDraft`, copying from a publication, role audience editing, review, or publication.
 
 ## HTTP contract
@@ -11,6 +13,12 @@ These classification values are draft metadata in this slice. Final review appro
 The server reads and verifies the private version's content hash, writes a new protected object, then commits the `shared_draft`, immutable version 1, and `SHARED_DRAFT_CREATED` audit event in one database transaction. The original private object remains unchanged. The response contains the new shared draft's title, body, classification, version/hash and timestamps, but no private source ID or storage URI. No shared-draft read or list route exists yet.
 
 A new request returns 201; an identical retry with the same key returns 200 and does not create another draft or audit event. Reusing the key with a different source/classification returns 409. An unavailable/unauthorized source returns the same 404. Invalid input returns 400. If DB commit acknowledgment is ambiguous, the new protected object is retained rather than risk deleting content referenced by a committed row; orphan reconciliation is required before deleting it.
+
+## Connected frontend boundary
+
+In an authenticated organization, save a private note, open it, and choose **Contribute copy**. The shared web/Electron dialog previews the exact saved text, asks for one of the three classifications, and sends the note's `currentVersion.id` with a new UUID `Idempotency-Key`. Unsaved or sample-only notes cannot call this API. An uncertain result keeps the same key for manual retry; a definitive 4xx response does not show a saved draft. Electron's main process allowlists only this endpoint and validates the key before attaching the header.
+
+On 201 or replayed 200, Knowledge shows the returned server draft in a separate, read-only receipt. The original note stays private. The receipt is session-scoped and cleared on organization switch/sign-out; the database copy persists, but there is no shared-draft list/read API to reopen it after refresh. The adjacent sample library, editor, review, and automatic sample publication do not operate on this server draft. Apply migrations 0006–0008 and deploy a compatible API before trying the action against a hosted slot. A successful frontend unit test does not verify those migrations or live authorization.
 
 ## Database boundary and verification
 

@@ -1,6 +1,8 @@
+import type { KnowledgeClassification } from "../shared/knowledge-classification";
+
 export type KnowledgeScope = "Department" | "Company-wide" | "Private";
 export type KnowledgeDocumentType = "Runbook" | "Decision" | "Checklist";
-export type KnowledgeClassification = "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED";
+export type { KnowledgeClassification } from "../shared/knowledge-classification";
 
 export type KnowledgeSection = { heading: string; body: string };
 export type KnowledgeDraft = {
@@ -80,7 +82,15 @@ export function draftReadyForReview(draft: KnowledgeDraft): boolean {
 }
 
 export function knowledgeDraftChanged(state: KnowledgePreviewState): boolean {
-  return JSON.stringify(state.draft) !== JSON.stringify(state.savedDraft);
+  return !sameDraft(state.draft, state.savedDraft);
+}
+
+function sameDraft(left: KnowledgeDraft, right: KnowledgeDraft): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+export function knowledgeDraftMatchesPublication(state: KnowledgePreviewState): boolean {
+  return state.publication !== null && sameDraft(state.draft, state.publication.draft);
 }
 
 // These are synthetic UI transitions, never authentication or server authorization.
@@ -92,6 +102,7 @@ export function reduceKnowledgePreview(state: KnowledgePreviewState, action: Kno
       return { ...state, savedDraft: copyDraft(state.draft), message: "Draft saved in this preview session. Nothing was sent to a server." };
     case "submit": {
       if (!draftReadyForReview(state.draft)) return { ...state, message: "Complete the content and both review checks before submitting a shared snapshot." };
+      if (knowledgeDraftMatchesPublication(state)) return { ...state, message: "This sample is already published. Edit the working draft before submitting a new version." };
       const submitted: KnowledgeSnapshot = { version: state.nextVersion, draft: copyDraft(state.draft), decision: "pending" };
       return { ...state, submitted, savedDraft: copyDraft(state.draft), nextVersion: state.nextVersion + 1, revisionRequested: false, message: "An immutable sample snapshot is ready for review. The working draft remains separate." };
     }

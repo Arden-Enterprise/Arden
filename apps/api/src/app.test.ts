@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, CreateSharedDraftResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, SharedKnowledgeDraft, StoredContentFields } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, CreateSharedDraftResult, DecideReviewResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
+import type { AssignedReview } from "./knowledge/review-queue.js";
+import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationEmail, InvitationMailer } from "./email/smtp-mailer.js";
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
@@ -472,6 +474,172 @@ describe("API auth and private draft routes", () => {
     await expect(storage.read(repository.attemptedSharedCopyUri!, repository.currentSource.contentHash)).resolves.toBe(repository.currentBody);
   });
 
+  it("creates a server-backed new shared draft, then lists and reopens only that actor's draft", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const url = `/api/v1/organizations/${organizationId}/knowledge/drafts/new`;
+    const headers = { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey };
+    const payload = { title: "Runbook", body: "Recovery steps", classification: "INTERNAL" };
+    const created = await app.inject({ method: "POST", url, headers, payload });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ title: "Runbook", body: "Recovery steps", status: "ACTIVE" });
+    expect(JSON.stringify(created.json())).not.toContain("arden-private-object");
+    const listed = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/drafts`, headers });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().items).toHaveLength(1);
+    expect(JSON.stringify(listed.json())).not.toContain("arden-private-object");
+    const reopened = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/drafts/${sharedDraftId}`, headers });
+    expect(reopened.statusCode).toBe(200);
+    expect(reopened.json().body).toBe("Recovery steps");
+    expect((await app.inject({ method: "POST", url, headers, payload })).statusCode).toBe(200);
+    expect(repository.sharedCreates).toBe(1);
+    expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, title: "Other" } })).statusCode).toBe(409);
+  });
+
+  it("exposes active knowledge metadata options only within the actor's organization", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const options = await app.inject({ method: "GET",
+      url: `/api/v1/organizations/${organizationId}/knowledge/options`, headers: { cookie: session } });
+    expect(options.statusCode).toBe(200);
+    expect(options.json()).toMatchObject({ departments: [{ name: "Product" }],
+      audienceRoles: [{ name: "Product Member" }] });
+    expect(options.headers["cache-control"]).toBe("no-store");
+    const otherOrganization = await app.inject({ method: "GET",
+      url: `/api/v1/organizations/${otherOrganizationId}/knowledge/options`, headers: { cookie: session } });
+    expect(otherOrganization.statusCode).toBe(404);
+  });
+
+  it("rejects invalid new shared drafts and does not reveal another organization", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const headers = { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey };
+    const payload = { title: "Runbook", body: "Body", classification: "INTERNAL" };
+    const url = `/api/v1/organizations/${organizationId}/knowledge/drafts/new`;
+    expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, title: "   " } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, body: "bad\u0000text" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: `/api/v1/organizations/${otherOrganizationId}/knowledge/drafts/new`, headers, payload })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/api/v1/organizations/${otherOrganizationId}/knowledge/drafts`, headers })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `/api/v1/organizations/${otherOrganizationId}/knowledge/drafts/${sharedDraftId}`, headers })).statusCode).toBe(404);
+  });
+
+  it("updates a shared draft as a new version only when If-Match is current", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const headers = { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey };
+    const created = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/knowledge/drafts/new`,
+      headers, payload: { title: "Runbook", body: "v1", classification: "INTERNAL" } });
+    expect(created.statusCode).toBe(201);
+    const url = `/api/v1/organizations/${organizationId}/knowledge/drafts/${sharedDraftId}`;
+    expect((await app.inject({ method: "PATCH", url, headers, payload: { title: "Updated" } })).statusCode).toBe(428);
+    const updated = await app.inject({ method: "PATCH", url, headers: { ...headers, "if-match": '"1"' },
+      payload: { title: "Updated", body: "v2", teamTag: "API", projectTag: "Arden" } });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.headers.etag).toBe('"2"');
+    expect(updated.json()).toMatchObject({ title: "Updated", body: "v2", teamTag: "API", projectTag: "Arden",
+      currentVersion: { version: 2 } });
+    expect((await app.inject({ method: "PATCH", url, headers: { ...headers, "if-match": '"1"' },
+      payload: { title: "Stale" } })).statusCode).toBe(412);
+    expect((await app.inject({ method: "GET", url, headers })).json().body).toBe("v2");
+  });
+
+  it("routes submit, scoped review, automatic publication and audience read without exposing the private source", async () => {
+    const ownerSession = await desktopSession(app, "owner@example.test");
+    const reviewerSession = await desktopSession(app, "manager@example.test");
+    const ownerHeaders = { cookie: ownerSession, origin: "http://localhost:5180" };
+    const reviewerHeaders = { cookie: reviewerSession, origin: "http://localhost:5180" };
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const created = await app.inject({ method: "POST", url: `${root}/drafts/new`,
+      headers: { ...ownerHeaders, "idempotency-key": createKey },
+      payload: { title: "Recovery runbook", body: "Check upstream first", classification: "INTERNAL" } });
+    expect(created.statusCode).toBe(201);
+    const updated = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+      headers: { ...ownerHeaders, "if-match": '"1"' },
+      payload: { responsibleDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        targetScopeType: "DEPARTMENT", audienceRoleIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } });
+    expect(updated.statusCode).toBe(200);
+    const submit = await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
+      headers: { ...ownerHeaders, "idempotency-key": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "if-match": '"2"' } });
+    expect(submit.statusCode).toBe(201);
+    expect(submit.json().status).toBe("PENDING_REVIEW");
+    expect((await app.inject({ method: "GET", url: `${root}/reviews`, headers: reviewerHeaders })).json().items).toEqual([]);
+    const grant = await app.inject({ method: "POST", url: `${root}/reviewer-grants`, headers: ownerHeaders,
+      payload: { reviewerMembershipId: otherId, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        classifications: ["INTERNAL"], level: "STANDARD" } });
+    expect(grant.statusCode).toBe(201);
+    const queue = await app.inject({ method: "GET", url: `${root}/reviews`, headers: reviewerHeaders });
+    expect(queue.json().items).toHaveLength(1);
+    expect(JSON.stringify(queue.json())).not.toContain("Check upstream first");
+    const submissionId = submit.json().id as string;
+    const detail = await app.inject({ method: "GET", url: `${root}/reviews/${submissionId}`, headers: reviewerHeaders });
+    expect(detail.statusCode).toBe(200);
+    expect(detail.json().body).toBe("Check upstream first");
+    expect((await app.inject({ method: "GET", url: `${root}/reviews/${submissionId}`, headers: ownerHeaders })).statusCode).toBe(404);
+    const decisionUrl = `${root}/reviews/${submissionId}/decisions`;
+    const decisionPayload = { action: "APPROVE", expectedSnapshotVersionId: updated.json().currentVersion.id,
+      expectedContentHash: updated.json().currentVersion.contentHash };
+    expect((await app.inject({ method: "POST", url: decisionUrl,
+      headers: { ...ownerHeaders, "idempotency-key": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff" },
+      payload: decisionPayload })).statusCode).toBe(404);
+    const decided = await app.inject({ method: "POST", url: decisionUrl,
+      headers: { ...reviewerHeaders, "idempotency-key": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff" },
+      payload: decisionPayload });
+    expect(decided.statusCode).toBe(201);
+    expect(decided.json()).toMatchObject({ status: "APPROVED", publishedVersionId: "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd" });
+    const read = await app.inject({ method: "GET", url: `${root}/published/${decided.json().publishedVersionId}`,
+      headers: ownerHeaders });
+    expect(read.statusCode).toBe(200);
+    expect(read.json()).toMatchObject({ body: "Check upstream first", title: "Recovery runbook" });
+    expect(JSON.stringify(read.json())).not.toContain("arden-private-object");
+    expect((await app.inject({ method: "GET", url: `${root}/published/${decided.json().publishedVersionId}`,
+      headers: reviewerHeaders })).statusCode).toBe(404);
+  });
+
+  it("locks the working draft while review is pending and permits a revised version after feedback", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const reviewer = await desktopSession(app, "manager@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const created = await app.inject({ method: "POST", url: `${root}/drafts/new`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "idempotency-key": createKey },
+      payload: { title: "Runbook", body: "First version", classification: "INTERNAL" } });
+    expect(created.statusCode).toBe(201);
+    const metadata = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
+      payload: { responsibleDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        targetScopeType: "DEPARTMENT", audienceRoleIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } });
+    expect(metadata.statusCode).toBe(200);
+    const first = await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"2"',
+        "idempotency-key": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" } });
+    expect(first.statusCode).toBe(201);
+    const blocked = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"2"' },
+      payload: { body: "Premature edit" } });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json().error.code).toBe("REVIEW_PENDING");
+    expect((await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers: { cookie: owner } })).json().hasPendingSubmission).toBe(true);
+    expect((await app.inject({ method: "POST", url: `${root}/reviewer-grants`,
+      headers: { cookie: owner, origin: "http://localhost:5180" },
+      payload: { reviewerMembershipId: otherId, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        classifications: ["INTERNAL"], level: "STANDARD" } })).statusCode).toBe(201);
+    const revision = await app.inject({ method: "POST", url: `${root}/reviews/${first.json().id}/decisions`,
+      headers: { cookie: reviewer, origin: "http://localhost:5180", "idempotency-key": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff" },
+      payload: { action: "REQUEST_REVISION", comment: "Clarify the rollback step.",
+        expectedSnapshotVersionId: metadata.json().currentVersion.id,
+        expectedContentHash: metadata.json().currentVersion.contentHash } });
+    expect(revision.statusCode).toBe(201);
+    expect(revision.json()).toMatchObject({ status: "CHANGES_REQUESTED", publishedVersionId: null,
+      decisionComment: "Clarify the rollback step." });
+    const authorSubmissions = await app.inject({ method: "GET", url: `${root}/submissions`, headers: { cookie: owner } });
+    expect(authorSubmissions.statusCode).toBe(200);
+    expect(authorSubmissions.json().items[0].decisionComment).toBe("Clarify the rollback step.");
+    expect((await app.inject({ method: "GET", url: `${root}/published`, headers: { cookie: owner } })).json().items).toEqual([]);
+    const revised = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"2"' },
+      payload: { body: "Clarified rollback step" } });
+    expect(revised.statusCode).toBe(200);
+    expect(revised.json().currentVersion.version).toBe(3);
+    expect((await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"3"',
+        "idempotency-key": "cccccccc-dddd-4eee-8fff-111111111111" } })).statusCode).toBe(201);
+  });
+
   it("routes desktop-compatible sign-in through the same HttpOnly Supabase session", async () => {
     const response = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
@@ -530,14 +698,18 @@ class MemoryRepository implements ArdenDataRepository {
   currentVersion = 2;
   currentSource: StoredContentFields = { sourceUri: "arden-private-object://dddddddd-dddd-4ddd-8ddd-dddddddddddd", mimeType: "text/plain", contentHash: "not-used-in-forged-note" };
   sharedDraft: SharedKnowledgeDraft | null = null;
+  sharedSubmission: SharedKnowledgeSubmission | null = null;
+  reviewerGrant: ReviewerGrantRecord | null = null;
+  publication: PublishedKnowledge | null = null;
+  private reviewRequestKey: string | null = null;
   sharedCreates = 0;
   failSharedCreate = false;
   attemptedSharedCopyUri: string | null = null;
   private sharedRequestKey: string | null = null;
 
   async requireActiveMembership(userId: string, requestedOrganization: string): Promise<ActiveMembership | null> {
-    return userId === ownerId && requestedOrganization === organizationId
-      ? { membershipId: ownerId, organizationId, userId } : null;
+    return (userId === ownerId || userId === otherId) && requestedOrganization === organizationId
+      ? { membershipId: userId, organizationId, userId } : null;
   }
 
   async listMemberships(userId: string): Promise<MembershipSummary[]> {
@@ -557,6 +729,15 @@ class MemoryRepository implements ArdenDataRepository {
       roles: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product Member", code: "DEPT_DEFAULT_TEST", isDefault: true }],
       members: [{ id: "77777777-7777-4777-8777-777777777777", email: "owner@example.test", name: "Owner", status: "ACTIVE", departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", roleIds: [], roleNames: [] }],
       invitations: [],
+    };
+  }
+
+  async getKnowledgeOptions(userId: string, requestedOrganization: string) {
+    if ((userId !== ownerId && userId !== otherId) || requestedOrganization !== organizationId) return null;
+    return {
+      departments: [{ id: "ffffffff-ffff-4fff-8fff-ffffffffffff", name: "Product" }],
+      audienceRoles: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product Member",
+        departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff" }],
     };
   }
 
@@ -627,11 +808,167 @@ class MemoryRepository implements ArdenDataRepository {
     this.sharedDraft = {
       id: sharedDraftId, organizationId, title: input.expectedSource.title,
       classification: input.classification, sourcePrivateVersionId: input.sourceVersionId,
+      responsibleDepartmentId: null, targetScopeType: null, teamTag: null, projectTag: null, audienceRoleIds: [],
       versionId: sharedVersionId, sourceUri: input.copiedContent.sourceUri,
       mimeType: input.copiedContent.mimeType, contentHash: input.copiedContent.contentHash,
-      currentVersion: 1, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
+      currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
     };
     return { kind: "created", draft: this.sharedDraft };
+  }
+
+  async createNewKnowledgeDraft(userId: string, requestedOrganization: string, input: {
+    title: string; classification: "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED";
+    idempotencyKey: string; content: StoredContentFields;
+  }): Promise<CreateSharedDraftResult> {
+    if (userId !== ownerId || requestedOrganization !== organizationId) return { kind: "unavailable" };
+    if (this.failSharedCreate) throw new Error("Synthetic database failure");
+    if (this.sharedDraft && this.sharedRequestKey === input.idempotencyKey) {
+      return this.sharedDraft.sourcePrivateVersionId === null && this.sharedDraft.title === input.title
+        && this.sharedDraft.classification === input.classification && this.sharedDraft.contentHash === input.content.contentHash
+        ? { kind: "replayed", draft: this.sharedDraft } : { kind: "idempotency-conflict" };
+    }
+    this.sharedRequestKey = input.idempotencyKey;
+    this.sharedCreates += 1;
+    this.sharedDraft = {
+      id: sharedDraftId, organizationId, title: input.title, classification: input.classification,
+      sourcePrivateVersionId: null, responsibleDepartmentId: null, targetScopeType: null,
+      teamTag: null, projectTag: null, audienceRoleIds: [], versionId: sharedVersionId,
+      sourceUri: input.content.sourceUri, mimeType: input.content.mimeType, contentHash: input.content.contentHash,
+      currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
+    };
+    return { kind: "created", draft: this.sharedDraft };
+  }
+
+  async listKnowledgeDrafts(userId: string, requestedOrganization: string): Promise<SharedKnowledgeDraft[] | null> {
+    if (userId !== ownerId || requestedOrganization !== organizationId) return null;
+    return this.sharedDraft ? [this.sharedDraft] : [];
+  }
+
+  async getKnowledgeDraft(userId: string, requestedOrganization: string, requestedDraft: string): Promise<SharedKnowledgeDraft | null> {
+    return userId === ownerId && requestedOrganization === organizationId && this.sharedDraft?.id === requestedDraft
+      ? this.sharedDraft : null;
+  }
+
+  async updateKnowledgeDraft(userId: string, requestedOrganization: string, requestedDraft: string,
+    expectedVersion: number, patch: SharedDraftPatch, content: StoredContentFields | null): Promise<UpdateSharedDraftResult> {
+    const draft = await this.getKnowledgeDraft(userId, requestedOrganization, requestedDraft);
+    if (!draft) return { kind: "not-found" };
+    if (draft.currentVersion !== expectedVersion) return { kind: "conflict", currentVersion: draft.currentVersion };
+    if (draft.hasPendingSubmission) return { kind: "pending" };
+    this.sharedDraft = {
+      ...draft, title: patch.title ?? draft.title, classification: patch.classification ?? draft.classification,
+      responsibleDepartmentId: patch.responsibleDepartmentId === undefined ? draft.responsibleDepartmentId : patch.responsibleDepartmentId,
+      targetScopeType: patch.targetScopeType === undefined ? draft.targetScopeType : patch.targetScopeType,
+      teamTag: patch.teamTag === undefined ? draft.teamTag : patch.teamTag,
+      projectTag: patch.projectTag === undefined ? draft.projectTag : patch.projectTag,
+      audienceRoleIds: patch.audienceRoleIds ?? draft.audienceRoleIds,
+      sourceUri: content?.sourceUri ?? draft.sourceUri,
+      contentHash: content?.contentHash ?? draft.contentHash,
+      versionId: expectedVersion + 1 === 2
+        ? "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" : "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      currentVersion: expectedVersion + 1,
+    };
+    return { kind: "updated", draft: this.sharedDraft };
+  }
+
+  async submitKnowledgeDraft(userId: string, requestedOrganization: string, requestedDraft: string,
+    expectedVersion: number, _key: string): Promise<SubmitKnowledgeDraftResult> {
+    const draft = await this.getKnowledgeDraft(userId, requestedOrganization, requestedDraft);
+    if (!draft) return { kind: "not-found" };
+    if (draft.currentVersion !== expectedVersion) return { kind: "conflict" };
+    if (!draft.responsibleDepartmentId || !draft.targetScopeType || draft.audienceRoleIds.length === 0) return { kind: "not-ready" };
+    if (this.sharedSubmission?.snapshotVersionId === draft.versionId) return { kind: "replayed", submission: this.sharedSubmission };
+    this.sharedSubmission = {
+      id: "abababab-abab-4aba-8aba-abababababab", draftId: draft.id,
+      snapshotVersionId: draft.versionId, title: draft.title, classification: draft.classification,
+      responsibleDepartmentId: draft.responsibleDepartmentId, targetScopeType: draft.targetScopeType,
+      targetDepartmentId: draft.targetScopeType === "DEPARTMENT" ? draft.responsibleDepartmentId : null,
+      audienceRoleIds: draft.audienceRoleIds, contentHash: draft.contentHash,
+      status: "PENDING_REVIEW", submittedAt: new Date("2026-10-10T10:00:00.000Z"), publishedVersionId: null,
+      decisionComment: null,
+    };
+    this.sharedDraft = { ...draft, hasPendingSubmission: true };
+    return { kind: "submitted", submission: this.sharedSubmission };
+  }
+
+  async listKnowledgeSubmissions(userId: string, requestedOrganization: string): Promise<SharedKnowledgeSubmission[] | null> {
+    if (userId !== ownerId || requestedOrganization !== organizationId) return null;
+    return this.sharedSubmission ? [this.sharedSubmission] : [];
+  }
+
+  async listReviewerGrants(userId: string, requestedOrganization: string): Promise<ReviewerGrantRecord[] | null> {
+    if (userId !== ownerId || requestedOrganization !== organizationId) return null;
+    return this.reviewerGrant ? [this.reviewerGrant] : [];
+  }
+
+  async createReviewerGrant(userId: string, requestedOrganization: string, input: ReviewerGrantInput): Promise<ReviewerGrantRecord | null> {
+    if (userId !== ownerId || requestedOrganization !== organizationId || input.reviewerMembershipId !== otherId) return null;
+    this.reviewerGrant = { ...input, id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", status: "ACTIVE",
+      validFrom: new Date("2026-10-10T09:00:00.000Z") };
+    return this.reviewerGrant;
+  }
+
+  async deactivateReviewerGrant(userId: string, requestedOrganization: string, grantId: string): Promise<boolean> {
+    if (userId !== ownerId || requestedOrganization !== organizationId || this.reviewerGrant?.id !== grantId) return false;
+    this.reviewerGrant = { ...this.reviewerGrant, status: "INACTIVE" };
+    return true;
+  }
+
+  async listAssignedReviews(userId: string, requestedOrganization: string): Promise<AssignedReview[] | null> {
+    if (requestedOrganization !== organizationId) return null;
+    const submission = this.sharedSubmission;
+    if (userId !== otherId || this.reviewerGrant?.status !== "ACTIVE"
+      || !submission || submission.status !== "PENDING_REVIEW") return [];
+    return [{ submissionId: submission.id, snapshotId: submission.snapshotVersionId,
+      title: submission.title, departmentId: submission.responsibleDepartmentId,
+      classification: submission.classification, submittedAt: submission.submittedAt, approvalBlocked: false }];
+  }
+
+  async getAssignedReview(userId: string, requestedOrganization: string, submissionId: string): Promise<ReviewDetail | null> {
+    const queue = await this.listAssignedReviews(userId, requestedOrganization);
+    if (!queue?.some((item) => item.submissionId === submissionId) || !this.sharedSubmission || !this.sharedDraft) return null;
+    return { submission: this.sharedSubmission, sourceUri: this.sharedDraft.sourceUri,
+      mimeType: "text/plain", submittedByMembershipId: ownerId,
+      teamTag: this.sharedDraft.teamTag, projectTag: this.sharedDraft.projectTag };
+  }
+
+  async decideReview(userId: string, requestedOrganization: string, submissionId: string, action: ReviewAction,
+    expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
+    idempotencyKey: string): Promise<DecideReviewResult> {
+    const submission = this.sharedSubmission;
+    if (this.reviewRequestKey === idempotencyKey && submission && submissionId === submission.id) {
+      return { kind: "replayed", submission };
+    }
+    if (userId !== otherId || requestedOrganization !== organizationId || !submission || submission.id !== submissionId
+      || this.reviewerGrant?.status !== "ACTIVE") return { kind: "not-found" };
+    if (submission.status !== "PENDING_REVIEW") return { kind: "conflict" };
+    if (submission.snapshotVersionId !== expectedSnapshotVersionId || submission.contentHash !== expectedContentHash) {
+      return { kind: "denied", reason: "STALE_SNAPSHOT" };
+    }
+    if (action !== "APPROVE" && !comment?.trim()) return { kind: "denied", reason: "COMMENT_REQUIRED" };
+    this.reviewRequestKey = idempotencyKey;
+    if (action === "APPROVE") {
+      this.publication = { id: "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd", draftId: submission.draftId,
+        title: submission.title, classification: submission.classification,
+        contentHash: submission.contentHash, sourceUri: this.sharedDraft!.sourceUri,
+        audienceRoleIds: submission.audienceRoleIds, publishedAt: new Date("2026-10-10T11:00:00.000Z"),
+        validFrom: new Date("2026-10-10T11:00:00.000Z"), validUntil: null };
+      this.sharedSubmission = { ...submission, status: "APPROVED", publishedVersionId: this.publication.id,
+        decisionComment: comment?.trim() || null };
+    } else this.sharedSubmission = { ...submission, status: action === "REJECT" ? "REJECTED" : "CHANGES_REQUESTED",
+      decisionComment: comment?.trim() || null };
+    if (this.sharedDraft) this.sharedDraft = { ...this.sharedDraft, hasPendingSubmission: false };
+    return { kind: "decided", submission: this.sharedSubmission };
+  }
+
+  async listPublishedKnowledge(userId: string, requestedOrganization: string): Promise<PublishedKnowledge[] | null> {
+    if (requestedOrganization !== organizationId) return null;
+    return userId === ownerId && this.publication ? [this.publication] : [];
+  }
+
+  async getPublishedKnowledge(userId: string, requestedOrganization: string, publishedVersionId: string): Promise<PublishedKnowledge | null> {
+    return userId === ownerId && requestedOrganization === organizationId && this.publication?.id === publishedVersionId
+      ? this.publication : null;
   }
 
   async canCreateDraft(userId: string, requestedOrganization: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }

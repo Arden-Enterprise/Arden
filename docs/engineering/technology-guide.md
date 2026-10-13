@@ -11,8 +11,8 @@ Inventory updated 5 October 2026:
 | Area | Present in the scaffold | Target, not yet implemented |
 | --- | --- | --- |
 | Runtime/tooling | Node.js 24 CI; pnpm 11.19.0; TypeScript 5.9.3; pnpm workspaces | Same baseline, reviewed upgrades |
-| Web/shared UI | React/react-dom 19.3.0; Vite 7.3.6; React plugin 5.2.0; typed fetch client for auth/private notes | React Router and TanStack Query |
-| Desktop | Electron 44.4.3; electron-vite 5.0.0; shared React UI; narrow preload IPC backed by Electron safeStorage | Signed Windows installer/update flow |
+| Web/shared UI | React/react-dom 19.3.0; Vite 7.3.6; React plugin 5.2.0; typed fetch client for auth/private notes and author-owned shared-draft creation | React Router and TanStack Query |
+| Desktop | Electron 44.4.3; electron-vite 5.0.0; shared React UI; narrow preload IPC backed by Electron safeStorage, with an allowlisted shared-draft create and idempotency header | Signed Windows installer/update flow |
 | API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15; Supabase Auth via `@supabase/supabase-js` 2.117.2; BFF sign-in/sign-up/session/org-create/invitation/private-draft routes and author-owned shared-draft creation from a private version; ordered SQL migration runner | Supabase Realtime notifications and remaining shared-draft/review/publication routes |
 | Data | Local `pgvector/pgvector:pg17` container; ordered SQL migrations 0001–0008 (0006–0008 add author-only shared-draft creation, not yet real-PostgreSQL verified); transaction-local actor/org/admin/invitation RLS context and non-bypass Arden runtime role; protected local note-object storage | Drizzle Kit migration authoring for future domain schema, full-text/vector search, Supabase Storage integration |
 | Identity | Supabase Auth email/password through a server-only Fastify adapter; verified user UUID maps to `user_account.user_id`; Arden-owned organization bootstrap and hashed-token email invitation lifecycle; SMTP through Nodemailer 10.0.10. Fenced test adapters support loopback-only local sign-in and a no-login synthetic actor for the SSH-only Kiet Local `dev-2` slot | Recovery |

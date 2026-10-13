@@ -17,6 +17,8 @@ export type Publication = {
   organizationId: string;
   status: "CURRENT" | "SUPERSEDED" | "ARCHIVED" | "REVOKED";
   audienceRoleIds: readonly string[];
+  validFrom: Date;
+  validUntil: Date | null;
 };
 
 export type AudienceContext = {
@@ -55,7 +57,10 @@ export function canReadPublication(input: {
   const { actor, publication, audience, now } = input;
   if (!activeInOrganization(actor, publication.organizationId) || publication.status !== "CURRENT") return false;
   if (!validAudience(publication.organizationId, publication.audienceRoleIds, audience.audienceRoles)) return false;
-  if (!Number.isFinite(now.getTime())) return false;
+  if (!Number.isFinite(now.getTime()) || !Number.isFinite(publication.validFrom.getTime())
+    || publication.validFrom > now
+    || (publication.validUntil !== null
+      && (!Number.isFinite(publication.validUntil.getTime()) || publication.validUntil <= now))) return false;
   const taggedRoles = new Set(publication.audienceRoleIds);
   return audience.assignments.some((assignment) =>
     assignment.membershipId === actor.membershipId
@@ -128,11 +133,16 @@ export function canReviewSnapshot(input: {
   effectivePolicyVersion: number;
   audienceEnforceable: boolean;
 }): boolean {
+  return input.audienceEnforceable && canRespondToSubmission(input);
+}
+
+// A reviewer must still be able to request a correction when the proposed
+// audience cannot be enforced. Only approval requires an enforceable audience.
+export function canRespondToSubmission(input: Omit<Parameters<typeof canReviewSnapshot>[0], "audienceEnforceable">): boolean {
   const { actor, submission, grant } = input;
   return activeInOrganization(actor, submission.organizationId)
     && actor.membershipId !== submission.submittedByMembershipId
     && submission.status === "PENDING_REVIEW"
-    && input.audienceEnforceable
     && Number.isInteger(submission.policyVersion) && submission.policyVersion > 0
     && submission.policyVersion === input.effectivePolicyVersion
     && grant !== null && grant.status === "ACTIVE"

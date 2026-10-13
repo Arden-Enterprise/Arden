@@ -1,7 +1,7 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, randomBytes } from "node:crypto";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
-import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft } from "./db/repository.js";
+import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
 import type { KnowledgeClassification } from "./knowledge/policy.js";
@@ -526,6 +526,476 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  app.post<{ Params: { organizationId: string }; Body: { title: string; body: string; classification: KnowledgeClassification } }>(
+    "/api/v1/organizations/:organizationId/knowledge/drafts/new", {
+      schema: {
+        params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
+        headers: { type: "object", required: ["idempotency-key"], properties: {
+          "idempotency-key": { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", additionalProperties: false, required: ["title", "body", "classification"], properties: {
+          title: { type: "string", minLength: 1, maxLength: 800 },
+          body: { type: "string", maxLength: maxBodyBytes },
+          classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      const { organizationId } = request.params;
+      const title = request.body.title.trim();
+      if (!title || !isValidText(title, 800, maxTitleCodePoints)
+        || !isValidText(request.body.body, maxBodyBytes, maxBodyBytes)) {
+        return reply.code(400).send(safeError("INVALID_REQUEST", "The draft is invalid.", request.id));
+      }
+      let stored: Awaited<ReturnType<PrivateContentStorage["write"]>> | null = null;
+      let creationAttempted = false;
+      try {
+        const actor = await dependencies.repository.requireActiveMembership(context.userId, organizationId);
+        if (!actor) return reply.code(404).send(resourceNotAvailable(request.id));
+        stored = await dependencies.storage.write(request.body.body);
+        creationAttempted = true;
+        const result = await dependencies.repository.createNewKnowledgeDraft(context.userId, organizationId, {
+          actorMembershipId: actor.membershipId, title, classification: request.body.classification,
+          idempotencyKey: request.headers["idempotency-key"] as string, content: stored, requestId: request.id,
+        });
+        if (result.kind === "unavailable" || result.kind === "idempotency-conflict") {
+          await dependencies.storage.remove(stored.sourceUri);
+          return result.kind === "unavailable"
+            ? reply.code(404).send(resourceNotAvailable(request.id))
+            : reply.code(409).send(safeError("IDEMPOTENCY_CONFLICT", "Use a new idempotency key for a different request.", request.id));
+        }
+        if (result.kind === "replayed") await dependencies.storage.remove(stored.sourceUri);
+        const body = result.kind === "created" ? request.body.body
+          : await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
+        reply.header("Cache-Control", "no-store");
+        reply.header("ETag", etag(result.draft.currentVersion));
+        return reply.code(result.kind === "created" ? 201 : 200).send(representSharedDraft(result.draft, body));
+      } catch (error) {
+        if (stored && !creationAttempted) {
+          try { await dependencies.storage.remove(stored.sourceUri); }
+          catch (cleanupError) {
+            request.log.error({ errorType: safeErrorType(cleanupError), requestId: request.id }, "Shared draft cleanup failed");
+          }
+        }
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft creation failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/options", {
+    schema: { params: { type: "object", required: ["organizationId"], properties: {
+      organizationId: { type: "string", pattern: uuidPattern },
+    } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const options = await dependencies.repository.getKnowledgeOptions(context.userId, request.params.organizationId);
+      if (!options) return reply.code(404).send(resourceNotAvailable(request.id));
+      reply.header("Cache-Control", "no-store");
+      return options;
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge options failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/drafts", {
+    schema: { params: { type: "object", required: ["organizationId"], properties: {
+      organizationId: { type: "string", pattern: uuidPattern },
+    } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const drafts = await dependencies.repository.listKnowledgeDrafts(context.userId, request.params.organizationId);
+      if (!drafts) return reply.code(404).send(resourceNotAvailable(request.id));
+      reply.header("Cache-Control", "no-store");
+      return { items: drafts.map(({ sourceUri: _sourceUri, sourcePrivateVersionId: _privateSource, ...draft }) => draft) };
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft list failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.get<{ Params: { organizationId: string; draftId: string } }>("/api/v1/organizations/:organizationId/knowledge/drafts/:draftId", {
+    schema: { params: { type: "object", required: ["organizationId", "draftId"], properties: {
+      organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern },
+    } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const draft = await dependencies.repository.getKnowledgeDraft(context.userId, request.params.organizationId, request.params.draftId);
+      if (!draft) return reply.code(404).send(resourceNotAvailable(request.id));
+      const body = await dependencies.storage.read(draft.sourceUri, draft.contentHash);
+      const stillAuthorized = await dependencies.repository.getKnowledgeDraft(context.userId, request.params.organizationId, request.params.draftId);
+      if (!stillAuthorized || stillAuthorized.versionId !== draft.versionId || stillAuthorized.contentHash !== draft.contentHash) {
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      reply.header("Cache-Control", "no-store");
+      reply.header("ETag", etag(draft.currentVersion));
+      return representSharedDraft(draft, body);
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft read failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.patch<{ Params: { organizationId: string; draftId: string }; Body: SharedDraftPatch }>(
+    "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "draftId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern },
+        } },
+        headers: { type: "object", properties: { "if-match": { type: "string", maxLength: 64 } } },
+        body: { type: "object", additionalProperties: false, minProperties: 1, properties: {
+          title: { type: "string", minLength: 1, maxLength: 800 },
+          body: { type: "string", maxLength: maxBodyBytes },
+          classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+          responsibleDepartmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
+          targetScopeType: { enum: ["ORGANIZATION", "DEPARTMENT", null] },
+          teamTag: { anyOf: [{ type: "string", maxLength: 100 }, { type: "null" }] },
+          projectTag: { anyOf: [{ type: "string", maxLength: 100 }, { type: "null" }] },
+          audienceRoleIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      const expectedVersion = parseEtag(request.headers["if-match"]);
+      if (expectedVersion === "missing") return reply.code(428).send(safeError("PRECONDITION_REQUIRED", "Reload the draft before saving.", request.id));
+      if (expectedVersion === null) return reply.code(400).send(safeError("INVALID_REQUEST", "The version precondition is invalid.", request.id));
+      const patch = request.body;
+      if ((patch.title !== undefined && (!patch.title.trim() || !isValidText(patch.title, 800, maxTitleCodePoints)))
+        || (patch.body !== undefined && !isValidText(patch.body, maxBodyBytes, maxBodyBytes))
+        || (patch.teamTag !== undefined && patch.teamTag !== null && !patch.teamTag.trim())
+        || (patch.projectTag !== undefined && patch.projectTag !== null && !patch.projectTag.trim())) {
+        return reply.code(400).send(safeError("INVALID_REQUEST", "The draft is invalid.", request.id));
+      }
+      const { organizationId, draftId } = request.params;
+      let stored: Awaited<ReturnType<PrivateContentStorage["write"]>> | null = null;
+      let updateAttempted = false;
+      try {
+        const existing = await dependencies.repository.getKnowledgeDraft(context.userId, organizationId, draftId);
+        if (!existing) return reply.code(404).send(resourceNotAvailable(request.id));
+        if (existing.currentVersion !== expectedVersion) {
+          return reply.code(412).send(safeError("VERSION_CONFLICT", "This draft changed. Reload it before saving again.", request.id));
+        }
+        if (existing.hasPendingSubmission) {
+          return reply.code(409).send(safeError("REVIEW_PENDING", "A submitted version is awaiting review. Editing can resume after a decision.", request.id));
+        }
+        if (patch.body !== undefined) stored = await dependencies.storage.write(patch.body);
+        updateAttempted = true;
+        const result = await dependencies.repository.updateKnowledgeDraft(context.userId, organizationId, draftId,
+          expectedVersion, { ...patch, title: patch.title?.trim(),
+            teamTag: patch.teamTag === null ? null : patch.teamTag?.trim(),
+            projectTag: patch.projectTag === null ? null : patch.projectTag?.trim() },
+          stored, request.id);
+        if (result.kind !== "updated") {
+          if (stored) await dependencies.storage.remove(stored.sourceUri);
+          if (result.kind === "conflict") return reply.code(412).send(safeError("VERSION_CONFLICT", "This draft changed. Reload it before saving again.", request.id));
+          if (result.kind === "pending") return reply.code(409).send(safeError("REVIEW_PENDING", "A submitted version is awaiting review. Editing can resume after a decision.", request.id));
+          if (result.kind === "invalid-metadata") return reply.code(400).send(safeError("INVALID_METADATA", "The draft metadata is invalid.", request.id));
+          return reply.code(404).send(resourceNotAvailable(request.id));
+        }
+        const body = patch.body ?? await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
+        reply.header("Cache-Control", "no-store");
+        reply.header("ETag", etag(result.draft.currentVersion));
+        return representSharedDraft(result.draft, body);
+      } catch (error) {
+        if (stored && !updateAttempted) {
+          try { await dependencies.storage.remove(stored.sourceUri); }
+          catch (cleanupError) {
+            request.log.error({ errorType: safeErrorType(cleanupError), requestId: request.id }, "Shared draft update cleanup failed");
+          }
+        }
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft update failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.post<{ Params: { organizationId: string; draftId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId/submit", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "draftId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern },
+        } },
+        headers: { type: "object", required: ["idempotency-key"], properties: {
+          "idempotency-key": { type: "string", pattern: uuidPattern },
+          "if-match": { type: "string", maxLength: 64 },
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      const expectedVersion = parseEtag(request.headers["if-match"]);
+      if (expectedVersion === "missing") return reply.code(428).send(safeError("PRECONDITION_REQUIRED", "Reload the draft before submitting.", request.id));
+      if (expectedVersion === null) return reply.code(400).send(safeError("INVALID_REQUEST", "The version precondition is invalid.", request.id));
+      try {
+        const currentDraft = await dependencies.repository.getKnowledgeDraft(context.userId,
+          request.params.organizationId, request.params.draftId);
+        if (currentDraft && currentDraft.currentVersion === expectedVersion) {
+          await dependencies.storage.read(currentDraft.sourceUri, currentDraft.contentHash);
+        }
+        const result = await dependencies.repository.submitKnowledgeDraft(context.userId,
+          request.params.organizationId, request.params.draftId, expectedVersion,
+          request.headers["idempotency-key"] as string, request.id);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT", "Reload this draft and its review status.", request.id));
+        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Add an active responsible department, access scope and audience before submitting.", request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(result.kind === "submitted" ? 201 : 200).send(representSubmission(result.submission));
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge submission failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/submissions", {
+    schema: { params: { type: "object", required: ["organizationId"], properties: {
+      organizationId: { type: "string", pattern: uuidPattern },
+    } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const submissions = await dependencies.repository.listKnowledgeSubmissions(context.userId, request.params.organizationId);
+      if (!submissions) return reply.code(404).send(resourceNotAvailable(request.id));
+      reply.header("Cache-Control", "no-store");
+      return { items: submissions.map(representSubmission) };
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge submission list failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/reviewer-grants", {
+    schema: { params: { type: "object", required: ["organizationId"], properties: {
+      organizationId: { type: "string", pattern: uuidPattern },
+    } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const grants = await dependencies.repository.listReviewerGrants(context.userId, request.params.organizationId);
+      if (!grants) return reply.code(404).send(resourceNotAvailable(request.id));
+      reply.header("Cache-Control", "no-store");
+      return { items: grants.map((grant) => ({ ...grant, validFrom: grant.validFrom.toISOString(),
+        validUntil: grant.validUntil?.toISOString() ?? null })) };
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Reviewer grant list failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.post<{ Params: { organizationId: string }; Body: Omit<ReviewerGrantInput, "validUntil"> & { validUntil: string | null } }>(
+    "/api/v1/organizations/:organizationId/knowledge/reviewer-grants", {
+      schema: {
+        params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false,
+          required: ["reviewerMembershipId", "departmentId", "classifications", "level"], properties: {
+            reviewerMembershipId: { type: "string", pattern: uuidPattern },
+            departmentId: { type: "string", pattern: uuidPattern },
+            classifications: { type: "array", minItems: 1, maxItems: 3, uniqueItems: true,
+              items: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] } },
+            level: { type: "string", enum: ["STANDARD", "SPECIALIST", "SENIOR"] },
+            teamTag: { anyOf: [{ type: "string", minLength: 1, maxLength: 100 }, { type: "null" }] },
+            projectTag: { anyOf: [{ type: "string", minLength: 1, maxLength: 100 }, { type: "null" }] },
+            validUntil: { anyOf: [{ type: "string", maxLength: 40 }, { type: "null" }] },
+          } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      const { validUntil, ...rest } = request.body;
+      const expiry = validUntil ? new Date(validUntil) : null;
+      if ((expiry && (!Number.isFinite(expiry.getTime()) || expiry <= new Date()))
+        || (rest.teamTag !== undefined && rest.teamTag !== null && !rest.teamTag.trim())
+        || (rest.projectTag !== undefined && rest.projectTag !== null && !rest.projectTag.trim())) {
+        return reply.code(400).send(safeError("INVALID_REQUEST", "The reviewer grant is invalid.", request.id));
+      }
+      try {
+        const grant = await dependencies.repository.createReviewerGrant(context.userId, request.params.organizationId, {
+          ...rest, teamTag: rest.teamTag?.trim() ?? null,
+          projectTag: rest.projectTag?.trim() ?? null, validUntil: expiry,
+        }, request.id);
+        if (!grant) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(201).send({ ...grant, validFrom: grant.validFrom.toISOString(),
+          validUntil: grant.validUntil?.toISOString() ?? null });
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Reviewer grant creation failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.post<{ Params: { organizationId: string; grantId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/reviewer-grants/:grantId/deactivate", {
+      schema: { params: { type: "object", required: ["organizationId", "grantId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, grantId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const deactivated = await dependencies.repository.deactivateReviewerGrant(context.userId,
+          request.params.organizationId, request.params.grantId, request.id);
+        return deactivated ? reply.code(204).send() : reply.code(404).send(resourceNotAvailable(request.id));
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Reviewer grant deactivation failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/reviews", {
+    schema: { params: { type: "object", required: ["organizationId"], properties: {
+      organizationId: { type: "string", pattern: uuidPattern },
+    } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const assigned = await dependencies.repository.listAssignedReviews(context.userId, request.params.organizationId);
+      if (!assigned) return reply.code(404).send(resourceNotAvailable(request.id));
+      reply.header("Cache-Control", "no-store");
+      return { items: assigned.map((item) => ({ ...item, submittedAt: item.submittedAt.toISOString() })) };
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Review queue failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.get<{ Params: { organizationId: string; submissionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/reviews/:submissionId", {
+      schema: { params: { type: "object", required: ["organizationId", "submissionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, submissionId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, submissionId } = request.params;
+        const detail = await dependencies.repository.getAssignedReview(context.userId, organizationId, submissionId);
+        if (!detail) return reply.code(404).send(resourceNotAvailable(request.id));
+        const body = await dependencies.storage.read(detail.sourceUri, detail.submission.contentHash);
+        const stillAuthorized = await dependencies.repository.getAssignedReview(context.userId, organizationId, submissionId);
+        if (!stillAuthorized || stillAuthorized.submission.snapshotVersionId !== detail.submission.snapshotVersionId
+          || stillAuthorized.submission.contentHash !== detail.submission.contentHash) {
+          return reply.code(404).send(resourceNotAvailable(request.id));
+        }
+        reply.header("Cache-Control", "no-store");
+        return { ...representSubmission(detail.submission), body,
+          submittedByMembershipId: detail.submittedByMembershipId,
+          teamTag: detail.teamTag, projectTag: detail.projectTag };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Review detail failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.post<{ Params: { organizationId: string; submissionId: string }; Body: {
+    action: "APPROVE" | "REQUEST_REVISION" | "REJECT";
+    expectedSnapshotVersionId: string; expectedContentHash: string; comment?: string | null;
+  } }>("/api/v1/organizations/:organizationId/knowledge/reviews/:submissionId/decisions", {
+    schema: {
+      params: { type: "object", required: ["organizationId", "submissionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, submissionId: { type: "string", pattern: uuidPattern },
+      } },
+      headers: { type: "object", required: ["idempotency-key"], properties: {
+        "idempotency-key": { type: "string", pattern: uuidPattern },
+      } },
+      body: { type: "object", additionalProperties: false,
+        required: ["action", "expectedSnapshotVersionId", "expectedContentHash"], properties: {
+          action: { type: "string", enum: ["APPROVE", "REQUEST_REVISION", "REJECT"] },
+          expectedSnapshotVersionId: { type: "string", pattern: uuidPattern },
+          expectedContentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          comment: { anyOf: [{ type: "string", maxLength: 2000 }, { type: "null" }] },
+        } },
+    },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      if (request.body.action === "APPROVE") {
+        const pendingReview = await dependencies.repository.getAssignedReview(context.userId,
+          request.params.organizationId, request.params.submissionId);
+        if (pendingReview
+          && pendingReview.submission.snapshotVersionId === request.body.expectedSnapshotVersionId
+          && pendingReview.submission.contentHash === request.body.expectedContentHash) {
+          await dependencies.storage.read(pendingReview.sourceUri, pendingReview.submission.contentHash);
+        }
+      }
+      const result = await dependencies.repository.decideReview(context.userId, request.params.organizationId,
+        request.params.submissionId, request.body.action, request.body.expectedSnapshotVersionId,
+        request.body.expectedContentHash, request.body.comment ?? null,
+        request.headers["idempotency-key"] as string, request.id);
+      if (result.kind === "not-found" || (result.kind === "denied" && result.reason === "NOT_AUTHORIZED")) {
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      if (result.kind === "conflict") return reply.code(409).send(safeError("REVIEW_CONFLICT", "This submission changed. Reload it before deciding.", request.id));
+      if (result.kind === "denied") {
+        return reply.code(result.reason === "COMMENT_REQUIRED" ? 400 : 409)
+          .send(safeError(result.reason, "This review decision cannot be applied.", request.id));
+      }
+      reply.header("Cache-Control", "no-store");
+      return reply.code(result.kind === "decided" ? 201 : 200).send(representSubmission(result.submission));
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Review decision failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/published", {
+    schema: { params: { type: "object", required: ["organizationId"], properties: {
+      organizationId: { type: "string", pattern: uuidPattern },
+    } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const items = await dependencies.repository.listPublishedKnowledge(context.userId, request.params.organizationId);
+      if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+      reply.header("Cache-Control", "no-store");
+      return { items: items.map(({ sourceUri: _sourceUri, ...item }) => ({ ...item,
+        publishedAt: item.publishedAt.toISOString(), validFrom: item.validFrom.toISOString(),
+        validUntil: item.validUntil?.toISOString() ?? null })) };
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Published knowledge list failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.get<{ Params: { organizationId: string; publishedVersionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/published/:publishedVersionId", {
+      schema: { params: { type: "object", required: ["organizationId", "publishedVersionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, publishedVersionId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, publishedVersionId } = request.params;
+        const publication = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
+        if (!publication) return reply.code(404).send(resourceNotAvailable(request.id));
+        const body = await dependencies.storage.read(publication.sourceUri, publication.contentHash);
+        const stillAuthorized = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
+        if (!stillAuthorized || stillAuthorized.contentHash !== publication.contentHash) {
+          return reply.code(404).send(resourceNotAvailable(request.id));
+        }
+        reply.header("Cache-Control", "no-store");
+        return { id: publication.id, draftId: publication.draftId, title: publication.title,
+          classification: publication.classification, body, contentHash: publication.contentHash,
+          audienceRoleIds: publication.audienceRoleIds,
+          publishedAt: publication.publishedAt.toISOString(), validFrom: publication.validFrom.toISOString(),
+          validUntil: publication.validUntil?.toISOString() ?? null };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Published knowledge read failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
   app.post<{ Params: { organizationId: string }; Body: DraftWrite }>("/api/v1/organizations/:organizationId/private-workspace/drafts", {
     schema: {
       params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
@@ -782,6 +1252,50 @@ function normalizePatch(value: DraftPatch): DraftPatch | null {
 
 function isValidText(value: string, maxBytes: number, maxCodePoints: number): boolean {
   return !value.includes("\u0000") && Buffer.byteLength(value, "utf8") <= maxBytes && Array.from(value).length <= maxCodePoints;
+}
+
+function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
+  return {
+    id: draft.id,
+    organizationId: draft.organizationId,
+    title: draft.title,
+    classification: draft.classification,
+    status: "ACTIVE" as const,
+    hasPendingSubmission: draft.hasPendingSubmission,
+    body,
+    responsibleDepartmentId: draft.responsibleDepartmentId,
+    targetScopeType: draft.targetScopeType,
+    teamTag: draft.teamTag,
+    projectTag: draft.projectTag,
+    audienceRoleIds: draft.audienceRoleIds,
+    currentVersion: {
+      id: draft.versionId,
+      version: draft.currentVersion,
+      mimeType: draft.mimeType,
+      contentHash: draft.contentHash,
+    },
+    createdAt: draft.createdAt.toISOString(),
+    updatedAt: draft.updatedAt.toISOString(),
+  };
+}
+
+function representSubmission(submission: SharedKnowledgeSubmission) {
+  return {
+    id: submission.id,
+    draftId: submission.draftId,
+    snapshotVersionId: submission.snapshotVersionId,
+    title: submission.title,
+    classification: submission.classification,
+    responsibleDepartmentId: submission.responsibleDepartmentId,
+    targetScopeType: submission.targetScopeType,
+    targetDepartmentId: submission.targetDepartmentId,
+    audienceRoleIds: submission.audienceRoleIds,
+    contentHash: submission.contentHash,
+    status: submission.status,
+    decisionComment: submission.decisionComment,
+    submittedAt: submission.submittedAt.toISOString(),
+    publishedVersionId: submission.publishedVersionId,
+  };
 }
 
 function parseEtag(value: string | undefined): number | "missing" | null {

@@ -2,14 +2,13 @@ import { app, BrowserWindow, ipcMain, safeStorage, session } from "electron";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { validateDesktopApiRequest, type DesktopApiRequest } from "./apiRequestPolicy";
 
-type DesktopApiRequest = { path: string; method: "GET" | "POST" | "PATCH"; body?: string; ifMatch?: string };
 type DesktopApiResponse = { status: number; body: string; etag?: string; location?: string };
 type CookieJar = Map<string, string>;
 
 const outputDirectory = fileURLToPath(new URL(".", import.meta.url));
 const sessionFile = () => join(app.getPath("userData"), "auth-session.enc");
-const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 let cookieJar: CookieJar | null = null;
 let requestQueue: Promise<void> = Promise.resolve();
 
@@ -31,36 +30,6 @@ function trustedApiOrigin(): string {
     throw new Error("ARDEN_CORE_URL must be a trusted HTTPS origin");
   }
   return url.origin;
-}
-
-function validateRequest(value: unknown): value is DesktopApiRequest {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const request = value as Record<string, unknown>;
-  if (Object.keys(request).some((key) => !["path", "method", "body", "ifMatch"].includes(key))) return false;
-  if (typeof request.path !== "string" || request.path.length > 2048 || !request.path.startsWith("/") || request.path.startsWith("//")) return false;
-  if (request.method !== "GET" && request.method !== "POST" && request.method !== "PATCH") return false;
-  if (request.body !== undefined && (typeof request.body !== "string" || Buffer.byteLength(request.body, "utf8") > 128 * 1024)) return false;
-  if (request.ifMatch !== undefined && (typeof request.ifMatch !== "string" || request.ifMatch.length > 80)) return false;
-  return isAllowedRequest(request as unknown as DesktopApiRequest);
-}
-
-function isAllowedRequest(request: DesktopApiRequest): boolean {
-  let url: URL;
-  try { url = new URL(request.path, "https://arden.invalid"); }
-  catch { return false; }
-  if (url.origin !== "https://arden.invalid" || url.hash) return false;
-  const signIn = url.pathname === "/api/v1/auth/sign-in" && request.method === "POST";
-  const signOut = url.pathname === "/api/v1/auth/sign-out" && request.method === "POST";
-  const currentUser = url.pathname === "/api/v1/me" && request.method === "GET";
-  const draftPath = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts(?:/${uuid})?$`).test(url.pathname);
-  const collection = /\/drafts$/.test(url.pathname);
-  const permittedDraftMethod = draftPath && (
-    (request.method === "GET" && !request.body && !request.ifMatch) ||
-    (collection && request.method === "POST" && Boolean(request.body) && !request.ifMatch) ||
-    (!collection && request.method === "PATCH" && Boolean(request.body) && Boolean(request.ifMatch))
-  );
-  const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
-  return (signIn || signOut || currentUser || permittedDraftMethod) && (!url.search || queryAllowed);
 }
 
 async function readCookieJar(origin: string): Promise<CookieJar> {
@@ -119,6 +88,7 @@ async function doApiRequest(request: DesktopApiRequest): Promise<DesktopApiRespo
   const headers = new Headers({ accept: "application/json", origin });
   if (request.body !== undefined) headers.set("content-type", "application/json");
   if (request.ifMatch) headers.set("if-match", request.ifMatch);
+  if (request.idempotencyKey) headers.set("idempotency-key", request.idempotencyKey);
   if (jar.size > 0) headers.set("cookie", [...jar].map(([name, value]) => `${name}=${value}`).join("; "));
   const response = await fetch(`${origin}${request.path}`, {
     method: request.method,
@@ -140,7 +110,7 @@ async function doApiRequest(request: DesktopApiRequest): Promise<DesktopApiRespo
 
 ipcMain.handle("arden:api-request", async (event, value: unknown) => {
   if (!isTrustedRenderer(event)) throw new Error("Untrusted IPC sender");
-  if (!validateRequest(value)) throw new Error("Invalid desktop API request");
+  if (!validateDesktopApiRequest(value)) throw new Error("Invalid desktop API request");
   const request = value as DesktopApiRequest;
   const current = requestQueue.then(() => doApiRequest(request));
   requestQueue = current.then(() => undefined, () => undefined);

@@ -1,5 +1,6 @@
 import type { Platform } from "./types";
 import type {} from "./desktop-session";
+import { isKnowledgeClassification, type KnowledgeClassification } from "./knowledge-classification";
 
 export type OrganizationMembership = {
   organization: { id: string; name: string };
@@ -14,6 +15,194 @@ export type OrganizationAdministration = {
   members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; roleIds: string[]; roleNames: string[] }>;
   invitations: Array<{ id: string; email: string; departmentId: string; status: string; expiresAt: string }>;
 };
+
+export type CreatedKnowledgeDraft = {
+  id: string;
+  organizationId: string;
+  title: string;
+  body: string;
+  classification: KnowledgeClassification;
+  version: number;
+};
+
+export type KnowledgeOptions = {
+  departments: Array<{ id: string; name: string }>;
+  audienceRoles: Array<{ id: string; name: string; departmentId: string | null }>;
+};
+export type KnowledgeDraftRecord = {
+  id: string;
+  organizationId: string;
+  title: string;
+  classification: KnowledgeClassification;
+  status: "ACTIVE";
+  hasPendingSubmission: boolean;
+  body: string;
+  responsibleDepartmentId: string | null;
+  targetScopeType: "ORGANIZATION" | "DEPARTMENT" | null;
+  teamTag: string | null;
+  projectTag: string | null;
+  audienceRoleIds: string[];
+  currentVersion: { id: string; version: number; mimeType: "text/plain"; contentHash: string };
+  createdAt: string;
+  updatedAt: string;
+};
+export type KnowledgeDraftSummary = {
+  id: string;
+  organizationId: string;
+  title: string;
+  classification: KnowledgeClassification;
+  responsibleDepartmentId: string | null;
+  targetScopeType: "ORGANIZATION" | "DEPARTMENT" | null;
+  teamTag: string | null;
+  projectTag: string | null;
+  audienceRoleIds: string[];
+  versionId: string;
+  mimeType: "text/plain";
+  contentHash: string;
+  currentVersion: number;
+  hasPendingSubmission: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+export type KnowledgeSubmission = {
+  id: string;
+  draftId: string;
+  snapshotVersionId: string;
+  title: string;
+  classification: KnowledgeClassification;
+  responsibleDepartmentId: string;
+  targetScopeType: "ORGANIZATION" | "DEPARTMENT";
+  targetDepartmentId: string | null;
+  audienceRoleIds: string[];
+  contentHash: string;
+  status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED" | "WITHDRAWN";
+  submittedAt: string;
+  publishedVersionId: string | null;
+  decisionComment: string | null;
+};
+export type AssignedKnowledgeReview = {
+  submissionId: string;
+  snapshotId: string;
+  title: string;
+  departmentId: string;
+  classification: KnowledgeClassification;
+  submittedAt: string;
+  approvalBlocked: boolean;
+};
+export type KnowledgeReviewDetail = KnowledgeSubmission & {
+  body: string;
+  submittedByMembershipId: string;
+  teamTag: string | null;
+  projectTag: string | null;
+};
+export type PublishedKnowledge = {
+  id: string;
+  draftId: string;
+  title: string;
+  classification: KnowledgeClassification;
+  audienceRoleIds: string[];
+  contentHash: string;
+  publishedAt: string;
+  validFrom: string;
+  validUntil: string | null;
+  body?: string;
+};
+export type ReviewerGrant = {
+  id: string;
+  reviewerMembershipId: string;
+  departmentId: string;
+  classifications: KnowledgeClassification[];
+  level: "STANDARD" | "SPECIALIST" | "SENIOR";
+  teamTag: string | null;
+  projectTag: string | null;
+  validFrom: string;
+  validUntil: string | null;
+  status: "ACTIVE" | "INACTIVE";
+};
+
+function knowledgePath(organizationId: string): string {
+  return `/api/v1/organizations/${organizationId}/knowledge`;
+}
+
+export function loadKnowledgeOptions(platform: Platform, organizationId: string): Promise<KnowledgeOptions> {
+  return request(platform, `${knowledgePath(organizationId)}/options`);
+}
+
+export async function listKnowledgeDrafts(platform: Platform, organizationId: string): Promise<KnowledgeDraftSummary[]> {
+  const result = await request<{ items: KnowledgeDraftSummary[] }>(platform, `${knowledgePath(organizationId)}/drafts`);
+  return result.items;
+}
+
+export function loadKnowledgeDraft(platform: Platform, organizationId: string, draftId: string): Promise<KnowledgeDraftRecord> {
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`);
+}
+
+export function createNewKnowledgeDraft(platform: Platform, organizationId: string,
+  input: { title: string; body: string; classification: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
+  return request(platform, `${knowledgePath(organizationId)}/drafts/new`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
+  });
+}
+
+export function saveKnowledgeDraft(platform: Platform, organizationId: string, draftId: string, version: number,
+  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceRoleIds">>): Promise<KnowledgeDraftRecord> {
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`, {
+    method: "PATCH", headers: { "If-Match": `"${version}"` }, body: JSON.stringify(patch),
+  });
+}
+
+export function submitKnowledgeDraft(platform: Platform, organizationId: string, draftId: string,
+  version: number, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}/submit`, {
+    method: "POST", headers: { "If-Match": `"${version}"`, "Idempotency-Key": idempotencyKey },
+  });
+}
+
+export async function listKnowledgeSubmissions(platform: Platform, organizationId: string): Promise<KnowledgeSubmission[]> {
+  const result = await request<{ items: KnowledgeSubmission[] }>(platform, `${knowledgePath(organizationId)}/submissions`);
+  return result.items;
+}
+
+export async function listAssignedKnowledgeReviews(platform: Platform, organizationId: string): Promise<AssignedKnowledgeReview[]> {
+  const result = await request<{ items: AssignedKnowledgeReview[] }>(platform, `${knowledgePath(organizationId)}/reviews`);
+  return result.items;
+}
+
+export function loadKnowledgeReview(platform: Platform, organizationId: string, submissionId: string): Promise<KnowledgeReviewDetail> {
+  return request(platform, `${knowledgePath(organizationId)}/reviews/${submissionId}`);
+}
+
+export function decideKnowledgeReview(platform: Platform, organizationId: string, detail: KnowledgeReviewDetail,
+  action: "APPROVE" | "REQUEST_REVISION" | "REJECT", comment: string | null, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/reviews/${detail.id}/decisions`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ action, expectedSnapshotVersionId: detail.snapshotVersionId,
+      expectedContentHash: detail.contentHash, comment }),
+  });
+}
+
+export async function listPublishedKnowledge(platform: Platform, organizationId: string): Promise<PublishedKnowledge[]> {
+  const result = await request<{ items: PublishedKnowledge[] }>(platform, `${knowledgePath(organizationId)}/published`);
+  return result.items;
+}
+
+export function loadPublishedKnowledge(platform: Platform, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge> {
+  return request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}`);
+}
+
+export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {
+  const result = await request<{ items: ReviewerGrant[] }>(platform, `${knowledgePath(organizationId)}/reviewer-grants`);
+  return result.items;
+}
+
+export function createReviewerGrant(platform: Platform, organizationId: string,
+  input: Omit<ReviewerGrant, "id" | "status" | "validFrom">): Promise<ReviewerGrant> {
+  return request(platform, `${knowledgePath(organizationId)}/reviewer-grants`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function deactivateReviewerGrant(platform: Platform, organizationId: string, grantId: string): Promise<void> {
+  return request(platform, `${knowledgePath(organizationId)}/reviewer-grants/${grantId}/deactivate`, { method: "POST" });
+}
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly code: string | null = null) {
@@ -101,6 +290,41 @@ export async function revokeOrganizationInvitation(platform: Platform, organizat
   await request(platform, `/api/v1/organizations/${organizationId}/invitations/${invitationId}/revoke`, { method: "POST" });
 }
 
+export async function createKnowledgeDraft(platform: Platform, organizationId: string, sourcePrivateVersionId: string, classification: KnowledgeClassification, idempotencyKey: string): Promise<CreatedKnowledgeDraft> {
+  let response: unknown;
+  try {
+    response = await request<unknown>(platform, `/api/v1/organizations/${organizationId}/knowledge/drafts`, {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify({ sourcePrivateVersionId, classification }),
+    });
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 0) {
+      throw new ApiError(0, "Could not confirm whether the shared draft was created. Retry the same request to check safely.");
+    }
+    throw cause;
+  }
+  if (typeof response !== "object" || response === null || Array.isArray(response)) throw new ApiError(0, "The server returned an invalid shared draft.");
+  const draft = response as Record<string, unknown>;
+  const currentVersion = draft.currentVersion;
+  if (typeof draft.id !== "string" || draft.organizationId !== organizationId ||
+    typeof draft.title !== "string" || typeof draft.body !== "string" ||
+    !isKnowledgeClassification(draft.classification) || draft.classification !== classification ||
+    draft.status !== "ACTIVE" || typeof currentVersion !== "object" || currentVersion === null ||
+    !("version" in currentVersion) || typeof currentVersion.version !== "number" ||
+    !Number.isSafeInteger(currentVersion.version) || currentVersion.version < 1) {
+    throw new ApiError(0, "The server returned an invalid shared draft.");
+  }
+  return {
+    id: draft.id,
+    organizationId,
+    title: draft.title,
+    body: draft.body,
+    classification: draft.classification,
+    version: currentVersion.version,
+  };
+}
+
 export async function apiRequest<T>(platform: Platform, path: string, init: RequestInit = {}): Promise<T> {
   return request<T>(platform, path, init);
 }
@@ -121,11 +345,15 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
       if (init.body !== undefined && typeof init.body !== "string") {
         throw new ApiError(0, "Desktop requests require a JSON body.");
       }
+      if ([...headers.keys()].some((header) => header !== "if-match" && header !== "idempotency-key")) {
+        throw new ApiError(0, "This request header is not available in the Arden desktop client.");
+      }
       response = await bridge.requestApi({
         path,
         method,
         body: typeof init.body === "string" ? init.body : undefined,
         ifMatch: headers.get("if-match") ?? undefined,
+        ...(headers.has("idempotency-key") ? { idempotencyKey: headers.get("idempotency-key")! } : {}),
       });
     } else {
       const requestHeaders: Record<string, string> = { ...Object.fromEntries(headers.entries()) };

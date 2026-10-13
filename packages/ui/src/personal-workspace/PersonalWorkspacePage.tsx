@@ -5,19 +5,27 @@ import { PrivateNoteList } from "./PrivateNoteList";
 import { SearchField } from "../shared/SearchField";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { useSearchShortcut } from "../shared/useSearchShortcut";
+import { ContributePrivateNoteDialog, type ContributionAttempt } from "./ContributePrivateNoteDialog";
+import type { CreatedKnowledgeDraft } from "../shared/api-client";
 import type { PrivateNotesController } from "./usePrivateNotes";
 import type { Platform } from "../shared/types";
 
-export function PersonalWorkspacePage({ controller, platform, organizationId, contextOpen, onToggleContext }: {
+export function PersonalWorkspacePage({ controller, platform, organizationId, contributionAttempt, onContributionAttemptChange, onKnowledgeDraftCreated, contextOpen, onToggleContext }: {
   controller: PrivateNotesController;
   platform: Platform;
   organizationId: string;
+  contributionAttempt: ContributionAttempt | null;
+  onContributionAttemptChange: (attempt: ContributionAttempt | null) => void;
+  onKnowledgeDraftCreated: (draft: CreatedKnowledgeDraft) => void;
 } & ContextControlProps) {
   const [query, setQuery] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
+  const [contributionOpen, setContributionOpen] = useState(false);
   const revealSearch = useCallback(() => setEditorOpen(false), []);
   const searchRef = useSearchShortcut(revealSearch);
   const { state, selectedNote, draft, isDirty, serverBacked, loading, saving, error, saveMessage } = controller;
+  const sourceVersionId = selectedNote?.sourceVersionId;
+  const matchingAttempt = contributionAttempt?.sourceVersionId === sourceVersionId ? contributionAttempt : null;
   const visibleNotes = useMemo(() => state.notes.filter((note) => {
     const current = state.drafts[note.id] ?? note;
     return `${current.title} ${current.body}`.toLowerCase().includes(query.trim().toLowerCase());
@@ -51,6 +59,8 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
           requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".note-list .is-selected")?.focus());
         }}>Back to notes</button>
           <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : serverBacked ? "Save private note" : "Save preview note"}</button>
+          {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}>Contribute copy</button>}
+          {serverBacked && (!sourceVersionId || isDirty) && <small>Save this private note before contributing an exact version.</small>}
         </div>}
         {loading && <p role="status">Loading your private notes…</p>}
         {error && <p className="sign-in-message" role="alert">{error}</p>}
@@ -69,6 +79,16 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
           </aside>
         </div>
       </div>
+      {contributionOpen && serverBacked && selectedNote && sourceVersionId && !isDirty && <ContributePrivateNoteDialog
+        key={sourceVersionId}
+        platform={platform}
+        organizationId={organizationId}
+        source={{ title: selectedNote.title, body: selectedNote.body, versionId: sourceVersionId }}
+        attempt={matchingAttempt}
+        onAttemptChange={onContributionAttemptChange}
+        onClose={() => setContributionOpen(false)}
+        onCreated={(created) => { onContributionAttemptChange(null); setContributionOpen(false); onKnowledgeDraftCreated(created); }}
+      />}
     </main>
   );
 }

@@ -9,12 +9,12 @@ type DraftRepresentation = {
   body: string;
   version: number;
   updatedAt: string;
-  currentVersion: { version: number };
+  currentVersion: { id: string; version: number };
 };
 type DraftListRepresentation = { items: Array<{ id: string; title: string; currentVersion: number; updatedAt: string }>; nextCursor: string | null };
 
 function toPrivateNote(note: DraftRepresentation): PrivateNote {
-  return { id: note.id, title: note.title, body: note.body, updatedLabel: `Saved to server · ${new Date(note.updatedAt).toLocaleString()}` };
+  return { id: note.id, title: note.title, body: note.body, updatedLabel: `Saved to server · ${new Date(note.updatedAt).toLocaleString()}`, sourceVersionId: note.currentVersion.id };
 }
 
 export function usePrivateNotes(initialNotes: PrivateNote[]) {
