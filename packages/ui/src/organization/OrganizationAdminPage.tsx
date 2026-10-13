@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import {
   ApiError, assignOrganizationRole, changePrimaryDepartment, createDepartment, createOrganizationRole,
-  inviteOrganizationMember, loadOrganizationAdministration, resendOrganizationInvitation,
-  revokeOrganizationInvitation, type OrganizationAdministration,
+  createReviewerGrant, deactivateReviewerGrant, inviteOrganizationMember, listReviewerGrants,
+  loadOrganizationAdministration, resendOrganizationInvitation,
+  revokeOrganizationInvitation, type OrganizationAdministration, type ReviewerGrant,
 } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 
@@ -11,6 +12,11 @@ type OrganizationAdminPageProps = { platform: Platform; organizationId: string; 
 
 export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext }: OrganizationAdminPageProps) {
   const [data, setData] = useState<OrganizationAdministration | null>(null);
+  const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
+  const [reviewerId, setReviewerId] = useState("");
+  const [reviewDepartmentId, setReviewDepartmentId] = useState("");
+  const [reviewClassifications, setReviewClassifications] = useState<Array<"INTERNAL" | "CONFIDENTIAL" | "RESTRICTED">>(["INTERNAL"]);
+  const [reviewLevel, setReviewLevel] = useState<ReviewerGrant["level"]>("STANDARD");
   const [departmentName, setDepartmentName] = useState("");
   const [roleName, setRoleName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -21,15 +27,23 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [message, setMessage] = useState("");
 
   const reload = useCallback(async () => {
-    const administration = await loadOrganizationAdministration(platform, organizationId);
+    const [administration, grants] = await Promise.all([
+      loadOrganizationAdministration(platform, organizationId), listReviewerGrants(platform, organizationId),
+    ]);
     setData(administration);
+    setReviewerGrants(grants);
     setInviteDepartmentId((current) => current || administration.departments[0]?.id || "");
+    setReviewDepartmentId((current) => current || administration.departments[0]?.id || "");
+    setReviewerId((current) => current || administration.members.find((member) => member.status === "ACTIVE")?.id || "");
   }, [platform, organizationId]);
 
   useEffect(() => {
     let active = true;
-    void loadOrganizationAdministration(platform, organizationId)
-      .then((administration) => { if (active) { setData(administration); setInviteDepartmentId(administration.departments[0]?.id ?? ""); } })
+    void Promise.all([loadOrganizationAdministration(platform, organizationId), listReviewerGrants(platform, organizationId)])
+      .then(([administration, grants]) => { if (active) { setData(administration); setReviewerGrants(grants);
+        setInviteDepartmentId(administration.departments[0]?.id ?? "");
+        setReviewDepartmentId(administration.departments[0]?.id ?? "");
+        setReviewerId(administration.members.find((member) => member.status === "ACTIVE")?.id ?? ""); } })
       .catch(() => { if (active) setError("Organization administration is unavailable for this account."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -62,6 +76,15 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         ? "Invitation saved in the local test database. No email was sent."
         : "Invitation email sent.";
     }, "Invitation email sent.");
+  };
+  const submitReviewerGrant = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!reviewerId || !reviewDepartmentId || reviewClassifications.length === 0) return;
+    void perform(() => createReviewerGrant(platform, organizationId, {
+      reviewerMembershipId: reviewerId, departmentId: reviewDepartmentId,
+      classifications: reviewClassifications, level: reviewLevel,
+      teamTag: null, projectTag: null, validUntil: null,
+    }).then(() => undefined), "Reviewer grant created. This grants scoped review, not automatic content readership.");
   };
 
   return <main id="arden-main" className="workspace-page organization-live-admin" aria-labelledby="organization-live-admin-title" tabIndex={-1}>
@@ -98,6 +121,25 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               void perform(() => assignOrganizationRole(platform, organizationId, member.id, roleId), "Role assigned."); event.target.value = "";
             }}><option value="">Choose a role</option>{data.roles.filter((role) => !role.isDefault && !member.roleIds.includes(role.id)).map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>
           </article>)}</div>
+        </section>
+        <section className="organization-surface organization-editor-stack"><h2>Knowledge reviewers</h2>
+          <p>Org Admin grants review authority by department and classification. This does not automatically grant published-content access; self-approval is blocked.</p>
+          <form className="organization-live-reviewer-form" onSubmit={submitReviewerGrant}>
+            <label className="organization-field"><span>Reviewer</span><select required disabled={busy} value={reviewerId} onChange={(event) => setReviewerId(event.target.value)}>
+              <option value="">Choose member</option>{data.members.filter((member) => member.status === "ACTIVE").map((member) => <option key={member.id} value={member.id}>{member.name} · {member.email}</option>)}</select></label>
+            <label className="organization-field"><span>Department scope</span><select required disabled={busy} value={reviewDepartmentId} onChange={(event) => setReviewDepartmentId(event.target.value)}>
+              <option value="">Choose department</option>{data.departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}</select></label>
+            <label className="organization-field"><span>Grant level</span><select disabled={busy} value={reviewLevel} onChange={(event) => setReviewLevel(event.target.value as ReviewerGrant["level"])}>
+              <option value="STANDARD">Standard</option><option value="SPECIALIST">Specialist · restricted</option><option value="SENIOR">Senior · restricted</option></select></label>
+            <fieldset className="organization-reviewer-classes"><legend>Classifications</legend>{(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] as const).map((classification) => <label key={classification}>
+              <input type="checkbox" disabled={busy} checked={reviewClassifications.includes(classification)} onChange={(event) => setReviewClassifications((current) => event.target.checked ? [...current, classification] : current.filter((value) => value !== classification))} />{classification}</label>)}</fieldset>
+            <button type="submit" className="primary-button" disabled={busy || !reviewerId || !reviewDepartmentId || !reviewClassifications.length || (reviewClassifications.includes("RESTRICTED") && reviewLevel === "STANDARD")}>Grant reviewer authority</button>
+          </form>
+          {reviewerGrants.length === 0 ? <p>No reviewer grants yet.</p> : <ul className="organization-live-invitations">{reviewerGrants.map((grant) => <li key={grant.id}>
+            <div><strong>{data.members.find((member) => member.id === grant.reviewerMembershipId)?.name ?? "Member"}</strong>
+              <span>{data.departments.find((department) => department.id === grant.departmentId)?.name ?? "Department"} · {grant.classifications.join(", ")} · {grant.level.toLowerCase()} · {grant.status.toLowerCase()}</span></div>
+            {grant.status === "ACTIVE" && <button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(() => deactivateReviewerGrant(platform, organizationId, grant.id), "Reviewer grant deactivated.")}>Deactivate</button>}
+          </li>)}</ul>}
         </section>
         <section className="organization-surface organization-editor-stack"><h2>Invitations</h2>
           {data.invitations.length === 0 ? <p>No invitations yet.</p> : <ul className="organization-live-invitations">{data.invitations.map((invitation) => <li key={invitation.id}><div><strong>{invitation.email}</strong><span>{invitation.status.toLowerCase()} · expires {new Date(invitation.expiresAt).toLocaleDateString()}</span></div>{invitation.status === "PENDING" && <div className="organization-row-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(async () => {

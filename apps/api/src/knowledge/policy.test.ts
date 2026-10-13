@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canCreateSharedDraft, canReadPublication, canReviewSnapshot, canSubmitSnapshot, type MembershipActor } from "./policy.js";
+import { canCreateSharedDraft, canReadPublication, canRespondToSubmission, canReviewSnapshot, canSubmitSnapshot, type MembershipActor } from "./policy.js";
 
 const actor: MembershipActor = { membershipId: "author", organizationId: "org", status: "ACTIVE" };
 const audienceRole = { roleId: "editor", organizationId: "org", status: "ACTIVE" as const, isSystem: false };
@@ -7,7 +7,8 @@ const now = new Date("2026-10-09T00:00:00Z");
 const assignment = { membershipId: "author", organizationId: "org", roleId: "editor", status: "ACTIVE" as const,
   validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null, scopeActive: true, memberInScope: true };
 const audience = { audienceRoles: [audienceRole], assignments: [assignment] };
-const publication = { organizationId: "org", status: "CURRENT" as const, audienceRoleIds: ["editor"] };
+const publication = { organizationId: "org", status: "CURRENT" as const, audienceRoleIds: ["editor"],
+  validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null };
 
 describe("Mainflow 2 policy foundations", () => {
   it("reads only current publications with a matching active custom role", () => {
@@ -23,6 +24,9 @@ describe("Mainflow 2 policy foundations", () => {
     expect(canReadPublication({ actor: { ...actor, status: "SUSPENDED" }, publication, audience, now })).toBe(false);
     expect(canReadPublication({ actor: { ...actor, organizationId: "other" }, publication, audience, now })).toBe(false);
     expect(canReadPublication({ actor, publication: { ...publication, status: "REVOKED" }, audience, now })).toBe(false);
+    expect(canReadPublication({ actor, publication: { ...publication, validFrom: new Date("2026-10-10T00:00:00Z") }, audience, now })).toBe(false);
+    expect(canReadPublication({ actor, publication: { ...publication, validUntil: now }, audience, now })).toBe(false);
+    expect(canReadPublication({ actor, publication: { ...publication, validUntil: new Date(Number.NaN) }, audience, now })).toBe(false);
   });
 
   it("creates a shared copy only from the actor's private version or an authorized publication", () => {
@@ -58,5 +62,7 @@ describe("Mainflow 2 policy foundations", () => {
     expect(canReviewSnapshot({ ...input, grant: { ...grant, validUntil: now } })).toBe(false);
     expect(canReviewSnapshot({ ...input, effectivePolicyVersion: 3 })).toBe(false);
     expect(canReviewSnapshot({ ...input, audienceEnforceable: false })).toBe(false);
+    expect(canRespondToSubmission(input)).toBe(true);
+    expect(canRespondToSubmission({ ...input, grant: { ...grant, status: "INACTIVE" } })).toBe(false);
   });
 });

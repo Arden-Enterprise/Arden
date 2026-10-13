@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createKnowledgePreview, createSampleHandover, draftReadyForReview, handoverReady, reduceKnowledgePreview } from "../src/knowledge/knowledgePreviewModel";
+import { createKnowledgePreview, createSampleHandover, draftReadyForReview, handoverReady, knowledgeDraftMatchesPublication, reduceKnowledgePreview } from "../src/knowledge/knowledgePreviewModel";
 
 describe("synthetic knowledge governance preview", () => {
   it("blocks incomplete or private drafts from shared review", () => {
@@ -31,6 +31,24 @@ describe("synthetic knowledge governance preview", () => {
     expect(published.submitted?.decision).toBe("approved");
     expect(published.publication?.version).toBe(25);
     expect(published.publication?.draft.title).toBe("API Gateway Runbook");
+  });
+
+  it("does not submit an unchanged published sample again", () => {
+    const initial = createKnowledgePreview();
+    const ready = reduceKnowledgePreview(initial, { type: "edit", draft: { ...initial.draft, recoveryReady: true, sourceReady: true } });
+    const submitted = reduceKnowledgePreview(ready, { type: "submit" });
+    const published = reduceKnowledgePreview(submitted, { type: "approve", version: 25 });
+    expect(knowledgeDraftMatchesPublication(published)).toBe(true);
+
+    const repeated = reduceKnowledgePreview(published, { type: "submit" });
+    expect(repeated.submitted).toBe(published.submitted);
+    expect(repeated.publication).toBe(published.publication);
+    expect(repeated.nextVersion).toBe(26);
+
+    const revised = reduceKnowledgePreview(published, { type: "edit", draft: { ...published.draft, title: "Updated runbook" } });
+    expect(knowledgeDraftMatchesPublication(revised)).toBe(false);
+    expect(reduceKnowledgePreview(revised, { type: "submit" }).submitted?.version).toBe(26);
+    expect(knowledgeDraftMatchesPublication(reduceKnowledgePreview(revised, { type: "edit", draft: published.draft }))).toBe(true);
   });
 
   it("freezes classification separately from publication audience", () => {

@@ -61,6 +61,16 @@ button.knowledge-row:hover { border-color: var(--arden-line-strong); background:
 .knowledge-row-copy small { font-size: 13px; overflow-wrap: anywhere; }
 .knowledge-row-status { flex: none; font-size: 12px; font-weight: 600; line-height: 1.5; }
 .knowledge-preview-footnote { display: flex; align-items: center; gap: 8px; color: var(--arden-text-muted) !important; font-size: 12px; line-height: 1.6; }
+.knowledge-server-draft { display: grid; gap: 12px; padding: 22px; border: 1px solid var(--arden-success); border-radius: 8px; background: var(--arden-surface); }
+.knowledge-server-draft h2 { overflow-wrap: anywhere; }
+.knowledge-server-draft details, .knowledge-source-preview { min-width: 0; padding: 14px; border-radius: 6px; background: var(--arden-elevated); }
+.knowledge-server-draft summary { cursor: pointer; color: var(--arden-text-primary); }
+.knowledge-server-draft pre, .knowledge-source-preview pre { max-height: 220px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--arden-text-secondary); font: inherit; font-size: 13px; line-height: 1.6; }
+.knowledge-source-preview { display: grid; gap: 8px; }
+.knowledge-source-preview > span { color: var(--arden-text-muted); font-size: 12px; }
+.knowledge-contribute-form { display: grid; gap: 10px; }
+.knowledge-contribute-form select { min-height: 44px; padding: 10px; border: 1px solid var(--arden-control-border); border-radius: 6px; color: var(--arden-text-primary); background: var(--arden-elevated); }
+.knowledge-contribute-form small { color: var(--arden-text-muted); }
 .knowledge-empty { display: grid; justify-items: start; gap: 12px; padding: 32px; border: 1px solid var(--arden-line); border-radius: 8px; }
 .knowledge-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; padding: 24px; border-radius: 8px; background: var(--arden-surface); }
 .knowledge-panel hr { width: 100%; margin: 0; border: 0; border-top: 1px solid var(--arden-line); }
@@ -95,6 +105,24 @@ button.knowledge-row:hover { border-color: var(--arden-line-strong); background:
 .knowledge-back-button { align-self: flex-start; min-height: 40px; padding: 8px 0; border: 0; color: var(--arden-text-secondary); background: transparent; font-size: 13px; text-align: left; }
 .knowledge-back-button:hover { color: var(--arden-accent); }
 .knowledge-action-message { padding: 12px 16px; border-left: 3px solid var(--arden-success); border-radius: 0 6px 6px 0; background: var(--arden-surface); font-size: 13px; }
+.knowledge-live-error { padding: 12px 16px; border-left: 3px solid var(--arden-danger); border-radius: 0 6px 6px 0; color: var(--arden-danger) !important; background: var(--arden-surface); font-size: 13px; }
+.knowledge-live-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.knowledge-live-form, .knowledge-live-decision { align-items: stretch; }
+.knowledge-live-form > label, .knowledge-live-decision > label { display: grid; gap: 8px; color: var(--arden-text-secondary); font-size: 13px; }
+.knowledge-live-form input, .knowledge-live-form select, .knowledge-live-form textarea,
+.knowledge-live-decision textarea { width: 100%; min-width: 0; padding: 12px 14px; border: 1px solid var(--arden-control-border); border-radius: 6px; color: var(--arden-text-primary); background: var(--arden-elevated); font: inherit; line-height: 1.55; }
+.knowledge-live-form textarea, .knowledge-live-decision textarea { resize: vertical; }
+.knowledge-live-form :disabled, .knowledge-live-decision :disabled { opacity: .6; cursor: not-allowed; }
+.knowledge-live-form fieldset { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--arden-line); border-radius: 8px; }
+.knowledge-live-form legend { padding: 0 6px; color: var(--arden-text-primary); font-size: 13px; }
+.knowledge-live-form fieldset p { font-size: 12px; }
+.knowledge-live-role-list { display: grid; gap: 10px; max-height: 200px; overflow: auto; }
+.knowledge-live-role-list label { display: flex; align-items: center; gap: 10px; color: var(--arden-text-secondary); font-size: 13px; }
+.knowledge-live-role-list input { width: 16px; height: 16px; padding: 0; accent-color: var(--arden-success); }
+.knowledge-live-document { gap: 18px; }
+.knowledge-live-document pre { max-height: 65vh; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--arden-text-secondary); font: inherit; line-height: 1.75; }
+.knowledge-live-document > small { overflow-wrap: anywhere; }
+.knowledge-live-decision .knowledge-live-actions { align-items: stretch; flex-direction: column; }
 
 .knowledge-draft-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .knowledge-draft-controls > span:not(.knowledge-badge) { color: var(--arden-text-muted); font-size: 12px; }

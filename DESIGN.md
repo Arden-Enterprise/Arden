@@ -46,7 +46,7 @@ The accepted 4 October 2026 **Living Archive** redesign follows [Figma page 06 R
 
 Use sidebar `#1C1E20`, content surfaces `#2D3032`, raised surfaces `#363A3D`, structural dividers `#33373A` and stronger dividers `#656B6E`. Amber `#E7B970` carries primary actions and active navigation, with `#F0C98B` on hover and charcoal text on amber controls. Jade `#80C5B8` signals success and connections, blue `#A4B9E8` signals source context, and muted red `#E9978A` signals errors. Pair every status color with a visible label or icon. These accents replace the earlier monochrome-only restriction; they do not justify gradients, rainbow decoration or fabricated analytics. Keep existing brand explorations separate from the accepted Figma icon assets.
 
-The implemented UI remains a session-memory frontend preview: sign-in, workspace selection, My Work, private notes, first-run setup, organization/access administration, invitation acceptance and access readiness, plus sample knowledge editing, review/publication and handover. Ask Arden displays a prerecorded answer, not live AI. There is no live graph screen. Native SVGs exported from the accepted Figma design are local decorative/interface assets, not fetched knowledge projections. [Mainflow 1 preview](docs/engineering/mainflow-1-preview.md) records the demonstrated transitions and the server work still required.
+The implemented UI combines live authentication/private notes and a single server-backed shared-draft creation action with session-memory previews: My Work, most knowledge editing/review/publication and handover remain samples. A signed-in owner can copy a saved private-note version into a server draft; the returned draft receipt is visually separate from the synthetic library and cannot yet be reopened or edited through an API. Ask Arden displays a prerecorded answer, not live AI. There is no live graph screen. Native SVGs exported from the accepted Figma design are local decorative/interface assets, not fetched knowledge projections. [Mainflow 1 preview](docs/engineering/mainflow-1-preview.md) records the demonstrated transitions and the server work still required.
 
 ## Typography and geometry
 
@@ -71,6 +71,8 @@ On mobile sign-in, keep the brand and a compact introduction above the form. The
 Priority queue is the main section. Its title must outweigh secondary activity labels. Use flat rows with dividers, readable urgency metadata and a separate activity surface; do not force a 560px empty card. Search describes its current scope: it filters the priority queue, not every document or activity. The sample status summary stays a whole-workspace summary while the queue is filtered.
 
 The Knowledge Pane retains visible access scope. In Personal Workspace it follows the selected note's draft title. Planned AI suggestions live inside a disclosure instead of a stack of disabled action buttons. Keep preview/sample labels and explain unavailable features without internal ticket IDs or API names in primary actions.
+
+In the sample knowledge workflow, the editor must reflect the immutable snapshot's lifecycle: after approval and automatic sample publication, an unchanged working copy shows **Published · Sample** instead of offering another submission. Editing that copy may start a new reviewable version; it never edits the published snapshot in place. These preview states do not imply server publication or audit records.
 
 ## Private-note draft contract
 

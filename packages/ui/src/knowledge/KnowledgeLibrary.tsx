@@ -2,6 +2,7 @@ import { useState } from "react";
 import { SearchField } from "../shared/SearchField";
 import { useSearchShortcut } from "../shared/useSearchShortcut";
 import { KnowledgeBadge, KnowledgeConnections, KnowledgeHeading, KnowledgeRow } from "./KnowledgePrimitives";
+import type { CreatedKnowledgeDraft } from "../shared/api-client";
 
 const sampleDocuments = [
   { title: "Release readiness checklist", details: "Checklist · Arden Core · Minh Tran", status: "Published", scope: "Company-wide", type: "Checklist" },
@@ -11,7 +12,7 @@ const sampleDocuments = [
   { title: "Data retention policy mapping", details: "Policy · Security · Company-wide", status: "Published", scope: "Company-wide", type: "Policy" },
 ];
 
-export function KnowledgeLibrary({ active, showPrivateSample, onCreate, onEdit, onOpenDocument }: { active: boolean; showPrivateSample: boolean; onCreate: () => void; onEdit: () => void; onOpenDocument: (title: string) => void }) {
+export function KnowledgeLibrary({ active, showPrivateSample, createdDraft, onCreate, onEdit, onOpenDocument }: { active: boolean; showPrivateSample: boolean; createdDraft: CreatedKnowledgeDraft | null; onCreate: () => void; onEdit: () => void; onOpenDocument: (title: string) => void }) {
   const [query, setQuery] = useState("");
   const [departmentOnly, setDepartmentOnly] = useState(false);
   const [publishedOnly, setPublishedOnly] = useState(false);
@@ -21,7 +22,15 @@ export function KnowledgeLibrary({ active, showPrivateSample, onCreate, onEdit, 
   const filtered = samples.filter((document) => `${document.title} ${document.details}`.toLowerCase().includes(query.trim().toLowerCase()) && (!departmentOnly || document.scope === "Department") && (!publishedOnly || document.status === "Published") && (documentType === "All types" || document.type === documentType));
   const showFeatured = "api gateway runbook lan nguyen product engineering".includes(query.trim().toLowerCase()) && (documentType === "All types" || documentType === "Runbook");
   return <>
-    <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Knowledge, connected." description="Find trusted decisions, guides and the context behind them." action={<button type="button" className="primary-button" onClick={onCreate}>Create knowledge</button>} />
+    <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Knowledge, connected." description="Find trusted decisions, guides and the context behind them." action={<button type="button" className="primary-button" onClick={onCreate}>Explore sample creation</button>} />
+    {createdDraft && <section className="knowledge-server-draft" aria-labelledby="knowledge-server-draft-title">
+      <span className="meta-label knowledge-tone-jade">CREATED ON ARDEN SERVER · NOT PUBLISHED</span>
+      <h2 id="knowledge-server-draft-title">{createdDraft.title}</h2>
+      <div className="knowledge-inline-meta"><KnowledgeBadge tone="jade">Shared draft · v{createdDraft.version}</KnowledgeBadge><KnowledgeBadge tone="blue">{createdDraft.classification}</KnowledgeBadge></div>
+      <p>The private source remains unchanged. This copy is saved on the server but is not submitted, reviewed or visible as published knowledge.</p>
+      <details><summary>View copied text</summary><pre>{createdDraft.body}</pre></details>
+      <p className="knowledge-preview-footnote">This receipt is shown only in this session. Listing or editing saved shared drafts needs a later API; the sample workflow below does not edit this server draft.</p>
+    </section>}
     <SearchField ref={searchRef} value={query} onChange={setQuery} placeholder="Search sample knowledge, decisions and people…" />
     <div className="knowledge-filters" aria-label="Sample knowledge filters">
       <button type="button" className="knowledge-filter is-current" onClick={() => { setDepartmentOnly(false); setPublishedOnly(false); setDocumentType("All types"); }}><KnowledgeBadge tone="amber">All knowledge · {samples.length + 1} samples</KnowledgeBadge></button>

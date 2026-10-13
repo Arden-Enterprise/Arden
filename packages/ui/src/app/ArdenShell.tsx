@@ -13,11 +13,12 @@ import { MembershipAccessPage } from "../organization/MembershipAccessPage";
 import { OrganizationSetupPage } from "../organization/OrganizationSetupPage";
 import { OrganizationAccessPage } from "../organization/OrganizationAccessPage";
 import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
+import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
 import { membershipReadiness } from "../organization/organizationWorkflow";
 import type { PaneContent, Platform, PrivateNote, WorkspaceView } from "../shared/types";
-import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CurrentSession, type OrganizationMembership } from "../shared/api-client";
+import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership } from "../shared/api-client";
 
 type ArdenShellProps = { platform: Platform };
 
@@ -80,7 +81,7 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
   },
   "knowledge": {
     eyebrow: "KNOWLEDGE CONTEXT", title: "Your shared library",
-    description: "Explore sample runbooks, decisions and source evidence.",
+    description: "Explore clearly labeled sample records and any draft created in this session.",
     suggestions: ["Inspect the source version", "Review the intended audience"],
     boundaryTitle: "Shared knowledge", boundaryBody: "Sample records only. Real results must be selected by server-authorized scope.",
   },
@@ -92,7 +93,7 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
   },
   "review-queue": {
     eyebrow: "REVIEW CONTEXT", title: "A snapshot to review",
-    description: "Approval and publication are separate preview transitions.",
+    description: "In the sample, final approval automatically publishes the reviewed snapshot.",
     suggestions: ["Check the intended audience", "Request a specific revision"],
     boundaryTitle: "Immutable review snapshot", boundaryBody: "Review applies to the submitted version. Private originals remain excluded.",
   },
@@ -127,11 +128,15 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | null>(null);
   const [serverSession, setServerSession] = useState<CurrentSession | null>(null);
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
+  const [createdKnowledgeDraft, setCreatedKnowledgeDraft] = useState<CreatedKnowledgeDraft | null>(null);
+  const [contributionAttempt, setContributionAttempt] = useState<ContributionAttempt | null>(null);
   const restoreStarted = useRef(false);
 
   const enterServerOrganization = (membership: OrganizationMembership) => {
     if (membership.status !== "active" || !membership.canUsePrivateWorkspace) return;
     setServerOrganizationId(membership.organization.id);
+    setCreatedKnowledgeDraft(null);
+    setContributionAttempt(null);
     setOrganization(null);
     setPreviewRole(null);
     setActiveView("personal-workspace");
@@ -210,6 +215,8 @@ export function ArdenShell({ platform }: ArdenShellProps) {
         onEnterPreview={() => {
           setServerSession(null);
           setServerOrganizationId(null);
+          setCreatedKnowledgeDraft(null);
+          setContributionAttempt(null);
           setOrganization(createPreviewOrganization());
           setPreviewRole("member");
           setPreviewMemberId("sample-employee");
@@ -219,6 +226,8 @@ export function ArdenShell({ platform }: ArdenShellProps) {
         onEnterAdminPreview={() => {
           setServerSession(null);
           setServerOrganizationId(null);
+          setCreatedKnowledgeDraft(null);
+          setContributionAttempt(null);
           setOrganization(createPreviewOrganization());
           setPreviewRole("admin");
           setPreviewMemberId("sample-admin");
@@ -296,6 +305,8 @@ export function ArdenShell({ platform }: ArdenShellProps) {
     if (serverSession) void apiSignOut(platform).catch(() => undefined);
     setServerSession(null);
     setServerOrganizationId(null);
+    setCreatedKnowledgeDraft(null);
+    setContributionAttempt(null);
     setPreviewRole(null);
     setEntryView("sign-in");
     setOrganization(null);
@@ -328,7 +339,13 @@ export function ArdenShell({ platform }: ArdenShellProps) {
       description: privateNotes.serverBacked ? "Your private notes are loaded from the selected organization’s Arden server." : "Drafts stay in this preview session when you switch notes or screens.",
       boundaryBody: privateNotes.serverBacked ? "Only you can work with this server-stored note. It is excluded from shared answers." : "Only you can work with this preview note. It is excluded from shared answers. Refreshing or exiting clears this session.",
     }
-    : paneContent[activeView];
+    : serverOrganizationId && activeView === "knowledge"
+      ? { ...paneContent.knowledge, description: "Your server-backed drafts and currently accessible published versions.",
+        boundaryBody: "Drafts remain author-owned. Approved versions are shown only when your current server-side audience and access scope allow them." }
+      : serverOrganizationId && activeView === "review-queue"
+        ? { ...paneContent[activeView], description: "Submissions assigned by an explicit reviewer grant.",
+          boundaryBody: "A reviewer can act only within the granted department and classification, never on their own submission." }
+        : paneContent[activeView];
 
   return (
     <div className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}`}>
@@ -356,11 +373,17 @@ export function ArdenShell({ platform }: ArdenShellProps) {
       ) : activeView === "organization-access" && organization && previewRole === "admin" ? (
         <OrganizationAccessPage organization={organization} onChange={setOrganization} onDirtyChange={setOrganizationDirty} onOpenSetup={() => { if (organizationDirty) setPendingAction("setup"); else setEntryView("setup"); }} onPreviewInvitation={(id) => { setInvitationId(id); setEntryView("invitation"); }} onPreviewAccess={(id) => { setAccessMemberId(id); setEntryView("access"); }} {...contextControl} />
       ) : activeView === "personal-workspace" ? (
-        <PersonalWorkspacePage key={serverOrganizationId ?? previewMemberId} controller={privateNotes} platform={platform} organizationId={serverOrganizationId ?? ""} {...contextControl} />
+        <PersonalWorkspacePage key={serverOrganizationId ?? previewMemberId} controller={privateNotes} platform={platform} organizationId={serverOrganizationId ?? ""} contributionAttempt={contributionAttempt} onContributionAttemptChange={setContributionAttempt} onKnowledgeDraftCreated={(draft) => { setCreatedKnowledgeDraft(draft); navigate("knowledge"); }} {...contextControl} />
       ) : null}
 
       <div className="knowledge-feature-slot" hidden={!isKnowledgeView}>
-        <KnowledgeFeaturePage view={knowledgeView} active={isKnowledgeView} organizationName={organization?.name} departmentName={organization?.departments.find(department => department.id === previewMember?.departmentId)?.name} showPrivateSample={previewMemberId === "sample-employee"} onNavigate={navigate} {...contextControl} />
+        <KnowledgeFeaturePage key={serverOrganizationId ?? "sample"} view={knowledgeView} active={isKnowledgeView}
+          platform={platform} organizationId={serverOrganizationId}
+          organizationName={activeMembership?.organization.name ?? organization?.name}
+          departmentName={activeMembership ? "Personal contribution" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+          showPrivateSample={!serverSession && previewMemberId === "sample-employee"}
+          createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
+          onNavigate={navigate} {...contextControl} />
       </div>
 
       <KnowledgePane content={activeContext} open={contextOpen} onToggle={contextControl.onToggleContext} />

@@ -325,6 +325,11 @@
 .organization-live-admin .organization-editor-stack > ul > li span { color: var(--arden-text-secondary); }
 .organization-live-admin .organization-editor-stack > form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; }
 .organization-live-admin .organization-live-invite-form { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 12px; }
+.organization-live-admin .organization-live-reviewer-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; gap: 14px; }
+.organization-live-admin .organization-live-reviewer-form > button { justify-self: start; }
+.organization-reviewer-classes { display: flex; flex-wrap: wrap; gap: 14px; grid-column: 1 / -1; padding: 12px; border: 1px solid var(--arden-line); border-radius: var(--arden-radius-sm); }
+.organization-reviewer-classes legend { padding: 0 6px; font-size: 13px; }
+.organization-reviewer-classes label { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
 .organization-live-members { display: grid; gap: 10px; }
 .organization-live-members article { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(150px, 0.8fr) minmax(150px, 0.8fr); align-items: end; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--arden-line); }
 .organization-live-members article > div { display: grid; gap: 4px; align-self: center; min-width: 0; }
@@ -336,12 +341,14 @@
 
 @media (max-width: 900px) {
   .organization-live-admin-grid { grid-template-columns: 1fr; }
+  .organization-live-admin .organization-live-reviewer-form { grid-template-columns: 1fr 1fr; }
   .organization-live-members article { grid-template-columns: 1fr 1fr; }
   .organization-live-members article > div { grid-column: 1 / -1; }
 }
 @media (max-width: 600px) {
   .organization-live-admin .organization-editor-stack > form,
   .organization-live-admin .organization-live-invite-form,
+  .organization-live-admin .organization-live-reviewer-form,
   .organization-live-members article { grid-template-columns: 1fr; }
   .organization-live-admin .organization-editor-stack > ul > li,
   .organization-live-invitations li { align-items: flex-start; flex-direction: column; }
