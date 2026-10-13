@@ -115,7 +115,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       <div className="sign-in-card workspace-select-card">
         <span className="meta-label">ORGANIZATION INVITATION</span>
         <h2 id="invitation-link-title">Continue to Arden</h2>
-        <p>Sign in or create an Arden account, then accept the invitation with the account whose verified email matches it.</p>
+
         {signedIn ? <>
           <div className="organization-notice is-info">
             <strong>Signed-in account</strong>
@@ -150,7 +150,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
         </>}
         {message && <div className="organization-notice is-success" role="status"><strong>Notice</strong><span>{message}</span></div>}
         {error && <div className="sign-in-message" role="alert"><strong>Action required</strong><span>{error}</span></div>}
-        <small>The invitation page uses the same steps whether or not an account already exists for an email address.</small>
+
       </div>
     </section>
   </main>;

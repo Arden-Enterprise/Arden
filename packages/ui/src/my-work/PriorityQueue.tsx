@@ -41,7 +41,7 @@ export function PriorityQueue({ items, onClearSearch, searchActive, onOpenKnowle
           </div>
         )}
       </div>
-      <p className="planned-feature-note">Sample work · Review and handover previews do not change shared knowledge.</p>
+
     </section>
   );
 }

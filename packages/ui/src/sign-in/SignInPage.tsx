@@ -113,11 +113,7 @@ export function SignInPage({
         <div className="sign-in-card">
           <span className="meta-label">{mode === "sign-in" ? "YOUR WORKSPACE" : "GET STARTED"}</span>
           <h2>{mode === "sign-in" ? "Sign in to Arden" : "Create an Arden account"}</h2>
-          <p>
-            {mode === "sign-in"
-              ? "Use your organization account. Arden only returns knowledge you are permitted to access."
-              : "Register with your work email to get started. Arden keeps your private thoughts safe while connecting your team."}
-          </p>
+
 
           <div className="sign-in-entry-tabs" role="group" aria-label="Account options">
             <button
@@ -159,10 +155,10 @@ export function SignInPage({
                   }}
                   autoComplete="username"
                   placeholder="name@company.com"
-                  aria-describedby="sign-in-email-help"
+
                   required
                 />
-                <small id="sign-in-email-help">Use the email linked to your organization.</small>
+
               </label>
               <label>
                 <span>Password</span>
@@ -175,10 +171,10 @@ export function SignInPage({
                   }}
                   autoComplete="current-password"
                   placeholder="Enter your password"
-                  aria-describedby="sign-in-password-help"
+
                   required
                 />
-                <small id="sign-in-password-help">Use the password provided for your organization account.</small>
+
               </label>
               <button type="submit" className="primary-button" disabled={busy}>
                 {busy ? "Signing in…" : "Sign in"}
@@ -198,10 +194,10 @@ export function SignInPage({
                   autoComplete="name"
                   placeholder="Jane Doe"
                   maxLength={200}
-                  aria-describedby="sign-up-name-help"
+
                   required
                 />
-                <small id="sign-up-name-help">Your display name in your organization workspace.</small>
+
               </label>
               <label>
                 <span>Organization email</span>
@@ -215,10 +211,10 @@ export function SignInPage({
                   autoComplete="email"
                   placeholder="name@company.com"
                   maxLength={320}
-                  aria-describedby="sign-up-email-help"
+
                   required
                 />
-                <small id="sign-up-email-help">Use your work or organization email.</small>
+
               </label>
               <label>
                 <span>Password</span>
@@ -232,10 +228,10 @@ export function SignInPage({
                   autoComplete="new-password"
                   placeholder="Enter a secure password"
                   maxLength={1024}
-                  aria-describedby="sign-up-password-help"
+
                   required
                 />
-                <small id="sign-up-password-help">Must be at least 6 characters.</small>
+
               </label>
               <label>
                 <span>Confirm password</span>
@@ -249,10 +245,10 @@ export function SignInPage({
                   autoComplete="new-password"
                   placeholder="Confirm your password"
                   maxLength={1024}
-                  aria-describedby="sign-up-confirm-help"
+
                   required
                 />
-                <small id="sign-up-confirm-help">Re-enter your password to confirm.</small>
+
               </label>
               <button type="submit" className="primary-button" disabled={busy}>
                 {busy ? "Creating account…" : "Create account"}
@@ -282,11 +278,7 @@ export function SignInPage({
             <img src={entryAssets.lockForm} alt="" width={16} height={16} />
             <span>Private by default · No external writes</span>
           </div>
-          <p className="sign-in-account-help">
-            {mode === "sign-in"
-              ? "Accounts are provided by your organization administrator."
-              : "Once verified, your account can be invited or assigned to your organization."}
-          </p>
+
 
           <div className="sign-in-preview-divider">
             <span>FRONTEND REVIEW</span>
@@ -298,9 +290,7 @@ export function SignInPage({
             <button type="button" onClick={onOpenSetup}>Preview first-run setup</button>
             {onEnterAdminPreview && <button type="button" onClick={onEnterAdminPreview}>Open admin preview</button>}
           </div>
-          <p className="preview-disclaimer">
-            Preview routes use synthetic data. They do not authenticate, persist changes or grant access.
-          </p>
+
         </div>
         <span className="platform-label">
           {platform === "desktop" ? "WINDOWS DESKTOP" : "WEB"} · UI FOUNDATION

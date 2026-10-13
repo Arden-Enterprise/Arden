@@ -7,6 +7,7 @@ import {
   revokeOrganizationInvitation, type OrganizationAdministration, type ReviewerGrant,
 } from "../shared/api-client";
 import type { Platform } from "../shared/types";
+import { RoleConfigurationPanel } from "./RoleConfigurationPanel";
 
 type OrganizationAdminPageProps = { platform: Platform; organizationId: string; organizationName: string } & ContextControlProps;
 
@@ -90,20 +91,26 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   return <main id="arden-main" className="workspace-page organization-live-admin" aria-labelledby="organization-live-admin-title" tabIndex={-1}>
     <WorkspaceTopbar breadcrumb={`${organizationName} / Administration`} previewLabel="SERVER MANAGED" contextOpen={contextOpen} onToggleContext={onToggleContext} />
     <div className="workspace-content organization-access-content">
-      <div className="page-title-row organization-access-heading"><div><span className="meta-label">ORGANIZATION / GOVERNANCE</span><h1 id="organization-live-admin-title">Members, departments & roles</h1><p>Changes are checked and recorded by the Arden server.</p></div><button type="button" className="secondary-button" disabled={busy || loading} onClick={() => { setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")); }}>Refresh</button></div>
+      <div className="page-title-row organization-access-heading"><div><span className="meta-label">ORGANIZATION / GOVERNANCE</span><h1 id="organization-live-admin-title">Members, departments & roles</h1></div><button type="button" className="secondary-button" disabled={busy || loading} onClick={() => { setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")); }}>Refresh</button></div>
       {loading ? <p role="status">Loading organization data…</p> : error && !data ? <p role="alert">{error}</p> : data && <>
         {error && <p className="organization-feedback" role="alert">{error}</p>}{message && <p className="organization-feedback" role="status">{message}</p>}
         <div className="organization-live-admin-grid">
-          <section className="organization-surface organization-editor-stack"><h2>Departments</h2><p>Members have one primary department and receive its default role.</p>
+          <section className="organization-surface organization-editor-stack"><h2>Departments</h2>
             <ul>{data.departments.map((department) => <li key={department.id}><strong>{department.name}</strong><span>Default: {department.defaultRoleName}</span></li>)}</ul>
             <form onSubmit={submitDepartment}><label className="organization-field"><span>Add department</span><input required maxLength={80} value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} /></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
           </section>
-          <section className="organization-surface organization-editor-stack"><h2>Custom roles</h2><p>Custom roles define audience tags for published knowledge.</p>
+          <section className="organization-surface organization-editor-stack"><h2>Custom roles</h2>
             <ul>{data.roles.map((role) => <li key={role.id}><strong>{role.name}</strong><span>{role.isDefault ? "Department default" : "Custom role"}</span></li>)}</ul>
             <form onSubmit={submitRole}><label className="organization-field"><span>Add role</span><input required maxLength={80} value={roleName} onChange={(event) => setRoleName(event.target.value)} /></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create role"}</button></form>
           </section>
         </div>
-        <section className="organization-surface organization-editor-stack"><h2>Invite a member</h2><p>The recipient signs in or creates an account. Acceptance requires a verified matching email.</p>
+        <RoleConfigurationPanel key={organizationId} members={data.members.map((member) => ({
+          id: member.id, name: member.name, email: member.email, active: member.status === "ACTIVE",
+        }))} initialRoles={data.roles.filter((role) => !role.isDefault && role.code !== "ORG_ADMIN").map((role) => ({
+          id: role.id, name: role.name, description: "", permissions: [],
+          memberIds: data.members.filter((member) => member.roleIds.includes(role.id)).map((member) => member.id),
+        }))} />
+        <section className="organization-surface organization-editor-stack"><h2>Invite a member</h2>
           {data.departments.length ? <form className="organization-live-invite-form" onSubmit={submitInvite}>
             <label className="organization-field"><span>Email</span><input type="email" required maxLength={320} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} /></label>
             <label className="organization-field"><span>Primary department</span><select required value={inviteDepartmentId} onChange={(event) => setInviteDepartmentId(event.target.value)}>{data.departments.map((department) => <option value={department.id} key={department.id}>{department.name}</option>)}</select></label>
@@ -123,7 +130,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           </article>)}</div>
         </section>
         <section className="organization-surface organization-editor-stack"><h2>Knowledge reviewers</h2>
-          <p>Org Admin grants review authority by department and classification. This does not automatically grant published-content access; self-approval is blocked.</p>
+
           <form className="organization-live-reviewer-form" onSubmit={submitReviewerGrant}>
             <label className="organization-field"><span>Reviewer</span><select required disabled={busy} value={reviewerId} onChange={(event) => setReviewerId(event.target.value)}>
               <option value="">Choose member</option>{data.members.filter((member) => member.status === "ACTIVE").map((member) => <option key={member.id} value={member.id}>{member.name} · {member.email}</option>)}</select></label>

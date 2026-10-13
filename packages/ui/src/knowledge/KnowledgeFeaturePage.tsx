@@ -60,6 +60,6 @@ function SampleKnowledgeFeaturePage({ view, active = true, organizationName = "F
       {effectiveView === "knowledge-handover" && <KnowledgeHandover onReturn={() => { if (onNavigate) onNavigate("my-work"); else goTo("knowledge"); }} />}
       {state.message && (effectiveView === "knowledge" || effectiveView === "review-queue") && <p role="status" className="knowledge-action-message">{state.message}</p>}
     </div>
-    {openedDocument && <KnowledgeDialog title={openedDocument} onClose={() => setOpenedDocument(null)}><p>This is a synthetic library record used to preview Arden’s layout and navigation.</p><KnowledgeNotice title="Document service not connected">Full document retrieval, version history and current permissions require Arden Core. No private or external content is loaded.</KnowledgeNotice><div className="dialog-actions"><button type="button" className="primary-button" onClick={() => setOpenedDocument(null)}>Back to library</button></div></KnowledgeDialog>}
+    {openedDocument && <KnowledgeDialog title={openedDocument} onClose={() => setOpenedDocument(null)}><KnowledgeNotice title="Document service not connected">Full document retrieval, version history and current permissions require Arden Core. No private or external content is loaded.</KnowledgeNotice><div className="dialog-actions"><button type="button" className="primary-button" onClick={() => setOpenedDocument(null)}>Back to library</button></div></KnowledgeDialog>}
   </main>;
 }

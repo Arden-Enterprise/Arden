@@ -88,6 +88,23 @@ At narrow widths, provide a selected-item summary and a direct navigable item li
 
 ## Accessibility and verification
 
+Routine screens use concise titles, field labels and functional metadata, without
+explanatory subtitles, repeated helper paragraphs or implementation footnotes.
+Preserve document/answer content, errors, loading/save states, required action
+warnings and confirmation consequences. Sample/server/planned badges remain
+visible so reducing copy never implies live functionality. Permission switches
+retain accessible names even without visible descriptions; remove dangling
+`aria-describedby` references when removing helper text. Do not hide copy globally
+with CSS or remove all `small`/`p` elements: many contain actual data or feedback.
+
+Custom-role configuration uses a flat two-column role rail/editor, with Display,
+Permissions and Members sections, permission switches, search and an Apply/Reset
+bar. Amber marks selection/actions; jade marks enabled switches. At narrow
+workspace widths the rail stacks above the editor. Private defaults and protected
+management rights are not editable switches. Until role APIs support configuration,
+the panel is prominently labeled UI preview and Apply never implies a server write.
+See [custom-role UI boundary](docs/engineering/custom-role-ui-preview.md).
+
 Use stable accessible search names independent of shortcut hints and clear buttons. All editable fields must retain visible keyboard focus. Active navigation must remain legible on hover. Use warm focus rings, at least 44px main action targets, reduced-motion rules and a skip-to-content link. Native dialog confirmation keeps focus inside the dialog and restores focus on dismissal.
 
 Check 1440px desktop, 1024px narrow windows, 390px/320px mobile, long content and 200% zoom/reflow. Check expanded and collapsed context, mobile editor/back navigation, note switching, save/reset/exit, empty search and keyboard access. Shared UI must be checked in web and Electron; a successful build alone does not prove native behavior.

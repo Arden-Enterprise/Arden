@@ -200,7 +200,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
       {message && <p role="status" className="knowledge-action-message">{message}</p>}
       {loading ? <div className="knowledge-empty" role="status">Loading governed knowledge…</div> : view === "review-queue" ? <>
         <KnowledgeHeading eyebrow="WORKSPACE / REVIEW QUEUE" title={review ? "Review submitted version" : "Assigned reviews"}
-          description="Only submissions within your active reviewer grant appear here. You cannot review your own submission."
+
           action={<button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>} />
         {review ? <div className="knowledge-two-column">
           <article className="knowledge-panel knowledge-live-document"><span className="meta-label knowledge-tone-blue">IMMUTABLE SUBMITTED SNAPSHOT</span>
@@ -211,7 +211,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <button type="button" className="knowledge-back-button" onClick={() => setReview(null)}>← Back to assigned reviews</button>
           </article>
           <aside className="knowledge-panel knowledge-live-decision"><span className="meta-label knowledge-tone-amber">HUMAN DECISION</span>
-            <h2>Decide this version</h2><p>Approval automatically publishes this exact snapshot. It does not publish later edits.</p>
+            <h2>Decide this version</h2>
             {reviews.find((item) => item.submissionId === review.id)?.approvalBlocked &&
               <KnowledgeNotice title="Audience no longer enforceable" tone="amber">Approval is blocked until the author creates a new valid snapshot. You may request revision or reject.</KnowledgeNotice>}
             <label>Decision reason<textarea rows={4} maxLength={2000} value={comment} disabled={busy}
@@ -227,9 +227,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             details={`${departmentName(item.departmentId)} · ${item.classification} · submitted ${new Date(item.submittedAt).toLocaleString()}`}
             status={item.approvalBlocked ? "Review · approval blocked" : "Review"} tone="amber"
             onClick={() => openReview(item.submissionId)} />)}</div>
-          : <div className="knowledge-empty"><h2>No assigned reviews</h2><p>An Org Admin must grant reviewer authority for the relevant department and classification. Admin status alone is not a reviewer grant.</p></div>}
+          : <div className="knowledge-empty"><h2>No assigned reviews</h2></div>}
       </> : screen === "create" ? <>
-        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Create a shared draft" description="Start a new document. It stays author-owned until you submit a version for review." />
+        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Create a shared draft"  />
         <div className="knowledge-two-column"><form className="knowledge-panel knowledge-live-form" onSubmit={(event) => { event.preventDefault(); createDraft(); }}>
           <label>Title<input required maxLength={160} value={newTitle} disabled={busy} onChange={(event) => setNewTitle(event.target.value)} /></label>
           <label>Classification<select value={newClassification} disabled={busy} onChange={(event) => setNewClassification(event.target.value as KnowledgeClassification)}>
@@ -237,9 +237,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <label>Document text<textarea rows={16} maxLength={131072} value={newBody} disabled={busy} onChange={(event) => setNewBody(event.target.value)} /></label>
           <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy || !newTitle.trim()}>Save new draft</button>
             <button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); createRequestKey.current = null; }}>Cancel</button></div>
-        </form><KnowledgeNotice title="Contribute copy is also available" tone="jade">To begin from a private note, open Personal workspace and choose Contribute copy. The private original remains separate.</KnowledgeNotice></div>
+        </form></div>
       </> : screen === "editor" && draft && editor ? <>
-        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title={draft.title} description={`Author-owned draft · v${draft.currentVersion.version} · ${departmentName(draft.responsibleDepartmentId)}`}
+        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title={draft.title}
           action={<button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); void refresh(); }}>Back to library</button>} />
         <div className="knowledge-inline-meta"><KnowledgeBadge tone={draft.hasPendingSubmission ? "amber" : "blue"}>{draft.hasPendingSubmission ? "Awaiting review" : "Working draft"}</KnowledgeBadge>
           <KnowledgeBadge>{draft.classification}</KnowledgeBadge>{latest && <KnowledgeBadge tone={latest.status === "APPROVED" ? "jade" : "amber"}>{statusLabel(latest.status)}</KnowledgeBadge>}
@@ -258,8 +258,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <label>Document text<textarea rows={18} maxLength={131072} disabled={busy || draft.hasPendingSubmission} value={editor.body} onChange={(event) => setEditor({ ...editor, body: event.target.value })} /></label>
           <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy || draft.hasPendingSubmission || !dirty} onClick={saveDraft}>Save new version</button>
             <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit this version for review</button></div>
-          {dirty && <small>Save these edits before submitting.</small>}
-          {snapshotAlreadySubmitted && !draft.hasPendingSubmission && <small>This exact version has already been reviewed. Save an edit to create a new version.</small>}
+
+
         </section><aside className="knowledge-panel knowledge-live-form"><span className="meta-label knowledge-tone-jade">GOVERNANCE METADATA</span>
           <label>Responsible department<select disabled={busy || draft.hasPendingSubmission} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => setEditor({ ...editor, responsibleDepartmentId: event.target.value || null })}>
             <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -268,7 +268,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <label>Classification<select disabled={busy || draft.hasPendingSubmission} value={editor.classification} onChange={(event) => setEditor({ ...editor, classification: event.target.value as KnowledgeClassification })}>
             <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select></label>
           <fieldset disabled={busy || draft.hasPendingSubmission}><legend>Audience roles</legend>
-            <p>Readers need an active assignment of a selected role within this access scope.</p>
+
             <div className="knowledge-live-role-list">{options?.audienceRoles.map((role) => <label key={role.id}>
               <input type="checkbox" checked={editor.audienceRoleIds.includes(role.id)} onChange={(event) => setEditor({ ...editor,
                 audienceRoleIds: event.target.checked ? [...editor.audienceRoleIds, role.id] : editor.audienceRoleIds.filter((id) => id !== role.id) })} />
@@ -279,13 +279,13 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           {!ready && <KnowledgeNotice title="Not ready to submit" tone="amber">Select a responsible department, access scope and at least one audience role.</KnowledgeNotice>}
         </aside></div>
       </> : screen === "document" && document ? <>
-        <KnowledgeHeading eyebrow="WORKSPACE / PUBLISHED KNOWLEDGE" title={document.title} description="Current approved version · server-authorized read"
+        <KnowledgeHeading eyebrow="WORKSPACE / PUBLISHED KNOWLEDGE" title={document.title}
           action={<button type="button" className="secondary-button" onClick={() => setScreen("library")}>Back to library</button>} />
         <div className="knowledge-inline-meta"><KnowledgeBadge tone="jade">Published</KnowledgeBadge><KnowledgeBadge>{document.classification}</KnowledgeBadge>
           <span>Published {new Date(document.publishedAt).toLocaleString()}</span></div>
         <article className="knowledge-panel knowledge-live-document"><pre>{document.body}</pre></article>
       </> : <>
-        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Governed knowledge" description="Your drafts and the current published versions you are authorized to read."
+        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Governed knowledge"
           action={<div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
             <button type="button" className="primary-button" onClick={() => setScreen("create")}>Create draft</button></div>} />
         <SearchField value={query} onChange={setQuery} placeholder="Filter titles in this loaded workspace…" />
@@ -296,12 +296,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             details={`v${item.currentVersion} · ${departmentName(item.responsibleDepartmentId)} · ${item.classification}`}
             status={status ? statusLabel(status) : "Draft"} tone={status === "APPROVED" ? "jade" : status === "PENDING_REVIEW" ? "amber" : "blue"}
             onClick={() => openDraft(item.id)} />;
-        })}</div> : <div className="knowledge-empty"><h2>No drafts found</h2><p>Create a new draft or Contribute copy from a private note.</p></div>}
+        })}</div> : <div className="knowledge-empty"><h2>No drafts found</h2></div>}
         <div className="knowledge-section-heading"><h2>Published for me</h2><span>{filteredPublished.length} current versions</span></div>
         {filteredPublished.length ? <div className="knowledge-row-list">{filteredPublished.map((item) =>
           <KnowledgeRow key={item.id} title={item.title} details={`${item.classification} · published ${new Date(item.publishedAt).toLocaleString()}`}
             status="Read approved version" tone="jade" onClick={() => openPublished(item.id)} />)}</div>
-          : <div className="knowledge-empty"><h2>No accessible publication</h2><p>Approval alone does not grant content access. Only members matching the publication audience and current scope can read it.</p></div>}
+          : <div className="knowledge-empty"><h2>No accessible publication</h2></div>}
       </>}
     </div>
   </main>;
