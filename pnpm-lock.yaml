@@ -119,6 +119,9 @@ importers:
       '@blocknote/react':
         specifier: 0.55.0
         version: 0.55.0(@floating-ui/dom@1.8.0)(@types/hast@3.0.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
+      '@flaticon/flaticon-uicons':
+        specifier: 3.3.1
+        version: 3.3.1
     devDependencies:
       '@types/react':
         specifier: 19.3.0
@@ -627,6 +630,9 @@ packages:
 
   '@fastify/proxy-addr@5.1.1':
     resolution: {integrity: sha512-zv07Y9GEuDsJPegZoDFd4SDWaZOW8N2pa0GSrYmKpId/tjt1Hgo3BjZBVjdVpfVrHaA+Qv5jawtS2O50J5xM9g==}
+
+  '@flaticon/flaticon-uicons@3.3.1':
+    resolution: {integrity: sha512-WN2zuECCdjuGBQrjzN0kpeSygzC5fgF8Q7pDR+FUuGtYWczSdIhIwoD+/fKBEfwqKfNIMZ1WouidevGQ4OJORg==}
 
   '@floating-ui/core@1.8.0':
     resolution: {integrity: sha512-0CIZ5itps/8x7BG8dEIhs53BvCUH2PCoogtakwRTut+Arm58sJooJ0AuZhLw2HJYIR5cMLNPBSS728sPho2khQ==}
@@ -1215,6 +1221,12 @@ packages:
 
   es-module-lexer@2.3.2:
     resolution: {integrity: sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw==}
+
+  esbuild-linux-64@0.14.54:
+    resolution: {integrity: sha512-EgjAgH5HwTbtNsTqQOXWApBaPVdDn7XcK+/PtJwZLT1UmpLoznPd8c5CxqsH2dQK3j05YsB3L17T8vE7cp4cCg==}
+    engines: {node: '>=12'}
+    cpu: [x64]
+    os: [linux]
 
   esbuild@0.25.12:
     resolution: {integrity: sha512-bbPBYYrtZbkt6Os6FiTLCTFxvq4tt3JKall1vRwshA3fdVztsLAatFaZobhkBC8/BrPetoa0oksYoKXoG4ryJg==}
@@ -2271,6 +2283,10 @@ snapshots:
       '@fastify/forwarded': 3.0.2
       ipaddr.js: 2.5.0
 
+  '@flaticon/flaticon-uicons@3.3.1':
+    optionalDependencies:
+      esbuild-linux-64: 0.14.54
+
   '@floating-ui/core@1.8.0':
     dependencies:
       '@floating-ui/utils': 0.2.12
@@ -2718,6 +2734,9 @@ snapshots:
   env-paths@3.0.0: {}
 
   es-module-lexer@2.3.2: {}
+
+  esbuild-linux-64@0.14.54:
+    optional: true
 
   esbuild@0.25.12:
     optionalDependencies:

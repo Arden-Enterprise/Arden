@@ -20,7 +20,7 @@ Inventory updated 5 October 2026:
 | Graph | Local decorative Figma SVGs; no graph view or authorized graph data | Sigma.js + Graphology on authorized API projections |
 | Jobs | None | pg-boss in `apps/worker` |
 | Storage | Protected local note-content volume via `LocalPrivateContentStorage`; opaque UUID `source_uri`, SHA-256 integrity check, production persistent mount required | Broader attachment/document storage; optional S3-compatible backend later |
-| AI | Explicit prerecorded Ask Arden sample; no model request | Arden gateway to customer-controlled Ollama/compatible private endpoint |
+| AI | No Ask Arden UI or model request; Flow 3 deferred | Arden gateway to customer-controlled Ollama/compatible private endpoint |
 | Tests | Vitest 5.0.1, Fastify auth/private-note tests, real-PostgreSQL repository/RLS test gated by `ARDEN_TEST_DATABASE_URL`, pure UI preview and API-client tests | Live Supabase Auth smoke, native Electron interaction, broader Playwright flows |
 | Deployment | Local database Compose; Ubuntu/Windows CI | Ubuntu 24.04 + Coolify, versioned full application Compose, isolated staging/production |
 
@@ -40,6 +40,29 @@ The container image includes pgvector software; the scaffold does not yet create
 - Review software/model licenses for redistribution, notices, commercial/non-core restrictions, and customer deployment. A package being downloadable is not permission for every intended use.
 
 ## 3. React, Vite, routing, and client state
+
+- Shared interface icon assets use `@flaticon/flaticon-uicons` 3.3.1, pinned in
+  `packages/ui/package.json` and the lockfile. `shared/Icon.tsx` maps semantic names
+  to Regular Rounded glyphs; `styles/icons.css` bundles only that family's WOFF2
+  (about 386 KB), not all styles or the vendor's full CSS. SVG text preserves
+  existing sizing/currentColor and decorative accessibility contracts. No CDN,
+  third-party runtime call, script, API secret or database migration is needed.
+  The font must ship with both web and Electron renderer builds under the existing
+  self-only font CSP. Loading can temporarily hide glyphs; labels remain usable.
+  The vendor package declares an old optional Linux esbuild binary; it is not
+  imported or executed by Arden, is not a build tool replacement, and is not
+  bundled in either client. No additional lifecycle scripts are authorized.
+  Keep glyph mappings and asset filename synchronized when upgrading; the adapter
+  tests verify glyph availability against the pinned vendor CSS.
+- Uicons assets retain the Flaticon license, not Arden's source-code license.
+  The free-use implementation preserves visible “Uicons by Flaticon” credit on
+  all screens, linked on web and text-only on desktop (external navigation is
+  still denied). Preserve the package LICENSE and credits when redistributing.
+  Do not remove credit based on an assumed Premium subscription or distribute
+  the icons as a standalone collection. Recheck applicable redistribution/customer
+  use terms before release: [official usage guide](https://www.flaticon.com/uicons/get-started/),
+  [package license](https://github.com/freepik-company/flaticon-uicons/blob/main/LICENSE)
+  and [Flaticon terms](https://www.flaticon.com/legal).
 
 - Shared product UI lives in `packages/ui` and future feature packages. App entry points should be composition/platform adapters, not independent copies of the product.
 - Living Archive assets are local: exported Figma SVGs and variable Sora/DM Sans TTFs with their OFL notices in `src/assets/fonts`. Preserve the font license files on redistribution. No runtime font-service request is needed. The accepted visual contract lives in [DESIGN.md](../../DESIGN.md).

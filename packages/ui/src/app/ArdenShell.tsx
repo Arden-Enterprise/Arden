@@ -85,12 +85,6 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
     suggestions: ["Inspect the source version", "Review the intended audience"],
     boundaryTitle: "Shared knowledge", boundaryBody: "Sample records only. Real results must be selected by server-authorized scope.",
   },
-  "ask-arden": {
-    eyebrow: "ANSWER CONTEXT", title: "Evidence before answers",
-    description: "Inspect a sample answer and its exact-version citations.",
-    suggestions: ["Inspect cited sources", "Check freshness"],
-    boundaryTitle: "No live AI", boundaryBody: "This preview uses an explicitly labeled sample answer. No prompt is sent to a model.",
-  },
   "review-queue": {
     eyebrow: "REVIEW CONTEXT", title: "A snapshot to review",
     description: "In the sample, final approval automatically publishes the reviewed snapshot.",
@@ -113,6 +107,19 @@ function tokenFromInvitationPath(pathname: string): string | null {
 }
 
 export function ArdenShell({ platform }: ArdenShellProps) {
+  return (
+    <>
+      <ArdenShellContent platform={platform} />
+      <footer className="icon-credits" aria-label="Icon attribution">
+        {platform === "web"
+          ? <a href="https://www.flaticon.com/uicons" target="_blank" rel="noopener noreferrer">Uicons by Flaticon</a>
+          : <span title="https://www.flaticon.com/uicons">Uicons by Flaticon</span>}
+      </footer>
+    </>
+  );
+}
+
+function ArdenShellContent({ platform }: ArdenShellProps) {
   const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
   const [invitationToken, setInvitationToken] = useState<string | null>(() => tokenFromInvitationPath(window.location.pathname));
   const [entryView, setEntryView] = useState<EntryView>(() => invitationToken ? "invite-link" : "sign-in");
@@ -330,7 +337,7 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
   const liveAdmin = activeMembership?.roleCodes.includes("ORG_ADMIN") ?? false;
-  const isKnowledgeView = activeView === "knowledge" || activeView === "ask-arden" || activeView === "review-queue" || activeView === "knowledge-handover";
+  const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue" || activeView === "knowledge-handover";
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
   const activeContext = activeView === "personal-workspace"
     ? {
@@ -348,7 +355,7 @@ export function ArdenShell({ platform }: ArdenShellProps) {
         : paneContent[activeView];
 
   return (
-    <div className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}`}>
+    <div className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${activeView === "my-work" ? " is-my-work" : ""}`}>
       <a className="skip-link" href="#arden-main">Skip to content</a>
       <AppSidebar
         activeView={activeView}

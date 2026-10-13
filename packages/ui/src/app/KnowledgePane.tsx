@@ -32,15 +32,7 @@ export function KnowledgePane({ content, open, onToggle }: { content: PaneConten
             <strong id="boundary-title">{content.boundaryTitle}</strong>
 
           </section>
-          <details className="pane-planned-features">
-            <summary>Planned assistance</summary>
-
-            <ul>{content.suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}</ul>
-          </details>
         </div>
-        <footer className="knowledge-pane-composer">
-          <div><Icon name="lock" size={15} /> Ask Arden · Planned</div>
-        </footer>
       </>}
     </aside>
   );

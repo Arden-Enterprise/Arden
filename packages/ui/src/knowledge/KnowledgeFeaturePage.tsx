@@ -1,7 +1,6 @@
 import { useEffect, useReducer, useState } from "react";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { CreateKnowledge } from "./CreateKnowledge";
-import { KnowledgeAsk } from "./KnowledgeAsk";
 import { KnowledgeDialog } from "./KnowledgeDialog";
 import { KnowledgeEditor } from "./KnowledgeEditor";
 import { KnowledgeHandover } from "./KnowledgeHandover";
@@ -13,7 +12,7 @@ import type { CreatedKnowledgeDraft } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { ServerKnowledgeFeaturePage } from "./ServerKnowledgeFeaturePage";
 
-export type KnowledgeFeatureView = "knowledge" | "ask-arden" | "review-queue" | "knowledge-handover";
+export type KnowledgeFeatureView = "knowledge" | "review-queue" | "knowledge-handover";
 export type KnowledgeFeaturePageProps = ContextControlProps & {
   platform?: Platform;
   organizationId?: string | null;
@@ -26,7 +25,7 @@ export type KnowledgeFeaturePageProps = ContextControlProps & {
   onNavigate?: (view: KnowledgeFeatureView | "my-work") => void;
 };
 
-const labels: Record<KnowledgeFeatureView, string> = { knowledge: "Knowledge", "ask-arden": "Ask Arden", "review-queue": "Review Queue", "knowledge-handover": "Knowledge Handover" };
+const labels: Record<KnowledgeFeatureView, string> = { knowledge: "Knowledge", "review-queue": "Review Queue", "knowledge-handover": "Knowledge Handover" };
 
 export function KnowledgeFeaturePage(props: KnowledgeFeaturePageProps) {
   if (props.platform && props.organizationId && (props.view === "knowledge" || props.view === "review-queue")) {
@@ -56,7 +55,6 @@ function SampleKnowledgeFeaturePage({ view, active = true, organizationName = "F
       {effectiveView === "knowledge" && knowledgeScreen === "create" && <CreateKnowledge draft={state.draft} onSave={(draft) => { dispatch({ type: "edit", draft }); dispatch({ type: "save" }); }} onContinue={(draft) => { dispatch({ type: "edit", draft }); dispatch({ type: "save" }); setKnowledgeScreen("editor"); }} onBack={() => setKnowledgeScreen("library")} />}
       {effectiveView === "knowledge" && knowledgeScreen === "editor" && <KnowledgeEditor state={state} dispatch={dispatch} onBack={() => setKnowledgeScreen("library")} onSubmitted={() => goTo("review-queue")} />}
       {effectiveView === "review-queue" && <KnowledgeReview state={state} dispatch={dispatch} onOpenDraft={openDraft} />}
-      {effectiveView === "ask-arden" && <KnowledgeAsk />}
       {effectiveView === "knowledge-handover" && <KnowledgeHandover onReturn={() => { if (onNavigate) onNavigate("my-work"); else goTo("knowledge"); }} />}
       {state.message && (effectiveView === "knowledge" || effectiveView === "review-queue") && <p role="status" className="knowledge-action-message">{state.message}</p>}
     </div>

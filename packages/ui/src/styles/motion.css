@@ -63,7 +63,6 @@
 .my-work-published-row,
 .knowledge-row,
 .knowledge-featured,
-.knowledge-citation,
 .workspace-membership,
 .note-list > button,
 .organization-department-nav > button,
@@ -98,7 +97,6 @@
   }
 
   .knowledge-featured:hover:not(:disabled),
-  .knowledge-citation:hover:not(:disabled),
   .workspace-membership:hover:not(:disabled) {
     transform: translateY(-3px);
     box-shadow: var(--arden-shadow-hover);
@@ -107,7 +105,7 @@
 
 button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item,
   .my-work-queue-row, .my-work-published-row, .knowledge-row, .knowledge-featured,
-  .knowledge-citation, .workspace-membership):active:not(:disabled),
+  .workspace-membership):active:not(:disabled),
 .note-list > button:active:not(:disabled) {
   transform: translateY(1px);
   box-shadow: none;
@@ -116,7 +114,6 @@ button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item
 .my-work-queue-row:focus-visible,
 .knowledge-row:focus-visible,
 .knowledge-featured:focus-visible,
-.knowledge-citation:focus-visible,
 .workspace-membership:focus-visible,
 .note-list > button:focus-visible {
   border-color: var(--arden-accent);
