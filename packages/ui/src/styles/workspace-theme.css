@@ -1,0 +1,73 @@
+/* Shared workspace appearance, excluding authentication/onboarding screens. */
+.arden-app-shell {
+  --arden-canvas: #1b1f21;
+  --arden-sidebar: #171b1d;
+  --arden-surface: #212629;
+  --arden-elevated: #292f33;
+  --arden-hover: #303b43;
+  --arden-line: #30373c;
+  --arden-line-strong: #68737c;
+  --arden-control-border: #85929e;
+  --arden-text-primary: #f2ece2;
+  --arden-text-secondary: #c8cfd5;
+  --arden-text-muted: #a8b3bd;
+  --arden-accent: #e6b66e;
+  --arden-accent-hover: #f0c78a;
+  --arden-success: #9bcfaf;
+  --arden-info: #8cbaea;
+  --arden-danger: #e5a0a0;
+  color: var(--arden-text-primary);
+}
+.arden-app-shell .sidebar-nav-item.is-active {
+  color: var(--arden-text-primary);
+  background: #283139;
+  box-shadow: inset 3px 0 var(--arden-info);
+}
+.arden-app-shell .sidebar-nav-item.is-active:hover { background: var(--arden-hover); }
+.arden-app-shell .workspace-topbar { top: 0; }
+.arden-app-shell .workspace-page-header { border-bottom: 0; padding-bottom: 16px; }
+.arden-app-shell .workspace-page-header h1 { font-size: clamp(30px, 3vw, 40px); line-height: 1.25; letter-spacing: -.035em; }
+.arden-app-shell .workspace-page-header .meta-label { font-size: 10px; color: var(--arden-text-muted); }
+.arden-app-shell .workspace-page-header-row { align-items: center; }
+.arden-app-shell .workspace-scroll-content { padding-top: 12px; }
+.arden-app-shell .workspace-search { border-color: var(--arden-control-border); border-radius: 8px; background: var(--arden-surface); }
+.arden-app-shell .workspace-search:focus-within { border-color: var(--arden-info); box-shadow: 0 0 0 2px rgb(140 186 234 / 25%); }
+.arden-app-shell button:focus-visible,
+.arden-app-shell input:focus-visible,
+.arden-app-shell textarea:focus-visible,
+.arden-app-shell select:focus-visible { outline: 2px solid var(--arden-info); outline-offset: 3px; }
+.arden-app-shell .secondary-button,
+.arden-app-shell .context-toggle { background: var(--arden-surface); }
+.arden-app-shell .secondary-button:hover:not(:disabled),
+.arden-app-shell .context-toggle:hover { background: var(--arden-elevated); }
+.arden-app-shell .knowledge-featured { background: var(--arden-surface); border-color: var(--arden-line); box-shadow: none; }
+.arden-app-shell .knowledge-row-list { display: grid; gap: 10px; }
+.arden-app-shell .knowledge-row { border: 1px solid var(--arden-line); border-radius: 8px; background: var(--arden-surface); }
+.arden-app-shell button.knowledge-row:hover:not(:disabled) { background: var(--arden-elevated); border-color: var(--arden-line-strong); }
+.arden-app-shell .knowledge-row > svg { box-sizing: content-box; flex: none; padding: 10px; border-radius: 9px; background: var(--arden-elevated); }
+.arden-app-shell .knowledge-badge { background: var(--arden-surface); border-radius: 5px; }
+.arden-app-shell .knowledge-filter[aria-pressed="true"] .knowledge-badge { color: var(--arden-info); border-color: var(--arden-info); background: #293846; }
+.arden-app-shell .knowledge-handover-metrics > div { border: 1px solid var(--arden-line); }
+.arden-app-shell .knowledge-section-heading h2 { font-size: 22px; letter-spacing: -.025em; }
+.arden-app-shell .knowledge-notice { border-radius: 6px; }
+.arden-app-shell .note-list > button.is-selected { background: #283139; border-color: var(--arden-info); }
+.arden-app-shell .note-list > button.is-selected:hover { background: #303b43; }
+.arden-app-shell .private-ownership-card { border: 1px solid var(--arden-line); background: var(--arden-surface); box-shadow: none; }
+.arden-app-shell .organization-tabs { gap: 8px; }
+.arden-app-shell .organization-tabs button { min-height: 44px; background: var(--arden-surface); }
+.arden-app-shell .organization-tabs button.is-active,
+.arden-app-shell .organization-tabs button.is-active:hover { color: var(--arden-info); border-color: var(--arden-info); background: #293846; }
+.arden-app-shell .organization-surface { background: var(--arden-surface); }
+.arden-app-shell .role-config-role-list > button.is-selected { color: var(--arden-text-primary); border-color: var(--arden-info); background: #283139; }
+.arden-app-shell .role-config-tabs button.is-active { color: var(--arden-info); border-bottom-color: var(--arden-info); }
+.arden-app-shell .organization-department-nav > button.is-selected { color: var(--arden-info); border-color: var(--arden-info); background: #293846; }
+.arden-app-shell .organization-department-nav > button.is-selected strong { color: var(--arden-info); }
+.arden-app-shell .knowledge-pane-redesign { background: var(--arden-sidebar); }
+.arden-app-shell .access-boundary { border-color: var(--arden-line); }
+@container workspace (max-width: 500px) {
+  .arden-app-shell .preview-state { display: block; max-width: 140px; font-size: 9px; }
+  .arden-app-shell .knowledge-row { gap: 10px; }
+  .arden-app-shell .knowledge-row > svg { padding: 7px; }
+  .arden-app-shell .workspace-page-header-row { flex-wrap: wrap; gap: 14px; }
+  .arden-app-shell .workspace-page-header h1 { font-size: 28px; }
+}

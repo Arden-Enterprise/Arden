@@ -45,7 +45,6 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
         eyebrow="PERSONAL / OWNER PRIVATE"
         title={editorOpen ? draft.title.trim() || "Untitled private note" : "Private notes"}
         titleId="personal-workspace-title"
-        description={editorOpen ? isDirty ? "Unsaved changes · Your draft is kept while you work." : serverBacked ? "Saved to your private workspace on the Arden server." : "Saved in this preview session." : "Only you can view these notes. Sharing always creates a separate governed copy."}
         action={editorOpen ? <span className="private-state">{isDirty ? "Unsaved changes" : serverBacked ? "Saved · Server" : "Saved · Preview"}</span> : <button type="button" className="primary-button" onClick={() => { controller.createNote(); setQuery(""); openEditor(); }}>
             <Icon name="plus" size={16} /> New private note
           </button>}

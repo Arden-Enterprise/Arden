@@ -28,9 +28,8 @@ type NavigationItem = {
 const workspaceNavigation: NavigationItem[] = [
   { label: "My Work", icon: "work", view: "my-work" },
   { label: "Knowledge", icon: "knowledge", view: "knowledge" },
-  { label: "Ask Arden", icon: "knowledge", view: "ask-arden" },
-  { label: "Review Queue", icon: "check", view: "review-queue" },
-  { label: "Knowledge Handover", icon: "arrow", view: "knowledge-handover" },
+  { label: "Review Queue", icon: "review", view: "review-queue" },
+  { label: "Knowledge Handover", icon: "handover", view: "knowledge-handover" },
 ];
 
 export function AppSidebar({
@@ -99,7 +98,7 @@ export function AppSidebar({
           <span><span className="nav-label-full">Personal Workspace</span><span className="nav-label-short" aria-hidden="true">Notes</span></span>
         </button>
         <button type="button" className="sidebar-nav-item" disabled title="Integrations are not connected" aria-label="Integrations — not connected">
-          <Icon name="plus" size={16} /><span>Integrations</span><small>Planned</small>
+          <Icon name="integrations" size={16} /><span>Integrations</span><small>Planned</small>
         </button>
 
         {((previewRole === "admin" && !authenticated) || showAdmin) && (
@@ -113,7 +112,7 @@ export function AppSidebar({
               title="Organization & Access"
               aria-current={activeView === "organization-access" ? "page" : undefined}
             >
-              <Icon name="work" size={16} />
+              <Icon name="organization" size={16} />
               <span><span className="nav-label-full">Administration</span><span className="nav-label-short" aria-hidden="true">Admin</span></span>
             </button>
           </>

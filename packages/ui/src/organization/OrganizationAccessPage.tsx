@@ -58,7 +58,7 @@ export function OrganizationAccessPage({ organization, onChange, onDirtyChange, 
     <WorkspaceTopbar breadcrumb={`${organization.name} / Administration`} previewLabel="SESSION PREVIEW · SYNTHETIC DATA" contextOpen={contextOpen} onToggleContext={onToggleContext} />
     <WorkspacePageContent className="organization-access-content" header={<WorkspacePageHeader
       className="organization-access-heading" eyebrow="ORGANIZATION / GOVERNANCE" title={title}
-      titleId="organization-access-title" description="Manage departments, members and the boundaries of shared knowledge."
+      titleId="organization-access-title"
       action={<button type="button" className="primary-button" onClick={() => tab === "members" || tab === "invitations" ? setShowInvite(true) : setTab("departments")}>{tab === "members" || tab === "invitations" ? "Invite member" : "Manage departments"}</button>}
     />}>
       <nav className="organization-tabs" aria-label="Organization and access sections">{tabs.map((item) => <button key={item.id} type="button" className={tab === item.id ? "is-active" : ""} aria-current={tab === item.id ? "page" : undefined} onClick={() => setTab(item.id)}>{item.label}{item.id === "invitations" && pendingCount > 0 ? ` · ${pendingCount}` : item.id === "members" && waitingCount > 0 ? ` · ${waitingCount} waiting` : ""}</button>)}</nav>

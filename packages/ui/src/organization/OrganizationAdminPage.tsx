@@ -93,7 +93,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     <WorkspaceTopbar breadcrumb={`${organizationName} / Administration`} previewLabel="SERVER MANAGED" contextOpen={contextOpen} onToggleContext={onToggleContext} />
     <WorkspacePageContent className="organization-access-content" header={<WorkspacePageHeader
       className="organization-access-heading" eyebrow="ORGANIZATION / GOVERNANCE" title="Members, departments & roles"
-      titleId="organization-live-admin-title" description="Changes are checked and recorded by the Arden server."
+      titleId="organization-live-admin-title"
       action={<button type="button" className="secondary-button" disabled={busy || loading} onClick={() => { setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")); }}>Refresh</button>}
     />}>
       {loading ? <p role="status">Loading organization data…</p> : error && !data ? <p role="alert">{error}</p> : data && <>
