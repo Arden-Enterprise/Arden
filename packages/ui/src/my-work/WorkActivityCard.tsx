@@ -21,7 +21,6 @@ export function WorkActivityCard({ recentItems, onOpenPrivateNotes, onOpenKnowle
       <div className="my-work-private-shortcut">
         <span className="meta-label"><Icon name="lock" size={14} /> PERSONAL · PRIVATE</span>
         <strong>Questions for architecture review</strong>
-        <span className="private-note-copy">Your rough thoughts stay private.</span>
         <button type="button" className="text-button" onClick={onOpenPrivateNotes}>Open Personal Workspace</button>
       </div>
     </aside>

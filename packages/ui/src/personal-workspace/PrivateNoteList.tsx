@@ -48,7 +48,7 @@ export function PrivateNoteList({
             <strong>{searching ? "No private notes match this search." : "Your private workspace is ready."}</strong>
             {searching ? <button type="button" onClick={onClearSearch}>
               Clear search
-            </button> : <p>Create your first private note to capture a thought.</p>}
+            </button> : null}
           </div>
         )}
       </div>

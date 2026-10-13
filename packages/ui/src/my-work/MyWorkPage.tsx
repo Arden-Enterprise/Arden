@@ -83,7 +83,7 @@ export function MyWorkPage({
           <div>
             <span className="meta-label">WORKSPACE / MY WORK</span>
             <h1 id="my-work-title">Good morning, {greetingName}.</h1>
-            <p>A clear view of the work that needs your attention.</p>
+
           </div>
           <button type="button" className="primary-button" onClick={onOpenKnowledge} disabled={!onOpenKnowledge}>Create knowledge</button>
         </div>
@@ -108,7 +108,7 @@ export function MyWorkPage({
             <div className="my-work-spotlight-copy">
               <div className="my-work-spotlight-meta"><span>Due today</span><span>Platform Reliability</span></div>
               <h2 id="spotlight-title">API Gateway Runbook</h2>
-              <p>Two evidence checks remain before this runbook can be published.</p>
+
               <div className="my-work-spotlight-actions">
                 <button type="button" className="primary-button" onClick={onOpenReview} disabled={!onOpenReview}>Open review</button>
                 <button type="button" className="my-work-ghost-button" onClick={onOpenReview} disabled={!onOpenReview}>View changes</button>

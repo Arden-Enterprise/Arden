@@ -26,21 +26,20 @@ export function KnowledgePane({ content, open, onToggle }: { content: PaneConten
         <div className="knowledge-pane-body">
           <span className="meta-label">{content.eyebrow}</span>
           <h2>{content.title}</h2>
-          <p>{content.description}</p>
+
           <section className="access-boundary" aria-labelledby="boundary-title">
             <span className="meta-label">ACCESS BOUNDARY</span>
             <strong id="boundary-title">{content.boundaryTitle}</strong>
-            <p>{content.boundaryBody}</p>
+
           </section>
           <details className="pane-planned-features">
             <summary>Planned assistance</summary>
-            <p>These actions will be available when Ask Arden is connected.</p>
+
             <ul>{content.suggestions.map((suggestion) => <li key={suggestion}>{suggestion}</li>)}</ul>
           </details>
         </div>
         <footer className="knowledge-pane-composer">
           <div><Icon name="lock" size={15} /> Ask Arden · Planned</div>
-          <span>Answers will use only sources you can access.</span>
         </footer>
       </>}
     </aside>

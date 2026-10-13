@@ -45,7 +45,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
           <div>
             <span className="meta-label">PERSONAL / OWNER PRIVATE</span>
             <h1 id="personal-workspace-title">{editorOpen ? draft.title.trim() || "Untitled private note" : "Private notes"}</h1>
-            <p>{editorOpen ? isDirty ? "Unsaved changes · Your draft is kept while you work." : serverBacked ? "Saved to your private workspace on the Arden server." : "Saved in this preview session." : "Only you can view these notes. Sharing always creates a separate governed copy."}</p>
+            {editorOpen && <span className="private-state">{isDirty ? "Unsaved changes" : serverBacked ? "Saved · Server" : "Saved · Preview"}</span>}
           </div>
           {!editorOpen && <button type="button" className="primary-button" onClick={() => { controller.createNote(); setQuery(""); openEditor(); }}>
             <Icon name="plus" size={16} /> New private note
@@ -60,7 +60,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
         }}>Back to notes</button>
           <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : serverBacked ? "Save private note" : "Save preview note"}</button>
           {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}>Contribute copy</button>}
-          {serverBacked && (!sourceVersionId || isDirty) && <small>Save this private note before contributing an exact version.</small>}
+
         </div>}
         {loading && <p role="status">Loading your private notes…</p>}
         {error && <p className="sign-in-message" role="alert">{error}</p>}
@@ -71,9 +71,8 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
             <Icon name="lock" size={32} />
             <span className="meta-label">{editorOpen ? "PRIVACY" : "PRIVATE BY DEFAULT"}</span>
             <h2>{editorOpen ? "Only you" : <>Your working <br />memory</>}</h2>
-            <p>A private note is visible only to its owner.</p>
-            <hr />
-            <p>Publishing or contributing creates a separate governed item. It never changes this note silently.</p>
+
+
             <span className="private-guidance-badge">YOU DECIDE WHAT TO SHARE</span>
             {editorOpen && <p className="private-save-status" aria-live="polite">{isDirty ? "Your draft has unsaved changes." : state.savedMessage || "No pending changes."}</p>}
           </aside>

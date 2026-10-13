@@ -8,15 +8,15 @@ export function KnowledgeReview({ state, dispatch, onOpenDraft }: { state: Knowl
   const checksRemaining = snapshot ? Number(!snapshot.draft.recoveryReady) + Number(!snapshot.draft.sourceReady) : 2;
   const published = Boolean(snapshot && state.publication?.version === snapshot.version);
   return <>
-    <KnowledgeHeading eyebrow="WORKSPACE / REVIEW QUEUE" title="Review & publish" description="Verify evidence, ownership and access before sharing knowledge." action={<KnowledgeBadge tone="amber">Assigned to me · Sample</KnowledgeBadge>} />
+    <KnowledgeHeading eyebrow="WORKSPACE / REVIEW QUEUE" title="Review & publish"  action={<KnowledgeBadge tone="amber">Assigned to me · Sample</KnowledgeBadge>} />
     <KnowledgeSteps steps={["Capture", "Enrich", "Review", "Publish", "Handover"]} active={published ? 3 : 2} />
     <div className="knowledge-inline-meta"><KnowledgeBadge>1 sample request</KnowledgeBadge><KnowledgeBadge tone="blue">{snapshot?.draft.title || "No submitted snapshot"}</KnowledgeBadge><KnowledgeBadge tone={published ? "jade" : "amber"}>{published ? "Published" : snapshot ? formatSampleVersion(snapshot.version) : "Draft"}</KnowledgeBadge></div>
-    {!snapshot ? <div className="knowledge-empty"><h2>No sample snapshot awaiting review</h2><p>Open the working draft and submit a snapshot to preview the review flow.</p><button type="button" className="primary-button" onClick={onOpenDraft}>Open draft</button></div> : <div className="knowledge-two-column">
+    {!snapshot ? <div className="knowledge-empty"><h2>No sample snapshot awaiting review</h2><button type="button" className="primary-button" onClick={onOpenDraft}>Open draft</button></div> : <div className="knowledge-two-column">
       <article className="knowledge-panel knowledge-review-document"><span className="meta-label knowledge-tone-blue">SUBMITTED {formatSampleVersion(snapshot.version).toUpperCase()} · IMMUTABLE SAMPLE</span><h2>{snapshot.draft.title}</h2><p>Lan Nguyen · Product Engineering · Sample submission</p><div className="knowledge-inline-meta"><KnowledgeBadge tone="jade">{snapshot.draft.scope}</KnowledgeBadge><KnowledgeBadge>{snapshot.draft.documentType}</KnowledgeBadge><KnowledgeBadge tone="blue">{snapshot.draft.classification}</KnowledgeBadge></div><hr />
         <span className="meta-label">CHANGESET · RECOVERY PROCEDURE</span><div className="knowledge-diff is-removed">− Restart the gateway when error rate exceeds 5%.</div><div className="knowledge-diff is-added">+ Validate upstream health and retry saturation before restart.<br />+ Link the incident ticket and record the decision owner.</div>
         <span className="meta-label">LINKED EVIDENCE</span><KnowledgeRow title="On-call escalation guide" details="Company-wide · Synthetic evidence available to intended readers" status="Verified" tone="blue" />
         {snapshot.draft.sourceReady ? <KnowledgeRow title="Department recovery dashboard" details="Department · Sample replacement evidence" status="Verified" /> : <KnowledgeRow title="Source access needs confirmation" details="Private content is not included in this review" status="Check access" icon="lock" tone="amber" />}
-        <p className="knowledge-preview-footnote">Review uses the submitted snapshot. Edits to the working draft do not alter it.</p>
+
       </article>
       <aside className="knowledge-panel knowledge-review-readiness"><span className="meta-label knowledge-tone-amber">PUBLICATION READINESS</span><h2>{ready ? "Ready for a decision" : `${checksRemaining} checks remaining`}</h2>
         <div className="knowledge-review-check"><Icon name="check" /><div><strong>Owner confirmed</strong><small>Lan Nguyen remains responsible.</small></div></div>
@@ -30,7 +30,7 @@ export function KnowledgeReview({ state, dispatch, onOpenDraft }: { state: Knowl
         <div className="knowledge-review-actions"><button type="button" className="secondary-button" onClick={() => { dispatch({ type: "request-revision" }); onOpenDraft(); }} disabled={snapshot.decision !== "pending"}>Request changes</button>
           <button type="button" className="primary-button" disabled={!ready || snapshot.decision !== "pending"} onClick={() => dispatch({ type: "approve", version: snapshot.version })}>Approve &amp; publish</button>
           <button type="button" className="knowledge-back-button" onClick={onOpenDraft}>Open working draft →</button></div>
-        <small>Final approval automatically publishes the exact submitted snapshot. Server authorization is not implemented.</small>
+
       </aside>
     </div>}
   </>;

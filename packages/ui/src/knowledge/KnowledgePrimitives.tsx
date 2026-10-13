@@ -15,8 +15,8 @@ export function KnowledgeNotice({ title, children, tone = "blue" }: { title: str
   return <div className={`knowledge-notice knowledge-tone-${tone}`}><div><strong>{title}</strong><p>{children}</p></div></div>;
 }
 
-export function KnowledgeHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
-  return <header className="knowledge-heading"><span className="meta-label">{eyebrow}</span><div><h1>{title}</h1>{action}</div><p>{description}</p></header>;
+export function KnowledgeHeading({ eyebrow, title, action }: { eyebrow: string; title: string; action?: ReactNode }) {
+  return <header className="knowledge-heading"><span className="meta-label">{eyebrow}</span><div><h1>{title}</h1>{action}</div></header>;
 }
 
 export function KnowledgeSteps({ steps, active }: { steps: string[]; active: number }) {
