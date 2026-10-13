@@ -126,11 +126,10 @@ button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item
 @media (prefers-reduced-motion: no-preference) {
   .sign-in-welcome-copy,
   .sign-in-card,
-  .workspace-content > .page-title-row,
+  .workspace-page-header,
   .my-work-content .my-work-status-strip,
   .my-work-spotlight,
   .my-work-content .my-work-activity-grid,
-  .knowledge-feature-page > :first-child,
   .knowledge-feature-page > :nth-child(2),
   .knowledge-feature-page > :nth-child(3),
   .knowledge-pane-redesign:not(.is-collapsed) {

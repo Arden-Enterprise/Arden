@@ -1,11 +1,12 @@
 @media (max-width: 1280px) {
   .arden-app-shell {
-    grid-template-columns: 208px minmax(0, 1fr) 280px;
+    grid-template-columns: 264px minmax(0, 1fr) 280px;
   }
   .arden-app-shell.is-context-collapsed {
-    grid-template-columns: 208px minmax(0, 1fr);
+    grid-template-columns: 264px minmax(0, 1fr);
   }
-  .workspace-content {
+  .workspace-page-header,
+  .workspace-scroll-content {
     padding-right: 24px;
     padding-left: 24px;
   }
@@ -17,8 +18,8 @@
     max-width: 150px;
   }
   .app-sidebar {
-    padding-right: 12px;
-    padding-left: 12px;
+    padding-right: 16px;
+    padding-left: 16px;
   }
 }
 
@@ -46,9 +47,9 @@
     gap: 20px;
   }
   .personal-title-row {
-    flex-direction: column;
-    gap: 16px;
+    align-items: stretch;
   }
+  .personal-title-row .workspace-page-header-row { align-items: flex-start; flex-direction: column; gap: 16px; }
   .personal-title-row .primary-button {
     margin-top: 0;
   }
@@ -263,9 +264,16 @@
     padding: 0 8px;
     font-size: 11px;
   }
-  .workspace-content {
-    padding: 26px 16px 36px;
+  .workspace-page {
+    height: calc(100dvh - 64px);
   }
+  .workspace-page-header {
+    padding: 22px 16px 18px;
+  }
+  .workspace-scroll-content {
+    padding: 20px 16px 36px;
+  }
+  .workspace-page-header h1,
   .page-title-row h1 {
     font-size: 27px;
   }
@@ -393,6 +401,8 @@
     flex-wrap: wrap;
     align-items: start;
   }
+  .workspace-page-header.organization-access-heading { align-items: stretch; }
+  .workspace-page-header.organization-access-heading .workspace-page-header-row { flex-wrap: wrap; align-items: start; }
 }
 
 @media (max-width: 480px) {

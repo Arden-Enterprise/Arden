@@ -211,14 +211,14 @@
 }
 
 .my-work-title-row {
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
+  align-items: stretch;
 }
+
+.my-work-title-row .workspace-page-header-row { align-items: center; }
 
 .my-work-title-row .meta-label { display: block; margin-bottom: 8px; font-size: 12px; letter-spacing: 0; }
 .my-work-title-row h1 { font-size: 32px; line-height: 43px; }
-.my-work-title-row > .primary-button { flex: none; }
+.my-work-title-row .workspace-page-header-row > .primary-button { flex: none; }
 
 .my-work-content .my-work-status-strip {
   gap: 16px;
@@ -323,7 +323,7 @@
 
 @container workspace (max-width: 760px) {
   .my-work-content .my-work-activity-grid { grid-template-columns: minmax(0, 1fr); }
-  .my-work-title-row { align-items: flex-start; flex-wrap: wrap; gap: 16px; }
+  .my-work-title-row .workspace-page-header-row { align-items: flex-start; flex-wrap: wrap; gap: 16px; }
   .my-work-content .my-work-status-strip > div { flex-direction: column; align-items: flex-start; gap: 4px; }
   .my-work-status-strip span { font-size: 12px; line-height: 18px; }
 }

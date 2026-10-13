@@ -279,7 +279,8 @@
 }
 
 /* Living Archive separates the private library and the writing view. */
-.personal-title-row { align-items: center; }
+.personal-title-row { align-items: stretch; }
+.personal-title-row .workspace-page-header-row { align-items: center; }
 .personal-title-row h1 { margin-top: 8px; overflow-wrap: anywhere; }
 .personal-title-row .primary-button { margin-top: 0; }
 .personal-grid { grid-template-columns: minmax(0, 2.14fr) minmax(260px, 1fr); align-items: start; }

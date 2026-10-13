@@ -4,6 +4,7 @@ import { WorkActivityCard } from "./WorkActivityCard";
 import { SearchField } from "../shared/SearchField";
 import { useSearchShortcut } from "../shared/useSearchShortcut";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
+import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 
 const priorityQueue: QueueItem[] = [
   {
@@ -78,15 +79,13 @@ export function MyWorkPage({
         search={<SearchField ref={searchRef} value={query} onChange={setQuery} placeholder="Search priority queue…" />}
       />
 
-      <div className="workspace-content my-work-content">
-        <div className="page-title-row my-work-title-row">
-          <div>
-            <span className="meta-label">WORKSPACE / MY WORK</span>
-            <h1 id="my-work-title">Good morning, {greetingName}.</h1>
-
-          </div>
-          <button type="button" className="primary-button" onClick={onOpenKnowledge} disabled={!onOpenKnowledge}>Create knowledge</button>
-        </div>
+      <WorkspacePageContent className="my-work-content" header={<WorkspacePageHeader className="my-work-title-row"
+        eyebrow="WORKSPACE / MY WORK"
+        title={<>Good morning, {greetingName}.</>}
+        titleId="my-work-title"
+        description="A clear view of the work that needs your attention."
+        action={<button type="button" className="primary-button" onClick={onOpenKnowledge} disabled={!onOpenKnowledge}>Create knowledge</button>}
+      />}>
 
         <div className="status-strip my-work-status-strip" aria-label="Sample work status summary">
           <div className="status-action">
@@ -128,7 +127,7 @@ export function MyWorkPage({
           />
           <WorkActivityCard recentItems={recentItems} onOpenPrivateNotes={onOpenPrivateNotes} onOpenKnowledge={onOpenKnowledge} />
         </div>
-      </div>
+      </WorkspacePageContent>
     </main>
   );
 }
