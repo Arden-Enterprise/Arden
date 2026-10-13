@@ -1,8 +1,11 @@
 .organization-access-content { max-width: 1232px; }
 .organization-access-heading { align-items: flex-end; gap: 24px; }
+.workspace-page-header.organization-access-heading { align-items: stretch; gap: 7px; }
+.workspace-page-header.organization-access-heading .workspace-page-header-row { align-items: flex-end; gap: 24px; }
 .organization-access-heading h1 { margin: 10px 0 8px; font-size: 32px; line-height: 1.35; }
 .organization-access-heading p { color: var(--arden-text-secondary); font-size: 15px; line-height: 1.5; }
-.organization-access-heading > .primary-button { flex-shrink: 0; }
+.organization-access-heading > .primary-button,
+.organization-access-heading .workspace-page-header-row > .primary-button { flex-shrink: 0; }
 .organization-surface { min-width: 0; padding: 24px; border: 1px solid var(--arden-line); border-radius: 8px; background: var(--arden-surface); }
 .organization-surface > h2, .organization-section-heading h2 { margin: 8px 0 12px; font-size: 20px; line-height: 1.45; }
 .organization-amber { color: var(--arden-accent); }
@@ -251,6 +254,8 @@
   .organization-department-nav > .meta-label, .organization-department-nav > h2 { grid-column: 1 / -1; }
   .organization-access-boundaries, .access-rule-grid { grid-template-columns: 1fr; }
   .organization-access-heading { align-items: flex-start; flex-direction: column; }
+  .workspace-page-header.organization-access-heading { align-items: stretch; }
+  .workspace-page-header.organization-access-heading .workspace-page-header-row { align-items: flex-start; flex-direction: column; }
   .organization-invitation-row { grid-template-columns: minmax(0, 1fr) auto; }
   .organization-invitation-row .organization-row-actions { grid-column: 1 / -1; }
 }

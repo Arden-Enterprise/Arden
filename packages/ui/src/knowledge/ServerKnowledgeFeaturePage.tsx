@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { SearchField } from "../shared/SearchField";
 import { KnowledgeBadge, KnowledgeHeading, KnowledgeNotice, KnowledgeRow } from "./KnowledgePrimitives";
@@ -12,6 +12,15 @@ import {
 } from "../shared/api-client";
 import type { KnowledgeClassification } from "../shared/knowledge-classification";
 import type { Platform } from "../shared/types";
+
+const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
+  .then((module) => ({ default: module.ArdenRichTextEditor })));
+const ArdenDocumentView = lazy(() => import("./ArdenRichTextEditor")
+  .then((module) => ({ default: module.ArdenDocumentView })));
+
+function DocumentSurfaceLoading() {
+  return <div className="arden-document-loading" role="status">Loading document editor…</div>;
+}
 
 type Props = ContextControlProps & {
   platform: Platform;
@@ -207,7 +216,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <h2>{review.title}</h2><div className="knowledge-inline-meta"><KnowledgeBadge>{review.classification}</KnowledgeBadge>
               <KnowledgeBadge tone="blue">{departmentName(review.responsibleDepartmentId)}</KnowledgeBadge>
               <KnowledgeBadge tone="amber">{review.targetScopeType}</KnowledgeBadge></div>
-            <pre>{review.body}</pre><small>Snapshot hash: {review.contentHash}</small>
+            <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+              key={`review:${review.id}:${review.snapshotVersionId}`} body={review.body}
+              instanceKey={`review:${review.id}:${review.snapshotVersionId}`} /></Suspense>
+            <small>Snapshot hash: {review.contentHash}</small>
             <button type="button" className="knowledge-back-button" onClick={() => setReview(null)}>← Back to assigned reviews</button>
           </article>
           <aside className="knowledge-panel knowledge-live-decision"><span className="meta-label knowledge-tone-amber">HUMAN DECISION</span>
@@ -234,7 +246,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <label>Title<input required maxLength={160} value={newTitle} disabled={busy} onChange={(event) => setNewTitle(event.target.value)} /></label>
           <label>Classification<select value={newClassification} disabled={busy} onChange={(event) => setNewClassification(event.target.value as KnowledgeClassification)}>
             <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select></label>
-          <label>Document text<textarea rows={16} maxLength={131072} value={newBody} disabled={busy} onChange={(event) => setNewBody(event.target.value)} /></label>
+          <div className="arden-document-field"><span>Document text</span>
+            <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor key="new-shared-knowledge"
+              body={newBody} instanceKey="new-shared-knowledge" disabled={busy} onChange={setNewBody} /></Suspense>
+          </div>
           <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy || !newTitle.trim()}>Save new draft</button>
             <button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); createRequestKey.current = null; }}>Cancel</button></div>
         </form></div>
@@ -255,7 +270,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         {latest?.status === "APPROVED" && <KnowledgeNotice title="Approved and published" tone="jade">The system published the reviewed snapshot. A new edit requires a new submission before it can replace that publication.</KnowledgeNotice>}
         <div className="knowledge-editor-grid"><section className="knowledge-panel knowledge-live-form">
           <label>Title<input maxLength={160} disabled={busy || draft.hasPendingSubmission} value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
-          <label>Document text<textarea rows={18} maxLength={131072} disabled={busy || draft.hasPendingSubmission} value={editor.body} onChange={(event) => setEditor({ ...editor, body: event.target.value })} /></label>
+          <div className="arden-document-field"><span>Document text</span>
+            <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor
+              key={`${draft.id}:${draft.currentVersion.version}`} body={editor.body}
+              instanceKey={`${draft.id}:${draft.currentVersion.version}`}
+              disabled={busy || draft.hasPendingSubmission} onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
+          </div>
           <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy || draft.hasPendingSubmission || !dirty} onClick={saveDraft}>Save new version</button>
             <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit this version for review</button></div>
 
@@ -283,7 +303,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           action={<button type="button" className="secondary-button" onClick={() => setScreen("library")}>Back to library</button>} />
         <div className="knowledge-inline-meta"><KnowledgeBadge tone="jade">Published</KnowledgeBadge><KnowledgeBadge>{document.classification}</KnowledgeBadge>
           <span>Published {new Date(document.publishedAt).toLocaleString()}</span></div>
-        <article className="knowledge-panel knowledge-live-document"><pre>{document.body}</pre></article>
+        <article className="knowledge-panel knowledge-live-document">
+          <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+            key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
+            instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>
+        </article>
       </> : <>
         <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Governed knowledge"
           action={<div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>

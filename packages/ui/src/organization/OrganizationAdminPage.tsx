@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
+import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 import {
   ApiError, assignOrganizationRole, changePrimaryDepartment, createDepartment, createOrganizationRole,
   createReviewerGrant, deactivateReviewerGrant, inviteOrganizationMember, listReviewerGrants,
@@ -90,8 +91,11 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
 
   return <main id="arden-main" className="workspace-page organization-live-admin" aria-labelledby="organization-live-admin-title" tabIndex={-1}>
     <WorkspaceTopbar breadcrumb={`${organizationName} / Administration`} previewLabel="SERVER MANAGED" contextOpen={contextOpen} onToggleContext={onToggleContext} />
-    <div className="workspace-content organization-access-content">
-      <div className="page-title-row organization-access-heading"><div><span className="meta-label">ORGANIZATION / GOVERNANCE</span><h1 id="organization-live-admin-title">Members, departments & roles</h1></div><button type="button" className="secondary-button" disabled={busy || loading} onClick={() => { setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")); }}>Refresh</button></div>
+    <WorkspacePageContent className="organization-access-content" header={<WorkspacePageHeader
+      className="organization-access-heading" eyebrow="ORGANIZATION / GOVERNANCE" title="Members, departments & roles"
+      titleId="organization-live-admin-title" description="Changes are checked and recorded by the Arden server."
+      action={<button type="button" className="secondary-button" disabled={busy || loading} onClick={() => { setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")); }}>Refresh</button>}
+    />}>
       {loading ? <p role="status">Loading organization data…</p> : error && !data ? <p role="alert">{error}</p> : data && <>
         {error && <p className="organization-feedback" role="alert">{error}</p>}{message && <p className="organization-feedback" role="status">{message}</p>}
         <div className="organization-live-admin-grid">
@@ -155,6 +159,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           }, "Invitation resent.")}>Resend</button><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(() => revokeOrganizationInvitation(platform, organizationId, invitation.id), "Invitation revoked.")}>Revoke</button></div>}</li>)}</ul>}
         </section>
       </>}
-    </div>
+    </WorkspacePageContent>
   </main>;
 }

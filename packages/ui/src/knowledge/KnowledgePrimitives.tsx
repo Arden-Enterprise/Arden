@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Icon, type IconName } from "../shared/Icon";
+import { WorkspacePageHeader } from "../shared/WorkspacePageContent";
 
 const statusAssets = {
   amber: new URL("./assets/status-amber.svg", import.meta.url).href,
@@ -15,8 +16,8 @@ export function KnowledgeNotice({ title, children, tone = "blue" }: { title: str
   return <div className={`knowledge-notice knowledge-tone-${tone}`}><div><strong>{title}</strong><p>{children}</p></div></div>;
 }
 
-export function KnowledgeHeading({ eyebrow, title, action }: { eyebrow: string; title: string; action?: ReactNode }) {
-  return <header className="knowledge-heading"><span className="meta-label">{eyebrow}</span><div><h1>{title}</h1>{action}</div></header>;
+export function KnowledgeHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description?: string; action?: ReactNode }) {
+  return <WorkspacePageHeader className="knowledge-heading" eyebrow={eyebrow} title={title} description={description} action={action} />;
 }
 
 export function KnowledgeSteps({ steps, active }: { steps: string[]; active: number }) {

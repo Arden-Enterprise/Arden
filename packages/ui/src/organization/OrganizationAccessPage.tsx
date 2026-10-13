@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
+import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 import { AccessRules } from "./AccessRules";
 import { DepartmentEditor } from "./OrganizationEditors";
 import { OrganizationDialog } from "./OrganizationDialog";
@@ -55,8 +56,11 @@ export function OrganizationAccessPage({ organization, onChange, onDirtyChange, 
   const title = tab === "members" ? "Departments & members" : "Organization & access";
   return <main id="arden-main" className="workspace-page" aria-labelledby="organization-access-title" tabIndex={-1}>
     <WorkspaceTopbar breadcrumb={`${organization.name} / Administration`} previewLabel="SESSION PREVIEW · SYNTHETIC DATA" contextOpen={contextOpen} onToggleContext={onToggleContext} />
-    <div className="workspace-content organization-access-content">
-      <div className="page-title-row organization-access-heading"><div><span className="meta-label">ORGANIZATION / GOVERNANCE</span><h1 id="organization-access-title">{title}</h1></div><button type="button" className="primary-button" onClick={() => tab === "members" || tab === "invitations" ? setShowInvite(true) : setTab("departments")}>{tab === "members" || tab === "invitations" ? "Invite member" : "Manage departments"}</button></div>
+    <WorkspacePageContent className="organization-access-content" header={<WorkspacePageHeader
+      className="organization-access-heading" eyebrow="ORGANIZATION / GOVERNANCE" title={title}
+      titleId="organization-access-title" description="Manage departments, members and the boundaries of shared knowledge."
+      action={<button type="button" className="primary-button" onClick={() => tab === "members" || tab === "invitations" ? setShowInvite(true) : setTab("departments")}>{tab === "members" || tab === "invitations" ? "Invite member" : "Manage departments"}</button>}
+    />}>
       <nav className="organization-tabs" aria-label="Organization and access sections">{tabs.map((item) => <button key={item.id} type="button" className={tab === item.id ? "is-active" : ""} aria-current={tab === item.id ? "page" : undefined} onClick={() => setTab(item.id)}>{item.label}{item.id === "invitations" && pendingCount > 0 ? ` · ${pendingCount}` : item.id === "members" && waitingCount > 0 ? ` · ${waitingCount} waiting` : ""}</button>)}</nav>
       <div className="organization-tab-panel">
         <div hidden={tab !== "roles"}><RoleConfigurationPanel onDirtyChange={onDirtyChange} members={organization.members.map((member) => ({
@@ -70,8 +74,8 @@ export function OrganizationAccessPage({ organization, onChange, onDirtyChange, 
         {tab === "policies" && <section className="organization-surface"><AccessRules /></section>}
         {tab === "audit" && <section className="organization-surface organization-editor-stack"><span className="meta-label organization-blue">ACCOUNTABILITY</span><h2>Recorded changes</h2><div className="organization-empty-state"><h3>No server audit records in preview</h3></div></section>}
       </div>
-      <div className="organization-notice is-success"><strong>Setup readiness</strong><span>{organization.departments.length} departments · {organization.members.length} members · {pendingCount} invitations pending · {waitingCount} awaiting assignment</span></div>
-    </div>
+      <div className="organization-notice is-success"><strong>Setup readiness</strong><span>{organization.departments.length} departments · {organization.members.length} members · {pendingCount} invitations pending · {waitingCount} awaiting assignment. {waitingCount ? "Assign departments and roles before those members enter the workspace." : "Review role assignments and document audiences before granting real access."}</span></div>
+    </WorkspacePageContent>
     {showInvite && <InviteMemberDialog organization={organization} onChange={onChange} onClose={() => { setShowInvite(false); setTab("invitations"); }} />}
     {showMetadata && <OrganizationMetadataDialog organization={organization} onChange={onChange} onClose={() => setShowMetadata(false)} onDirtyChange={onDirtyChange} />}
   </main>;

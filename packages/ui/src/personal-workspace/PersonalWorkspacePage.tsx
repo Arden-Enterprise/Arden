@@ -4,6 +4,7 @@ import { PrivateNoteEditor } from "./PrivateNoteEditor";
 import { PrivateNoteList } from "./PrivateNoteList";
 import { SearchField } from "../shared/SearchField";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
+import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 import { useSearchShortcut } from "../shared/useSearchShortcut";
 import { ContributePrivateNoteDialog, type ContributionAttempt } from "./ContributePrivateNoteDialog";
 import type { CreatedKnowledgeDraft } from "../shared/api-client";
@@ -40,17 +41,15 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   return (
     <main id="arden-main" className="workspace-page" aria-labelledby="personal-workspace-title" tabIndex={-1}>
       <WorkspaceTopbar breadcrumb="Arden / Personal Workspace" previewLabel={serverBacked ? "PRIVATE NOTES · SERVER" : "SAMPLE NOTES · SESSION ONLY"} contextOpen={contextOpen} onToggleContext={onToggleContext} />
-      <div className={`workspace-content personal-content${editorOpen ? " is-editing-note" : ""}`}>
-        <div className="page-title-row personal-title-row">
-          <div>
-            <span className="meta-label">PERSONAL / OWNER PRIVATE</span>
-            <h1 id="personal-workspace-title">{editorOpen ? draft.title.trim() || "Untitled private note" : "Private notes"}</h1>
-            {editorOpen && <span className="private-state">{isDirty ? "Unsaved changes" : serverBacked ? "Saved · Server" : "Saved · Preview"}</span>}
-          </div>
-          {!editorOpen && <button type="button" className="primary-button" onClick={() => { controller.createNote(); setQuery(""); openEditor(); }}>
+      <WorkspacePageContent className={`personal-content${editorOpen ? " is-editing-note" : ""}`} header={<WorkspacePageHeader className="personal-title-row"
+        eyebrow="PERSONAL / OWNER PRIVATE"
+        title={editorOpen ? draft.title.trim() || "Untitled private note" : "Private notes"}
+        titleId="personal-workspace-title"
+        description={editorOpen ? isDirty ? "Unsaved changes · Your draft is kept while you work." : serverBacked ? "Saved to your private workspace on the Arden server." : "Saved in this preview session." : "Only you can view these notes. Sharing always creates a separate governed copy."}
+        action={editorOpen ? <span className="private-state">{isDirty ? "Unsaved changes" : serverBacked ? "Saved · Server" : "Saved · Preview"}</span> : <button type="button" className="primary-button" onClick={() => { controller.createNote(); setQuery(""); openEditor(); }}>
             <Icon name="plus" size={16} /> New private note
           </button>}
-        </div>
+      />}>
         {!editorOpen && <SearchField ref={searchRef} value={query} onChange={setQuery} placeholder="Search your private notes…" />}
         {editorOpen && <div className="private-editor-toolbar">
           <span className="private-state"><Icon name="lock" size={14} /> PRIVATE · ONLY YOU</span>
@@ -77,7 +76,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
             {editorOpen && <p className="private-save-status" aria-live="polite">{isDirty ? "Your draft has unsaved changes." : state.savedMessage || "No pending changes."}</p>}
           </aside>
         </div>
-      </div>
+      </WorkspacePageContent>
       {contributionOpen && serverBacked && selectedNote && sourceVersionId && !isDirty && <ContributePrivateNoteDialog
         key={sourceVersionId}
         platform={platform}
