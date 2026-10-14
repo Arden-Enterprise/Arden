@@ -129,6 +129,15 @@ References: [Supabase Auth](https://supabase.com/docs/guides/auth), [server-side
 
 ## 7. PostgreSQL, pgvector, Drizzle, and search
 
+- Custom-role foundation `0011_custom_role_policy_foundation.sql` adds configuration version and
+  fixed owner-private RLS, with exact publication assignment scopes. Existing publication data
+  requires a reviewed backfill before this migration can run. The runtime role stays non-bypass;
+  the owner helper is SECURITY INVOKER. Do not bypass the existing schema migration owner or
+  alter old migrations. [Decision 0009](../decisions/0009-custom-role-scope-and-owner-defaults.md)
+  and [implementation status](custom-role-implementation.md) separate implemented policy from
+  pending configurable APIs, UI and Share integration. Rollback-only runtime-role rehearsal exists
+  in `tools/roles/policy-rehearsal.sql`; it does not replace broader integration tests.
+
 - PostgreSQL is the canonical system of record for organization-scoped content, immutable versions, permissions, publications, source revisions, explicit edges, and audit metadata. An SVG/Graphology object, embedding, or client cache is not canonical storage.
 - Use constraints, foreign keys, unique keys, indexes, and transactions to enforce invariants as well as domain checks. Make organization ownership explicit and prevent cross-organization references. IDs are identifiers, not access controls.
 - Separate migration/owner, application, and worker roles. The local Compose user/password is development-only; it is not the least-privilege production role design.

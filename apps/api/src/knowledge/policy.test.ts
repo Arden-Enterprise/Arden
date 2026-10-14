@@ -5,12 +5,34 @@ const actor: MembershipActor = { membershipId: "author", organizationId: "org", 
 const audienceRole = { roleId: "editor", organizationId: "org", status: "ACTIVE" as const, isSystem: false };
 const now = new Date("2026-10-09T00:00:00Z");
 const assignment = { membershipId: "author", organizationId: "org", roleId: "editor", status: "ACTIVE" as const,
-  validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null, scopeActive: true, memberInScope: true };
+  validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null, scopeActive: true, memberInScope: true,
+  scope: { type: "ORGANIZATION" as const, departmentId: null }, permissions: ["PUBLISHED_CONTENT_VIEW"] };
 const audience = { audienceRoles: [audienceRole], assignments: [assignment] };
 const publication = { organizationId: "org", status: "CURRENT" as const, audienceRoleIds: ["editor"],
-  validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null };
+  validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null,
+  scope: { type: "ORGANIZATION" as const, departmentId: null } };
 
 describe("Mainflow 2 policy foundations", () => {
+  it("unions valid grants without letting an inactive audience role grant access", () => {
+    const inactiveRole = { ...audienceRole, roleId: "retired", status: "INACTIVE" as const };
+    const unionPublication = { ...publication, audienceRoleIds: ["editor", "retired"] };
+    const unionAudience = { ...audience, audienceRoles: [audienceRole, inactiveRole] };
+    expect(canReadPublication({ actor, publication: unionPublication, audience: unionAudience, now })).toBe(true);
+    expect(canReadPublication({ actor, publication: unionPublication, audience: {
+      ...unionAudience, assignments: [{ ...assignment, roleId: "retired" }],
+    }, now })).toBe(false);
+    expect(canReadPublication({ actor, publication: unionPublication, audience: {
+      ...unionAudience, assignments: [{ ...assignment, permissions: [] }],
+    }, now })).toBe(false);
+  });
+  it("requires VIEW on the matching audience grant and the same scope", () => {
+    expect(canReadPublication({ actor, publication, audience: { ...audience, assignments: [{ ...assignment, permissions: [] }] }, now })).toBe(false);
+    const department = { type: "DEPARTMENT" as const, departmentId: "engineering" };
+    expect(canReadPublication({ actor, publication: { ...publication, scope: department }, audience, now })).toBe(false);
+    const scopedAudience = { ...audience, assignments: [{ ...assignment, scope: department }] };
+    expect(canReadPublication({ actor, publication: { ...publication, scope: department }, audience: scopedAudience, now })).toBe(true);
+    expect(canReadPublication({ actor, publication, audience: scopedAudience, now })).toBe(false);
+  });
   it("reads only current publications with a matching active custom role", () => {
     expect(canReadPublication({ actor, publication, audience, now })).toBe(true);
     expect(canReadPublication({ actor, publication, audience: { ...audience, assignments: [] }, now })).toBe(false);

@@ -13,6 +13,13 @@ These are application design and implementation requirements. The current backen
 
 ## 2. Identity, organization scope, and authorization
 
+The accepted custom-role V1 contract is [decision 0009](../decisions/0009-custom-role-scope-and-owner-defaults.md).
+Owner-private access is a fixed active-member capability; it cannot be configured in custom roles.
+Published readership requires VIEW on a matching audience role and exact Organization/Department
+scope, without inheritance. Search follows VIEW. Older role-contribution and private-grant guidance
+below describes the previous slice and does not override this decision. API/UI rollout remains
+partial; see [implementation status](custom-role-implementation.md).
+
 Manual local Mainflow 1 testing may use the dedicated local adapter in `apps/api/src/auth/local-flow1-test.ts` only when startup verifies a loopback API, loopback PostgreSQL database named `arden_test_*`, synthetic `@example.test` identities, no Supabase configuration, and non-production mode. It supplies test authentication only; it is not identity proof and must never be exposed through a tunnel or pointed at shared/Coolify data. Its invitation mail sink never sends email. A no-login actor is automatically selected only for the dedicated Kiet Local `dev-2` API/database (`NODE_ENV=development`, PostgreSQL `postgres/arden_dev_2`, no Supabase config). Anyone with that slot's SSH access can act as the fixed synthetic Org Admin; therefore this mode is not authentication and must never be exposed through a public domain. Keep the API port loopback-bound behind the assigned SSH tunnel. Test writes persist. Without SMTP settings invitations are saved with no delivery; configuring all six SMTP settings enables real outbound invitation email in dev-2. Treat this as an external write: send only to intended test recipients and use a team-controlled sender account. The invite URL points to the developer's local frontend and is not reachable by invitees on other devices. No project-wide test-mode variable is used.
 
 - Default deny. Authenticate requests and derive actor/organization scope from verified server context; validate requested organization membership rather than trusting client fields.

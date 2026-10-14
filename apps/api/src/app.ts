@@ -5,6 +5,9 @@ import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateD
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
 import type { KnowledgeClassification } from "./knowledge/policy.js";
+import { registerCustomRoleRoutes, roleFailure, roleWriteProperties } from "./roles/routes.js";
+import { validCustomRoleName, type RolePermission } from "./roles/policy.js";
+import { RoleError } from "./roles/store.js";
 
 const maxBodyBytes = 100_000;
 const maxTitleCodePoints = 200;
@@ -51,6 +54,7 @@ export function buildApp(dependencies: AppDependencies) {
   });
   const requestActor = (request: FastifyRequest, reply: FastifyReply) =>
     requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, dependencies.testActor);
+  registerCustomRoleRoutes(app, dependencies.repository.customRoles, requestActor, uuidPattern);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
       return reply.code(400).send(safeError("INVALID_REQUEST", "The request is invalid.", request.id));
@@ -245,22 +249,29 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: { name: string } }>("/api/v1/organizations/:organizationId/roles", {
+  app.post<{ Params: { organizationId: string }; Body: { name: string; description?: string; permissions?: RolePermission[] } }>("/api/v1/organizations/:organizationId/roles", {
     schema: {
       params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
-      body: { type: "object", additionalProperties: false, required: ["name"], properties: { name: { type: "string", minLength: 1, maxLength: 80 } } },
+      body: { type: "object", additionalProperties: false, required: ["name"], properties: roleWriteProperties },
     },
   }, async (request, reply) => {
     const context = await requestActor(request, reply);
     if (!context) return;
     const name = request.body.name.trim();
-    if (!isValidLabel(name, 80)) return reply.code(400).send(safeError("INVALID_REQUEST", "Enter a valid role name.", request.id));
+    if (!isValidLabel(name, 80) || !validCustomRoleName(name)) return reply.code(400).send(safeError("INVALID_REQUEST", "Enter a valid custom role name.", request.id));
     try {
+      if (dependencies.repository.customRoles) {
+        const role = await dependencies.repository.customRoles.create(context.userId, request.params.organizationId,
+          { name, description: request.body.description ?? "", permissions: request.body.permissions ?? [] }, request.id);
+        reply.header("Cache-Control", "no-store").header("ETag", `"role-${role.version}"`);
+        return reply.code(201).send(role);
+      }
       const created = await dependencies.repository.createOrganizationRole(context.userId, request.params.organizationId, name, request.id);
       if (!created) return reply.code(404).send(resourceNotAvailable(request.id));
-      return reply.code(201).send({ name, audiencePermissions: ["view", "search", "contribute"] });
+      return reply.code(201).send({ name, audiencePermissions: [] });
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Role creation failed");
+      if (error instanceof RoleError) return roleFailure(reply, error);
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
   });
