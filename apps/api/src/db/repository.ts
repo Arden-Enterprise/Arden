@@ -1,4 +1,5 @@
 import type { Pool, PoolClient } from "pg";
+import { PgCustomRoleStore, RoleError, type CustomRoleStore } from "../roles/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
@@ -330,7 +331,7 @@ export type CreatedInvitation = { invitationId: string; email: string; organizat
 export type OrganizationAdminData = {
   departments: Array<{ id: string; name: string; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
-  members: Array<{ id: string; email: string; name: string; status: MembershipStatus; departmentId: string | null; roleIds: string[]; roleNames: string[] }>;
+  members: Array<{ id: string; email: string; name: string; status: MembershipStatus; departmentId: string | null; departmentIds?: string[]; roleIds: string[]; roleNames: string[] }>;
   invitations: Array<{ id: string; email: string; departmentId: string; status: string; expiresAt: Date }>;
 };
 export type KnowledgeOptions = {
@@ -339,6 +340,7 @@ export type KnowledgeOptions = {
 };
 
 export interface ArdenDataRepository {
+  readonly customRoles?: CustomRoleStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
   createOrganization(userId: string, email: string, fullName: string | null, setup: OrganizationSetup, requestId: string): Promise<CreatedOrganization>;
@@ -400,7 +402,10 @@ function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): strin
   EXISTS (
     SELECT 1 FROM user_account ua
      WHERE ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-  ) AND EXISTS (
+  ) AND om.status = 'ACTIVE'
+    AND EXISTS (SELECT 1 FROM organization active_org
+      WHERE active_org.organization_id = om.organization_id AND active_org.status = 'ACTIVE')
+    AND (${permissionParameter} IN ('PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE') OR EXISTS (
     SELECT 1
       FROM role_assignment ra
       JOIN role r ON r.role_id = ra.role_id AND r.status = 'ACTIVE'
@@ -424,11 +429,14 @@ function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): strin
               AND dm.status = 'ACTIVE'
          )
        )
-  )`;
+  ))`;
 }
 
 export class ArdenRepository implements ArdenDataRepository {
-  constructor(private readonly pool: Pool) {}
+  readonly customRoles: CustomRoleStore;
+  constructor(private readonly pool: Pool) {
+    this.customRoles = new PgCustomRoleStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
+  }
 
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
@@ -622,10 +630,14 @@ export class ArdenRepository implements ArdenDataRepository {
           FROM role r WHERE r.organization_id = $1 AND r.status = 'ACTIVE' ORDER BY r.name`, [organizationId]);
       const members = await client.query<{
         id: string; email: string; name: string; status: MembershipStatus; department_id: string | null;
-        role_ids: string[] | null; role_names: string[] | null;
+        role_ids: string[] | null; role_names: string[] | null; department_ids: string[];
       }>(`
         SELECT om.membership_id AS id, ua.email, ua.full_name AS name, om.status,
                max(dm.department_id::text) FILTER (WHERE dm.is_primary AND dm.status = 'ACTIVE')::uuid AS department_id,
+               ARRAY(SELECT all_dm.department_id::text FROM department_membership all_dm
+                 JOIN department all_d USING(department_id)
+                 WHERE all_dm.membership_id = om.membership_id AND all_dm.status = 'ACTIVE'
+                   AND all_d.status = 'ACTIVE' AND all_d.organization_id = $1) AS department_ids,
                COALESCE(array_agg(DISTINCT r.role_id::text) FILTER (WHERE r.role_id IS NOT NULL), '{}') AS role_ids,
                COALESCE(array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS role_names
           FROM organization_membership om JOIN user_account ua ON ua.user_id = om.user_id
@@ -647,6 +659,7 @@ export class ArdenRepository implements ArdenDataRepository {
         roles: roles.rows.map((row) => ({ id: row.id, name: row.name, code: row.code, isDefault: row.is_default })),
         members: members.rows.map((row) => ({
           id: row.id, email: row.email, name: row.name, status: row.status, departmentId: row.department_id,
+          departmentIds: row.department_ids,
           roleIds: row.role_ids ?? [], roleNames: row.role_names ?? [],
         })),
         invitations: invitations.rows.map((row) => ({ id: row.id, email: row.email, departmentId: row.department_id, status: row.status, expiresAt: row.expires_at })),
@@ -707,44 +720,24 @@ export class ArdenRepository implements ArdenDataRepository {
   }
 
   async createOrganizationRole(userId: string, organizationId: string, name: string, requestId: string): Promise<boolean> {
-    return (await this.withOrganizationAdmin(userId, organizationId, async (client, actorMembershipId) => {
-      const base = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 36);
-      const code = `${base || "ROLE"}_${randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase()}`;
-      const role = await client.query<{ role_id: string }>(`
-        INSERT INTO role (organization_id, code, name, description, is_system)
-        VALUES ($1, $2, $3, 'Organization-created audience role', false) RETURNING role_id`, [organizationId, code, name]);
-      const roleId = role.rows[0]?.role_id;
-      if (!roleId) throw new Error("Organization role creation returned no id");
-      await client.query(`
-        INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission
-         WHERE code IN ('PUBLISHED_CONTENT_VIEW', 'PUBLISHED_CONTENT_SEARCH', 'PUBLISHED_CONTENT_CONTRIBUTE')
-        ON CONFLICT DO NOTHING`, [roleId]);
-      await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
-        VALUES ($1, $2, 'ORGANIZATION_ROLE_CREATED', 'SUCCESS', $3::jsonb)`,
-      [organizationId, actorMembershipId, JSON.stringify({ roleId, requestId })]);
+    try {
+      await this.customRoles.create(userId, organizationId, { name, description: "", permissions: [] }, requestId);
       return true;
-    })) ?? false;
+    } catch (error) {
+      if (error instanceof RoleError) return false;
+      throw error;
+    }
   }
 
   async assignOrganizationRole(userId: string, organizationId: string, membershipId: string, roleId: string, requestId: string): Promise<boolean> {
-    return (await this.withOrganizationAdmin(userId, organizationId, async (client, actorMembershipId) => {
-      const result = await client.query<{ role_assignment_id: string }>(`
-        INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-        SELECT om.membership_id, r.role_id, s.access_scope_id
-          FROM organization_membership om JOIN role r ON r.role_id = $3 AND r.organization_id = $2
-            AND r.is_system = false AND r.status = 'ACTIVE'
-          JOIN access_scope s ON s.organization_id = $2 AND s.scope_type = 'ORGANIZATION' AND s.status = 'ACTIVE'
-         WHERE om.membership_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
-        ON CONFLICT DO NOTHING RETURNING role_assignment_id`, [membershipId, organizationId, roleId]);
-      if (result.rowCount !== 1) return false;
-      await client.query(`
-        INSERT INTO audit_event (organization_id, actor_membership_id, role_assignment_id, event_type, outcome, details_json)
-        VALUES ($1, $2, $3, 'ORGANIZATION_ROLE_ASSIGNED', 'SUCCESS', $4::jsonb)`,
-      [organizationId, actorMembershipId, result.rows[0]?.role_assignment_id, JSON.stringify({ membershipId, roleId, requestId })]);
+    try {
+      await this.customRoles.assign(userId, organizationId, roleId, membershipId,
+        { type: "ORGANIZATION", departmentId: null }, requestId);
       return true;
-    })) ?? false;
+    } catch (error) {
+      if (error instanceof RoleError) return false;
+      throw error;
+    }
   }
 
   async changePrimaryDepartment(userId: string, organizationId: string, membershipId: string, departmentId: string, requestId: string): Promise<boolean> {

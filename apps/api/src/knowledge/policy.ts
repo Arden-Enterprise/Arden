@@ -1,3 +1,5 @@
+import { matchingRoleScope, type RoleScope } from "../roles/policy.js";
+
 export type KnowledgeClassification = "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED";
 
 export type MembershipActor = {
@@ -19,6 +21,7 @@ export type Publication = {
   audienceRoleIds: readonly string[];
   validFrom: Date;
   validUntil: Date | null;
+  scope: RoleScope;
 };
 
 export type AudienceContext = {
@@ -32,6 +35,8 @@ export type AudienceContext = {
     validUntil: Date | null;
     scopeActive: boolean;
     memberInScope: boolean;
+    scope: RoleScope;
+    permissions: readonly string[];
   }[];
 };
 
@@ -39,12 +44,12 @@ function activeInOrganization(actor: MembershipActor | null, organizationId: str
   return actor !== null && actor.status === "ACTIVE" && actor.organizationId === organizationId;
 }
 
-function validAudience(organizationId: string, audienceRoleIds: readonly string[], audienceRoles: readonly AudienceRole[]): boolean {
+function validAudience(organizationId: string, audienceRoleIds: readonly string[], audienceRoles: readonly AudienceRole[], requireActive = true): boolean {
   if (audienceRoleIds.length === 0 || new Set(audienceRoleIds).size !== audienceRoleIds.length) return false;
   const resolved = new Map(audienceRoles.map((role) => [role.roleId, role]));
   return audienceRoleIds.every((roleId) => {
     const role = resolved.get(roleId);
-    return Boolean(role && roleId && role.organizationId === organizationId && role.status === "ACTIVE" && !role.isSystem);
+    return Boolean(role && roleId && role.organizationId === organizationId && (!requireActive || role.status === "ACTIVE") && !role.isSystem);
   });
 }
 
@@ -56,7 +61,7 @@ export function canReadPublication(input: {
 }): boolean {
   const { actor, publication, audience, now } = input;
   if (!activeInOrganization(actor, publication.organizationId) || publication.status !== "CURRENT") return false;
-  if (!validAudience(publication.organizationId, publication.audienceRoleIds, audience.audienceRoles)) return false;
+  if (!validAudience(publication.organizationId, publication.audienceRoleIds, audience.audienceRoles, false)) return false;
   if (!Number.isFinite(now.getTime()) || !Number.isFinite(publication.validFrom.getTime())
     || publication.validFrom > now
     || (publication.validUntil !== null
@@ -67,6 +72,9 @@ export function canReadPublication(input: {
     && assignment.organizationId === publication.organizationId
     && assignment.status === "ACTIVE"
     && assignment.scopeActive && assignment.memberInScope
+    && matchingRoleScope(assignment.scope, publication.scope)
+    && assignment.permissions.includes("PUBLISHED_CONTENT_VIEW")
+    && audience.audienceRoles.some(role => role.roleId === assignment.roleId && role.status === "ACTIVE")
     && Number.isFinite(assignment.validFrom.getTime())
     && assignment.validFrom <= now
     && (assignment.validUntil === null || (Number.isFinite(assignment.validUntil.getTime()) && assignment.validUntil > now))

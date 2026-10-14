@@ -23,6 +23,11 @@ const administrationPath = new RegExp(`^/api/v1/organizations/${uuid}/administra
 const adminCreatePath = new RegExp(`^/api/v1/organizations/${uuid}/(departments|roles|invitations)$`);
 const adminMemberRolePath = new RegExp(`^/api/v1/organizations/${uuid}/members/${uuid}/(roles|department)$`);
 const adminInvitationActionPath = new RegExp(`^/api/v1/organizations/${uuid}/invitations/${uuid}/(resend|revoke)$`);
+const customRoleReadPath = new RegExp(`^/api/v1/organizations/${uuid}/(permissions|roles(?:/${uuid})?)$`);
+const customRoleItemPath = new RegExp(`^/api/v1/organizations/${uuid}/roles/${uuid}$`);
+const customRoleAssignPath = new RegExp(`^/api/v1/organizations/${uuid}/roles/${uuid}/assignments$`);
+const customRoleRevokePath = new RegExp(`^/api/v1/organizations/${uuid}/roles/${uuid}/assignments/${uuid}/revoke$`);
+const customRoleDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/roles/${uuid}/deactivate$`);
 
 export function validateDesktopApiRequest(value: unknown): value is DesktopApiRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -68,6 +73,16 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && !request.body && !request.ifMatch && !request.idempotencyKey;
   const adminGet = administrationPath.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const customRoleGet = customRoleReadPath.test(url.pathname) && request.method === "GET"
+    && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const customRolePatch = customRoleItemPath.test(url.pathname) && request.method === "PATCH"
+    && Boolean(request.body) && typeof request.ifMatch === "string" && /^"role-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
+  const customRoleAssign = customRoleAssignPath.test(url.pathname) && request.method === "POST"
+    && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
+  const customRoleRevoke = customRoleRevokePath.test(url.pathname) && request.method === "POST"
+    && request.body === "{}" && !request.ifMatch && !request.idempotencyKey;
+  const customRoleDeactivate = customRoleDeactivatePath.test(url.pathname) && request.method === "POST"
+    && request.body === "{}" && typeof request.ifMatch === "string" && /^"role-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
   const adminPost = (adminCreatePath.test(url.pathname) || adminMemberRolePath.test(url.pathname))
     && request.method === "POST" && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const adminAction = adminInvitationActionPath.test(url.pathname) && request.method === "POST"
@@ -84,5 +99,6 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
   return (otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePatch
     || knowledgeSubmit || knowledgeDecision || grantCreate || grantDeactivate || adminGet
-    || adminPost || adminAction || accountPost) && (!url.search || queryAllowed);
+    || adminPost || adminAction || accountPost || customRoleGet || customRolePatch
+    || customRoleAssign || customRoleRevoke || customRoleDeactivate) && (!url.search || queryAllowed);
 }

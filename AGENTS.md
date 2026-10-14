@@ -116,6 +116,11 @@ Use available mandated skills/tools according to their governing instructions. D
 
 ## 7. Non-negotiable security and data invariants
 
+- Custom role, owner-private defaults and exact assignment scopes follow
+  [decision 0009](docs/decisions/0009-custom-role-scope-and-owner-defaults.md).
+  Its policy foundation is implemented; API/UI and Share integration remain partial.
+  Do not treat preview permission switches or legacy grants as the accepted final contract.
+
 - Authenticate and authorize **every** entry point: HTTP, events, jobs, search, graph, downloads, exports, citations, AI context, and native IPC. Default-deny unknown scope or audience.
 - Bind content to an organization and authorized actor server-side. Membership/role and content grants are distinct. A manager does not automatically read private notes.
 - Authorize graph endpoints **and** each edge. Hidden data must not leak through counts, layout, titles, suggestions, snippets, errors, or derived content.

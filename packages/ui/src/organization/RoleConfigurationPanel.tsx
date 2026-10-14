@@ -87,7 +87,7 @@ export function RoleConfigurationPanel({ members, initialRoles, onDirtyChange }:
         </div>}
         {section === "permissions" && <>
           <label className="role-config-search"><span className="sr-only">Search permissions</span><input type="search" placeholder="Search permissions…" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-          {(["Reading", "Contribution"] as const).map((group) => {
+            {(["Reading"] as const).map((group) => {
             const permissions = configurablePermissions.filter((permission) => permission.group === group && `${permission.name} ${permission.description}`.toLowerCase().includes(search));
             return permissions.length > 0 && <section className="role-config-permission-group" key={group} aria-label={`${group} permissions`}>
               <div className="role-config-group-heading"><h4>{group}</h4><button type="button" className="role-config-text-button"

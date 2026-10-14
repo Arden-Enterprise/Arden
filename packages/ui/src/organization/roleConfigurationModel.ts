@@ -1,8 +1,6 @@
 // UI-only configuration. These values are not server authorization facts.
 export const configurablePermissions = [
   { code: "PUBLISHED_CONTENT_VIEW", name: "Read published knowledge", group: "Reading", description: "Read approved documents only when this role matches their audience and the member is in the permitted scope." },
-  { code: "SHARED_DRAFT_WRITE", name: "Write shared drafts", group: "Contribution", description: "Create and edit your own shared drafts, including a separate copy of your own private note. Pending submissions stay locked." },
-  { code: "SHARED_DRAFT_SUBMIT", name: "Submit for review", group: "Contribution", description: "Send your own saved version for review. A valid department, classification and audience are still required." },
 ] as const;
 
 export type ConfigurablePermission = typeof configurablePermissions[number]["code"];
@@ -38,7 +36,7 @@ export function validateRoleConfigurations(roles: readonly RoleConfiguration[]):
 
 export function createSampleRoleConfigurations(): RoleConfiguration[] {
   return [
-    { id: "preview-contributor", name: "Contributor", description: "Capture knowledge and submit it for human review.", permissions: ["PUBLISHED_CONTENT_VIEW", "SHARED_DRAFT_WRITE", "SHARED_DRAFT_SUBMIT"], memberIds: [] },
+    { id: "preview-project-reader", name: "Project Reader", description: "Read published project knowledge within an assigned audience.", permissions: ["PUBLISHED_CONTENT_VIEW"], memberIds: [] },
     { id: "preview-reader", name: "Reader", description: "Read knowledge within an assigned audience.", permissions: ["PUBLISHED_CONTENT_VIEW"], memberIds: [] },
   ];
 }

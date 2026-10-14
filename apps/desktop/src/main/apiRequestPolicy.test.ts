@@ -8,6 +8,20 @@ const idempotencyKey = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const sharedDraftPath = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
 
 describe("desktop API request allowlist", () => {
+  it("bounds custom-role routes and requires role-specific update preconditions", () => {
+    const role = `/api/v1/organizations/${organizationId}/roles/${sourcePrivateVersionId}`;
+    assert.equal(validateDesktopApiRequest({ path: role, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: role, method: "PATCH", body: "{}", ifMatch: '"role-2"' }), true);
+    assert.equal(validateDesktopApiRequest({ path: role, method: "PATCH", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: role, method: "PATCH", body: "{}", ifMatch: '"2"' }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${role}/assignments`, method: "POST", body: "{}" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${role}/assignments/${idempotencyKey}/revoke`, method: "POST", body: "{}" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${role}/deactivate`, method: "POST", body: "{}", ifMatch: '"role-2"' }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${role}/deactivate`, method: "POST", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${role}/deactivate`, method: "POST", body: '{"unexpected":true}', ifMatch: '"role-2"' }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${role}?next=1`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${role}/permissions`, method: "POST", body: "{}" }), false);
+  });
   it("permits a bounded shared-draft create with its idempotency key", () => {
     assert.equal(validateDesktopApiRequest({
       path: sharedDraftPath,

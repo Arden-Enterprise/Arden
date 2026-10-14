@@ -1,4 +1,5 @@
 import type { Platform } from "./types";
+import { parseCustomRole, parseCustomRoleList, type CustomRoleRecord, type CustomRoleWrite, type CustomRoleAssignment } from "./role-contracts";
 import type {} from "./desktop-session";
 import { isKnowledgeClassification, type KnowledgeClassification } from "./knowledge-classification";
 
@@ -12,7 +13,7 @@ export type CurrentSession = { actor: { id: string; email?: string }; membership
 export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
-  members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; roleIds: string[]; roleNames: string[] }>;
+  members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; departmentIds?: string[]; roleIds: string[]; roleNames: string[] }>;
   invitations: Array<{ id: string; email: string; departmentId: string; status: string; expiresAt: string }>;
 };
 
@@ -268,6 +269,29 @@ export async function createDepartment(platform: Platform, organizationId: strin
 
 export async function createOrganizationRole(platform: Platform, organizationId: string, name: string): Promise<void> {
   await request(platform, `/api/v1/organizations/${organizationId}/roles`, { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export async function loadCustomRoles(platform: Platform, organizationId: string): Promise<CustomRoleRecord[]> {
+  return parseCustomRoleList(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles`));
+}
+export async function saveCustomRole(platform: Platform, organizationId: string, existing: CustomRoleRecord | null, write: CustomRoleWrite): Promise<CustomRoleRecord> {
+  return parseCustomRole(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles${existing ? "/" + existing.id : ""}`, {
+    method: existing ? "PATCH" : "POST", body: JSON.stringify(write),
+    headers: existing ? { "If-Match": `"role-${existing.version}"` } : {},
+  }));
+}
+export async function assignCustomRole(platform: Platform, organizationId: string, roleId: string, membershipId: string, scope: CustomRoleAssignment["scope"]): Promise<CustomRoleRecord> {
+  return parseCustomRole(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles/${roleId}/assignments`, {
+    method: "POST", body: JSON.stringify({ membershipId, scopeType: scope.type, departmentId: scope.departmentId }),
+  }));
+}
+export async function revokeCustomRole(platform: Platform, organizationId: string, roleId: string, assignmentId: string): Promise<CustomRoleRecord> {
+  return parseCustomRole(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles/${roleId}/assignments/${assignmentId}/revoke`, { method: "POST", body: "{}" }));
+}
+export async function deactivateCustomRole(platform: Platform, organizationId: string, role: CustomRoleRecord): Promise<CustomRoleRecord> {
+  return parseCustomRole(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles/${role.id}/deactivate`, {
+    method: "POST", body: "{}", headers: { "If-Match": `"role-${role.version}"` },
+  }));
 }
 
 export async function assignOrganizationRole(platform: Platform, organizationId: string, membershipId: string, roleId: string): Promise<void> {

@@ -2,17 +2,17 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 import {
-  ApiError, assignOrganizationRole, changePrimaryDepartment, createDepartment, createOrganizationRole,
+  ApiError, changePrimaryDepartment, createDepartment,
   createReviewerGrant, deactivateReviewerGrant, inviteOrganizationMember, listReviewerGrants,
   loadOrganizationAdministration, resendOrganizationInvitation,
   revokeOrganizationInvitation, type OrganizationAdministration, type ReviewerGrant,
 } from "../shared/api-client";
 import type { Platform } from "../shared/types";
-import { RoleConfigurationPanel } from "./RoleConfigurationPanel";
+import { ServerRoleConfigurationPanel } from "./ServerRoleConfigurationPanel";
 
-type OrganizationAdminPageProps = { platform: Platform; organizationId: string; organizationName: string } & ContextControlProps;
+type OrganizationAdminPageProps = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void } & ContextControlProps;
 
-export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext }: OrganizationAdminPageProps) {
+export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext, onDirtyChange }: OrganizationAdminPageProps) {
   const [data, setData] = useState<OrganizationAdministration | null>(null);
   const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
   const [reviewerId, setReviewerId] = useState("");
@@ -20,7 +20,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [reviewClassifications, setReviewClassifications] = useState<Array<"INTERNAL" | "CONFIDENTIAL" | "RESTRICTED">>(["INTERNAL"]);
   const [reviewLevel, setReviewLevel] = useState<ReviewerGrant["level"]>("STANDARD");
   const [departmentName, setDepartmentName] = useState("");
-  const [roleName, setRoleName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteDepartmentId, setInviteDepartmentId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -65,10 +64,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     event.preventDefault(); const name = departmentName.trim(); if (!name) return;
     void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentName(""); }, "Department created with its default role.");
   };
-  const submitRole = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault(); const name = roleName.trim(); if (!name) return;
-    void perform(async () => { await createOrganizationRole(platform, organizationId, name); setRoleName(""); }, "Role created. It can now be assigned to members.");
-  };
   const submitInvite = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void perform(async () => {
@@ -103,17 +98,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             <ul>{data.departments.map((department) => <li key={department.id}><strong>{department.name}</strong><span>Default: {department.defaultRoleName}</span></li>)}</ul>
             <form onSubmit={submitDepartment}><label className="organization-field"><span>Add department</span><input required maxLength={80} value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} /></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
           </section>
-          <section className="organization-surface organization-editor-stack"><h2>Custom roles</h2>
-            <ul>{data.roles.map((role) => <li key={role.id}><strong>{role.name}</strong><span>{role.isDefault ? "Department default" : "Custom role"}</span></li>)}</ul>
-            <form onSubmit={submitRole}><label className="organization-field"><span>Add role</span><input required maxLength={80} value={roleName} onChange={(event) => setRoleName(event.target.value)} /></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create role"}</button></form>
-          </section>
         </div>
-        <RoleConfigurationPanel key={organizationId} members={data.members.map((member) => ({
-          id: member.id, name: member.name, email: member.email, active: member.status === "ACTIVE",
-        }))} initialRoles={data.roles.filter((role) => !role.isDefault && role.code !== "ORG_ADMIN").map((role) => ({
-          id: role.id, name: role.name, description: "", permissions: [],
-          memberIds: data.members.filter((member) => member.roleIds.includes(role.id)).map((member) => member.id),
-        }))} />
+        <ServerRoleConfigurationPanel platform={platform} organizationId={organizationId} members={data.members} departments={data.departments} onDirtyChange={onDirtyChange} />
         <section className="organization-surface organization-editor-stack"><h2>Invite a member</h2>
           {data.departments.length ? <form className="organization-live-invite-form" onSubmit={submitInvite}>
             <label className="organization-field"><span>Email</span><input type="email" required maxLength={320} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} /></label>
@@ -127,10 +113,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             <label className="organization-field"><span>Primary department</span><select disabled={busy || !data.departments.length} value={member.departmentId ?? ""} onChange={(event) => void perform(() => changePrimaryDepartment(platform, organizationId, member.id, event.target.value), "Primary department updated.")}>
               {data.departments.map((department) => <option key={department.id} value={department.id}>{department.name}</option>)}
             </select></label>
-            <label className="organization-field"><span>Assign custom role</span><select disabled={busy} defaultValue="" onChange={(event) => {
-              const roleId = event.target.value; if (!roleId) return;
-              void perform(() => assignOrganizationRole(platform, organizationId, member.id, roleId), "Role assigned."); event.target.value = "";
-            }}><option value="">Choose a role</option>{data.roles.filter((role) => !role.isDefault && !member.roleIds.includes(role.id)).map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select></label>
           </article>)}</div>
         </section>
         <section className="organization-surface organization-editor-stack"><h2>Knowledge reviewers</h2>
