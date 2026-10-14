@@ -3,7 +3,7 @@
 Status: accepted
 Date: 2026-10-14
 Decision owner/approval: branch owner, explicit Phase 0 approval
-Implementation: partial; migration deployed, configurable API/UI implemented and awaiting hosted synchronization and live verification
+Implementation: partial; policy migrations and configurable API/UI implemented, Flow 2 matching remains
 Supersedes: custom-role contribution/private permissions and inherited scope assumptions in earlier slice documents
 
 ## Decision
@@ -22,8 +22,9 @@ Supersedes: custom-role contribution/private permissions and inherited scope ass
 - Reviewer grants remain department/classification-scoped. Final approval publishes automatically.
   Author proposes classification; an authorized information owner/reviewer confirms it.
 - No custom DENY, AI, export or management permissions are enabled.
-- Explicit ALL_MEMBERS Organization audience support remains integration work;
-  migration 0011 does not implement it or retrofit legacy department audiences.
+- `ALL_MEMBERS` is a server-managed Organization audience, not a configurable role. Active
+  organization membership is its only grant. It has no assignments, is hidden from role
+  administration, cannot target Department publications, and never opens private content.
 
 ## Migration and verification
 
@@ -32,14 +33,25 @@ owner-private RLS policies, and changes publication audience checks to exact sco
 It refuses databases with current publications until reviewed scope/audience backfill exists.
 It does not delete or rewrite existing grants, assignments, snapshots or publications.
 
+`0012_all_members_organization_audience` creates one reserved organization-local audience marker
+with VIEW for each organization and for future organization bootstrap. It updates audience
+validation and publication reads so an active member can read an Organization publication tagged
+`ALL_MEMBERS` without an assignment. Exact custom/default-role assignment remains mandatory for
+all Department publications. The marker cannot be configured or assigned.
+
 The user-approved shared development database was backed up and 0011 committed through Coolify
 using the existing schema owner. The initial non-owner attempt rolled back. No new DB was created;
 authentication/container configuration and pre-existing unsaved Coolify changes were untouched.
 Backup archive listing was readable; a full restore has not been rehearsed.
 
+Migration 0012 was later committed to the same `arden-hk` development database with the schema
+owner. Verification found one active marker and VIEW grant for its one Organization, with zero
+marker assignments. A PostgreSQL-user attempt was denied before mutation and rolled back.
+
 The rollback-only [SQL rehearsal](../../tools/roles/policy-rehearsal.sql) passed on the real runtime role:
 owner without assignments inserts/reads private workspace and draft; another member cannot
-read them even with administration context; neither scope inherits; removing VIEW denies access.
+read them even with administration context; ALL_MEMBERS grants only active Organization members;
+neither assignment scope inherits; removing VIEW denies access.
 Fixtures rolled back with zero rehearsal users and the original organization count.
 This is not complete RLS, live auth/API/UI or end-to-end evidence.
 
@@ -56,6 +68,6 @@ Any checkout running migrations against this DB must include 0011; an older chec
 intentionally fail its unknown-migration safeguard. Share the migration file and coordinate numbering.
 
 Before full Flow 2 acceptance, coordinate with the Flow 2 owner to match Share metadata,
-audience options, ALL_MEMBERS, immutable
-submission creation, stable document identity, version numbering and misclassification containment.
+the implemented ALL_MEMBERS audience contract, immutable submission creation, stable document
+identity, version numbering and misclassification containment.
 Do not use default Department roles to simulate an Organization-wide audience.

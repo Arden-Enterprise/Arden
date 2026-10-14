@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { SearchField } from "../shared/SearchField";
 import { KnowledgeBadge, KnowledgeHeading, KnowledgeNotice, KnowledgeRow } from "./KnowledgePrimitives";
+import { availableAudienceOptions, normalizeAudienceSelection, validAudienceSelection } from "./audience-options";
 import {
   ApiError, createNewKnowledgeDraft, decideKnowledgeReview, listAssignedKnowledgeReviews,
   listKnowledgeDrafts, listKnowledgeSubmissions, listPublishedKnowledge, loadKnowledgeDraft,
@@ -196,7 +197,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const dirty = Boolean(draft && editor && JSON.stringify(editor) !== JSON.stringify(valuesFromDraft(draft)));
   const latest = draft ? latestByDraft.get(draft.id) : undefined;
   const snapshotAlreadySubmitted = Boolean(latest && draft && latest.snapshotVersionId === draft.currentVersion.id);
-  const ready = Boolean(editor?.responsibleDepartmentId && editor.targetScopeType && editor.audienceRoleIds.length);
+  const ready = Boolean(editor?.responsibleDepartmentId && editor.targetScopeType
+    && validAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], editor.targetScopeType));
   const filteredDrafts = drafts.filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
   const filteredPublished = published.filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
@@ -283,16 +285,21 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         </section><aside className="knowledge-panel knowledge-live-form"><span className="meta-label knowledge-tone-jade">GOVERNANCE METADATA</span>
           <label>Responsible department<select disabled={busy || draft.hasPendingSubmission} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => setEditor({ ...editor, responsibleDepartmentId: event.target.value || null })}>
             <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <label>Access scope<select disabled={busy || draft.hasPendingSubmission} value={editor.targetScopeType ?? ""} onChange={(event) => setEditor({ ...editor, targetScopeType: (event.target.value || null) as EditorValues["targetScopeType"] })}>
+          <label>Access scope<select disabled={busy || draft.hasPendingSubmission} value={editor.targetScopeType ?? ""} onChange={(event) => {
+            const targetScopeType = (event.target.value || null) as EditorValues["targetScopeType"];
+            const audienceRoleIds = normalizeAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], targetScopeType);
+            setEditor({ ...editor, targetScopeType, audienceRoleIds });
+          }}>
             <option value="">Choose scope</option><option value="DEPARTMENT">Responsible department</option><option value="ORGANIZATION">Organization</option></select></label>
           <label>Classification<select disabled={busy || draft.hasPendingSubmission} value={editor.classification} onChange={(event) => setEditor({ ...editor, classification: event.target.value as KnowledgeClassification })}>
             <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select></label>
           <fieldset disabled={busy || draft.hasPendingSubmission}><legend>Audience roles</legend>
 
-            <div className="knowledge-live-role-list">{options?.audienceRoles.map((role) => <label key={role.id}>
+            <div className="knowledge-live-role-list">{availableAudienceOptions(options?.audienceRoles ?? [], editor.targetScopeType).map((role) => <label key={role.id}>
               <input type="checkbox" checked={editor.audienceRoleIds.includes(role.id)} onChange={(event) => setEditor({ ...editor,
                 audienceRoleIds: event.target.checked ? [...editor.audienceRoleIds, role.id] : editor.audienceRoleIds.filter((id) => id !== role.id) })} />
-              <span>{role.name}{role.departmentId ? ` · ${departmentName(role.departmentId)}` : " · Organization"}</span></label>)}</div>
+              <span>{role.name}{role.kind === "ALL_MEMBERS" ? " · Organization default"
+                : role.departmentId ? ` · ${departmentName(role.departmentId)}` : " · Organization"}</span></label>)}</div>
           </fieldset>
           <label>Team tag (optional)<input maxLength={100} disabled={busy || draft.hasPendingSubmission} value={editor.teamTag ?? ""} onChange={(event) => setEditor({ ...editor, teamTag: event.target.value || null })} /></label>
           <label>Project tag (optional)<input maxLength={100} disabled={busy || draft.hasPendingSubmission} value={editor.projectTag ?? ""} onChange={(event) => setEditor({ ...editor, projectTag: event.target.value || null })} /></label>

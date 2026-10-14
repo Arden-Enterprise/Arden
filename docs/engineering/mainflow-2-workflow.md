@@ -8,7 +8,7 @@ There are two creation paths. `POST /api/v1/organizations/:organizationId/knowle
 
 Each shared draft has immutable content versions. `GET /knowledge/drafts` lists only the actor's drafts, `GET /knowledge/drafts/:id` reopens one, and `PATCH /knowledge/drafts/:id` requires `If-Match: "<current version>"`. Editing writes a new version; it never mutates the previous one. The author supplies title, responsible department, classification, target scope, optional team/project tags and active audience roles. `GET /knowledge/options` provides selectable active departments and content-view-capable audience roles. While a submission is pending, editing is locked. Saving after a completed decision creates the next version.
 
-`POST /knowledge/drafts/:id/submit` requires `If-Match` and an idempotency key. Submission freezes the exact current version, title, classification, responsible department, scope, tags, audience-role IDs, content URI and hash. A draft needs an active responsible department, target scope and at least one active, non-system audience role with `PUBLISHED_CONTENT_VIEW` before submission.
+`POST /knowledge/drafts/:id/submit` requires `If-Match` and an idempotency key. Submission freezes the exact current version, title, classification, responsible department, scope, tags, audience-role IDs, content URI and hash. A draft needs an active responsible department, target scope and at least one valid audience. Custom/default audiences require an active organization-local role with `PUBLISHED_CONTENT_VIEW`; the reserved `ALL_MEMBERS` audience is valid only for Organization scope.
 
 ## Review and publication
 
@@ -18,7 +18,7 @@ Org Admin creates a `reviewer_grant` through Administration or `POST /knowledge/
 
 `POST /knowledge/reviews/:submissionId/decisions` requires a UUID `Idempotency-Key`, the expected snapshot-version ID and content hash. Request Revision and Reject require a reason, return that reason to the author in submission history, and never publish. Approval is one transaction: lock submission, recheck authority and audience, insert immutable decision and reviewer audit, change status, insert the exact published snapshot, replace current-publication pointer, and insert a distinct system publication audit. A deferred database trigger rejects approval missing publication or either audit record. The author can edit and resubmit a **new** draft version after a decision.
 
-`GET /knowledge/published` and `GET /knowledge/published/:id` expose only current, valid publications to active members with a live assignment of an audience role in the current access scope. The detail endpoint rechecks authorization after reading protected text. Approval does not automatically make the reviewer or Org Admin a reader. Only current approved/published versions are eligible for future Search/AI use; Search/AI implementation is outside Flow 2.
+`GET /knowledge/published` and `GET /knowledge/published/:id` expose only current, valid publications. Custom/default audiences require a live assignment in the exact current scope; Organization-only `ALL_MEMBERS` requires active organization membership and no assignment. The detail endpoint rechecks authorization after reading protected text. Approval does not automatically make the reviewer or Org Admin a reader unless an independent audience rule grants access. Only current approved/published versions are eligible for future Search/AI use; Search/AI implementation is outside Flow 2.
 
 ## Migration and deployment gate
 

@@ -336,7 +336,7 @@ export type OrganizationAdminData = {
 };
 export type KnowledgeOptions = {
   departments: Array<{ id: string; name: string }>;
-  audienceRoles: Array<{ id: string; name: string; departmentId: string | null }>;
+  audienceRoles: Array<{ id: string; name: string; departmentId: string | null; kind: "ROLE" | "ALL_MEMBERS" }>;
 };
 
 export interface ArdenDataRepository {
@@ -509,6 +509,17 @@ export class ArdenRepository implements ArdenDataRepository {
       if (!organizationId) throw new Error("Organization creation returned no id");
       await client.query("SELECT set_config('arden.organization_id', $1, true), set_config('arden.org_admin', 'true', true)", [organizationId]);
 
+      const allMembersRole = await client.query<{ role_id: string }>(`
+        INSERT INTO role (organization_id, code, name, description, is_system)
+        VALUES ($1, 'ALL_MEMBERS', 'Everyone in organization',
+          'Server-managed audience for every active organization member', false)
+        RETURNING role_id`, [organizationId]);
+      const allMembersRoleId = allMembersRole.rows[0]?.role_id;
+      if (!allMembersRoleId) throw new Error("Organization audience creation returned no id");
+      await client.query(`INSERT INTO role_permission (role_id, permission_id)
+        SELECT $1, permission_id FROM permission
+        WHERE code = 'PUBLISHED_CONTENT_VIEW' AND status = 'ACTIVE'`, [allMembersRoleId]);
+
       const role = await client.query<{ role_id: string }>(`
         INSERT INTO role (organization_id, code, name, description, is_system)
         VALUES ($1, 'DEPT_DEFAULT_BOOTSTRAP', $2, 'Default role for the initial department', false)
@@ -673,8 +684,8 @@ export class ArdenRepository implements ArdenDataRepository {
       const departments = await client.query<{ id: string; name: string }>(`
         SELECT department_id AS id, name FROM department
         WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY name`, [organizationId]);
-      const roles = await client.query<{ id: string; name: string; department_id: string | null }>(`
-        SELECT r.role_id AS id, r.name, d.department_id
+      const roles = await client.query<{ id: string; name: string; department_id: string | null; code: string }>(`
+        SELECT r.role_id AS id, r.name, d.department_id, r.code
         FROM role r LEFT JOIN department d ON d.default_role_id = r.role_id
           AND d.organization_id = r.organization_id AND d.status = 'ACTIVE'
         WHERE r.organization_id = $1 AND r.status = 'ACTIVE' AND NOT r.is_system
@@ -685,6 +696,7 @@ export class ArdenRepository implements ArdenDataRepository {
         departments: departments.rows,
         audienceRoles: roles.rows.map((role) => ({
           id: role.id, name: role.name, departmentId: role.department_id,
+          kind: role.code === "ALL_MEMBERS" ? "ALL_MEMBERS" : "ROLE",
         })),
       };
     });
@@ -1113,8 +1125,10 @@ export class ArdenRepository implements ArdenDataRepository {
         const roles = await client.query<{ role_id: string }>(`
           SELECT r.role_id FROM role r WHERE r.organization_id = $1 AND r.role_id = ANY($2::uuid[])
             AND r.status = 'ACTIVE' AND r.is_system = false
+            AND (r.code <> 'ALL_MEMBERS' OR $3 = 'ORGANIZATION')
             AND EXISTS (SELECT 1 FROM role_permission rp JOIN permission p ON p.permission_id = rp.permission_id
-              WHERE rp.role_id = r.role_id AND p.code = 'PUBLISHED_CONTENT_VIEW')`, [organizationId, next.audienceRoleIds]);
+              WHERE rp.role_id = r.role_id AND p.code = 'PUBLISHED_CONTENT_VIEW' AND p.status = 'ACTIVE')`,
+        [organizationId, next.audienceRoleIds, next.targetScopeType]);
         if (roles.rowCount !== next.audienceRoleIds.length) return { kind: "invalid-metadata" };
       }
       await client.query(`UPDATE shared_draft SET title = $3, classification = $4,
@@ -1164,18 +1178,22 @@ export class ArdenRepository implements ArdenDataRepository {
       }
       if (row.current_version_no !== expectedVersion) return { kind: "conflict" };
       if (!row.responsible_department_id || !row.target_scope_type) return { kind: "not-ready" };
-      const roles = await client.query<{ role_id: string; organization_id: string; status: "ACTIVE" | "INACTIVE"; is_system: boolean }>(`
-        SELECT role_id, organization_id, status, is_system FROM role
+      const roles = await client.query<{ role_id: string; organization_id: string; status: "ACTIVE" | "INACTIVE"; is_system: boolean; code: string }>(`
+        SELECT role_id, organization_id, status, is_system, code FROM role
          WHERE organization_id = $1 AND role_id = ANY($2::uuid[])`, [organizationId, row.audience_role_ids]);
       const ready = canSubmitSnapshot({
         actor: { membershipId: row.author_membership_id, organizationId, status: "ACTIVE" },
         draft: { organizationId, authorMembershipId: row.author_membership_id, status: row.status,
           currentVersionId: row.shared_draft_version_id },
         snapshot: { versionId: row.shared_draft_version_id, contentHash: row.content_hash,
-          classification: row.classification, audienceRoleIds: row.audience_role_ids },
+          classification: row.classification, audienceRoleIds: row.audience_role_ids,
+          scope: row.target_scope_type === "ORGANIZATION"
+            ? { type: "ORGANIZATION", departmentId: null }
+            : { type: "DEPARTMENT", departmentId: row.responsible_department_id } },
         audienceRoles: roles.rows.map((role) => ({ roleId: role.role_id, organizationId: role.organization_id,
-          status: role.status, isSystem: role.is_system })),
-        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids),
+          status: role.status, isSystem: role.is_system,
+          kind: role.code === "ALL_MEMBERS" ? "ALL_MEMBERS" : "ROLE" })),
+        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids, row.target_scope_type),
       });
       const department = await client.query(`SELECT 1 FROM department
         WHERE department_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [row.responsible_department_id, organizationId]);
@@ -1297,7 +1315,7 @@ export class ArdenRepository implements ArdenDataRepository {
         submission: reviewAuthorizationFromRow(row, organizationId),
         reviewerGrants: grants,
         effectivePolicyVersion: 1,
-        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids),
+        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids, row.target_scope_type),
       })));
       return listAssignedReviews({ actor, now, candidates });
     });
@@ -1361,7 +1379,7 @@ export class ArdenRepository implements ArdenDataRepository {
           submissionId, snapshotVersionId: row.shared_draft_version_id, contentHash: row.content_hash },
         reviewerGrants: grants,
         effectivePolicyVersion: 1,
-        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids),
+        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids, row.target_scope_type),
         policy: { kind: "SINGLE_REVIEWER" },
         now: new Date(),
       }, { action, expectedSnapshotVersionId, expectedContentHash, comment });
@@ -1655,12 +1673,14 @@ export class ArdenRepository implements ArdenDataRepository {
     }));
   }
 
-  private async audienceEnforceable(client: PoolClient, organizationId: string, roleIds: string[]): Promise<boolean> {
+  private async audienceEnforceable(client: PoolClient, organizationId: string, roleIds: string[], targetScopeType: "ORGANIZATION" | "DEPARTMENT"): Promise<boolean> {
     if (roleIds.length === 0 || roleIds.length > 100 || new Set(roleIds).size !== roleIds.length) return false;
     const result = await client.query(`SELECT 1 FROM role r WHERE r.organization_id = $1
       AND r.role_id = ANY($2::uuid[]) AND r.status = 'ACTIVE' AND r.is_system = false
+      AND (r.code <> 'ALL_MEMBERS' OR $3 = 'ORGANIZATION')
       AND EXISTS (SELECT 1 FROM role_permission rp JOIN permission p ON p.permission_id = rp.permission_id
-        WHERE rp.role_id = r.role_id AND p.code = 'PUBLISHED_CONTENT_VIEW')`, [organizationId, roleIds]);
+        WHERE rp.role_id = r.role_id AND p.code = 'PUBLISHED_CONTENT_VIEW' AND p.status = 'ACTIVE')`,
+    [organizationId, roleIds, targetScopeType]);
     return result.rowCount === roleIds.length;
   }
 

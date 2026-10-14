@@ -20,7 +20,8 @@ describe("custom role and default owner policy", () => {
   });
   it("reserves protected role names after normalization", () => {
     expect(validCustomRoleName("Project Readers")).toBe(true);
-    for (const name of [" ", "a".repeat(81), "Org Admin", "organization-admin", "ORG_ADMIN", "Ｏｒｇ Ａｄｍｉｎ"]) {
+    for (const name of [" ", "a".repeat(81), "Org Admin", "organization-admin", "ORG_ADMIN", "Ｏｒｇ Ａｄｍｉｎ",
+      "All Members", "ALL_MEMBERS", "Everyone", "Everyone in the organization"]) {
       expect(validCustomRoleName(name)).toBe(false);
     }
   });

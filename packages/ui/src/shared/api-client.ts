@@ -28,7 +28,7 @@ export type CreatedKnowledgeDraft = {
 
 export type KnowledgeOptions = {
   departments: Array<{ id: string; name: string }>;
-  audienceRoles: Array<{ id: string; name: string; departmentId: string | null }>;
+  audienceRoles: Array<{ id: string; name: string; departmentId: string | null; kind: "ROLE" | "ALL_MEMBERS" }>;
 };
 export type KnowledgeDraftRecord = {
   id: string;

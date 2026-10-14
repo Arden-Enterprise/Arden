@@ -17,7 +17,7 @@ export function matchingRoleScope(assignment: RoleScope, publication: RoleScope)
 export function validCustomRoleName(name: string): boolean {
   const normalized = name.normalize("NFKC").trim();
   return normalized.length > 0 && normalized.length <= 80
-    && !/^(org[\s_-]*admin|organization[\s_-]*admin)$/i.test(normalized);
+    && !/^(org[\s_-]*admin|organization[\s_-]*admin|all[\s_-]*members|everyone(?:[\s_-]*in[\s_-]*(?:the[\s_-]*)?organization)?)$/i.test(normalized);
 }
 
 export function canUseOwnerPrivateWorkspace(input: {

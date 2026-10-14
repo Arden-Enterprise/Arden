@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, CreateSharedDraftResult, DecideReviewResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, CreateSharedDraftResult, DecideReviewResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -732,12 +732,12 @@ class MemoryRepository implements ArdenDataRepository {
     };
   }
 
-  async getKnowledgeOptions(userId: string, requestedOrganization: string) {
+  async getKnowledgeOptions(userId: string, requestedOrganization: string): Promise<KnowledgeOptions | null> {
     if ((userId !== ownerId && userId !== otherId) || requestedOrganization !== organizationId) return null;
     return {
       departments: [{ id: "ffffffff-ffff-4fff-8fff-ffffffffffff", name: "Product" }],
       audienceRoles: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product Member",
-        departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff" }],
+        departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", kind: "ROLE" }],
     };
   }
 
