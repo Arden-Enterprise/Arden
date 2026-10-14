@@ -25,6 +25,7 @@ type AdminTransaction = <T>(userId: string, organizationId: string,
   work: (client: PoolClient, actorMembershipId: string) => Promise<T>) => Promise<T | null>;
 
 const manageableRole = `r.organization_id = $1 AND NOT r.is_system
+  AND r.code <> 'ALL_MEMBERS'
   AND NOT EXISTS (SELECT 1 FROM department d WHERE d.default_role_id = r.role_id)
   AND NOT EXISTS (SELECT 1 FROM role_permission rp JOIN permission p USING(permission_id)
     WHERE rp.role_id = r.role_id AND p.code NOT IN

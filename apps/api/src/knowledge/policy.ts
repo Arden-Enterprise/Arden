@@ -13,6 +13,7 @@ export type AudienceRole = {
   organizationId: string;
   status: "ACTIVE" | "INACTIVE";
   isSystem: boolean;
+  kind: "ROLE" | "ALL_MEMBERS";
 };
 
 export type Publication = {
@@ -44,12 +45,14 @@ function activeInOrganization(actor: MembershipActor | null, organizationId: str
   return actor !== null && actor.status === "ACTIVE" && actor.organizationId === organizationId;
 }
 
-function validAudience(organizationId: string, audienceRoleIds: readonly string[], audienceRoles: readonly AudienceRole[], requireActive = true): boolean {
+function validAudience(organizationId: string, audienceRoleIds: readonly string[], audienceRoles: readonly AudienceRole[], scope: RoleScope, requireActive = true): boolean {
   if (audienceRoleIds.length === 0 || new Set(audienceRoleIds).size !== audienceRoleIds.length) return false;
   const resolved = new Map(audienceRoles.map((role) => [role.roleId, role]));
   return audienceRoleIds.every((roleId) => {
     const role = resolved.get(roleId);
-    return Boolean(role && roleId && role.organizationId === organizationId && (!requireActive || role.status === "ACTIVE") && !role.isSystem);
+    return Boolean(role && roleId && role.organizationId === organizationId
+      && (!requireActive || role.status === "ACTIVE") && !role.isSystem
+      && (role.kind === "ROLE" || (role.kind === "ALL_MEMBERS" && scope.type === "ORGANIZATION" && scope.departmentId === null)));
   });
 }
 
@@ -61,12 +64,14 @@ export function canReadPublication(input: {
 }): boolean {
   const { actor, publication, audience, now } = input;
   if (!activeInOrganization(actor, publication.organizationId) || publication.status !== "CURRENT") return false;
-  if (!validAudience(publication.organizationId, publication.audienceRoleIds, audience.audienceRoles, false)) return false;
+  if (!validAudience(publication.organizationId, publication.audienceRoleIds, audience.audienceRoles, publication.scope, false)) return false;
   if (!Number.isFinite(now.getTime()) || !Number.isFinite(publication.validFrom.getTime())
     || publication.validFrom > now
     || (publication.validUntil !== null
       && (!Number.isFinite(publication.validUntil.getTime()) || publication.validUntil <= now))) return false;
   const taggedRoles = new Set(publication.audienceRoleIds);
+  if (publication.scope.type === "ORGANIZATION" && audience.audienceRoles.some((role) =>
+    role.kind === "ALL_MEMBERS" && role.status === "ACTIVE" && taggedRoles.has(role.roleId))) return true;
   return audience.assignments.some((assignment) =>
     assignment.membershipId === actor.membershipId
     && assignment.organizationId === publication.organizationId
@@ -74,7 +79,7 @@ export function canReadPublication(input: {
     && assignment.scopeActive && assignment.memberInScope
     && matchingRoleScope(assignment.scope, publication.scope)
     && assignment.permissions.includes("PUBLISHED_CONTENT_VIEW")
-    && audience.audienceRoles.some(role => role.roleId === assignment.roleId && role.status === "ACTIVE")
+    && audience.audienceRoles.some(role => role.roleId === assignment.roleId && role.status === "ACTIVE" && role.kind === "ROLE")
     && Number.isFinite(assignment.validFrom.getTime())
     && assignment.validFrom <= now
     && (assignment.validUntil === null || (Number.isFinite(assignment.validUntil.getTime()) && assignment.validUntil > now))
@@ -98,7 +103,7 @@ export function canCreateSharedDraft(input: {
 export function canSubmitSnapshot(input: {
   actor: MembershipActor | null;
   draft: { organizationId: string; authorMembershipId: string; status: "ACTIVE" | "SUBMITTED" | "ARCHIVED"; currentVersionId: string };
-  snapshot: { versionId: string; contentHash: string; classification: KnowledgeClassification; audienceRoleIds: readonly string[] };
+  snapshot: { versionId: string; contentHash: string; classification: KnowledgeClassification; audienceRoleIds: readonly string[]; scope: RoleScope };
   audienceRoles: readonly AudienceRole[];
   audienceEnforceable: boolean;
 }): boolean {
@@ -110,7 +115,7 @@ export function canSubmitSnapshot(input: {
     && /^[0-9a-f]{64}$/.test(snapshot.contentHash)
     && ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"].includes(snapshot.classification)
     && input.audienceEnforceable
-    && validAudience(draft.organizationId, snapshot.audienceRoleIds, input.audienceRoles);
+    && validAudience(draft.organizationId, snapshot.audienceRoleIds, input.audienceRoles, snapshot.scope);
 }
 
 export function canReviewSnapshot(input: {

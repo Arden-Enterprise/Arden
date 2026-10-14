@@ -8,7 +8,8 @@ CREATE TEMP TABLE role_rehearsal_ids ON COMMIT DROP AS SELECT
     gen_random_uuid() AS owner_user, gen_random_uuid() AS other_user,
     gen_random_uuid() AS organization_id, gen_random_uuid() AS owner_member,
     gen_random_uuid() AS other_member, gen_random_uuid() AS workspace_id,
-    gen_random_uuid() AS role_id, gen_random_uuid() AS department_id,
+    gen_random_uuid() AS role_id, gen_random_uuid() AS all_members_role,
+    gen_random_uuid() AS department_id,
     gen_random_uuid() AS organization_scope, gen_random_uuid() AS department_scope;
 GRANT SELECT ON role_rehearsal_ids TO arden_runtime;
 INSERT INTO user_account(user_id, email, full_name)
@@ -20,9 +21,14 @@ INSERT INTO organization_membership(membership_id, organization_id, user_id)
     SELECT owner_member, organization_id, owner_user FROM role_rehearsal_ids
     UNION ALL SELECT other_member, organization_id, other_user FROM role_rehearsal_ids;
 INSERT INTO role(role_id, organization_id, code, name, is_system)
-    SELECT role_id, organization_id, 'REHEARSAL_READER', 'Rehearsal Reader', false FROM role_rehearsal_ids;
+    SELECT role_id, organization_id, 'REHEARSAL_READER', 'Rehearsal Reader', false FROM role_rehearsal_ids
+    UNION ALL
+    SELECT all_members_role, organization_id, 'ALL_MEMBERS', 'Everyone in organization', false
+      FROM role_rehearsal_ids;
 INSERT INTO role_permission(role_id, permission_id)
-    SELECT i.role_id, p.permission_id FROM role_rehearsal_ids i CROSS JOIN permission p WHERE p.code = 'PUBLISHED_CONTENT_VIEW';
+    SELECT i.role_id, p.permission_id FROM role_rehearsal_ids i CROSS JOIN permission p WHERE p.code = 'PUBLISHED_CONTENT_VIEW'
+    UNION ALL
+    SELECT i.all_members_role, p.permission_id FROM role_rehearsal_ids i CROSS JOIN permission p WHERE p.code = 'PUBLISHED_CONTENT_VIEW';
 INSERT INTO department(department_id, organization_id, code, name, default_role_id)
     SELECT department_id, organization_id, 'REHEARSAL', 'Rehearsal Department', role_id FROM role_rehearsal_ids;
 INSERT INTO department_membership(membership_id, department_id)
@@ -56,12 +62,34 @@ INSERT INTO role_assignment(membership_id, role_id, access_scope_id)
 SET LOCAL ROLE arden_runtime;
 DO $$ DECLARE i record; BEGIN
     SELECT * INTO STRICT i FROM role_rehearsal_ids;
+    IF NOT actor_in_publication_audience(i.organization_id, ARRAY[i.all_members_role], 'ORGANIZATION', NULL)
+       OR actor_in_publication_audience(i.organization_id, ARRAY[i.all_members_role], 'DEPARTMENT', i.department_id) THEN
+        RAISE EXCEPTION 'ALL_MEMBERS did not grant only Organization scope';
+    END IF;
     IF NOT actor_in_publication_audience(i.organization_id, ARRAY[i.role_id], 'ORGANIZATION', NULL)
        OR actor_in_publication_audience(i.organization_id, ARRAY[i.role_id], 'DEPARTMENT', i.department_id) THEN
         RAISE EXCEPTION 'Organization scope leaked into Department';
     END IF;
 END; $$;
 RESET ROLE;
+DO $$ DECLARE i record; BEGIN
+    SELECT * INTO STRICT i FROM role_rehearsal_ids;
+    PERFORM set_config('arden.actor_id', i.other_user::text, true);
+    PERFORM set_config('arden.organization_id', i.organization_id::text, true);
+    PERFORM set_config('arden.org_admin', 'false', true);
+END; $$;
+SET LOCAL ROLE arden_runtime;
+DO $$ DECLARE i record; BEGIN
+    SELECT * INTO STRICT i FROM role_rehearsal_ids;
+    IF NOT actor_in_publication_audience(i.organization_id, ARRAY[i.all_members_role], 'ORGANIZATION', NULL) THEN
+        RAISE EXCEPTION 'Active member without assignment cannot use ALL_MEMBERS';
+    END IF;
+END; $$;
+RESET ROLE;
+DO $$ DECLARE i record; BEGIN
+    SELECT * INTO STRICT i FROM role_rehearsal_ids;
+    PERFORM set_config('arden.actor_id', i.owner_user::text, true);
+END; $$;
 UPDATE role_assignment SET status = 'REVOKED' WHERE membership_id = (SELECT owner_member FROM role_rehearsal_ids);
 INSERT INTO role_assignment(membership_id, role_id, access_scope_id)
     SELECT owner_member, role_id, department_scope FROM role_rehearsal_ids;
@@ -91,4 +119,4 @@ DO $$ DECLARE i record; BEGIN
 END; $$;
 RESET ROLE;
 ROLLBACK;
-SELECT 'PASS: owner default, private isolation, strict scopes, VIEW revocation; fixtures rolled back' AS result;
+SELECT 'PASS: owner default, private isolation, ALL_MEMBERS, strict scopes, VIEW revocation; fixtures rolled back' AS result;

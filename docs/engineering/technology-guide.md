@@ -137,6 +137,10 @@ References: [Supabase Auth](https://supabase.com/docs/guides/auth), [server-side
   and [implementation status](custom-role-implementation.md) separate implemented policy from
   pending configurable APIs, UI and Share integration. Rollback-only runtime-role rehearsal exists
   in `tools/roles/policy-rehearsal.sql`; it does not replace broader integration tests.
+- Organization audience migration `0012_all_members_organization_audience.sql` reserves one
+  non-configurable `ALL_MEMBERS` marker per organization. It grants Organization publication
+  readership from active membership without creating assignments. It must remain excluded from
+  role-management APIs and must be rejected for Department audiences.
 
 - PostgreSQL is the canonical system of record for organization-scoped content, immutable versions, permissions, publications, source revisions, explicit edges, and audit metadata. An SVG/Graphology object, embedding, or client cache is not canonical storage.
 - Use constraints, foreign keys, unique keys, indexes, and transactions to enforce invariants as well as domain checks. Make organization ownership explicit and prevent cross-organization references. IDs are identifiers, not access controls.
