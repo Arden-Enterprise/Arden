@@ -38,12 +38,13 @@ export type KnowledgeDraftRecord = {
   status: "ACTIVE";
   hasPendingSubmission: boolean;
   body: string;
+  pdfBase64?: string;
   responsibleDepartmentId: string | null;
   targetScopeType: "ORGANIZATION" | "DEPARTMENT" | null;
   teamTag: string | null;
   projectTag: string | null;
   audienceRoleIds: string[];
-  currentVersion: { id: string; version: number; mimeType: "text/plain"; contentHash: string };
+  currentVersion: { id: string; version: number; mimeType: "text/plain" | "application/pdf"; contentHash: string };
   createdAt: string;
   updatedAt: string;
 };
@@ -58,7 +59,7 @@ export type KnowledgeDraftSummary = {
   projectTag: string | null;
   audienceRoleIds: string[];
   versionId: string;
-  mimeType: "text/plain";
+  mimeType: "text/plain" | "application/pdf";
   contentHash: string;
   currentVersion: number;
   hasPendingSubmission: boolean;
@@ -92,6 +93,8 @@ export type AssignedKnowledgeReview = {
 };
 export type KnowledgeReviewDetail = KnowledgeSubmission & {
   body: string;
+  mimeType: "text/plain" | "application/pdf";
+  pdfBase64?: string;
   submittedByMembershipId: string;
   teamTag: string | null;
   projectTag: string | null;
@@ -107,6 +110,8 @@ export type PublishedKnowledge = {
   validFrom: string;
   validUntil: string | null;
   body?: string;
+  mimeType?: "text/plain" | "application/pdf";
+  pdfBase64?: string;
 };
 export type ReviewerGrant = {
   id: string;
@@ -142,6 +147,22 @@ export function createNewKnowledgeDraft(platform: Platform, organizationId: stri
   input: { title: string; body: string; classification: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/new`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
+  });
+}
+
+export async function createPdfKnowledgeDraft(platform: Platform, organizationId: string,
+  input: { title: string; file: File; classification: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
+  if (!/\.pdf$/i.test(input.file.name) || input.file.size === 0 || input.file.size > 5 * 1024 * 1024) {
+    throw new ApiError(0, "Choose a PDF file up to 5 MB.");
+  }
+  const bytes = new Uint8Array(await input.file.arrayBuffer());
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return request(platform, `${knowledgePath(organizationId)}/drafts/pdf`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ title: input.title, classification: input.classification, pdfBase64: btoa(binary) }),
   });
 }
 

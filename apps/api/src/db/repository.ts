@@ -1142,7 +1142,7 @@ export class ArdenRepository implements ArdenDataRepository {
             SELECT $1, $2, unnest($3::uuid[])`, [draftId, organizationId, next.audienceRoleIds]);
         }
       }
-      const object = content ?? { sourceUri: current.sourceUri, mimeType: "text/plain" as const, contentHash: current.contentHash };
+      const object = content ?? { sourceUri: current.sourceUri, mimeType: current.mimeType, contentHash: current.contentHash };
       await client.query(`INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash)
         VALUES ($1, $2, $3, $4, $5)`, [draftId, expectedVersion + 1,
         object.sourceUri, object.mimeType, object.contentHash]);
@@ -1710,7 +1710,7 @@ export class ArdenRepository implements ArdenDataRepository {
 }
 
 export type DraftCursor = { updatedAt: string; draftId: string };
-export type StoredContentFields = { sourceUri: string; mimeType: "text/plain"; contentHash: string };
+export type StoredContentFields = { sourceUri: string; mimeType: "text/plain" | "application/pdf"; contentHash: string };
 
 function organizationSlug(name: string): string {
   const base = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()

@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, safeStorage, session } from "electron";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { validateDesktopApiRequest, type DesktopApiRequest } from "./apiRequestPolicy";
+import { desktopApiResponseLimit, validateDesktopApiRequest, type DesktopApiRequest } from "./apiRequestPolicy";
 
 type DesktopApiResponse = { status: number; body: string; etag?: string; location?: string };
 type CookieJar = Map<string, string>;
@@ -99,7 +99,7 @@ async function doApiRequest(request: DesktopApiRequest): Promise<DesktopApiRespo
   applySetCookies(jar, response.headers.getSetCookie());
   await persistCookieJar(jar, origin);
   const body = await response.text();
-  if (Buffer.byteLength(body, "utf8") > 1024 * 1024) throw new Error("The Arden response exceeded the desktop limit");
+  if (Buffer.byteLength(body, "utf8") > desktopApiResponseLimit(request)) throw new Error("The Arden response exceeded the desktop limit");
   return {
     status: response.status,
     body,

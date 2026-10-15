@@ -10,6 +10,8 @@ import { validCustomRoleName, type RolePermission } from "./roles/policy.js";
 import { RoleError } from "./roles/store.js";
 
 const maxBodyBytes = 100_000;
+const maxPdfBytes = 5 * 1024 * 1024;
+const maxPdfBase64Length = Math.ceil(maxPdfBytes / 3) * 4;
 const maxTitleCodePoints = 200;
 const defaultListLimit = 50;
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
@@ -594,6 +596,66 @@ export function buildApp(dependencies: AppDependencies) {
       }
     });
 
+  app.post<{ Params: { organizationId: string }; Body: { title: string; pdfBase64: string; classification: KnowledgeClassification } }>(
+    "/api/v1/organizations/:organizationId/knowledge/drafts/pdf", {
+      bodyLimit: maxPdfBase64Length + 4096,
+      schema: {
+        params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
+        headers: { type: "object", required: ["idempotency-key"], properties: {
+          "idempotency-key": { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", additionalProperties: false, required: ["title", "pdfBase64", "classification"], properties: {
+          title: { type: "string", minLength: 1, maxLength: 800 },
+          pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
+          classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      const title = request.body.title.trim();
+      const encoded = request.body.pdfBase64;
+      if (!title || !isValidText(title, 800, maxTitleCodePoints) || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+        return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file.", request.id));
+      }
+      const bytes = Buffer.from(encoded, "base64");
+      if (bytes.length === 0 || bytes.length > maxPdfBytes || bytes.toString("base64") !== encoded
+        || !bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))
+        || !bytes.subarray(-1024).toString("latin1").includes("%%EOF")) {
+        return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
+      }
+      let stored: Awaited<ReturnType<PrivateContentStorage["writePdf"]>> | null = null;
+      let creationAttempted = false;
+      try {
+        const actor = await dependencies.repository.requireActiveMembership(context.userId, request.params.organizationId);
+        if (!actor) return reply.code(404).send(resourceNotAvailable(request.id));
+        stored = await dependencies.storage.writePdf(bytes);
+        creationAttempted = true;
+        const result = await dependencies.repository.createNewKnowledgeDraft(context.userId, request.params.organizationId, {
+          actorMembershipId: actor.membershipId, title, classification: request.body.classification,
+          idempotencyKey: request.headers["idempotency-key"] as string, content: stored, requestId: request.id,
+        });
+        if (result.kind === "unavailable" || result.kind === "idempotency-conflict") {
+          await dependencies.storage.remove(stored.sourceUri);
+          return result.kind === "unavailable" ? reply.code(404).send(resourceNotAvailable(request.id))
+            : reply.code(409).send(safeError("IDEMPOTENCY_CONFLICT", "Use a new idempotency key for a different request.", request.id));
+        }
+        if (result.kind === "replayed") await dependencies.storage.remove(stored.sourceUri);
+        const pdfBase64 = result.kind === "created" ? encoded
+          : (await dependencies.storage.readPdf(result.draft.sourceUri, result.draft.contentHash)).toString("base64");
+        reply.header("Cache-Control", "no-store");
+        reply.header("ETag", etag(result.draft.currentVersion));
+        return reply.code(result.kind === "created" ? 201 : 200).send({ ...representSharedDraft(result.draft, ""), pdfBase64 });
+      } catch (error) {
+        if (stored && !creationAttempted) {
+          try { await dependencies.storage.remove(stored.sourceUri); }
+          catch (cleanupError) { request.log.error({ errorType: safeErrorType(cleanupError), requestId: request.id }, "PDF cleanup failed"); }
+        }
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "PDF draft creation failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
   app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/options", {
     schema: { params: { type: "object", required: ["organizationId"], properties: {
       organizationId: { type: "string", pattern: uuidPattern },
@@ -640,14 +702,14 @@ export function buildApp(dependencies: AppDependencies) {
     try {
       const draft = await dependencies.repository.getKnowledgeDraft(context.userId, request.params.organizationId, request.params.draftId);
       if (!draft) return reply.code(404).send(resourceNotAvailable(request.id));
-      const body = await dependencies.storage.read(draft.sourceUri, draft.contentHash);
+      const content = await readKnowledgeContent(dependencies.storage, draft.sourceUri, draft.contentHash, draft.mimeType);
       const stillAuthorized = await dependencies.repository.getKnowledgeDraft(context.userId, request.params.organizationId, request.params.draftId);
       if (!stillAuthorized || stillAuthorized.versionId !== draft.versionId || stillAuthorized.contentHash !== draft.contentHash) {
         return reply.code(404).send(resourceNotAvailable(request.id));
       }
       reply.header("Cache-Control", "no-store");
       reply.header("ETag", etag(draft.currentVersion));
-      return representSharedDraft(draft, body);
+      return { ...representSharedDraft(draft, content.body), ...(content.pdfBase64 ? { pdfBase64: content.pdfBase64 } : {}) };
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft read failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
@@ -667,8 +729,8 @@ export function buildApp(dependencies: AppDependencies) {
           classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
           responsibleDepartmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
           targetScopeType: { enum: ["ORGANIZATION", "DEPARTMENT", null] },
-          teamTag: { anyOf: [{ type: "string", maxLength: 100 }, { type: "null" }] },
-          projectTag: { anyOf: [{ type: "string", maxLength: 100 }, { type: "null" }] },
+          teamTag: { type: ["string", "null"], maxLength: 100 },
+          projectTag: { type: ["string", "null"], maxLength: 100 },
           audienceRoleIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
         } },
       },
@@ -697,6 +759,9 @@ export function buildApp(dependencies: AppDependencies) {
         if (existing.hasPendingSubmission) {
           return reply.code(409).send(safeError("REVIEW_PENDING", "A submitted version is awaiting review. Editing can resume after a decision.", request.id));
         }
+        if (existing.mimeType === "application/pdf" && patch.body !== undefined) {
+          return reply.code(400).send(safeError("INVALID_REQUEST", "Uploaded PDFs cannot be edited as text.", request.id));
+        }
         if (patch.body !== undefined) stored = await dependencies.storage.write(patch.body);
         updateAttempted = true;
         const result = await dependencies.repository.updateKnowledgeDraft(context.userId, organizationId, draftId,
@@ -711,10 +776,11 @@ export function buildApp(dependencies: AppDependencies) {
           if (result.kind === "invalid-metadata") return reply.code(400).send(safeError("INVALID_METADATA", "The draft metadata is invalid.", request.id));
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
-        const body = patch.body ?? await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
+        const content = patch.body !== undefined ? { body: patch.body }
+          : await readKnowledgeContent(dependencies.storage, result.draft.sourceUri, result.draft.contentHash, result.draft.mimeType);
         reply.header("Cache-Control", "no-store");
         reply.header("ETag", etag(result.draft.currentVersion));
-        return representSharedDraft(result.draft, body);
+        return { ...representSharedDraft(result.draft, content.body), ...(content.pdfBase64 ? { pdfBase64: content.pdfBase64 } : {}) };
       } catch (error) {
         if (stored && !updateAttempted) {
           try { await dependencies.storage.remove(stored.sourceUri); }
@@ -748,7 +814,7 @@ export function buildApp(dependencies: AppDependencies) {
         const currentDraft = await dependencies.repository.getKnowledgeDraft(context.userId,
           request.params.organizationId, request.params.draftId);
         if (currentDraft && currentDraft.currentVersion === expectedVersion) {
-          await dependencies.storage.read(currentDraft.sourceUri, currentDraft.contentHash);
+          await readKnowledgeContent(dependencies.storage, currentDraft.sourceUri, currentDraft.contentHash, currentDraft.mimeType);
         }
         const result = await dependencies.repository.submitKnowledgeDraft(context.userId,
           request.params.organizationId, request.params.draftId, expectedVersion,
@@ -890,14 +956,14 @@ export function buildApp(dependencies: AppDependencies) {
         const { organizationId, submissionId } = request.params;
         const detail = await dependencies.repository.getAssignedReview(context.userId, organizationId, submissionId);
         if (!detail) return reply.code(404).send(resourceNotAvailable(request.id));
-        const body = await dependencies.storage.read(detail.sourceUri, detail.submission.contentHash);
+        const content = await readKnowledgeContent(dependencies.storage, detail.sourceUri, detail.submission.contentHash, detail.mimeType);
         const stillAuthorized = await dependencies.repository.getAssignedReview(context.userId, organizationId, submissionId);
         if (!stillAuthorized || stillAuthorized.submission.snapshotVersionId !== detail.submission.snapshotVersionId
           || stillAuthorized.submission.contentHash !== detail.submission.contentHash) {
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
         reply.header("Cache-Control", "no-store");
-        return { ...representSubmission(detail.submission), body,
+        return { ...representSubmission(detail.submission), ...content, mimeType: detail.mimeType,
           submittedByMembershipId: detail.submittedByMembershipId,
           teamTag: detail.teamTag, projectTag: detail.projectTag };
       } catch (error) {
@@ -935,7 +1001,7 @@ export function buildApp(dependencies: AppDependencies) {
         if (pendingReview
           && pendingReview.submission.snapshotVersionId === request.body.expectedSnapshotVersionId
           && pendingReview.submission.contentHash === request.body.expectedContentHash) {
-          await dependencies.storage.read(pendingReview.sourceUri, pendingReview.submission.contentHash);
+          await readKnowledgeContent(dependencies.storage, pendingReview.sourceUri, pendingReview.submission.contentHash, pendingReview.mimeType);
         }
       }
       const result = await dependencies.repository.decideReview(context.userId, request.params.organizationId,
@@ -990,14 +1056,15 @@ export function buildApp(dependencies: AppDependencies) {
         const { organizationId, publishedVersionId } = request.params;
         const publication = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
         if (!publication) return reply.code(404).send(resourceNotAvailable(request.id));
-        const body = await dependencies.storage.read(publication.sourceUri, publication.contentHash);
+        const mimeType = publication.sourceUri.endsWith(".pdf") ? "application/pdf" : "text/plain";
+        const content = await readKnowledgeContent(dependencies.storage, publication.sourceUri, publication.contentHash, mimeType);
         const stillAuthorized = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
         if (!stillAuthorized || stillAuthorized.contentHash !== publication.contentHash) {
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
-          classification: publication.classification, body, contentHash: publication.contentHash,
+          classification: publication.classification, ...content, mimeType, contentHash: publication.contentHash,
           audienceRoleIds: publication.audienceRoleIds,
           publishedAt: publication.publishedAt.toISOString(), validFrom: publication.validFrom.toISOString(),
           validUntil: publication.validUntil?.toISOString() ?? null };
@@ -1263,6 +1330,14 @@ function normalizePatch(value: DraftPatch): DraftPatch | null {
 
 function isValidText(value: string, maxBytes: number, maxCodePoints: number): boolean {
   return !value.includes("\u0000") && Buffer.byteLength(value, "utf8") <= maxBytes && Array.from(value).length <= maxCodePoints;
+}
+
+async function readKnowledgeContent(storage: PrivateContentStorage, sourceUri: string, contentHash: string, mimeType: string): Promise<{ body: string; pdfBase64?: string }> {
+  if (mimeType === "application/pdf") {
+    return { body: "", pdfBase64: (await storage.readPdf(sourceUri, contentHash)).toString("base64") };
+  }
+  if (mimeType === "text/plain") return { body: await storage.read(sourceUri, contentHash) };
+  throw new Error("Unsupported knowledge content type");
 }
 
 function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {

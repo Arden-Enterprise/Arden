@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { validateDesktopApiRequest } from "./apiRequestPolicy.ts";
+import { desktopApiResponseLimit, validateDesktopApiRequest } from "./apiRequestPolicy.ts";
 
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const sourcePrivateVersionId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -29,6 +29,20 @@ describe("desktop API request allowlist", () => {
       body: JSON.stringify({ sourcePrivateVersionId, classification: "INTERNAL" }),
       idempotencyKey,
     }), true);
+  });
+
+  it("allows only a bounded PDF upload route to carry a larger request", () => {
+    const pdf = `${sharedDraftPath}/pdf`;
+    const body = "x".repeat(200_000);
+    assert.equal(validateDesktopApiRequest({ path: pdf, method: "POST", body, idempotencyKey }), true);
+    assert.equal(validateDesktopApiRequest({ path: pdf, method: "POST", body }), false);
+    assert.equal(validateDesktopApiRequest({ path: pdf, method: "GET", body, idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ path: pdf, method: "POST", body: "x".repeat(7_100_001), idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${sharedDraftPath}/new`, method: "POST", body, idempotencyKey }), false);
+    assert.equal(desktopApiResponseLimit({ path: pdf, method: "POST", body, idempotencyKey }), 7_100_000);
+    assert.equal(desktopApiResponseLimit({ path: `${sharedDraftPath}/${sourcePrivateVersionId}`, method: "GET" }), 7_100_000);
+    assert.equal(desktopApiResponseLimit({ path: `${sharedDraftPath}/${sourcePrivateVersionId}`, method: "PATCH", body: "{}", ifMatch: '"1"' }), 7_100_000);
+    assert.equal(desktopApiResponseLimit({ path: `${sharedDraftPath}/new`, method: "POST", body: "{}", idempotencyKey }), 1024 * 1024);
   });
 
   it("rejects missing, malformed, or misrouted idempotency keys", () => {

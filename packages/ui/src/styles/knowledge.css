@@ -119,6 +119,8 @@ button.knowledge-row:hover { border-color: var(--arden-line-strong); background:
 .knowledge-live-form textarea, .knowledge-live-decision textarea { resize: vertical; }
 .knowledge-live-form :disabled, .knowledge-live-decision :disabled { opacity: .6; cursor: not-allowed; }
 .knowledge-live-form fieldset { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--arden-line); border-radius: 8px; }
+.knowledge-live-form .knowledge-create-source label { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.knowledge-live-form fieldset input[type="radio"] { flex: none; width: 16px; height: 16px; margin: 0; padding: 0; accent-color: var(--arden-success); }
 .knowledge-live-form legend { padding: 0 6px; color: var(--arden-text-primary); font-size: 13px; }
 .knowledge-live-form fieldset p { font-size: 12px; }
 .knowledge-live-role-list { display: grid; gap: 10px; max-height: 200px; overflow: auto; }
@@ -127,6 +129,8 @@ button.knowledge-row:hover { border-color: var(--arden-line-strong); background:
 .knowledge-live-document { gap: 18px; }
 .knowledge-live-document pre { max-height: 65vh; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--arden-text-secondary); font: inherit; line-height: 1.75; }
 .knowledge-live-document > small { overflow-wrap: anywhere; }
+.knowledge-pdf-document { display: grid; gap: 14px; min-width: 0; }
+.knowledge-pdf-document object { width: 100%; height: min(70vh, 780px); min-height: 420px; border: 1px solid var(--arden-line); background: #fff; }
 .knowledge-live-decision .knowledge-live-actions { align-items: stretch; flex-direction: column; }
 
 .arden-document-field { display: grid; gap: 8px; min-width: 0; color: var(--arden-text-secondary); font-size: 13px; }

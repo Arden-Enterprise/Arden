@@ -13,6 +13,7 @@ const sharedDraftPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/dra
 const knowledgeCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/(options|drafts|submissions|reviews|published|reviewer-grants)$`);
 const reviewerGrantCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants$`);
 const newKnowledgeDraft = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/new$`);
+const pdfKnowledgeDraft = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/pdf$`);
 const knowledgeDraftItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}$`);
 const knowledgeDraftSubmit = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/submit$`);
 const knowledgeReviewItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}$`);
@@ -35,10 +36,21 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
   if (Object.keys(request).some((key) => !["path", "method", "body", "ifMatch", "idempotencyKey"].includes(key))) return false;
   if (typeof request.path !== "string" || request.path.length > 2048 || !request.path.startsWith("/") || request.path.startsWith("//")) return false;
   if (request.method !== "GET" && request.method !== "POST" && request.method !== "PATCH") return false;
-  if (request.body !== undefined && (typeof request.body !== "string" || Buffer.byteLength(request.body, "utf8") > 128 * 1024)) return false;
+  const pdfUpload = typeof request.path === "string" && pdfKnowledgeDraft.test(request.path);
+  if (request.body !== undefined && (typeof request.body !== "string" || Buffer.byteLength(request.body, "utf8") >
+    (pdfUpload ? 7_100_000 : 128 * 1024))) return false;
   if (request.ifMatch !== undefined && (typeof request.ifMatch !== "string" || request.ifMatch.length > 80)) return false;
   if (request.idempotencyKey !== undefined && (typeof request.idempotencyKey !== "string" || !uuidPattern.test(request.idempotencyKey))) return false;
   return isAllowedRequest(request as DesktopApiRequest);
+}
+
+export function desktopApiResponseLimit(request: DesktopApiRequest): number {
+  const pdfCreate = request.method === "POST" && pdfKnowledgeDraft.test(request.path);
+  const knowledgeDetail = ((request.method === "GET" || request.method === "PATCH")
+    && knowledgeDraftItem.test(request.path))
+    || (request.method === "GET" && (knowledgeReviewItem.test(request.path)
+      || publishedKnowledgeItem.test(request.path)));
+  return pdfCreate || knowledgeDetail ? 7_100_000 : 1024 * 1024;
 }
 
 function isAllowedRequest(request: DesktopApiRequest): boolean {
@@ -60,6 +72,8 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     || knowledgeReviewItem.test(url.pathname) || publishedKnowledgeItem.test(url.pathname))
     && request.method === "GET" && !request.body && !request.ifMatch && !request.idempotencyKey;
   const knowledgeCreate = newKnowledgeDraft.test(url.pathname) && request.method === "POST"
+    && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
+  const knowledgePdfCreate = pdfKnowledgeDraft.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
   const knowledgePatch = knowledgeDraftItem.test(url.pathname) && request.method === "PATCH"
     && Boolean(request.body) && Boolean(request.ifMatch) && !request.idempotencyKey;
@@ -97,7 +111,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     privateDraftRequest
   ) && !request.idempotencyKey;
   const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
-  return (otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePatch
+  return (otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
     || knowledgeSubmit || knowledgeDecision || grantCreate || grantDeactivate || adminGet
     || adminPost || adminAction || accountPost || customRoleGet || customRolePatch
     || customRoleAssign || customRoleRevoke || customRoleDeactivate) && (!url.search || queryAllowed);

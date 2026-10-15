@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiRequest, createKnowledgeDraft, createNewKnowledgeDraft, decideKnowledgeReview,
+import { apiRequest, createKnowledgeDraft, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview,
   saveKnowledgeDraft, signIn, signOut, signUp, submitKnowledgeDraft } from "../src/shared/api-client";
 
 const actorId = "11111111-1111-4111-8111-111111111111";
@@ -140,6 +140,22 @@ describe("shared knowledge draft transport", () => {
 });
 
 describe("governed knowledge transport", () => {
+  it("encodes a selected local PDF through the desktop bridge", async () => {
+    const requestApi = vi.fn().mockResolvedValue({ status: 201, body: JSON.stringify({ ...createdDraft,
+      body: "", currentVersion: { ...createdDraft.currentVersion, mimeType: "application/pdf" } }) });
+    vi.stubGlobal("window", { location: { origin: "file://" }, ardenDesktop: { requestApi } });
+    const file = new File(["%PDF-1.4\n%%EOF"], "original.pdf", { type: "application/pdf" });
+    await createPdfKnowledgeDraft("desktop", organizationId,
+      { title: "Original", file, classification: "INTERNAL" }, idempotencyKey);
+    const sent = requestApi.mock.calls[0][0] as { path: string; body: string; idempotencyKey: string };
+    expect(sent.path).toBe(`/api/v1/organizations/${organizationId}/knowledge/drafts/pdf`);
+    expect(sent.idempotencyKey).toBe(idempotencyKey);
+    expect(Buffer.from(JSON.parse(sent.body).pdfBase64, "base64").toString()).toBe("%PDF-1.4\n%%EOF");
+    await expect(createPdfKnowledgeDraft("desktop", organizationId,
+      { title: "Wrong", file: new File(["text"], "wrong.txt"), classification: "INTERNAL" }, idempotencyKey))
+      .rejects.toThrow("Choose a PDF");
+  });
+
   it("sends draft preconditions and idempotency through the desktop bridge", async () => {
     const requestApi = vi.fn().mockResolvedValue({ status: 200, body: JSON.stringify(createdDraft) });
     vi.stubGlobal("window", { location: { origin: "file://" }, ardenDesktop: { requestApi } });
@@ -170,7 +186,7 @@ describe("governed knowledge transport", () => {
       title: "Runbook", classification: "INTERNAL", responsibleDepartmentId: sourceVersionId,
       targetScopeType: "DEPARTMENT", targetDepartmentId: sourceVersionId, audienceRoleIds: [],
       contentHash: createdDraft.currentVersion.contentHash, status: "PENDING_REVIEW",
-      submittedAt: "2026-10-12T00:00:00.000Z", publishedVersionId: null, body: "Steps",
+      submittedAt: "2026-10-12T00:00:00.000Z", publishedVersionId: null, body: "Steps", mimeType: "text/plain",
       submittedByMembershipId: actorId, teamTag: null, projectTag: null,
     }, "APPROVE", null, idempotencyKey);
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
