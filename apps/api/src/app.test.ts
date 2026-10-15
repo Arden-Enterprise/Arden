@@ -495,6 +495,70 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, title: "Other" } })).statusCode).toBe(409);
   });
 
+  it("preserves an uploaded PDF through metadata, submission, review and publication", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const reviewer = await desktopSession(app, "manager@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const pdfBase64 = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n").toString("base64");
+    const headers = { cookie: owner, origin: "http://localhost:5180", "idempotency-key": createKey };
+    const created = await app.inject({ method: "POST", url: `${root}/drafts/pdf`, headers,
+      payload: { title: "Original PDF", pdfBase64, classification: "INTERNAL" } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ body: "", pdfBase64, currentVersion: { mimeType: "application/pdf" } });
+    const reopened = await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers: { cookie: owner } });
+    expect(reopened.json().pdfBase64).toBe(pdfBase64);
+    expect((await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers: { cookie: reviewer } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
+      payload: { body: "Do not overwrite PDF" } })).statusCode).toBe(400);
+    const invalidTag = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
+      payload: { teamTag: "   ", projectTag: null } });
+    expect(invalidTag.statusCode).toBe(400);
+    const updated = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
+      payload: { title: "Original PDF", classification: "INTERNAL",
+        responsibleDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        targetScopeType: "DEPARTMENT", teamTag: null, projectTag: null,
+        audienceRoleIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ pdfBase64, teamTag: null, projectTag: null,
+      currentVersion: { mimeType: "application/pdf", version: 2 } });
+    const submitted = await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"2"',
+        "idempotency-key": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" } });
+    expect(submitted.statusCode).toBe(201);
+    expect((await app.inject({ method: "POST", url: `${root}/reviewer-grants`,
+      headers: { cookie: owner, origin: "http://localhost:5180" },
+      payload: { reviewerMembershipId: otherId, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        classifications: ["INTERNAL"], level: "STANDARD" } })).statusCode).toBe(201);
+    const detail = await app.inject({ method: "GET", url: `${root}/reviews/${submitted.json().id}`,
+      headers: { cookie: reviewer } });
+    expect(detail.json()).toMatchObject({ body: "", pdfBase64, mimeType: "application/pdf" });
+    const approved = await app.inject({ method: "POST", url: `${root}/reviews/${submitted.json().id}/decisions`,
+      headers: { cookie: reviewer, origin: "http://localhost:5180",
+        "idempotency-key": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff" },
+      payload: { action: "APPROVE", expectedSnapshotVersionId: updated.json().currentVersion.id,
+        expectedContentHash: updated.json().currentVersion.contentHash } });
+    expect(approved.statusCode).toBe(201);
+    const publication = await app.inject({ method: "GET", url: `${root}/published/${approved.json().publishedVersionId}`,
+      headers: { cookie: owner } });
+    expect(publication.json()).toMatchObject({ body: "", pdfBase64, mimeType: "application/pdf" });
+    expect(JSON.stringify(publication.json())).not.toContain("arden-private-object");
+  });
+
+  it("rejects malformed, oversized and cross-organization PDF uploads", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const headers = { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey };
+    const url = `/api/v1/organizations/${organizationId}/knowledge/drafts/pdf`;
+    const payload = { title: "PDF", classification: "INTERNAL", pdfBase64: Buffer.from("not a PDF %%EOF").toString("base64") };
+    expect((await app.inject({ method: "POST", url, headers, payload })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: `/api/v1/organizations/${otherOrganizationId}/knowledge/drafts/pdf`,
+      headers, payload: { ...payload, pdfBase64: Buffer.from("%PDF-1.4\n%%EOF").toString("base64") } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url, headers,
+      payload: { ...payload, pdfBase64: "A".repeat(7_100_000) } })).statusCode).toBe(413);
+  });
+
   it("exposes active knowledge metadata options only within the actor's organization", async () => {
     const session = await desktopSession(app, "owner@example.test");
     const options = await app.inject({ method: "GET",
@@ -928,7 +992,7 @@ class MemoryRepository implements ArdenDataRepository {
     const queue = await this.listAssignedReviews(userId, requestedOrganization);
     if (!queue?.some((item) => item.submissionId === submissionId) || !this.sharedSubmission || !this.sharedDraft) return null;
     return { submission: this.sharedSubmission, sourceUri: this.sharedDraft.sourceUri,
-      mimeType: "text/plain", submittedByMembershipId: ownerId,
+      mimeType: this.sharedDraft.mimeType, submittedByMembershipId: ownerId,
       teamTag: this.sharedDraft.teamTag, projectTag: this.sharedDraft.projectTag };
   }
 

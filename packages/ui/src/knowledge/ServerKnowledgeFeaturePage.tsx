@@ -4,7 +4,7 @@ import { SearchField } from "../shared/SearchField";
 import { KnowledgeBadge, KnowledgeHeading, KnowledgeNotice, KnowledgeRow } from "./KnowledgePrimitives";
 import { availableAudienceOptions, normalizeAudienceSelection, validAudienceSelection } from "./audience-options";
 import {
-  ApiError, createNewKnowledgeDraft, decideKnowledgeReview, listAssignedKnowledgeReviews,
+  ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listAssignedKnowledgeReviews,
   listKnowledgeDrafts, listKnowledgeSubmissions, listPublishedKnowledge, loadKnowledgeDraft,
   loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, saveKnowledgeDraft,
   submitKnowledgeDraft, type AssignedKnowledgeReview, type KnowledgeDraftRecord,
@@ -13,6 +13,7 @@ import {
 } from "../shared/api-client";
 import type { KnowledgeClassification } from "../shared/knowledge-classification";
 import type { Platform } from "../shared/types";
+import { PdfDocument } from "./PdfDocument";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
   .then((module) => ({ default: module.ArdenRichTextEditor })));
@@ -66,6 +67,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [document, setDocument] = useState<PublishedKnowledge | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [newBody, setNewBody] = useState("");
+  const [newFile, setNewFile] = useState<File | null>(null);
+  const [createMode, setCreateMode] = useState<"text" | "pdf">("text");
   const [newClassification, setNewClassification] = useState<KnowledgeClassification>("INTERNAL");
   const [screen, setScreen] = useState<"library" | "create" | "editor" | "document">("library");
   const [query, setQuery] = useState("");
@@ -133,6 +136,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
 
   const openDraft = (id: string) => void run(async () => {
     const loaded = await loadKnowledgeDraft(platform, organizationId, id);
+    submitRequestKey.current = null;
     setDraft(loaded); setEditor(valuesFromDraft(loaded)); setScreen("editor");
   });
 
@@ -140,18 +144,25 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     if (!newTitle.trim()) { setError("Enter a title for this draft."); return; }
     const key = createRequestKey.current ?? crypto.randomUUID();
     createRequestKey.current = key;
-    const created = await createNewKnowledgeDraft(platform, organizationId,
-      { title: newTitle.trim(), body: newBody, classification: newClassification }, key);
+    if (createMode === "pdf" && !newFile) { setError("Choose a PDF file from your computer."); return; }
+    const created = createMode === "pdf" && newFile
+      ? await createPdfKnowledgeDraft(platform, organizationId,
+        { title: newTitle.trim(), file: newFile, classification: newClassification }, key)
+      : await createNewKnowledgeDraft(platform, organizationId,
+        { title: newTitle.trim(), body: newBody, classification: newClassification }, key);
     createRequestKey.current = null;
     setDraft(created); setEditor(valuesFromDraft(created)); setScreen("editor");
-    setNewTitle(""); setNewBody("");
+    setNewTitle(""); setNewBody(""); setNewFile(null);
     await refresh(); setMessage("Draft saved on the Arden server. Add its governance metadata before submitting.");
   });
 
   const saveDraft = () => void run(async () => {
     if (!draft || !editor) return;
     if (!editor.title.trim()) { setError("The title cannot be empty."); return; }
-    const saved = await saveKnowledgeDraft(platform, organizationId, draft.id, draft.currentVersion.version, editor);
+    const { body: _body, ...metadata } = editor;
+    const saved = await saveKnowledgeDraft(platform, organizationId, draft.id, draft.currentVersion.version,
+      draft.currentVersion.mimeType === "application/pdf" ? metadata : editor);
+    submitRequestKey.current = null;
     setDraft(saved); setEditor(valuesFromDraft(saved));
     await refresh(); setMessage(`Draft v${saved.currentVersion.version} saved on the server.`);
   });
@@ -163,7 +174,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     const submission = await submitKnowledgeDraft(platform, organizationId, draft.id, draft.currentVersion.version, key);
     submitRequestKey.current = null;
     setDraft({ ...draft, hasPendingSubmission: true });
-    await refresh(); setMessage(`Version ${draft.currentVersion.version} submitted for review (${statusLabel(submission.status)}).`);
+    setMessage(`Version ${draft.currentVersion.version} submitted for review (${statusLabel(submission.status)}).`);
+    await refresh();
   });
 
   const openReview = (id: string) => void run(async () => {
@@ -218,9 +230,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <h2>{review.title}</h2><div className="knowledge-inline-meta"><KnowledgeBadge>{review.classification}</KnowledgeBadge>
               <KnowledgeBadge tone="blue">{departmentName(review.responsibleDepartmentId)}</KnowledgeBadge>
               <KnowledgeBadge tone="amber">{review.targetScopeType}</KnowledgeBadge></div>
-            <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
-              key={`review:${review.id}:${review.snapshotVersionId}`} body={review.body}
-              instanceKey={`review:${review.id}:${review.snapshotVersionId}`} /></Suspense>
+            {review.mimeType === "application/pdf" && review.pdfBase64
+              ? <PdfDocument base64={review.pdfBase64} title={review.title} />
+              : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+                key={`review:${review.id}:${review.snapshotVersionId}`} body={review.body}
+                instanceKey={`review:${review.id}:${review.snapshotVersionId}`} /></Suspense>}
             <small>Snapshot hash: {review.contentHash}</small>
             <button type="button" className="knowledge-back-button" onClick={() => setReview(null)}>← Back to assigned reviews</button>
           </article>
@@ -245,13 +259,22 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
       </> : screen === "create" ? <>
         <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Create a shared draft"  />
         <div className="knowledge-two-column"><form className="knowledge-panel knowledge-live-form" onSubmit={(event) => { event.preventDefault(); createDraft(); }}>
-          <label>Title<input required maxLength={160} value={newTitle} disabled={busy} onChange={(event) => setNewTitle(event.target.value)} /></label>
-          <label>Classification<select value={newClassification} disabled={busy} onChange={(event) => setNewClassification(event.target.value as KnowledgeClassification)}>
+          <fieldset className="knowledge-create-source" disabled={busy}><legend>Content source</legend>
+            <label><input type="radio" name="knowledge-create-mode" checked={createMode === "text"} onChange={() => { setCreateMode("text"); createRequestKey.current = null; }} /> Write document text</label>
+            <label><input type="radio" name="knowledge-create-mode" checked={createMode === "pdf"} onChange={() => { setCreateMode("pdf"); createRequestKey.current = null; }} /> Upload PDF from this computer</label>
+          </fieldset>
+          <label>Title<input required maxLength={160} value={newTitle} disabled={busy} onChange={(event) => { setNewTitle(event.target.value); createRequestKey.current = null; }} /></label>
+          <label>Classification<select value={newClassification} disabled={busy} onChange={(event) => { setNewClassification(event.target.value as KnowledgeClassification); createRequestKey.current = null; }}>
             <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select></label>
-          <div className="arden-document-field"><span>Document text</span>
+          {createMode === "pdf" ? <label>PDF file (up to 5 MB)
+            <input type="file" accept=".pdf,application/pdf" disabled={busy} onChange={(event) => {
+              setNewFile(event.target.files?.[0] ?? null); createRequestKey.current = null;
+            }} />
+            <small>The original PDF is kept for review and download. It will not be converted into editable text.</small>
+          </label> : <div className="arden-document-field"><span>Document text</span>
             <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor key="new-shared-knowledge"
-              body={newBody} instanceKey="new-shared-knowledge" disabled={busy} onChange={setNewBody} /></Suspense>
-          </div>
+              body={newBody} instanceKey="new-shared-knowledge" disabled={busy} onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
+          </div>}
           <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy || !newTitle.trim()}>Save new draft</button>
             <button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); createRequestKey.current = null; }}>Cancel</button></div>
         </form></div>
@@ -261,6 +284,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         <div className="knowledge-inline-meta"><KnowledgeBadge tone={draft.hasPendingSubmission ? "amber" : "blue"}>{draft.hasPendingSubmission ? "Awaiting review" : "Working draft"}</KnowledgeBadge>
           <KnowledgeBadge>{draft.classification}</KnowledgeBadge>{latest && <KnowledgeBadge tone={latest.status === "APPROVED" ? "jade" : "amber"}>{statusLabel(latest.status)}</KnowledgeBadge>}
           {dirty && <span>Unsaved changes</span>}</div>
+        {draft.hasPendingSubmission && <KnowledgeNotice title="Waiting for a reviewer" tone="amber">
+          A different member needs an active reviewer grant for this department and classification. An Org Admin can assign one if the review queue is empty.
+        </KnowledgeNotice>}
         {latest?.status === "CHANGES_REQUESTED" && <KnowledgeNotice title="Revision requested" tone="amber">
           {latest.decisionComment && <>Reviewer: {latest.decisionComment}<br /></>}
           Edit and save a new version, then resubmit. The earlier submitted snapshot is unchanged.
@@ -272,12 +298,14 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         {latest?.status === "APPROVED" && <KnowledgeNotice title="Approved and published" tone="jade">The system published the reviewed snapshot. A new edit requires a new submission before it can replace that publication.</KnowledgeNotice>}
         <div className="knowledge-editor-grid"><section className="knowledge-panel knowledge-live-form">
           <label>Title<input maxLength={160} disabled={busy || draft.hasPendingSubmission} value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
-          <div className="arden-document-field"><span>Document text</span>
+          {draft.currentVersion.mimeType === "application/pdf" && draft.pdfBase64
+            ? <PdfDocument base64={draft.pdfBase64} title={draft.title} />
+            : <div className="arden-document-field"><span>Document text</span>
             <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor
               key={`${draft.id}:${draft.currentVersion.version}`} body={editor.body}
               instanceKey={`${draft.id}:${draft.currentVersion.version}`}
               disabled={busy || draft.hasPendingSubmission} onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
-          </div>
+          </div>}
           <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy || draft.hasPendingSubmission || !dirty} onClick={saveDraft}>Save new version</button>
             <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit this version for review</button></div>
 
@@ -311,9 +339,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         <div className="knowledge-inline-meta"><KnowledgeBadge tone="jade">Published</KnowledgeBadge><KnowledgeBadge>{document.classification}</KnowledgeBadge>
           <span>Published {new Date(document.publishedAt).toLocaleString()}</span></div>
         <article className="knowledge-panel knowledge-live-document">
-          <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
-            key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
-            instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>
+          {document.mimeType === "application/pdf" && document.pdfBase64
+            ? <PdfDocument base64={document.pdfBase64} title={document.title} />
+            : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+              key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
+              instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>}
         </article>
       </> : <>
         <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Governed knowledge"
