@@ -52,6 +52,8 @@ The repository has strict TypeScript and typecheck/test/build scripts, plus API 
 
 ## Test design
 
+Keep package test discovery scoped to source tests. The API's `vitest run src` must not execute stale ignored JavaScript tests left in `dist/` by an earlier build; those artifacts can make a clean source change appear to fail for unrelated reasons.
+
 - For each new behavior, identify the observable contract and the layer that owns it. Write tests for outcomes, allowed/denied transitions, and invariants rather than private helper call counts or a specific implementation structure.
 - For a defect, add a reproducing regression case before the fix when practical; establish that it detects the original defect. For a refactor, add characterization tests where behavior lacks protection, then preserve observable outcomes.
 - Cover representative success, invalid input, boundary, denial, empty/missing data, dependency failure, conflict, and cancellation/retry cases when relevant. Security-sensitive behavior additionally follows the full privacy/revocation gates.

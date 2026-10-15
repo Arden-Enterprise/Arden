@@ -14,6 +14,7 @@ const ids = {
   organizationScope: randomUUID(),
   ownerMembership: randomUUID(),
   managerMembership: randomUUID(),
+  department: randomUUID(),
 };
 const roleCodes = [`ARDEN_TEST_OWNER_${ids.owner.replaceAll("-", "")}`, `ARDEN_TEST_MANAGER_${ids.manager.replaceAll("-", "")}`];
 const repository = pool ? new ArdenRepository(pool) : null;
@@ -31,8 +32,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     if (!identity.rows[0]?.is_superuser) throw new Error("The isolated integration database connection must be a superuser for fixture cleanup");
     const migration = await pool.query<{ count: string }>(`
       SELECT count(*)::text AS count FROM public.arden_schema_migrations
-       WHERE migration_id IN ('0001_initial_schema', '0008_enable_private_shared_draft_creation')`);
-    if (migration.rows[0]?.count !== "2") throw new Error("Apply the current schema migrations to the isolated test database first");
+       WHERE migration_id IN ('0001_initial_schema', '0008_enable_private_shared_draft_creation',
+         '0015_org_admin_member_profiles')`);
+    if (migration.rows[0]?.count !== "3") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -42,8 +44,12 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query(`INSERT INTO user_account (user_id, email, full_name) VALUES ($1, $2, 'Synthetic Owner'), ($3, $4, 'Synthetic Manager')`, [ids.owner, `${ids.owner}@example.test`, ids.manager, `${ids.manager}@example.test`]);
       await client.query(`INSERT INTO organization_membership (membership_id, organization_id, user_id) VALUES ($1, $2, $3), ($4, $2, $5)`, [ids.ownerMembership, ids.organization, ids.owner, ids.managerMembership, ids.manager]);
       await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Synthetic private-note owner'), ($4, $2, $5, 'Synthetic manager')`, [ids.ownerRole, ids.organization, roleCodes[0], ids.managerRole, roleCodes[1]]);
+      await client.query(`INSERT INTO department (department_id, organization_id, code, name, default_role_id)
+        VALUES ($1, $2, 'TEST', 'Synthetic department', $3)`, [ids.department, ids.organization, ids.ownerRole]);
       await client.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type) VALUES ($1, $2, 'ORGANIZATION')`, [ids.organizationScope, ids.organization]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id) VALUES ($1, $2, $3), ($4, $5, $3)`, [ids.ownerMembership, ids.ownerRole, ids.organizationScope, ids.managerMembership, ids.managerRole]);
+      await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
+        SELECT $1, role_id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.ownerMembership, ids.organizationScope]);
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission WHERE code IN ('PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE')`, [ids.ownerRole]);
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
@@ -70,6 +76,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("ALTER TABLE draft_version DISABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_draft_version DISABLE TRIGGER USER");
           await client.query("DELETE FROM audit_event WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM reviewer_grant WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE author_membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM shared_draft WHERE author_membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
@@ -78,6 +85,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
           await client.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM department WHERE department_id = $1", [ids.department]);
           await client.query("DELETE FROM role WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
           await client.query("DELETE FROM access_scope WHERE access_scope_id = $1", [ids.organizationScope]);
           await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])", [[ids.owner, ids.manager]]);
@@ -183,11 +191,52 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       const hiddenVersion = await client.query<{ count: string }>("SELECT count(*)::text AS count FROM shared_draft_version WHERE shared_draft_id = $1", [created.draft.id]);
       expect(hidden.rows[0]?.count).toBe("0");
       expect(hiddenVersion.rows[0]?.count).toBe("0");
-      await client.query("ROLLBACK");
     } finally {
+      await client.query("ROLLBACK");
       client.release();
     }
     const audit = await pool.query<{ count: string }>("SELECT count(*)::text AS count FROM arden.audit_event WHERE organization_id = $1 AND event_type = 'SHARED_DRAFT_CREATED'", [ids.organization]);
     expect(audit.rows[0]?.count).toBe("1");
+  });
+
+  it("shows invited members to their Org Admin and permits a reviewer grant without exposing profiles to other actors", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+
+    const administration = await repository.getOrganizationAdministration(ids.owner, ids.organization);
+    expect(administration?.members).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: ids.ownerMembership }),
+      expect.objectContaining({ id: ids.managerMembership, name: "Synthetic Manager" }),
+    ]));
+    await expect(repository.getOrganizationAdministration(ids.manager, ids.organization)).resolves.toBeNull();
+    await expect(repository.getOrganizationAdministration(ids.owner, randomUUID())).resolves.toBeNull();
+
+    const grant = await repository.createReviewerGrant(ids.owner, ids.organization, {
+      reviewerMembershipId: ids.managerMembership,
+      departmentId: ids.department,
+      classifications: ["INTERNAL"],
+      level: "STANDARD",
+      teamTag: null,
+      projectTag: null,
+      validUntil: null,
+    }, "integration-reviewer-grant");
+    expect(grant).toMatchObject({ reviewerMembershipId: ids.managerMembership, status: "ACTIVE" });
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE arden_runtime");
+      await client.query("SET LOCAL search_path TO arden, public");
+      await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [ids.manager, ids.organization]);
+      const memberView = await client.query<{ user_id: string }>("SELECT user_id FROM user_account WHERE user_id = $1", [ids.owner]);
+      expect(memberView.rows).toHaveLength(0);
+
+      await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true), set_config('arden.org_admin', 'true', true)",
+        [ids.owner, randomUUID()]);
+      const otherOrgView = await client.query<{ user_id: string }>("SELECT user_id FROM user_account WHERE user_id = $1", [ids.manager]);
+      expect(otherOrgView.rows).toHaveLength(0);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
 });
