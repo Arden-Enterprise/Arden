@@ -56,11 +56,9 @@ export function AppSidebar({
       </div>
 
       <section className="access-card" aria-labelledby="access-card-title">
-        <span className="meta-label" id="access-card-title">
-          {organizationLabel ?? organization?.name ?? "FPT DIGITAL"}
-        </span>
-        <strong>{previewRole === "admin" ? "Organization" : memberDepartment}</strong>
-        <span>{previewRole === "admin" ? "Configuration access" : "Member workspace"}</span>
+        <span className="access-card-mark" aria-hidden="true">{(organizationLabel ?? organization?.name ?? "FPT DIGITAL").split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span>
+        <span className="access-card-copy"><strong id="access-card-title">{organizationLabel ?? organization?.name ?? "FPT DIGITAL"}</strong>
+          <span>{authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`}</span></span>
       </section>
 
       <nav className="sidebar-navigation" aria-label="Workspace">
@@ -73,7 +71,7 @@ export function AppSidebar({
               type="button"
               className={`sidebar-nav-item${active ? " is-active" : ""}`}
               onClick={() => { if (item.view) onNavigate(item.view); }}
-              disabled={item.planned || (authenticated && item.view !== "knowledge")}
+              disabled={item.planned || (authenticated && item.view !== "knowledge" && item.view !== "review-queue")}
               aria-label={item.label}
               aria-current={active ? "page" : undefined}
               title={authenticated && item.view === "knowledge" ? "View server draft and labeled sample library" : item.planned ? `${item.label} is not connected yet` : item.label}
@@ -125,7 +123,7 @@ export function AppSidebar({
           <div><strong>{memberName}</strong><span>{memberRole}</span></div>
         </div>
         <span>{platform === "desktop" ? "WINDOWS" : "WEB"} · {authenticated ? "SIGNED IN" : "SAMPLE SESSION"}</span>
-        <button type="button" onClick={onSignOut} aria-label="Exit preview">
+        <button type="button" onClick={onSignOut} aria-label={authenticated ? "Sign out" : "Exit preview"}>
           <Icon name="logout" size={15} />
           <span><span className="nav-label-full">{authenticated ? "Sign out" : "Exit preview"}</span><span className="nav-label-short" aria-hidden="true">Exit</span></span>
         </button>
