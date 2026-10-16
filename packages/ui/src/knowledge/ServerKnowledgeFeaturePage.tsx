@@ -15,6 +15,8 @@ import type { KnowledgeClassification } from "../shared/knowledge-classification
 import type { Platform } from "../shared/types";
 import { PdfDocument } from "./PdfDocument";
 import { KnowledgeDialog } from "./KnowledgeDialog";
+import { ActionToast } from "../shared/ActionToast";
+import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
   .then((module) => ({ default: module.ArdenRichTextEditor })));
@@ -32,6 +34,7 @@ type Props = ContextControlProps & {
   view: "knowledge" | "review-queue";
   active: boolean;
   createdDraftId: string | null;
+  onAssignedReviewCount?: (count: number) => void;
 };
 
 type EditorValues = Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" |
@@ -46,17 +49,12 @@ function valuesFromDraft(draft: KnowledgeDraftRecord): EditorValues {
   };
 }
 
-function statusLabel(status: KnowledgeSubmission["status"]): string {
-  return ({ PENDING_REVIEW: "Awaiting review", APPROVED: "Approved", REJECTED: "Rejected",
-    CHANGES_REQUESTED: "Revision requested", WITHDRAWN: "Withdrawn" })[status];
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "The server request failed. Refresh and try again.";
 }
 
 export function ServerKnowledgeFeaturePage({ platform, organizationId, organizationName,
-  view, active, createdDraftId, contextOpen, onToggleContext }: Props) {
+  view, active, createdDraftId, onAssignedReviewCount, contextOpen, onToggleContext }: Props) {
   const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
   const [submissions, setSubmissions] = useState<KnowledgeSubmission[]>([]);
   const [published, setPublished] = useState<PublishedKnowledge[]>([]);
@@ -69,6 +67,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [newTitle, setNewTitle] = useState("");
   const [newBody, setNewBody] = useState("");
   const [newFile, setNewFile] = useState<File | null>(null);
+  const [newFileError, setNewFileError] = useState("");
+  const [newTitleError, setNewTitleError] = useState("");
+  const [dragActive, setDragActive] = useState(false);
   const [createMode, setCreateMode] = useState<"text" | "pdf">("text");
   const [newClassification, setNewClassification] = useState<KnowledgeClassification>("INTERNAL");
   const [screen, setScreen] = useState<"library" | "create" | "editor" | "document">("library");
@@ -79,11 +80,15 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [comment, setComment] = useState("");
+  const [commentSubmitted, setCommentSubmitted] = useState(false);
   const [decisionToConfirm, setDecisionToConfirm] = useState<"APPROVE" | "REJECT" | null>(null);
   const createRequestKey = useRef<string | null>(null);
   const submitRequestKey = useRef<string | null>(null);
   const decisionRequest = useRef<{ action: "APPROVE" | "REQUEST_REVISION" | "REJECT"; key: string } | null>(null);
   const openedCreatedDraftId = useRef<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const chooseFileButton = useRef<HTMLButtonElement>(null);
+  const decisionReason = useRef<HTMLTextAreaElement>(null);
 
   const reload = useCallback(async () => {
     const [nextDrafts, nextSubmissions, nextPublished, nextReviews, nextOptions] = await Promise.all([
@@ -93,7 +98,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     ]);
     setDrafts(nextDrafts); setSubmissions(nextSubmissions); setPublished(nextPublished);
     setReviews(nextReviews); setOptions(nextOptions);
-  }, [platform, organizationId]);
+    onAssignedReviewCount?.(nextReviews.length);
+  }, [platform, organizationId, onAssignedReviewCount]);
 
   useEffect(() => {
     let present = true;
@@ -144,10 +150,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   });
 
   const createDraft = () => void run(async () => {
-    if (!newTitle.trim()) { setError("Enter a title for this draft."); return; }
+    if (!newTitle.trim()) { setNewTitleError("Enter a title for this draft."); window.document.getElementById("knowledge-new-title")?.focus(); return; }
+    const pdfError = createMode === "pdf" ? validatePdfFile(newFile) : "";
+    if (pdfError) { setNewFileError(pdfError); chooseFileButton.current?.focus(); return; }
     const key = createRequestKey.current ?? crypto.randomUUID();
     createRequestKey.current = key;
-    if (createMode === "pdf" && !newFile) { setError("Choose a PDF file from your computer."); return; }
     const created = createMode === "pdf" && newFile
       ? await createPdfKnowledgeDraft(platform, organizationId,
         { title: newTitle.trim(), file: newFile, classification: newClassification }, key)
@@ -155,7 +162,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         { title: newTitle.trim(), body: newBody, classification: newClassification }, key);
     createRequestKey.current = null;
     setDraft(created); setEditor(valuesFromDraft(created)); setScreen("editor");
-    setNewTitle(""); setNewBody(""); setNewFile(null);
+    setNewTitle(""); setNewBody(""); setNewFile(null); setNewFileError(""); setNewTitleError("");
     await refresh(); setMessage("Draft saved on the Arden server. Add its governance metadata before submitting.");
   });
 
@@ -183,12 +190,17 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
 
   const openReview = (id: string) => void run(async () => {
     const loaded = await loadKnowledgeReview(platform, organizationId, id);
-    setReview(loaded); setComment(""); decisionRequest.current = null;
+    setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
   });
 
+  const requireDecisionReason = () => {
+    setCommentSubmitted(true);
+    if (comment.trim()) return true;
+    decisionReason.current?.focus();
+    return false;
+  };
   const decide = (action: "APPROVE" | "REQUEST_REVISION" | "REJECT") => void run(async () => {
     if (!review) return;
-    if (action !== "APPROVE" && !comment.trim()) { setError("Explain the requested changes or rejection before deciding."); return; }
     const existing = decisionRequest.current;
     const key = existing?.action === action ? existing.key : crypto.randomUUID();
     decisionRequest.current = { action, key };
@@ -208,9 +220,15 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   });
 
   const latestByDraft = new Map<string, KnowledgeSubmission>();
-  for (const submission of submissions) if (!latestByDraft.has(submission.draftId)) latestByDraft.set(submission.draftId, submission);
+  for (const submission of submissions) {
+    const previous = latestByDraft.get(submission.draftId);
+    if (!previous || Date.parse(submission.submittedAt) > Date.parse(previous.submittedAt)) latestByDraft.set(submission.draftId, submission);
+  }
   const dirty = Boolean(draft && editor && JSON.stringify(editor) !== JSON.stringify(valuesFromDraft(draft)));
   const latest = draft ? latestByDraft.get(draft.id) : undefined;
+  const currentDraftStatus = draft ? draftStatus({ hasPendingSubmission: draft.hasPendingSubmission,
+    responsibleDepartmentId: draft.responsibleDepartmentId, targetScopeType: draft.targetScopeType,
+    audienceRoleIds: draft.audienceRoleIds, versionId: draft.currentVersion.id }, latest) : null;
   const snapshotAlreadySubmitted = Boolean(latest && draft && latest.snapshotVersionId === draft.currentVersion.id);
   const ready = Boolean(editor?.responsibleDepartmentId && editor.targetScopeType
     && validAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], editor.targetScopeType));
@@ -222,22 +240,22 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
       : !ready ? "Complete the required governance metadata before submitting."
         : snapshotAlreadySubmitted ? "This version has already been submitted."
           : `Version ${draft?.currentVersion.version ?? 1} is ready to submit.`;
+  const chooseFile = (file: File | null) => { setNewFile(file); setNewFileError(file ? validatePdfFile(file) : ""); createRequestKey.current = null; };
 
   return <main id={active ? "arden-main" : undefined} className="workspace-page" tabIndex={-1}>
     <WorkspaceTopbar breadcrumb={`${organizationName} / ${view === "knowledge" ? "Knowledge" : "Review Queue"}`}
       previewLabel="ARDEN SERVER · GOVERNED CONTENT" contextOpen={contextOpen} onToggleContext={onToggleContext} />
     <div className="knowledge-feature-page knowledge-live-page">
       {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-      {message && <p role="status" className="knowledge-action-message">{message}</p>}
       {loading ? <div className="knowledge-empty" role="status">Loading governed knowledge…</div> : view === "review-queue" ? <>
-        <KnowledgeHeading eyebrow="WORKSPACE / REVIEW QUEUE" title={review ? "Review submitted version" : "Review Queue"}
-          description={review ? undefined : "Submissions assigned to you by active reviewer authority."}
+        <KnowledgeHeading eyebrow="WORKSPACE / REVIEW QUEUE" title={review ? review.title : "Review Queue"}
+          description={review ? undefined : "Submissions assigned to you through reviewer authority. You never review your own work."}
 
           action={<button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>} />
         {review && <button type="button" className="knowledge-back-button knowledge-live-back" onClick={() => setReview(null)}>← Assigned reviews</button>}
         {review ? <div className="knowledge-two-column knowledge-live-review-detail">
           <article className="knowledge-panel knowledge-live-document"><span className="meta-label knowledge-tone-blue">IMMUTABLE SUBMITTED SNAPSHOT</span>
-            <h2>{review.title}</h2><div className="knowledge-inline-meta"><KnowledgeBadge>{review.classification}</KnowledgeBadge>
+            <h2>{review.title}</h2><div className="knowledge-inline-meta"><KnowledgeBadge classification={review.classification}>{review.classification}</KnowledgeBadge>
               <KnowledgeBadge tone="blue">{departmentName(review.responsibleDepartmentId)}</KnowledgeBadge>
               <KnowledgeBadge tone="amber">{review.targetScopeType}</KnowledgeBadge></div>
             {review.mimeType === "application/pdf" && review.pdfBase64
@@ -248,56 +266,62 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <small>Snapshot hash: {review.contentHash}</small>
           </article>
           <div className="knowledge-live-side"><section className="knowledge-panel knowledge-live-submission"><h2>Submission</h2>
-            <dl><div><dt>Submitted</dt><dd>{new Date(review.submittedAt).toLocaleString()}</dd></div>
+            <dl><div><dt>Submitted by</dt><dd>{review.submittedByMembershipId}</dd></div><div><dt>Submitted</dt><dd>{new Date(review.submittedAt).toLocaleString()}</dd></div>
               <div><dt>Department</dt><dd>{departmentName(review.responsibleDepartmentId)}</dd></div>
-              <div><dt>Audience</dt><dd>{review.targetScopeType === "DEPARTMENT" ? "Responsible department" : "Organization"}</dd></div>
-              <div><dt>Team / project</dt><dd>{review.teamTag || "All teams"} · {review.projectTag || "all projects"}</dd></div></dl></section>
+              <div><dt>Access scope</dt><dd>{review.targetScopeType === "DEPARTMENT" ? "Responsible department" : "Organization"}</dd></div>
+              <div><dt>Audience</dt><dd>{review.audienceRoleIds.map((id) => options?.audienceRoles.find((role) => role.id === id)?.name ?? `${id} (inactive)`).join(", ") || "None"}</dd></div>
+              <div><dt>Team tag</dt><dd>{review.teamTag || "All teams"}</dd></div><div><dt>Project tag</dt><dd>{review.projectTag || "All projects"}</dd></div>
+              <div><dt>Snapshot hash</dt><dd className="knowledge-hash">{review.contentHash}</dd></div></dl></section>
           <aside className="knowledge-panel knowledge-live-decision"><span className="meta-label knowledge-tone-amber">HUMAN DECISION</span>
             <h2>Decision</h2><p>Decide the exact snapshot shown at left. Approval automatically publishes it.</p>
             {reviews.find((item) => item.submissionId === review.id)?.approvalBlocked &&
               <KnowledgeNotice title="Audience no longer enforceable" tone="amber">Approval is blocked until the author creates a new valid snapshot. You may request revision or reject.</KnowledgeNotice>}
-            <label>Decision reason<textarea rows={4} maxLength={2000} value={comment} disabled={busy}
+            <label>Decision reason<textarea ref={decisionReason} rows={4} maxLength={2000} value={comment} disabled={busy} aria-invalid={commentSubmitted && !comment.trim()} aria-describedby="knowledge-decision-help"
               onChange={(event) => setComment(event.target.value)} placeholder="Required for revision or rejection" /></label>
+            <small id="knowledge-decision-help" className={commentSubmitted && !comment.trim() ? "field-error" : ""}>{commentSubmitted && !comment.trim() ? "Explain the requested changes or rejection before deciding." : "Shared with the author. Required to request revision or reject."}</small>
             <div className="knowledge-live-actions">
-              <button type="button" className="primary-button" disabled={busy || reviews.find((item) => item.submissionId === review.id)?.approvalBlocked} onClick={() => setDecisionToConfirm("APPROVE")}>Approve &amp; auto-publish</button>
-              <button type="button" className="secondary-button" disabled={busy || !comment.trim()} onClick={() => decide("REQUEST_REVISION")}>Request revision</button>
-              <button type="button" className="secondary-button" disabled={busy || !comment.trim()} onClick={() => setDecisionToConfirm("REJECT")}>Reject</button>
+              <button type="button" className="primary-button" disabled={busy || reviews.find((item) => item.submissionId === review.id)?.approvalBlocked} onClick={() => setDecisionToConfirm("APPROVE")}>Approve and publish</button>
+              <button type="button" className="secondary-button" disabled={busy} onClick={() => { if (requireDecisionReason()) decide("REQUEST_REVISION"); }}>Request revision</button>
+              <button type="button" className="admin-text-danger" disabled={busy} onClick={() => { if (requireDecisionReason()) setDecisionToConfirm("REJECT"); }}>Reject submission…</button>
             </div>
           </aside></div>
         </div> : reviews.length ? <div className="knowledge-row-list">{reviews.map((item) =>
           <KnowledgeRow key={item.submissionId} title={item.title}
             details={`${departmentName(item.departmentId)} · ${item.classification} · submitted ${new Date(item.submittedAt).toLocaleString()}`}
-            status={item.approvalBlocked ? "Review · approval blocked" : "Review"} tone="amber"
+            status={item.approvalBlocked ? "Approval blocked" : "Ready to review"} tone={item.approvalBlocked ? "amber" : "blue"}
             onClick={() => openReview(item.submissionId)} />)}</div>
-          : <div className="knowledge-empty"><h2>No assigned reviews</h2></div>}
+          : <div className="knowledge-empty"><h2>No reviews assigned to you</h2></div>}
       </> : screen === "create" ? <>
-        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Create a shared draft"  />
+        <button type="button" className="knowledge-back-button knowledge-live-back" disabled={busy} onClick={() => setScreen("library")}>← Knowledge</button>
+        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Create a shared draft" description="The draft stays yours. Governance metadata and review come after it's saved." />
         <div className="knowledge-two-column"><form className="knowledge-panel knowledge-live-form" onSubmit={(event) => { event.preventDefault(); createDraft(); }}>
           <fieldset className="knowledge-create-source" disabled={busy}><legend>Content source</legend>
-            <label><input type="radio" name="knowledge-create-mode" checked={createMode === "text"} onChange={() => { setCreateMode("text"); createRequestKey.current = null; }} /> Write document text</label>
-            <label><input type="radio" name="knowledge-create-mode" checked={createMode === "pdf"} onChange={() => { setCreateMode("pdf"); createRequestKey.current = null; }} /> Upload PDF from this computer</label>
+            <label className={createMode === "pdf" ? "is-selected" : ""}><input type="radio" name="knowledge-create-mode" checked={createMode === "pdf"} onChange={() => { setCreateMode("pdf"); createRequestKey.current = null; }} /><strong>Upload a PDF</strong><small>Kept as the original file</small></label>
+            <label className={createMode === "text" ? "is-selected" : ""}><input type="radio" name="knowledge-create-mode" checked={createMode === "text"} onChange={() => { setCreateMode("text"); createRequestKey.current = null; }} /><strong>Write document text</strong><small>Arden's formatted editor</small></label>
           </fieldset>
-          <label>Title<input required maxLength={160} value={newTitle} disabled={busy} onChange={(event) => { setNewTitle(event.target.value); createRequestKey.current = null; }} /></label>
+          <label>Title *<input id="knowledge-new-title" maxLength={160} value={newTitle} disabled={busy} aria-invalid={Boolean(newTitleError)} aria-describedby="knowledge-new-title-help" onChange={(event) => { setNewTitle(event.target.value); setNewTitleError(""); createRequestKey.current = null; }} /><small id="knowledge-new-title-help" className={newTitleError ? "field-error" : ""}>{newTitleError || "Up to 160 characters."}</small></label>
           <label>Classification<select value={newClassification} disabled={busy} onChange={(event) => { setNewClassification(event.target.value as KnowledgeClassification); createRequestKey.current = null; }}>
-            <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select></label>
-          {createMode === "pdf" ? <label>PDF file (up to 5 MB)
-            <input type="file" accept=".pdf,application/pdf" disabled={busy} onChange={(event) => {
-              setNewFile(event.target.files?.[0] ?? null); createRequestKey.current = null;
-            }} />
-            <small>The original PDF is kept for review and download. It will not be converted into editable text.</small>
-          </label> : <div className="arden-document-field"><span>Document text</span>
+            <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select><small>You can change it before submitting.</small></label>
+          {createMode === "pdf" ? <div className={`knowledge-pdf-choose${dragActive ? " is-drag-active" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragActive(true); }} onDragLeave={() => setDragActive(false)} onDrop={(event) => { event.preventDefault(); setDragActive(false); chooseFile(event.dataTransfer.files[0] ?? null); }}>
+            <strong>Choose a PDF from this computer</strong><span>PDF only, up to 5 MB. The original is kept for review and download and isn't converted to editable text.</span>
+            <input ref={fileInput} className="knowledge-hidden-file-input" tabIndex={-1} type="file" accept=".pdf,application/pdf" disabled={busy} aria-label="Choose PDF file" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} />
+            <button ref={chooseFileButton} type="button" className="secondary-button" disabled={busy} aria-invalid={Boolean(newFileError)} aria-describedby="knowledge-pdf-help" onClick={() => fileInput.current?.click()}>Choose file</button>
+            <small id="knowledge-pdf-help" className={newFileError ? "field-error" : ""}>{newFileError}</small>
+            {newFile && !newFileError && <div className="knowledge-selected-pdf"><strong>{newFile.name}</strong><span>{(newFile.size / 1024 / 1024).toFixed(1)} MB · ready to upload</span><button type="button" disabled={busy} onClick={() => { chooseFile(null); if (fileInput.current) fileInput.current.value = ""; }}>Remove</button></div>}
+          </div> : <div className="arden-document-field"><span>Document text</span>
             <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor key="new-shared-knowledge"
               body={newBody} instanceKey="new-shared-knowledge" disabled={busy} onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
           </div>}
-          <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy || !newTitle.trim()}>Save new draft</button>
+          <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button>
             <button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); createRequestKey.current = null; }}>Cancel</button></div>
         </form></div>
       </> : screen === "editor" && draft && editor ? <>
         <button type="button" className="knowledge-back-button knowledge-live-back" onClick={() => { setScreen("library"); void refresh(); }}>← Knowledge</button>
         <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title={draft.title}
           action={<button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); void refresh(); }}>Back to library</button>} />
-        <div className="knowledge-inline-meta"><KnowledgeBadge tone={draft.hasPendingSubmission ? "amber" : "blue"}>{draft.hasPendingSubmission ? "Awaiting review" : "Working draft"}</KnowledgeBadge>
-          <KnowledgeBadge>{draft.classification}</KnowledgeBadge>{latest && <KnowledgeBadge tone={latest.status === "APPROVED" ? "jade" : "amber"}>{statusLabel(latest.status)}</KnowledgeBadge>}
+        <div className="knowledge-inline-meta"><span className={`knowledge-live-status ${currentDraftStatus?.tone ?? ""}`}>{currentDraftStatus?.label}</span>
+          <span>v{draft.currentVersion.version} · {draft.currentVersion.mimeType === "application/pdf" ? "PDF" : "Text"} · {departmentName(draft.responsibleDepartmentId)}</span>
+          <KnowledgeBadge classification={draft.classification}>{draft.classification}</KnowledgeBadge>
           {dirty && <span>Unsaved changes</span>}</div>
         {draft.hasPendingSubmission && <KnowledgeNotice title="Waiting for a reviewer" tone="amber">
           A different member needs an active reviewer grant for this department and classification. An Org Admin can assign one if the review queue is empty.
@@ -306,13 +330,13 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           {latest.decisionComment && <>Reviewer: {latest.decisionComment}<br /></>}
           Edit and save a new version, then resubmit. The earlier submitted snapshot is unchanged.
         </KnowledgeNotice>}
-        {latest?.status === "REJECTED" && <KnowledgeNotice title="Submission rejected" tone="amber">
+        {latest?.status === "REJECTED" && <KnowledgeNotice title="Submission rejected" tone="danger">
           {latest.decisionComment && <>Reviewer: {latest.decisionComment}<br /></>}
           This version was not published. You may revise the draft and submit a new version.
         </KnowledgeNotice>}
         {latest?.status === "APPROVED" && <KnowledgeNotice title="Approved and published" tone="jade">The system published the reviewed snapshot. A new edit requires a new submission before it can replace that publication.</KnowledgeNotice>}
         <div className="knowledge-editor-grid"><section className="knowledge-panel knowledge-live-form">
-          <label>Title<input maxLength={160} disabled={busy || draft.hasPendingSubmission} value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
+          <label>Title *<input maxLength={160} disabled={busy || draft.hasPendingSubmission} value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
           {draft.currentVersion.mimeType === "application/pdf" && draft.pdfBase64
             ? <PdfDocument base64={draft.pdfBase64} title={draft.title} />
             : <div className="arden-document-field"><span>Document text</span>
@@ -325,43 +349,56 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <ol><li><strong>v{draft.currentVersion.version} · {draft.hasPendingSubmission ? "awaiting review" : "working draft"}</strong><small>Updated {new Date(draft.updatedAt).toLocaleDateString()}</small></li>
             {submissions.filter((item) => item.draftId === draft.id).map((item) => <li key={item.id}><strong>{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
         </section><aside className="knowledge-panel knowledge-live-form"><div className="knowledge-live-meta-heading"><h2>Governance metadata</h2><small>* Required to submit</small></div>
-          <label>Responsible department<select disabled={busy || draft.hasPendingSubmission} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => setEditor({ ...editor, responsibleDepartmentId: event.target.value || null })}>
-            <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-          <label>Access scope<select disabled={busy || draft.hasPendingSubmission} value={editor.targetScopeType ?? ""} onChange={(event) => {
-            const targetScopeType = (event.target.value || null) as EditorValues["targetScopeType"];
-            const audienceRoleIds = normalizeAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], targetScopeType);
-            setEditor({ ...editor, targetScopeType, audienceRoleIds });
+          <label>Responsible department *<select disabled={busy || draft.hasPendingSubmission} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => {
+            const responsibleDepartmentId = event.target.value || null;
+            setEditor({ ...editor, responsibleDepartmentId, audienceRoleIds: editor.audienceRoleIds.filter((id) => {
+              const role = options?.audienceRoles.find((item) => item.id === id);
+              return role?.kind === "ALL_MEMBERS" || !role?.departmentId || role.departmentId === responsibleDepartmentId;
+            }) });
           }}>
-            <option value="">Choose scope</option><option value="DEPARTMENT">Responsible department</option><option value="ORGANIZATION">Organization</option></select></label>
-          <label>Classification<select disabled={busy || draft.hasPendingSubmission} value={editor.classification} onChange={(event) => setEditor({ ...editor, classification: event.target.value as KnowledgeClassification })}>
-            <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select></label>
-          <fieldset disabled={busy || draft.hasPendingSubmission}><legend>Audience roles</legend>
+            <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Reviewers are drawn from this department.</small></label>
+          <fieldset className="knowledge-option-cards" disabled={busy || draft.hasPendingSubmission}><legend>Access scope *</legend>{(["DEPARTMENT", "ORGANIZATION"] as const).map((scope) => <label key={scope} className={editor.targetScopeType === scope ? "is-selected" : ""}><input type="radio" name="knowledge-scope" checked={editor.targetScopeType === scope} onChange={() => setEditor({ ...editor, targetScopeType: scope,
+            audienceRoleIds: normalizeAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], scope) })} /><span><strong>{scope === "DEPARTMENT" ? "Responsible department" : "Organization"}</strong><small>{scope === "DEPARTMENT" ? "Only roles in the selected department" : "Organization-wide audiences"}</small></span></label>)}</fieldset>
+          <fieldset className="knowledge-option-cards knowledge-classification-cards" disabled={busy || draft.hasPendingSubmission}><legend>Classification *</legend>{(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] as const).map((classification) => <label key={classification} className={editor.classification === classification ? "is-selected" : ""}><input type="radio" name="knowledge-classification" checked={editor.classification === classification} onChange={() => setEditor({ ...editor, classification })} /><span><strong>{classification[0]}{classification.slice(1).toLowerCase()}</strong></span></label>)}</fieldset>
+          <fieldset disabled={busy || draft.hasPendingSubmission}><legend>Audience roles *</legend>
 
-            <div className="knowledge-live-role-list">{availableAudienceOptions(options?.audienceRoles ?? [], editor.targetScopeType).map((role) => <label key={role.id}>
+            {!editor.targetScopeType ? <p className="knowledge-field-helper">Choose an access scope to see available roles.</p> : <div className="knowledge-live-role-list">{availableAudienceOptions(options?.audienceRoles ?? [], editor.targetScopeType).map((role) => <label key={role.id}>
               <input type="checkbox" checked={editor.audienceRoleIds.includes(role.id)} onChange={(event) => setEditor({ ...editor,
                 audienceRoleIds: event.target.checked ? [...editor.audienceRoleIds, role.id] : editor.audienceRoleIds.filter((id) => id !== role.id) })} />
               <span>{role.name}{role.kind === "ALL_MEMBERS" ? " · Organization default"
-                : role.departmentId ? ` · ${departmentName(role.departmentId)}` : " · Organization"}</span></label>)}</div>
+                : role.departmentId ? ` · ${departmentName(role.departmentId)}` : " · Organization"}</span></label>)}</div>}
+            <small>Only roles available for the selected scope are listed.</small>
           </fieldset>
           <label>Team tag (optional)<input maxLength={100} disabled={busy || draft.hasPendingSubmission} value={editor.teamTag ?? ""} onChange={(event) => setEditor({ ...editor, teamTag: event.target.value || null })} /></label>
           <label>Project tag (optional)<input maxLength={100} disabled={busy || draft.hasPendingSubmission} value={editor.projectTag ?? ""} onChange={(event) => setEditor({ ...editor, projectTag: event.target.value || null })} /></label>
-          {!ready && <KnowledgeNotice title="Not ready to submit" tone="amber">Select a responsible department, access scope and at least one audience role.</KnowledgeNotice>}
+          <div className="knowledge-readiness" aria-label="Submission readiness"><strong>Ready to submit</strong>
+            <span>{editor.title.trim() ? "✓" : "✕"} Title <small>{editor.title.trim() ? "Done" : "Missing"}</small></span>
+            <span>{editor.responsibleDepartmentId ? "✓" : "✕"} Responsible department <small>{editor.responsibleDepartmentId ? "Done" : "Missing"}</small></span>
+            <span>{editor.targetScopeType ? "✓" : "✕"} Access scope <small>{editor.targetScopeType ? "Done" : "Missing"}</small></span>
+            <span>{validAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], editor.targetScopeType) ? "✓" : "✕"} Audience roles <small>{validAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], editor.targetScopeType) ? "Done" : "Missing"}</small></span>
+          </div>
         </aside></div></div>
-        <div className="knowledge-live-action-bar" role="group" aria-label="Draft actions"><span>{dirty ? "Unsaved changes · " : ""}{submitHint}</span>
+        <div className="knowledge-live-action-bar" role="group" aria-label="Draft actions"><span aria-live="polite">{dirty ? "Unsaved changes · " : ""}{submitHint}</span>
           <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy || draft.hasPendingSubmission || !dirty} onClick={saveDraft}>{busy ? "Working…" : "Save new version"}</button>
             <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit v{draft.currentVersion.version} for review</button></div></div>
       </> : screen === "document" && document ? <>
         <KnowledgeHeading eyebrow="WORKSPACE / PUBLISHED KNOWLEDGE" title={document.title}
           action={<button type="button" className="secondary-button" onClick={() => setScreen("library")}>Back to library</button>} />
-        <div className="knowledge-inline-meta"><KnowledgeBadge tone="jade">Published</KnowledgeBadge><KnowledgeBadge>{document.classification}</KnowledgeBadge>
+        <div className="knowledge-inline-meta"><KnowledgeBadge tone="jade">Published</KnowledgeBadge><KnowledgeBadge classification={document.classification}>{document.classification}</KnowledgeBadge>
           <span>Published {new Date(document.publishedAt).toLocaleString()}</span></div>
-        <article className="knowledge-panel knowledge-live-document">
+        <div className="knowledge-two-column knowledge-live-published"><article className="knowledge-panel knowledge-live-document">
           {document.mimeType === "application/pdf" && document.pdfBase64
             ? <PdfDocument base64={document.pdfBase64} title={document.title} />
             : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
               key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
               instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>}
-        </article>
+        </article><aside className="knowledge-panel knowledge-live-submission"><h2>Publication</h2><dl>
+          <div><dt>Published</dt><dd>{new Date(document.publishedAt).toLocaleString()}</dd></div>
+          <div><dt>Valid from</dt><dd>{new Date(document.validFrom).toLocaleString()}</dd></div>
+          <div><dt>Valid until</dt><dd>{document.validUntil ? new Date(document.validUntil).toLocaleString() : "No end date"}</dd></div>
+          <div><dt>Audience</dt><dd>{document.audienceRoleIds.map((id) => options?.audienceRoles.find((role) => role.id === id)?.name ?? `${id} (inactive)`).join(", ") || "None"}</dd></div>
+          <div><dt>Content hash</dt><dd className="knowledge-hash">{document.contentHash}</dd></div>
+        </dl></aside></div>
       </> : <>
         <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Knowledge" description="Drafts you own and the versions published to you."
           action={<div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
@@ -370,28 +407,30 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <button type="button" role="tab" aria-selected={libraryTab === "published"} className={libraryTab === "published" ? "is-active" : ""} onClick={() => setLibraryTab("published")}>Published for me <span>{published.length}</span></button></div>
           <SearchField value={query} onChange={setQuery} placeholder="Filter titles…" /></div>
         {libraryTab === "drafts" && (filteredDrafts.length ? <div className="knowledge-live-library-list" aria-label="My drafts">{filteredDrafts.map((item) => {
-          const status = latestByDraft.get(item.id)?.status;
+          const status = draftStatus(item, latestByDraft.get(item.id));
           return <button type="button" key={item.id} className="knowledge-live-library-row" onClick={() => openDraft(item.id)} aria-label={`Open ${item.title}`}>
             <span className="knowledge-live-file-kind" aria-hidden="true">{item.mimeType === "application/pdf" ? "PDF" : "TXT"}</span>
             <span className="knowledge-live-row-title"><strong>{item.title}</strong><small>v{item.currentVersion} · updated {new Date(item.updatedAt).toLocaleDateString()}</small></span>
-            <span className="knowledge-live-classification">{item.classification}</span><span>{departmentName(item.responsibleDepartmentId)}</span>
-            <span className={`knowledge-live-status ${status === "APPROVED" ? "is-success" : status === "PENDING_REVIEW" ? "is-info" : status === "CHANGES_REQUESTED" ? "is-attention" : ""}`}>{status ? statusLabel(status) : item.responsibleDepartmentId ? "Draft" : "Draft · metadata incomplete"}</span>
+            <span className="knowledge-live-classification" data-classification={item.classification}>{item.classification}</span><span>{departmentName(item.responsibleDepartmentId)}</span>
+            <span className={`knowledge-live-status ${status.tone}`}>{status.label}</span>
           </button>;
-        })}</div> : <div className="knowledge-empty"><h2>{drafts.length ? "No matching drafts" : "No drafts yet"}</h2><p>{drafts.length ? "Try another title." : "Create a draft to start the review process."}</p></div>)}
+        })}</div> : <div className="knowledge-empty"><h2>{drafts.length ? "No matching drafts" : "No drafts found"}</h2><p>{drafts.length ? "Try another title." : "Create a draft by writing text or uploading a PDF. It stays yours until you submit a version for review."}</p><button type="button" className="secondary-button" onClick={() => setScreen("create")}>Create draft</button></div>)}
         {libraryTab === "published" && (filteredPublished.length ? <div className="knowledge-live-library-list" aria-label="Published for me">{filteredPublished.map((item) =>
           <button type="button" className="knowledge-live-library-row" key={item.id} onClick={() => openPublished(item.id)} aria-label={`Read ${item.title}`}>
             <span className="knowledge-live-file-kind" aria-hidden="true">{item.mimeType === "application/pdf" ? "PDF" : "TXT"}</span>
             <span className="knowledge-live-row-title"><strong>{item.title}</strong><small>Published {new Date(item.publishedAt).toLocaleDateString()}</small></span>
-            <span className="knowledge-live-classification">{item.classification}</span><span>Approved snapshot</span><span className="knowledge-live-status is-success">Published</span>
+            <span className="knowledge-live-classification" data-classification={item.classification}>{item.classification}</span><span>Approved snapshot</span><span className="knowledge-live-status is-success">Published</span>
           </button>)}</div>
           : <div className="knowledge-empty"><h2>{published.length ? "No matching publications" : "No accessible publication"}</h2></div>)}
       </>}
     </div>
-    {decisionToConfirm && review && <KnowledgeDialog title={decisionToConfirm === "APPROVE" ? `Approve and publish ${review.title}?` : `Reject ${review.title}?`}
+    {decisionToConfirm && review && <KnowledgeDialog confirmation title={decisionToConfirm === "APPROVE" ? `Approve and publish ${review.title}?` : `Reject ${review.title}?`}
       onClose={() => setDecisionToConfirm(null)} dismissible={!busy}>
       <p>{decisionToConfirm === "APPROVE" ? "The server will publish this exact reviewed snapshot if approval succeeds." : "The author will need to revise and submit a new version. Nothing will be published."}</p>
+      {error && <p role="alert" className="knowledge-live-error">{error}</p>}
       <div className="knowledge-live-actions"><button type="button" className="secondary-button" autoFocus disabled={busy} onClick={() => setDecisionToConfirm(null)}>Cancel</button>
         <button type="button" className={decisionToConfirm === "REJECT" ? "admin-danger-button" : "primary-button"} disabled={busy} onClick={() => decide(decisionToConfirm)}>{busy ? "Working…" : decisionToConfirm === "APPROVE" ? "Approve and publish" : "Reject submission"}</button></div>
     </KnowledgeDialog>}
+    <ActionToast message={message} onDismiss={() => setMessage("")} />
   </main>;
 }

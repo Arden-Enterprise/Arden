@@ -22,6 +22,7 @@ export type KnowledgeFeaturePageProps = ContextControlProps & {
   departmentName?: string;
   showPrivateSample?: boolean;
   createdDraft?: CreatedKnowledgeDraft | null;
+  onAssignedReviewCount?: (count: number) => void;
   onNavigate?: (view: KnowledgeFeatureView | "my-work") => void;
 };
 
@@ -31,7 +32,8 @@ export function KnowledgeFeaturePage(props: KnowledgeFeaturePageProps) {
   if (props.platform && props.organizationId && (props.view === "knowledge" || props.view === "review-queue")) {
     return <ServerKnowledgeFeaturePage platform={props.platform} organizationId={props.organizationId}
       organizationName={props.organizationName ?? "Organization"} view={props.view} active={props.active ?? true}
-      createdDraftId={props.createdDraft?.id ?? null} contextOpen={props.contextOpen} onToggleContext={props.onToggleContext} />;
+      createdDraftId={props.createdDraft?.id ?? null} onAssignedReviewCount={props.onAssignedReviewCount}
+      contextOpen={props.contextOpen} onToggleContext={props.onToggleContext} />;
   }
   return <SampleKnowledgeFeaturePage {...props} />;
 }

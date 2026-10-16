@@ -16,7 +16,7 @@ export function KnowledgePane({ content, open, onToggle }: { content: PaneConten
   return (
     <aside ref={paneRef} id="arden-context-panel" className={`knowledge-pane-redesign${open ? "" : " is-collapsed"}`} aria-label="Knowledge Pane" tabIndex={-1}>
       <header className="knowledge-pane-header">
-        <strong>Knowledge Pane</strong>
+        <strong>Context</strong>
         <button type="button" className="pane-control" aria-label={open ? "Collapse context pane" : "Expand context pane"} aria-expanded={open} onClick={() => {
           onToggle();
           if (open) document.querySelector<HTMLButtonElement>(".context-toggle")?.focus();
@@ -26,11 +26,12 @@ export function KnowledgePane({ content, open, onToggle }: { content: PaneConten
         <div className="knowledge-pane-body">
           <span className="meta-label">{content.eyebrow}</span>
           <h2>{content.title}</h2>
+          <p>{content.description}</p>
 
           <section className="access-boundary" aria-labelledby="boundary-title">
             <span className="meta-label">ACCESS BOUNDARY</span>
             <strong id="boundary-title">{content.boundaryTitle}</strong>
-
+            <p>{content.boundaryBody}</p>
           </section>
         </div>
       </>}

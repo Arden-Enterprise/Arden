@@ -15,6 +15,7 @@ import { OrganizationAccessPage } from "../organization/OrganizationAccessPage";
 import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
 import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
+import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
 import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
 import { membershipReadiness } from "../organization/organizationWorkflow";
 import type { PaneContent, Platform, PrivateNote, WorkspaceView } from "../shared/types";
@@ -132,6 +133,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [activeView, setActiveView] = useState<WorkspaceView>("my-work");
   const privateNotes = usePrivateNotes(initialNotes);
   const [contextOpen, setContextOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const [contextOverlay, setContextOverlay] = useState(false);
+  const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
+  const shellRef = useRef<HTMLDivElement>(null);
   const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | null>(null);
   const [serverSession, setServerSession] = useState<CurrentSession | null>(null);
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
@@ -143,6 +148,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (membership.status !== "active" || !membership.canUsePrivateWorkspace) return;
     setServerOrganizationId(membership.organization.id);
     setCreatedKnowledgeDraft(null);
+    setAssignedReviewCount(undefined);
     setContributionAttempt(null);
     setOrganization(null);
     setPreviewRole(null);
@@ -175,14 +181,31 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   }, [platform, invitationToken]);
 
   useEffect(() => {
-    const compactWindow = window.matchMedia("(max-width: 1180px)");
-    const updateContext = (event: MediaQueryListEvent) => { if (event.matches) setContextOpen(false); };
-    compactWindow.addEventListener("change", updateContext);
-    return () => compactWindow.removeEventListener("change", updateContext);
-  }, []);
+    const shell = shellRef.current;
+    const sidebar = shell?.querySelector<HTMLElement>(".app-sidebar");
+    if (!shell || !sidebar) return;
+    const measure = () => {
+      const sidebarWidth = getComputedStyle(sidebar).position === "fixed" ? 0 : sidebar.getBoundingClientRect().width;
+      setContextOverlay(shell.getBoundingClientRect().width - sidebarWidth < 1100);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(shell); observer.observe(sidebar); measure();
+    return () => observer.disconnect();
+  }, [entryView]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
+      if (navOpen) setNavOpen(false);
+      else if (contextOpen) { setContextOpen(false); document.querySelector<HTMLButtonElement>(".context-toggle")?.focus(); }
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [contextOpen, navOpen]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
+    setNavOpen(false);
   }, [activeView, previewRole, entryView]);
 
   const enterMemberWorkspace = (memberId: string) => {
@@ -300,6 +323,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   }
 
   const navigate = (view: WorkspaceView) => {
+    setNavOpen(false);
     if (organizationDirty && activeView === "organization-access" && view !== activeView) {
       setPendingAction(view);
       return;
@@ -309,10 +333,12 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   };
 
   const finishSignOut = () => {
+    setNavOpen(false);
     if (serverSession) void apiSignOut(platform).catch(() => undefined);
     setServerSession(null);
     setServerOrganizationId(null);
     setCreatedKnowledgeDraft(null);
+    setAssignedReviewCount(undefined);
     setContributionAttempt(null);
     setPreviewRole(null);
     setEntryView("sign-in");
@@ -333,7 +359,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     finishSignOut();
   };
 
-  const contextControl = { contextOpen, onToggleContext: () => setContextOpen((open) => !open) };
+  const contextControl = { contextOpen, onToggleContext: () => { setNavOpen(false); setContextOpen((open) => !open); } };
   const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
   const liveAdmin = activeMembership?.roleCodes.includes("ORG_ADMIN") ?? false;
@@ -355,7 +381,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         : paneContent[activeView];
 
   return (
-    <div className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${activeView === "my-work" ? " is-my-work" : ""}`}>
+    <WorkspaceNavigationContext.Provider value={{ open: navOpen, setOpen: setNavOpen }}>
+    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${activeView === "my-work" ? " is-my-work" : ""}`}>
       <a className="skip-link" href="#arden-main">Skip to content</a>
       <AppSidebar
         activeView={activeView}
@@ -369,9 +396,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         memberRole={serverSession ? serverSession.memberships.find((item) => item.organization.id === serverOrganizationId)?.roleCodes.join(", ") || "Organization member" : previewMember?.role || "Awaiting assignment"}
         memberDepartment={serverSession ? "Member" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
+        assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined}
+        canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
+        onSwitchWorkspace={() => { setNavOpen(false); setContextOpen(false); setEntryView("workspace-select"); }}
+        onCloseNavigation={() => setNavOpen(false)}
         onNavigate={navigate}
         onSignOut={signOut}
       />
+      {navOpen && <button type="button" className="shell-nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
 
       {activeView === "my-work" ? (
         <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
@@ -390,9 +422,11 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           departmentName={activeMembership ? "Personal contribution" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
           showPrivateSample={!serverSession && previewMemberId === "sample-employee"}
           createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
+          onAssignedReviewCount={setAssignedReviewCount}
           onNavigate={navigate} {...contextControl} />
       </div>
 
+      {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close context" onClick={contextControl.onToggleContext} />}
       <KnowledgePane content={activeContext} open={contextOpen} onToggle={contextControl.onToggleContext} />
       {pendingAction && (
         <DiscardChangesDialog
@@ -410,5 +444,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         />
       )}
     </div>
+    </WorkspaceNavigationContext.Provider>
   );
 }
