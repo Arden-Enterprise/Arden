@@ -112,6 +112,16 @@ const app = buildApp({
     }
     return parsed.origin;
   })(),
+  publicApiOrigin: (() => {
+    if (flow1TestMode) return "http://127.0.0.1:3001";
+    const configured = process.env.ARDEN_PUBLIC_API_ORIGIN ?? (process.env.NODE_ENV === "production" ? null : "http://127.0.0.1:3001");
+    if (!configured) return null;
+    const parsed = new URL(configured);
+    if (parsed.origin !== configured || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash || (process.env.NODE_ENV === "production" && parsed.protocol !== "https:")) {
+      throw new Error("ARDEN_PUBLIC_API_ORIGIN must be an exact API origin (HTTPS in production)");
+    }
+    return parsed.origin;
+  })(),
 });
 
 const port = Number(process.env.ARDEN_API_PORT ?? 3001);

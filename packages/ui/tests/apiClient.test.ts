@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiRequest, createKnowledgeDraft, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview,
-  saveKnowledgeDraft, signIn, signOut, signUp, submitKnowledgeDraft } from "../src/shared/api-client";
+import { apiRequest, beginGoogleSignIn, createKnowledgeDraft, createNewKnowledgeDraft, createPdfKnowledgeDraft, currentSession,
+  decideKnowledgeReview, saveKnowledgeDraft, setAccountPassword, signIn, signOut, signUp,
+  submitKnowledgeDraft } from "../src/shared/api-client";
 
 const actorId = "11111111-1111-4111-8111-111111111111";
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -11,7 +12,7 @@ const createdDraft = {
   title: "Review notes", body: "Exact private text", classification: "CONFIDENTIAL", status: "ACTIVE",
   currentVersion: { id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", version: 1, mimeType: "text/plain", contentHash: "a".repeat(64) },
 };
-const me = { actor: { id: actorId }, memberships: [{
+const me = { actor: { id: actorId }, account: { passwordSetupRequired: false }, memberships: [{
   organization: { id: organizationId, name: "Synthetic Org" },
   status: "active", roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
 }] };
@@ -34,6 +35,17 @@ describe("Supabase session transport", () => {
       method: "POST", credentials: "include", body: JSON.stringify({ email: "member@example.test", password: "synthetic-password" }),
     }));
     expect(fetchMock).toHaveBeenNthCalledWith(2, "https://arden.example.test/api/v1/me", expect.objectContaining({ credentials: "include" }));
+  });
+
+  it("normalizes sessions from an older remote API without account setup state", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const legacySession = { actor: me.actor, memberships: me.memberships };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json(legacySession, { status: 200 })));
+
+    await expect(currentSession("web")).resolves.toEqual({
+      ...legacySession,
+      account: { passwordSetupRequired: false },
+    });
   });
 
   it("submits registration through the sign-up endpoint on web", async () => {
@@ -70,6 +82,26 @@ describe("Supabase session transport", () => {
     expect(requestApi).toHaveBeenNthCalledWith(2, {
       path: "/api/v1/me", method: "GET", body: undefined, ifMatch: undefined,
     });
+  });
+
+  it("finishes desktop Google sign-in through the isolated main-process window", async () => {
+    const startGoogleSignIn = vi.fn(async () => undefined);
+    const requestApi = vi.fn().mockResolvedValueOnce({ status: 200, body: JSON.stringify(me) });
+    vi.stubGlobal("window", { location: { origin: "file://" }, ardenDesktop: { requestApi, startGoogleSignIn } });
+    await expect(beginGoogleSignIn("desktop")).resolves.toEqual(me);
+    expect(startGoogleSignIn).toHaveBeenCalledOnce();
+    expect(requestApi).toHaveBeenCalledWith(expect.objectContaining({ path: "/api/v1/me", method: "GET" }));
+  });
+
+  it("creates the initial Arden password and refreshes the account state", async () => {
+    const requestApi = vi.fn()
+      .mockResolvedValueOnce({ status: 204, body: "" })
+      .mockResolvedValueOnce({ status: 200, body: JSON.stringify(me) });
+    vi.stubGlobal("window", { location: { origin: "file://" }, ardenDesktop: { requestApi } });
+    await expect(setAccountPassword("desktop", "new-password")).resolves.toEqual(me);
+    expect(requestApi).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      path: "/api/v1/auth/password", method: "POST", body: JSON.stringify({ password: "new-password" }),
+    }));
   });
 
   it("forwards update versions and clears encrypted desktop sessions after sign-out", async () => {

@@ -6,4 +6,5 @@ type DesktopApiResponse = { status: number; body: string; etag?: string; locatio
 contextBridge.exposeInMainWorld("ardenDesktop", {
   requestApi: (request: DesktopApiRequest): Promise<DesktopApiResponse> => ipcRenderer.invoke("arden:api-request", request),
   clearSession: (): Promise<void> => ipcRenderer.invoke("arden:session:clear"),
+  startGoogleSignIn: (): Promise<void> => ipcRenderer.invoke("arden:auth:google"),
 });

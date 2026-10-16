@@ -4,6 +4,7 @@ import { KnowledgePane } from "./KnowledgePane";
 import { MyWorkPage } from "../my-work/MyWorkPage";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
 import { SignInPage } from "../sign-in/SignInPage";
+import { SetPasswordPage } from "../sign-in/SetPasswordPage";
 import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
 import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
 import { InvitationAcceptPage } from "../organization/InvitationAcceptPage";
@@ -100,7 +101,7 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
   },
 };
 
-type EntryView = "sign-in" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
+type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
 
 function tokenFromInvitationPath(pathname: string): string | null {
   const match = /^\/invite\/([A-Za-z0-9_-]{43})\/?$/.exec(pathname);
@@ -158,11 +159,18 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   };
 
   const acceptServerSession = async (current: CurrentSession) => {
+    if (new URLSearchParams(window.location.search).has("auth")) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    setServerSession(current);
+    if (current.account?.passwordSetupRequired === true) {
+      setEntryView("password-setup");
+      return;
+    }
     if (invitationToken) {
       window.history.replaceState(null, "", "/");
       setInvitationToken(null);
     }
-    setServerSession(current);
     const allowed = current.memberships.filter((membership) => membership.status === "active" && membership.canUsePrivateWorkspace);
     if (allowed.length === 1) enterServerOrganization(allowed[0]);
     else setEntryView("workspace-select");
@@ -173,6 +181,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     restoreStarted.current = true;
     void restoreSession(platform).then((current) => {
       if (current) {
+        if (current.account?.passwordSetupRequired === true) return acceptServerSession(current);
         if (invitationToken) setServerSession(current);
         else return acceptServerSession(current);
       }
@@ -235,6 +244,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         }}
       />
     );
+  }
+
+  if (entryView === "password-setup" && serverSession) {
+    return <SetPasswordPage platform={platform} email={serverSession.actor.email} onComplete={acceptServerSession} />;
   }
 
   if (entryView === "sign-in") {

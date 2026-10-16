@@ -86,11 +86,41 @@ describe("API auth and private draft routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
       actor: { id: ownerId, email: "owner@example.test" },
+      account: { passwordSetupRequired: false },
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
         status: "active", roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
       }],
     });
+  });
+
+  it("completes Google PKCE sign-in and requires a one-time Arden password", async () => {
+    const started = await app.inject({ method: "GET", url: "/api/v1/auth/google/start?client=web" });
+    expect(started.statusCode).toBe(302);
+    expect(started.headers.location).toBe("https://accounts.google.test/oauth");
+    const oauthCookie = cookieHeader(started.headers["set-cookie"]);
+    expect(oauthCookie).toContain("arden_oauth=");
+
+    const callback = await app.inject({
+      method: "GET",
+      url: "/api/v1/auth/google/callback?code=synthetic-code&sb_flow_id=0123456789abcdef0123456789abcdef",
+      headers: { cookie: oauthCookie },
+    });
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toBe("https://arden.example.test/?auth=google&status=success&setup=password");
+    const sessionCookie = cookieHeader(callback.headers["set-cookie"]);
+    expect(sessionCookie).toContain("arden_access=access-google");
+
+    const before = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
+    expect(before.json().account).toEqual({ passwordSetupRequired: true });
+    const updated = await app.inject({
+      method: "POST", url: "/api/v1/auth/password",
+      headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
+      payload: { password: "new-password" },
+    });
+    expect(updated.statusCode).toBe(204);
+    const after = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
+    expect(after.json().account).toEqual({ passwordSetupRequired: false });
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
@@ -730,7 +760,7 @@ function cookieHeader(setCookie: string | string[] | undefined): string {
 
 class FakeAuthProvider implements AuthProvider {
   readonly revokedSessions: string[] = [];
-  private readonly usersByAccessToken = new Map<string, { userId: string; email: string }>();
+  private readonly usersByAccessToken = new Map<string, { userId: string; email: string; passwordSetupRequired: boolean }>();
 
   async signIn(credentials: { email: string; password: string }) {
     if (credentials.password !== "synthetic-password" || !credentials.email.endsWith("@example.test")) throw new Error("INVALID_CREDENTIALS");
@@ -738,7 +768,7 @@ class FakeAuthProvider implements AuthProvider {
     const userId = suffix === "owner" ? ownerId : otherId;
     const tokens = { accessToken: `access-${suffix}`, refreshToken: `refresh-${suffix}`, expiresIn: 3600 };
     const email = credentials.email.trim().toLowerCase();
-    this.usersByAccessToken.set(tokens.accessToken, { userId, email });
+    this.usersByAccessToken.set(tokens.accessToken, { userId, email, passwordSetupRequired: false });
     return { userId, email, fullName: null, tokens };
   }
 
@@ -752,6 +782,22 @@ class FakeAuthProvider implements AuthProvider {
   async signOut(tokens: { accessToken: string }) {
     this.usersByAccessToken.delete(tokens.accessToken);
     this.revokedSessions.push(tokens.accessToken);
+  }
+
+  async startGoogleSignIn() {
+    return { url: "https://accounts.google.test/oauth", flowId: "0123456789abcdef0123456789abcdef", verifier: "v".repeat(64) };
+  }
+
+  async completeGoogleSignIn() {
+    const tokens = { accessToken: "access-google", refreshToken: "refresh-google", expiresIn: 3600 };
+    this.usersByAccessToken.set(tokens.accessToken, { userId: ownerId, email: "owner@example.test", passwordSetupRequired: true });
+    return { userId: ownerId, email: "owner@example.test", fullName: "Owner", tokens, passwordSetupRequired: true };
+  }
+
+  async setInitialPassword(tokens: { accessToken: string }) {
+    const user = this.usersByAccessToken.get(tokens.accessToken);
+    if (!user) throw new Error("UNAUTHENTICATED");
+    user.passwordSetupRequired = false;
   }
 }
 
