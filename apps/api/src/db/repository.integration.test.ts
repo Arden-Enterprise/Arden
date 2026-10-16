@@ -33,8 +33,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const migration = await pool.query<{ count: string }>(`
       SELECT count(*)::text AS count FROM public.arden_schema_migrations
        WHERE migration_id IN ('0001_initial_schema', '0008_enable_private_shared_draft_creation',
-         '0015_org_admin_member_profiles')`);
-    if (migration.rows[0]?.count !== "3") throw new Error("Apply the current schema migrations to the isolated test database first");
+         '0015_org_admin_member_profiles', '0016_fix_flow2_cross_actor_validation')`);
+    if (migration.rows[0]?.count !== "4") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -51,7 +51,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
         SELECT $1, role_id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.ownerMembership, ids.organizationScope]);
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission WHERE code IN ('PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE')`, [ids.ownerRole]);
+        SELECT $1, permission_id FROM permission
+         WHERE code IN ('PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE', 'PUBLISHED_CONTENT_VIEW')`, [ids.ownerRole]);
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission WHERE code = 'PRIVATE_WORKSPACE_READ'`, [ids.managerRole]);
       await client.query("COMMIT");
@@ -75,7 +76,18 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("ALTER TABLE audit_event DISABLE TRIGGER USER");
           await client.query("ALTER TABLE draft_version DISABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_draft_version DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE shared_submission DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE review_decision DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE published_knowledge_version DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE knowledge_current_publication DISABLE TRIGGER USER");
           await client.query("DELETE FROM audit_event WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = $1", [ids.organization]);
+          await client.query(`DELETE FROM published_knowledge_version
+            WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
+          await client.query(`DELETE FROM review_decision
+            WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
+          await client.query("DELETE FROM shared_submission WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM knowledge_base WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM reviewer_grant WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE author_membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM shared_draft WHERE author_membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
@@ -92,6 +104,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM organization WHERE organization_id = $1", [ids.organization]);
           await client.query("ALTER TABLE draft_version ENABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_draft_version ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE shared_submission ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE review_decision ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE published_knowledge_version ENABLE TRIGGER USER");
+          await client.query("ALTER TABLE knowledge_current_publication ENABLE TRIGGER USER");
           await client.query("ALTER TABLE audit_event ENABLE TRIGGER USER");
           await client.query("COMMIT");
         } catch (error) {
@@ -238,5 +254,87 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query("ROLLBACK");
       client.release();
     }
+  });
+
+  it("approves and publishes a different member's exact snapshot under the runtime RLS role", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+
+    const contentHash = "c".repeat(64);
+    const created = await repository.createNewKnowledgeDraft(ids.owner, ids.organization, {
+      actorMembershipId: ids.ownerMembership,
+      title: "Cross-actor publication regression",
+      classification: "INTERNAL",
+      idempotencyKey: randomUUID(),
+      content: {
+        sourceUri: `arden-private-object://${randomUUID()}`,
+        mimeType: "text/plain",
+        contentHash,
+      },
+      requestId: "integration-flow2-create",
+    });
+    expect(created.kind).toBe("created");
+    if (created.kind !== "created") return;
+
+    const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
+      responsibleDepartmentId: ids.department,
+      targetScopeType: "ORGANIZATION",
+      audienceRoleIds: [ids.ownerRole],
+    }, null, "integration-flow2-configure");
+    expect(configured).toMatchObject({ kind: "updated", draft: { currentVersion: 2 } });
+    if (configured.kind !== "updated") return;
+
+    const submitted = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
+      created.draft.id, configured.draft.currentVersion, randomUUID(), "integration-flow2-submit");
+    expect(submitted.kind).toBe("submitted");
+    if (submitted.kind !== "submitted") return;
+
+    const grant = await repository.createReviewerGrant(ids.owner, ids.organization, {
+      reviewerMembershipId: ids.managerMembership,
+      departmentId: ids.department,
+      classifications: ["INTERNAL"],
+      level: "STANDARD",
+      teamTag: null,
+      projectTag: null,
+      validUntil: null,
+    }, "integration-flow2-reviewer-grant");
+    expect(grant).not.toBeNull();
+
+    const assigned = await repository.listAssignedReviews(ids.manager, ids.organization);
+    expect(assigned).toEqual(expect.arrayContaining([
+      expect.objectContaining({ submissionId: submitted.submission.id, snapshotId: submitted.submission.snapshotVersionId }),
+    ]));
+
+    const decisionKey = randomUUID();
+    const decided = await repository.decideReview(ids.manager, ids.organization, submitted.submission.id,
+      "APPROVE", submitted.submission.snapshotVersionId, submitted.submission.contentHash,
+      null, decisionKey, "integration-flow2-approve");
+    expect(decided).toMatchObject({
+      kind: "decided",
+      submission: { status: "APPROVED", publishedVersionId: expect.any(String) },
+    });
+
+    await expect(repository.decideReview(ids.manager, ids.organization, submitted.submission.id,
+      "APPROVE", submitted.submission.snapshotVersionId, submitted.submission.contentHash,
+      null, decisionKey, "integration-flow2-approve-replay"))
+      .resolves.toMatchObject({ kind: "replayed", submission: { status: "APPROVED" } });
+
+    const published = await repository.listPublishedKnowledge(ids.owner, ids.organization);
+    expect(published).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        draftId: created.draft.id,
+        title: "Cross-actor publication regression",
+        contentHash,
+      }),
+    ]));
+    await expect(repository.listPublishedKnowledge(ids.manager, ids.organization)).resolves.toEqual([]);
+
+    const evidence = await pool.query<{ event_type: string; count: string }>(`
+      SELECT event_type, count(*)::text AS count FROM arden.audit_event
+       WHERE organization_id = $1 AND event_type IN ('KNOWLEDGE_REVIEW_DECIDED', 'KNOWLEDGE_AUTO_PUBLISHED')
+       GROUP BY event_type ORDER BY event_type`, [ids.organization]);
+    expect(evidence.rows).toEqual([
+      { event_type: "KNOWLEDGE_AUTO_PUBLISHED", count: "1" },
+      { event_type: "KNOWLEDGE_REVIEW_DECIDED", count: "1" },
+    ]);
   });
 });
