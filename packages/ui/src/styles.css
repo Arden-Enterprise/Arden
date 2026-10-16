@@ -14,5 +14,6 @@
 @import "./styles/workspace-theme.css";
 @import "./styles/admin-redesign.css";
 @import "./styles/knowledge-redesign.css";
-@import "./styles/shell-redesign.css";
 @import "./styles/icons.css";
+@import "./styles/shell-redesign.css";
+@import "./styles/action-toast.css";

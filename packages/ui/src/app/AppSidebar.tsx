@@ -14,6 +14,10 @@ type AppSidebarProps = {
   memberRole?: string;
   memberDepartment?: string;
   environmentLabel?: string;
+  assignedReviewCount?: number;
+  canSwitchWorkspace?: boolean;
+  onSwitchWorkspace?: () => void;
+  onCloseNavigation?: () => void;
   onNavigate: (view: WorkspaceView) => void;
   onSignOut: () => void;
 };
@@ -44,22 +48,28 @@ export function AppSidebar({
   memberRole = "Employee",
   memberDepartment = "Product Engineering",
   environmentLabel,
+  assignedReviewCount,
+  canSwitchWorkspace = false,
+  onSwitchWorkspace,
+  onCloseNavigation,
   onNavigate,
   onSignOut,
 }: AppSidebarProps) {
   return (
-    <aside className="app-sidebar" aria-label="Main navigation">
+    <aside id="arden-primary-navigation" className="app-sidebar" aria-label="Main navigation">
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark" aria-hidden="true"><Icon name="knowledge" size={24} /></span>
         <span>ARDEN</span>
         <small>{environmentLabel ?? (!authenticated ? "PREVIEW" : null)}</small>
+        <button type="button" className="sidebar-mobile-close" aria-label="Close navigation" onClick={onCloseNavigation}>×</button>
       </div>
 
-      <section className="access-card" aria-labelledby="access-card-title">
+      <button type="button" className="access-card" disabled={!canSwitchWorkspace} onClick={onSwitchWorkspace}
+        aria-label={`Workspace: ${organizationLabel ?? organization?.name ?? "FPT Digital"}${canSwitchWorkspace ? ". Switch workspace" : ""}`}>
         <span className="access-card-mark" aria-hidden="true">{(organizationLabel ?? organization?.name ?? "FPT DIGITAL").split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span>
         <span className="access-card-copy"><strong id="access-card-title">{organizationLabel ?? organization?.name ?? "FPT DIGITAL"}</strong>
           <span>{authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`}</span></span>
-      </section>
+      </button>
 
       <nav className="sidebar-navigation" aria-label="Workspace">
           <span className="meta-label navigation-label">WORKSPACE</span>
@@ -72,12 +82,13 @@ export function AppSidebar({
               className={`sidebar-nav-item${active ? " is-active" : ""}`}
               onClick={() => { if (item.view) onNavigate(item.view); }}
               disabled={item.planned || (authenticated && item.view !== "knowledge" && item.view !== "review-queue")}
-              aria-label={item.label}
+              aria-label={item.label === "Review Queue" && assignedReviewCount !== undefined ? `Review Queue, ${assignedReviewCount} assigned` : item.label}
               aria-current={active ? "page" : undefined}
               title={authenticated && item.view === "knowledge" ? "View server draft and labeled sample library" : item.planned ? `${item.label} is not connected yet` : item.label}
             >
               <Icon name={item.icon} size={16} />
               <span>{item.label}</span>
+              {item.label === "Review Queue" && assignedReviewCount !== undefined && assignedReviewCount > 0 && <small className="sidebar-review-count">{assignedReviewCount}</small>}
               {item.planned && <small>Planned</small>}
             </button>
           );

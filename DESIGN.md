@@ -46,7 +46,7 @@ The original 4 October 2026 **Living Archive** foundation follows [Figma page 06
 
 Use the shared workspace tokens for canvas, surfaces and dividers. Muted blue carries navigation/selection and source context; amber carries primary actions and attention; sage carries success and connections; muted red carries errors and risk. Pair every status color with a visible label or icon. These accents do not justify gradients, rainbow decoration or fabricated analytics. Keep existing brand explorations separate from the accepted Figma icon assets.
 
-The implemented UI combines live authentication/private notes and a single server-backed shared-draft creation action with session-memory previews: My Work, most knowledge editing/review/publication and handover remain samples. A signed-in owner can copy a saved private-note version into a server draft; the returned draft receipt is visually separate from the synthetic library and cannot yet be reopened or edited through an API. Ask Arden has been removed from the current UI; AI/RAG is deferred, not available as a sample page or planned composer. There is no live graph screen. Native SVGs exported from the accepted Figma design are local decorative/interface assets, not fetched knowledge projections. [Mainflow 1 preview](docs/engineering/mainflow-1-preview.md) records the demonstrated transitions and the server work still required.
+The implemented UI combines live authentication, server-backed private notes and governed shared knowledge with session-memory previews for My Work and handover. Signed-in members can create text or PDF drafts, edit governance metadata, submit a version for review, and see authorized publications; assigned reviewers can decide an immutable snapshot. Preview content stays labeled and never represents a server write. Ask Arden and the graph remain deferred. Native SVGs exported from the accepted Figma design are local decorative/interface assets, not fetched knowledge projections. [Mainflow 1 preview](docs/engineering/mainflow-1-preview.md) records the earlier demonstration and its then-current boundaries.
 
 ## Typography and geometry
 
@@ -58,25 +58,25 @@ consistent sizing and accessible button labels; decorative glyphs are hidden fro
 screen readers. The free-license attribution remains visible on every screen.
 This does not adopt a new brand mark or replace the rich editor's own toolbar icons.
 
-Use Sora for headings and DM Sans for body, controls and metadata, with Segoe UI/sans-serif fallbacks. The variable TTF files and their OFL notices live in `packages/ui/src/assets/fonts/`; `@font-face` bundles them through Vite without runtime requests to a font service. Normal workspace headings use 30px, section headings 22px, body text 14px and metadata typically 12px. Sign-in has a larger editorial heading. Use heading weight 600, restrained tracking and tabular figures for counts. Wrap long note titles instead of hiding the selected title in a single-line input.
+Use Sora for headings and DM Sans for body, controls and metadata, with Segoe UI/sans-serif fallbacks. The variable TTF files and their OFL notices live in `packages/ui/src/assets/fonts/`; `@font-face` bundles them through Vite without runtime requests to a font service. Redesigned workspace page titles use 28px, section headings 15–18px, body text 14px and metadata typically 12px. Sign-in has a larger editorial heading. Use heading weight 600, restrained tracking and tabular figures for counts. Wrap long note titles instead of hiding the selected title in a single-line input.
 
 The server-backed shared-knowledge `Document text` field keeps the existing dark bordered writing surface and adds one compact toolbar inside that boundary. Users may choose Normal, Large or Heading text and apply bold, italic, underline, strike, inline code, bullet/numbered lists and quotes. Arden owns the typography: do not expose font family, arbitrary color, background color, remote embeds, files or decorative formatting. The same validated document formatting must appear in authoring, immutable review and published reading. Legacy plain text remains readable, disabled/pending editors retain their formatting without appearing editable, and the toolbar must wrap without horizontal page overflow at narrow widths.
 
 Corners remain square with small softening: 4px for small controls, 6px for buttons/navigation and 8px for major containers. Avoid card nesting when spacing and a divider can express the same relationship. Shadows are unnecessary on ordinary dark workspace surfaces.
 
-The primary workspace sidebar uses a Jira-scale information rail: 304px on wide desktop layouts and 264px on medium desktop layouts, before collapsing to the existing icon rail or mobile top navigation. Its additional width is paired with 24px desktop padding, 14px navigation text and 18px navigation icons so the rail remains intentionally proportioned rather than merely empty. Keep the sidebar scrollbar visually hidden at rest and reveal it on sidebar hover or keyboard focus without changing the content width.
+The primary workspace sidebar follows the redesign handoff: 248px on wide layouts, 224px at 900–1199px, and a 64px accessible icon rail at 640–899px. Below 640px it becomes a 280px overlay opened from the top bar, with a scrim and Escape-to-close behavior. Keep the sidebar scrollbar visually hidden at rest and reveal it on sidebar hover or keyboard focus without changing the content width.
 
-Interaction depth is selective: featured/raised surfaces use a soft dark shadow and quiet top edge, while actionable rows, navigation and buttons respond with a small lift or lateral shift. Short entrance motion is limited to page sections, the context pane, feedback and dialogs; there is no continuous decorative animation. Hover motion applies only to fine pointers, keyboard focus remains visible without requiring motion, and reduced-motion preferences remove transforms and entrance effects.
+The redesigned shell, Administration and Knowledge surfaces use dividers, flat tints and a scrim for depth rather than box-shadows. Hover and focus states change background and border without moving controls; reduced-motion preferences remain respected elsewhere in the workspace.
 
 ## Shell and responsive behavior
 
-The desktop shell has a 304px sidebar and a flexible workspace. Context starts collapsed and occupies no rail; opening it adds a 320px Knowledge Pane. At 1280px and below, navigation is 264px and the expanded pane 280px. Crossing into 1180px or below collapses context; the user can reopen it. From 761–980px, navigation is a 72px icon rail with accessible names and tooltips.
+The desktop shell has a flexible workspace. Context starts collapsed and occupies no rail; opening it adds a 320px Context pane inline only when the measured workspace width after the sidebar is at least 1100px. Otherwise Context overlays the workspace, with a scrim; on mobile it may take the full width. The top bar remains 56px high and shows structured breadcrumbs. The Review Queue nav item displays the assigned review count when server data is available.
 
 Every primary workspace destination uses the shared page header for its eyebrow, title, description and optional action. The workspace top bar and page header remain visible while only the content region below them scrolls; body scrolling must not move shell navigation or page identity. Keep this split consistent across My Work, Knowledge, Review Queue, Knowledge Handover, Personal Workspace and Organization administration, including narrow layouts.
 
 The workspace is an inline-size query container. Below 760px **of available workspace width**, My Work sections stack; the note layout stacks below 640px. This depends on the actual content width rather than the viewport alone, so opening a pane cannot push editor controls beneath it. Below 500px of content width, compact forms and organization rows stack further.
 
-At viewport widths of 760px or below, navigation becomes a sticky 64px strip with short visible labels. Its destinations scroll horizontally inside the navigation strip rather than widening the page; the workspace top bar stays below it. Private notes show either the list or the editor. Selecting or creating a note opens the editor and hides the introductory heading/search so writing starts sooner; Back to notes restores the list and New private note action without discarding a draft. The collapsed context pane occupies no mobile space. Opening Context reveals the pane below the workspace and moves focus/scroll to it; closing it returns focus to the Context control. Organization tables, setup steps, dialogs and knowledge layouts must reflow without hiding required actions.
+Below 640px, the top-bar hamburger opens the sidebar over the workspace. Private notes show either the list or the editor. Selecting or creating a note opens the editor and hides the introductory heading/search so writing starts sooner; Back to notes restores the list and New private note action without discarding a draft. The collapsed Context pane occupies no mobile space; opening it overlays the workspace and closing it returns focus to the Context control. Organization tables, setup steps, dialogs and knowledge layouts must reflow without hiding required actions.
 
 On mobile sign-in, keep the brand and a compact introduction above the form. The long desktop explanation is omitted so the form appears sooner.
 
@@ -135,14 +135,14 @@ retain accessible names even without visible descriptions; remove dangling
 `aria-describedby` references when removing helper text. Do not hide copy globally
 with CSS or remove all `small`/`p` elements: many contain actual data or feedback.
 
-Custom-role configuration uses a flat two-column role rail/editor, with Display,
-Permissions and Members sections, permission switches, search and an Apply/Reset
-bar. Amber marks selection/actions; jade marks enabled switches. At narrow
-workspace widths the rail stacks above the editor. Private defaults and protected
-management rights are not editable switches. Until role APIs support configuration,
-the panel is prominently labeled UI preview and Apply never implies a server write.
-See [custom-role UI boundary](docs/engineering/custom-role-ui-preview.md).
+Custom-role configuration uses a flat two-column role rail/editor, with Details,
+Permissions and Members sections, permission switches, search and a Save/Reset
+bar. Blue marks selection and jade marks enabled switches. At narrow workspace
+widths the rail stacks above the editor. Private defaults and protected management
+rights are not editable switches. In a signed-in administration session, custom-role
+changes use server APIs; the preview flow remains visibly synthetic. See
+[custom-role UI boundary](docs/engineering/custom-role-ui-preview.md) for the earlier preview contract.
 
-Use stable accessible search names independent of shortcut hints and clear buttons. All editable fields must retain visible keyboard focus. Active navigation must remain legible on hover. Use warm focus rings, at least 44px main action targets, reduced-motion rules and a skip-to-content link. Native dialog confirmation keeps focus inside the dialog and restores focus on dismissal.
+Use stable accessible search names independent of shortcut hints and clear buttons. All editable fields must retain visible keyboard focus. Active navigation must remain legible on hover. Redesigned controls use a blue 2px focus ring, 40px main actions, reduced-motion rules and a skip-to-content link. Native dialog confirmation keeps focus inside the dialog and restores focus on dismissal.
 
 Check 1440px desktop, 1024px narrow windows, 390px/320px mobile, long content and 200% zoom/reflow. Check expanded and collapsed context, mobile editor/back navigation, note switching, save/reset/exit, empty search and keyboard access. Shared UI must be checked in web and Electron; a successful build alone does not prove native behavior.
