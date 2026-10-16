@@ -25,11 +25,12 @@ type AppDependencies = {
   storage: PrivateContentStorage;
   invitationMailer?: InvitationMailer | null;
   publicWebOrigin?: string | null;
+  publicApiOrigin?: string | null;
   invitationDeliveryMode?: "email" | "local-test-no-email";
   testActor?: SessionContext;
 };
 
-type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean };
+type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean; passwordSetupRequired?: boolean };
 type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification: KnowledgeClassification };
 
 export function buildApp(dependencies: AppDependencies) {
@@ -115,6 +116,79 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  app.get<{ Querystring: { client?: string } }>("/api/v1/auth/google/start", async (request, reply) => {
+    if (!dependencies.auth?.startGoogleSignIn) return authUnavailable(reply, request);
+    const client = request.query.client === "desktop" ? "desktop" : "web";
+    const callbackOrigin = client === "desktop" ? dependencies.publicApiOrigin : dependencies.publicWebOrigin;
+    if (!callbackOrigin) return authUnavailable(reply, request);
+    try {
+      const callbackUrl = `${callbackOrigin}/api/v1/auth/google/callback`;
+      const result = await dependencies.auth.startGoogleSignIn(callbackUrl);
+      const state = Buffer.from(JSON.stringify({ flowId: result.flowId, verifier: result.verifier, client }), "utf8").toString("base64url");
+      if (state.length > 3000) throw new Error("INVALID_AUTH_RESPONSE");
+      reply.header("set-cookie", oauthStateCookie(state, dependencies.secureCookies));
+      return reply.redirect(result.url);
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Google sign-in could not be started");
+      return authUnavailable(reply, request);
+    }
+  });
+
+  app.get<{ Querystring: { code?: string; error?: string; error_description?: string; sb_flow_id?: string } }>(
+    "/api/v1/auth/google/callback",
+    async (request, reply) => {
+      const state = readOAuthState(request.headers.cookie, dependencies.secureCookies);
+      const fallbackClient = state?.client === "desktop" ? "desktop" : "web";
+      const completeUrl = fallbackClient === "desktop"
+        ? "/api/v1/auth/google/desktop-complete"
+        : `${dependencies.publicWebOrigin ?? ""}/?auth=google`;
+      if (!dependencies.auth?.completeGoogleSignIn || !state || request.query.error || !request.query.code ||
+        request.query.sb_flow_id && request.query.sb_flow_id !== state.flowId) {
+        reply.header("set-cookie", clearOAuthStateCookie(dependencies.secureCookies));
+        return reply.redirect(`${completeUrl}${completeUrl.includes("?") ? "&" : "?"}status=error`);
+      }
+      try {
+        const result = await dependencies.auth.completeGoogleSignIn(request.query.code, state.flowId, state.verifier);
+        setAuthCookies(reply, result.tokens, dependencies.secureCookies, [clearOAuthStateCookie(dependencies.secureCookies)]);
+        const suffix = `status=success${result.passwordSetupRequired ? "&setup=password" : ""}`;
+        return reply.redirect(`${completeUrl}${completeUrl.includes("?") ? "&" : "?"}${suffix}`);
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Google sign-in callback failed");
+        reply.header("set-cookie", clearOAuthStateCookie(dependencies.secureCookies));
+        return reply.redirect(`${completeUrl}${completeUrl.includes("?") ? "&" : "?"}status=error`);
+      }
+    },
+  );
+
+  app.get("/api/v1/auth/google/desktop-complete", async (_request, reply) => {
+    return reply.type("text/html; charset=utf-8").send("<!doctype html><html><body>Authentication complete. You may return to Arden.</body></html>");
+  });
+
+  app.post<{ Body: { password: string } }>("/api/v1/auth/password", {
+    schema: {
+      body: { type: "object", additionalProperties: false, required: ["password"], properties: {
+        password: { type: "string", minLength: 8, maxLength: 1024 },
+      } },
+    },
+  }, async (request, reply) => {
+    if (!dependencies.auth?.setInitialPassword) return authUnavailable(reply, request);
+    const tokens = readAuthCookies(request.headers.cookie, dependencies.secureCookies);
+    if (!tokens) return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+    try {
+      const resolution = await dependencies.auth.resolveSession(tokens);
+      if (resolution.kind !== "authenticated") return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+      if (!resolution.passwordSetupRequired) return reply.code(409).send(safeError("PASSWORD_ALREADY_INITIALIZED", "This account already has a password.", request.id));
+      await dependencies.auth.setInitialPassword(tokens, request.body.password);
+      return reply.code(204).send();
+    } catch (error) {
+      if (error instanceof Error && error.message === "PASSWORD_REJECTED") {
+        return reply.code(400).send(safeError("PASSWORD_REJECTED", "Choose a stronger password and try again.", request.id));
+      }
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Initial password setup failed");
+      return authUnavailable(reply, request);
+    }
+  });
+
   app.post<{ Body: { email: string; password: string; fullName: string } }>("/api/v1/auth/sign-up", {
     schema: {
       body: {
@@ -169,6 +243,7 @@ export function buildApp(dependencies: AppDependencies) {
       const memberships = await dependencies.repository.listMemberships(context.userId);
       return {
         actor: { id: context.userId, email: context.email },
+        account: { passwordSetupRequired: Boolean(context.passwordSetupRequired) },
         ...(dependencies.testActor ? { testMode: true } : {}),
         memberships: memberships.map((membership) => ({
           organization: { id: membership.organizationId, name: membership.organizationName },
@@ -1229,6 +1304,7 @@ async function requireAuthenticatedActor(request: FastifyRequest, reply: Fastify
         email: resolution.email,
         fullName: resolution.fullName,
         emailVerified: resolution.emailVerified,
+        passwordSetupRequired: resolution.passwordSetupRequired,
       };
     }
     if (resolution.kind === "unavailable") {
@@ -1267,13 +1343,37 @@ function readAuthCookies(header: string | undefined, secure: boolean): AuthSessi
   return { accessToken, refreshToken, expiresIn: 3600 };
 }
 
-function setAuthCookies(reply: FastifyReply, tokens: AuthSessionTokens, secure: boolean): void {
+function setAuthCookies(reply: FastifyReply, tokens: AuthSessionTokens, secure: boolean, additional: string[] = []): void {
   const names = cookieNames(secure);
   const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
   reply.header("set-cookie", [
     `${names.access}=${tokens.accessToken}; ${attributes}`,
     `${names.refresh}=${tokens.refreshToken}; ${attributes}`,
+    ...additional,
   ]);
+}
+
+function oauthStateName(secure: boolean): string { return secure ? "__Host-arden_oauth" : "arden_oauth"; }
+function oauthStateCookie(value: string, secure: boolean): string {
+  return `${oauthStateName(secure)}=${value}; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}; Max-Age=600`;
+}
+function clearOAuthStateCookie(secure: boolean): string {
+  return `${oauthStateName(secure)}=; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}; Max-Age=0`;
+}
+function readOAuthState(header: string | undefined, secure: boolean): { flowId: string; verifier: string; client: "web" | "desktop" } | null {
+  if (!header || header.length > 8192) return null;
+  const prefix = `${oauthStateName(secure)}=`;
+  const value = header.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix))?.slice(prefix.length);
+  if (!value || value.length > 3000) return null;
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
+    if (typeof parsed !== "object" || parsed === null || !("flowId" in parsed) || !("verifier" in parsed) || !("client" in parsed)) return null;
+    const state = parsed as Record<string, unknown>;
+    if (typeof state.flowId !== "string" || !/^[a-f0-9]{32}$/i.test(state.flowId) ||
+      typeof state.verifier !== "string" || state.verifier.length < 32 || state.verifier.length > 256 ||
+      (state.client !== "web" && state.client !== "desktop")) return null;
+    return state as { flowId: string; verifier: string; client: "web" | "desktop" };
+  } catch { return null; }
 }
 
 function clearAuthCookies(reply: FastifyReply, secure: boolean): void {

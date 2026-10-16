@@ -10,6 +10,7 @@ declare global {
         location?: string;
       }>;
       clearSession(): Promise<void>;
+      startGoogleSignIn(): Promise<void>;
     };
   }
 }

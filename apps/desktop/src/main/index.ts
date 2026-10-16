@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, safeStorage, session } from "electron";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { desktopApiResponseLimit, validateDesktopApiRequest, type DesktopApiRequest } from "./apiRequestPolicy";
 
 type DesktopApiResponse = { status: number; body: string; etag?: string; location?: string };
@@ -122,6 +123,82 @@ ipcMain.handle("arden:session:clear", async (event) => {
   cookieJar = new Map();
   await rm(sessionFile(), { force: true });
 });
+
+ipcMain.handle("arden:auth:google", async (event) => {
+  if (!isTrustedRenderer(event)) throw new Error("Untrusted IPC sender");
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  if (!parent) throw new Error("Arden window is unavailable");
+  await startDesktopGoogleSignIn(parent);
+});
+
+async function startDesktopGoogleSignIn(parent: BrowserWindow): Promise<void> {
+  const origin = trustedApiOrigin();
+  const partition = `arden-oauth-${randomUUID()}`;
+  const authSession = session.fromPartition(partition, { cache: false });
+  authSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  const authWindow = new BrowserWindow({
+    parent,
+    modal: true,
+    show: true,
+    width: 520,
+    height: 720,
+    minWidth: 420,
+    minHeight: 600,
+    title: "Sign in to Arden",
+    backgroundColor: "#17191b",
+    webPreferences: {
+      partition,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+    },
+  });
+  authWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  authWindow.webContents.on("will-navigate", (event, target) => {
+    try {
+      const url = new URL(target);
+      const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+      if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) event.preventDefault();
+    } catch { event.preventDefault(); }
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (!authWindow.isDestroyed()) authWindow.close();
+      if (error) reject(error); else resolve();
+    };
+    const timeout = setTimeout(() => finish(new Error("Google sign-in timed out")), 5 * 60 * 1000);
+    authWindow.on("closed", () => {
+      if (!settled) finish(new Error("Google sign-in was cancelled"));
+    });
+    authWindow.webContents.on("did-navigate", async (_event, target) => {
+      try {
+        const url = new URL(target);
+        if (url.origin !== origin || url.pathname !== "/api/v1/auth/google/desktop-complete") return;
+        if (url.searchParams.get("status") !== "success") return finish(new Error("Google sign-in could not be completed"));
+        const cookies = await authSession.cookies.get({ url: origin });
+        const allowedNames = new Set(["arden_access", "arden_refresh", "__Host-arden_access", "__Host-arden_refresh"]);
+        const jar = await readCookieJar(origin);
+        for (const name of allowedNames) jar.delete(name);
+        for (const cookie of cookies) if (allowedNames.has(cookie.name) && cookie.value) jar.set(cookie.name, cookie.value);
+        if (!["arden_access", "__Host-arden_access"].some((name) => jar.has(name)) ||
+          !["arden_refresh", "__Host-arden_refresh"].some((name) => jar.has(name))) {
+          return finish(new Error("Google sign-in did not return an Arden session"));
+        }
+        await persistCookieJar(jar, origin);
+        finish();
+      } catch (error) {
+        finish(error instanceof Error ? error : new Error("Google sign-in could not be completed"));
+      }
+    });
+    void authWindow.loadURL(`${origin}/api/v1/auth/google/start?client=desktop`).catch((error) => finish(error));
+  });
+}
 
 function createWindow() {
   const window = new BrowserWindow({

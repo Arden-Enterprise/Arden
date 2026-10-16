@@ -9,7 +9,12 @@ export type OrganizationMembership = {
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
 };
-export type CurrentSession = { actor: { id: string; email?: string }; memberships: OrganizationMembership[]; testMode?: boolean };
+export type CurrentSession = {
+  actor: { id: string; email?: string };
+  account: { passwordSetupRequired: boolean };
+  memberships: OrganizationMembership[];
+  testMode?: boolean;
+};
 export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
@@ -240,6 +245,22 @@ export async function signIn(platform: Platform, email: string, password: string
   return currentSession(platform);
 }
 
+export async function beginGoogleSignIn(platform: Platform): Promise<CurrentSession | null> {
+  if (platform === "web") {
+    window.location.assign("/api/v1/auth/google/start?client=web");
+    return null;
+  }
+  await requireDesktopBridge().startGoogleSignIn();
+  return currentSession(platform);
+}
+
+export async function setAccountPassword(platform: Platform, password: string): Promise<CurrentSession> {
+  await request(platform, "/api/v1/auth/password", {
+    method: "POST", body: JSON.stringify({ password }),
+  });
+  return currentSession(platform);
+}
+
 export async function restoreSession(platform: Platform): Promise<CurrentSession | null> {
   try { return await currentSession(platform); }
   catch (error) {
@@ -259,7 +280,13 @@ export async function signOut(platform: Platform): Promise<void> {
 }
 
 export async function currentSession(platform: Platform): Promise<CurrentSession> {
-  return request<CurrentSession>(platform, "/api/v1/me");
+  const session = await request<Omit<CurrentSession, "account"> & {
+    account?: { passwordSetupRequired?: boolean };
+  }>(platform, "/api/v1/me");
+  return {
+    ...session,
+    account: { passwordSetupRequired: session.account?.passwordSetupRequired === true },
+  };
 }
 
 export async function createOrganization(platform: Platform, name: string, departmentName: string): Promise<void> {

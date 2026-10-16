@@ -1,4 +1,5 @@
 @import "@blocknote/ariakit/style.css";
+@import "@flaticon/flaticon-uicons/css/brands/all.css";
 @import "./styles/base.css";
 @import "./styles/sign-in.css";
 @import "./styles/app-shell.css";
