@@ -111,9 +111,27 @@ function tokenFromInvitationPath(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
+function parseRecoveryHash(hash: string): { accessToken: string; refreshToken: string } | null {
+  if (!hash || !hash.includes("type=recovery")) return null;
+  const params = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
+  const accessToken = params.get("access_token");
+  const refreshToken = params.get("refresh_token");
+  if (accessToken && refreshToken) {
+    return { accessToken, refreshToken };
+  }
+  return null;
+}
+
 export function ArdenShell({ platform }: ArdenShellProps) {
   const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
   const [invitationToken, setInvitationToken] = useState<string | null>(() => tokenFromInvitationPath(window.location.pathname));
+  const [recoveryTokens, setRecoveryTokens] = useState<{ accessToken: string; refreshToken: string } | null>(() => {
+    const parsed = parseRecoveryHash(window.location.hash);
+    if (parsed) {
+      try { window.history.replaceState(null, "", window.location.pathname); } catch {}
+    }
+    return parsed;
+  });
   const [entryView, setEntryView] = useState<EntryView>(() => invitationToken ? "invite-link" : "sign-in");
   const [previewMemberId, setPreviewMemberId] = useState("sample-employee");
   const [invitationId, setInvitationId] = useState("");
@@ -143,6 +161,9 @@ export function ArdenShell({ platform }: ArdenShellProps) {
     if (invitationToken) {
       window.history.replaceState(null, "", "/");
       setInvitationToken(null);
+    }
+    if (recoveryTokens) {
+      setRecoveryTokens(null);
     }
     setServerSession(current);
     const allowed = current.memberships.filter((membership) => membership.status === "active" && membership.canUsePrivateWorkspace);
@@ -206,6 +227,8 @@ export function ArdenShell({ platform }: ArdenShellProps) {
     return (
       <SignInPage
         platform={platform}
+        initialMode={recoveryTokens || (typeof window !== "undefined" && window.location.pathname === "/reset-password") ? "reset-password" : "sign-in"}
+        recoveryTokens={recoveryTokens}
         onAuthenticated={acceptServerSession}
         onEnterPreview={() => {
           setServerSession(null);

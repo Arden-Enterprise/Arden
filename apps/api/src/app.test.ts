@@ -88,6 +88,77 @@ describe("API auth and private draft routes", () => {
     });
   });
 
+  it("processes account sign-up and returns 409 when user already exists", async () => {
+    const success = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "newuser@example.test", password: "secure-password", fullName: "New User" },
+    });
+    expect(success.statusCode).toBe(202);
+    expect(success.json()).toEqual({
+      status: "check_email",
+      message: "If account setup can proceed, check your email for confirmation. Then return to this invitation and sign in to accept it.",
+    });
+
+    authProvider.signUpBehavior = "already_exists";
+    const conflict = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "existing@example.test", password: "secure-password", fullName: "Existing User" },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error).toMatchObject({
+      code: "ACCOUNT_ALREADY_EXISTS",
+      message: "An account with this email address already exists. Please sign in instead.",
+    });
+
+    authProvider.signUpBehavior = "rejected";
+    const rejected = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "weak@example.test", password: "123", fullName: "Weak User" },
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().error).toMatchObject({
+      code: "ACCOUNT_SETUP_UNAVAILABLE",
+    });
+  });
+
+  it("handles forgot password requests, verification proxy, and password reset", async () => {
+    const forgot = await app.inject({
+      method: "POST", url: "/api/v1/auth/forgot-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test" },
+    });
+    expect(forgot.statusCode).toBe(202);
+    expect(forgot.json().status).toBe("recovery_sent");
+    expect(authProvider.lastResetEmail).toBe("owner@example.test");
+
+    const verify = await app.inject({
+      method: "GET", url: "/auth/v1/verify?token=valid-link&type=recovery",
+    });
+    expect(verify.statusCode).toBe(303);
+    expect(verify.headers.location).toContain("reset-password");
+
+    const resetWithOtp = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "new-secure-password" },
+    });
+    expect(resetWithOtp.statusCode).toBe(200);
+    expect(resetWithOtp.json()).toEqual({ status: "password_updated" });
+    expect(authProvider.lastUpdatedPassword?.password).toBe("new-secure-password");
+    expect(cookieHeader(resetWithOtp.headers["set-cookie"])).toContain("arden_access=access-recovery");
+
+    const invalidOtp = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "wrong-token", newPassword: "new-secure-password" },
+    });
+    expect(invalidOtp.statusCode).toBe(401);
+    expect(invalidOtp.json().error.code).toBe("INVALID_TOKEN");
+  });
+
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
     const noLoginApp = buildApp({
       checkDatabase: async () => undefined,
@@ -437,6 +508,9 @@ function cookieHeader(setCookie: string | string[] | undefined): string {
 
 class FakeAuthProvider implements AuthProvider {
   readonly revokedSessions: string[] = [];
+  signUpBehavior: "success" | "already_exists" | "rejected" = "success";
+  lastResetEmail: string | null = null;
+  lastUpdatedPassword: { token: string; password: string } | null = null;
   private readonly usersByAccessToken = new Map<string, { userId: string; email: string }>();
 
   async signIn(credentials: { email: string; password: string }) {
@@ -449,7 +523,11 @@ class FakeAuthProvider implements AuthProvider {
     return { userId, email, fullName: null, tokens };
   }
 
-  async signUp() { return { tokens: null, emailVerified: false }; }
+  async signUp() {
+    if (this.signUpBehavior === "already_exists") throw new Error("USER_ALREADY_EXISTS");
+    if (this.signUpBehavior === "rejected") throw new Error("SIGNUP_REJECTED");
+    return { tokens: null, emailVerified: false };
+  }
 
   async resolveSession(tokens: { accessToken: string }) {
     const user = this.usersByAccessToken.get(tokens.accessToken);
@@ -459,6 +537,29 @@ class FakeAuthProvider implements AuthProvider {
   async signOut(tokens: { accessToken: string }) {
     this.usersByAccessToken.delete(tokens.accessToken);
     this.revokedSessions.push(tokens.accessToken);
+  }
+
+  async resetPasswordForEmail(email: string) {
+    this.lastResetEmail = email;
+  }
+
+  async verifyOtp(params: { email: string; token: string }) {
+    if (params.token !== "valid-token") throw new Error("INVALID_OTP");
+    const tokens = { accessToken: "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
+    this.usersByAccessToken.set(tokens.accessToken, { userId: ownerId, email: params.email });
+    return { tokens };
+  }
+
+  async updateUserPassword(tokens: { accessToken: string }, newPassword: string) {
+    if (newPassword.length < 6) throw new Error("PASSWORD_UPDATE_REJECTED");
+    this.lastUpdatedPassword = { token: tokens.accessToken, password: newPassword };
+  }
+
+  async verifyLink(searchParams: string) {
+    if (searchParams.includes("token=valid-link")) {
+      return "http://localhost:5180/reset-password#access_token=access-recovery&refresh_token=refresh-recovery&type=recovery";
+    }
+    return null;
   }
 }
 

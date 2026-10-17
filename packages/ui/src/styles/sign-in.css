@@ -243,6 +243,32 @@
 .invitation-entry-tabs button[aria-pressed="true"] { border-bottom-color: var(--arden-accent); color: var(--arden-text-primary); }
 .workspace-select-card > small { display: block; margin-top: 18px; color: var(--arden-text-muted); line-height: 1.5; }
 
+.sign-in-footer-links {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.text-button {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--arden-text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 0.15s ease;
+}
+
+.text-button:hover {
+  color: var(--arden-accent);
+}
+
 .is-unavailable .workspace-membership-status { color: var(--arden-text-muted); }
 .workspace-continue { width: 100%; }
 .workspace-preview-identity { margin: 24px 0 0; padding-top: 24px; border-top: 1px solid var(--arden-line); color: var(--arden-text-muted); font-size: 13px; line-height: 20px; }

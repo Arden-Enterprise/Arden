@@ -63,6 +63,21 @@ export async function signUp(platform: Platform, email: string, password: string
   });
 }
 
+export async function requestPasswordReset(platform: Platform, email: string): Promise<void> {
+  await request(platform, "/api/v1/auth/forgot-password", {
+    method: "POST", body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPasswordWithToken(
+  platform: Platform,
+  params: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string }
+): Promise<void> {
+  await request(platform, "/api/v1/auth/reset-password", {
+    method: "POST", body: JSON.stringify(params),
+  });
+}
+
 export async function acceptInvitation(platform: Platform, token: string): Promise<void> {
   await request(platform, "/api/v1/invitations/accept", {
     method: "POST", body: JSON.stringify({ token }),

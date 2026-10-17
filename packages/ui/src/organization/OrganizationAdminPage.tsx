@@ -35,6 +35,18 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     return () => { active = false; };
   }, [platform, organizationId]);
 
+  useEffect(() => {
+    const onFocus = () => { void reload().catch(() => undefined); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [reload]);
+
+  useEffect(() => {
+    if (!data?.invitations.some((item) => item.status === "PENDING")) return;
+    const interval = setInterval(() => { void reload().catch(() => undefined); }, 4000);
+    return () => clearInterval(interval);
+  }, [data?.invitations, reload]);
+
   const perform = async (action: () => Promise<string | void>, successMessage: string) => {
     setBusy(true); setError(""); setMessage("");
     try { const actionMessage = await action(); await reload(); setMessage(actionMessage ?? successMessage); }
@@ -100,10 +112,29 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           </article>)}</div>
         </section>
         <section className="organization-surface organization-editor-stack"><h2>Invitations</h2>
-          {data.invitations.length === 0 ? <p>No invitations yet.</p> : <ul className="organization-live-invitations">{data.invitations.map((invitation) => <li key={invitation.id}><div><strong>{invitation.email}</strong><span>{invitation.status.toLowerCase()} · expires {new Date(invitation.expiresAt).toLocaleDateString()}</span></div>{invitation.status === "PENDING" && <div className="organization-row-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(async () => {
-            const result = await resendOrganizationInvitation(platform, organizationId, invitation.id);
-            return result.deliveryMode === "local-test-no-email" ? "Invitation updated locally. No email was sent." : "Invitation resent.";
-          }, "Invitation resent.")}>Resend</button><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(() => revokeOrganizationInvitation(platform, organizationId, invitation.id), "Invitation revoked.")}>Revoke</button></div>}</li>)}</ul>}
+          {data.invitations.length === 0 ? <p>No invitations yet.</p> : <ul className="organization-live-invitations">{data.invitations.map((invitation) => {
+            const statusKey = invitation.status.toLowerCase();
+            const detail = invitation.status === "ACCEPTED"
+              ? "Membership created"
+              : invitation.status === "REVOKED"
+              ? "Revoked"
+              : invitation.status === "EXPIRED"
+              ? `Expired ${new Date(invitation.expiresAt).toLocaleDateString()}`
+              : `Expires ${new Date(invitation.expiresAt).toLocaleDateString()}`;
+            return <li key={invitation.id}>
+              <div>
+                <strong>{invitation.email}</strong>
+                <div className="organization-invitation-status">
+                  <span className={`organization-status status-${statusKey}`}>{statusKey.charAt(0).toUpperCase() + statusKey.slice(1)}</span>
+                  <small>{detail}</small>
+                </div>
+              </div>
+              {invitation.status === "PENDING" && <div className="organization-row-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(async () => {
+                const result = await resendOrganizationInvitation(platform, organizationId, invitation.id);
+                return result.deliveryMode === "local-test-no-email" ? "Invitation updated locally. No email was sent." : "Invitation resent.";
+              }, "Invitation resent.")}>Resend</button><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(() => revokeOrganizationInvitation(platform, organizationId, invitation.id), "Invitation revoked.")}>Revoke</button></div>}
+            </li>;
+          })}</ul>}
         </section>
       </>}
     </div>

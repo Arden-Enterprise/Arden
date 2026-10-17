@@ -19,6 +19,10 @@ export interface AuthProvider {
   signUp(credentials: SupabaseSignUp): Promise<{ tokens: AuthSessionTokens | null; emailVerified: boolean }>;
   resolveSession(tokens: AuthSessionTokens): Promise<SessionResolution>;
   signOut(tokens: AuthSessionTokens): Promise<void>;
+  resetPasswordForEmail?(email: string, redirectTo?: string): Promise<void>;
+  verifyOtp?(params: { email: string; token: string; type: "recovery" | "email" }): Promise<{ tokens: AuthSessionTokens }>;
+  updateUserPassword?(tokens: AuthSessionTokens, newPassword: string): Promise<void>;
+  verifyLink?(searchParams: string): Promise<string | null>;
 }
 
 export class SupabaseAuthProvider implements AuthProvider {
@@ -51,7 +55,13 @@ export class SupabaseAuthProvider implements AuthProvider {
       password: credentials.password,
       options: { data: { full_name: credentials.fullName } },
     });
-    if (error) throw new Error(isClientAuthFailure(error) ? "SIGNUP_REJECTED" : "SUPABASE_AUTH_UNAVAILABLE");
+    if (error) {
+      if (isUserAlreadyRegistered(error)) throw new Error("USER_ALREADY_EXISTS");
+      throw new Error(isClientAuthFailure(error) ? "SIGNUP_REJECTED" : "SUPABASE_AUTH_UNAVAILABLE");
+    }
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      throw new Error("USER_ALREADY_EXISTS");
+    }
     if (!data.user) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
     const emailVerified = Boolean(data.user.email_confirmed_at);
     const tokens = data.session ? toTokens(data.session) : null;
@@ -107,6 +117,47 @@ export class SupabaseAuthProvider implements AuthProvider {
     const { error } = await auth.signOut({ scope: "local" });
     if (error && !isClientAuthFailure(error)) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
   }
+
+  async resetPasswordForEmail(email: string, redirectTo?: string): Promise<void> {
+    const { error } = await this.createAuthClient().auth.resetPasswordForEmail(email, {
+      redirectTo: redirectTo || undefined,
+    });
+    if (error && !isClientAuthFailure(error)) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
+    if (error) throw new Error("RESET_REQUEST_REJECTED");
+  }
+
+  async verifyOtp(params: { email: string; token: string; type: "recovery" | "email" }): Promise<{ tokens: AuthSessionTokens }> {
+    const { data, error } = await this.createAuthClient().auth.verifyOtp({
+      email: params.email,
+      token: params.token,
+      type: params.type,
+    });
+    if (error) throw new Error(isClientAuthFailure(error) ? "INVALID_OTP" : "SUPABASE_AUTH_UNAVAILABLE");
+    if (!data.session) throw new Error("INVALID_AUTH_RESPONSE");
+    const tokens = toTokens(data.session);
+    if (!tokens) throw new Error("INVALID_AUTH_RESPONSE");
+    return { tokens };
+  }
+
+  async updateUserPassword(tokens: AuthSessionTokens, newPassword: string): Promise<void> {
+    const auth = this.createAuthClient().auth;
+    const { error: sessionError } = await auth.setSession({
+      access_token: tokens.accessToken,
+      refresh_token: tokens.refreshToken,
+    });
+    if (sessionError) throw new Error(isClientAuthFailure(sessionError) ? "INVALID_SESSION" : "SUPABASE_AUTH_UNAVAILABLE");
+    const { error } = await auth.updateUser({ password: newPassword });
+    if (error) throw new Error(isClientAuthFailure(error) ? "PASSWORD_UPDATE_REJECTED" : "SUPABASE_AUTH_UNAVAILABLE");
+  }
+
+  async verifyLink(searchParams: string): Promise<string | null> {
+    const target = new URL(`/auth/v1/verify?${searchParams}`, this.url);
+    const response = await fetch(target.toString(), {
+      headers: { apikey: this.publishableKey },
+      redirect: "manual",
+    });
+    return response.headers.get("location");
+  }
 }
 
 function toTokens(session: Session): AuthSessionTokens | null {
@@ -128,6 +179,12 @@ function isExpiredJwt(token: string): boolean {
 
 function isClientAuthFailure(error: { status?: number }): boolean {
   return typeof error.status === "number" && error.status >= 400 && error.status < 500 && error.status !== 429;
+}
+
+function isUserAlreadyRegistered(error: { code?: string; message?: string }): boolean {
+  if (error.code === "user_already_exists") return true;
+  if (typeof error.message === "string" && /user already (registered|exists)|already registered/i.test(error.message)) return true;
+  return false;
 }
 
 function normalizeEmail(email: string | undefined): string {
