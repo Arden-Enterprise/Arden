@@ -180,6 +180,15 @@ for name in ['slot-owners.json', 'development.lock']:
         with self.assertRaisesRegex(ValueError, 'Symlinks'):
             sync.safe_file(source, 'apps/api/src/index.ts')
 
+    def test_versioned_migrations_are_allowed_even_when_their_names_describe_security_concepts(self):
+        source = self.root / 'dev/dev-1/source'
+        for name in [
+                'apps/api/migrations/0005_allow_accepted_invitation_token_read.sql',
+                'apps/api/migrations/0008_enable_private_shared_draft_creation.sql']:
+            self.assertTrue(sync.permitted(name))
+            self.assertEqual(sync.safe_file(source, name), source / name)
+        self.assertFalse(sync.permitted('apps/api/migrations/password.sql'))
+
     def test_sync_mutation_holds_global_fence_and_pause_rejects_it(self):
         original = sync.atomic_json
         def writing(*args):

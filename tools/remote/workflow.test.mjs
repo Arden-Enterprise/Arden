@@ -163,7 +163,11 @@ test('source allowlist excludes frontend, private files, traversal, and generate
   for (const name of ['apps/web/src/main.tsx', '.private/remote.json', 'apps/api/password.json', 'apps/api/../outside.ts', 'apps/api/node_modules/x.js', 'packages/db/data/seed.sql']) {
     assert.equal(allowedSource(name), false, name);
   }
-  for (const name of ['apps/api/src/index.ts', 'packages/db/src/schema.sql', 'apps/web/package.json']) assert.equal(allowedSource(name), true, name);
+  for (const name of ['apps/api/src/index.ts', 'packages/db/src/schema.sql', 'apps/web/package.json',
+    'apps/api/migrations/0005_allow_accepted_invitation_token_read.sql',
+    'apps/api/migrations/0008_enable_private_shared_draft_creation.sql']) {
+    assert.equal(allowedSource(name), true, name);
+  }
 });
 
 test('snapshot respects Git ignores and requires a complete backend', async t => {
