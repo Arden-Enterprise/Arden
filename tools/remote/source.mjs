@@ -13,7 +13,8 @@ const excluded = new Set(['node_modules', 'dist', 'out', 'coverage', 'fixtures',
 export function allowedSource(name) {
   const parts = name.split('/');
   if (parts.some(part => part.startsWith('.') || excluded.has(part))) return false;
-  if (/(secret|credential|token|password|private|\.local)([._-]|$)/i.test(path.basename(name))) return false;
+  const versionedMigration = /^apps\/api\/migrations\/\d{4}_[a-z0-9_]+\.sql$/.test(name);
+  if (!versionedMigration && /(secret|credential|token|password|private|\.local)([._-]|$)/i.test(path.basename(name))) return false;
   if (rootFiles.has(name)) return true;
   if (parts[0] === 'apps' && parts[2] === 'package.json' && parts.length === 3) return true;
   if (parts[0] === 'packages' && parts[2] === 'package.json' && parts.length === 3) return true;

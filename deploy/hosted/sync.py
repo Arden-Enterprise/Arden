@@ -25,7 +25,9 @@ def permitted(name):
     parts = name.split('/')
     if any(not part or part.startswith('.') or part in EXCLUDED for part in parts):
         return False
-    if '\\' in name or re.search(r'(secret|credential|token|password|private|\.local)([._-]|$)', parts[-1], re.I):
+    versioned_migration = re.fullmatch(r'apps/api/migrations/\d{4}_[a-z0-9_]+\.sql', name)
+    if '\\' in name or (not versioned_migration and re.search(
+            r'(secret|credential|token|password|private|\.local)([._-]|$)', parts[-1], re.I)):
         return False
     if name in ROOT_FILES:
         return True
