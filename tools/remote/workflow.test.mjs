@@ -198,4 +198,3 @@ test('frontendCommand resolves standalone .exe directly and wraps js in node', (
   assert.equal(jsResult.executable, process.execPath);
   assert.deepEqual(jsResult.args, ['/usr/local/lib/node_modules/pnpm/bin/pnpm.cjs', 'dev:web']);
 });
-

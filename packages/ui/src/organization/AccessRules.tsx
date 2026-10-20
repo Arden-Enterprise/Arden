@@ -7,7 +7,7 @@ export function AccessRules() {
         <div>
           <span className="meta-label">DOCUMENT VISIBILITY</span>
           <h2>Initial access rules</h2>
-          <p>Review the three scopes that every document must declare. The server must enforce these rules when APIs are implemented.</p>
+
         </div>
       </div>
       <div className="access-rule-grid">
@@ -20,10 +20,7 @@ export function AccessRules() {
           </section>
         ))}
       </div>
-      <div className="organization-boundary-note">
-        <strong>Role and content grants are separate.</strong>
-        <span>System administration and review responsibility do not automatically reveal private documents. UI visibility is only a preview; authorization belongs to the API.</span>
-      </div>
+
     </div>
   );
 }

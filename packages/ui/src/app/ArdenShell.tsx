@@ -4,6 +4,7 @@ import { KnowledgePane } from "./KnowledgePane";
 import { MyWorkPage } from "../my-work/MyWorkPage";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
 import { SignInPage } from "../sign-in/SignInPage";
+import { SetPasswordPage } from "../sign-in/SetPasswordPage";
 import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
 import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
 import { InvitationAcceptPage } from "../organization/InvitationAcceptPage";
@@ -13,11 +14,13 @@ import { MembershipAccessPage } from "../organization/MembershipAccessPage";
 import { OrganizationSetupPage } from "../organization/OrganizationSetupPage";
 import { OrganizationAccessPage } from "../organization/OrganizationAccessPage";
 import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
+import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
+import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
 import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
 import { membershipReadiness } from "../organization/organizationWorkflow";
 import type { PaneContent, Platform, PrivateNote, WorkspaceView } from "../shared/types";
-import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CurrentSession, type OrganizationMembership } from "../shared/api-client";
+import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership } from "../shared/api-client";
 
 type ArdenShellProps = { platform: Platform };
 
@@ -80,19 +83,13 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
   },
   "knowledge": {
     eyebrow: "KNOWLEDGE CONTEXT", title: "Your shared library",
-    description: "Explore sample runbooks, decisions and source evidence.",
+    description: "Explore clearly labeled sample records and any draft created in this session.",
     suggestions: ["Inspect the source version", "Review the intended audience"],
     boundaryTitle: "Shared knowledge", boundaryBody: "Sample records only. Real results must be selected by server-authorized scope.",
   },
-  "ask-arden": {
-    eyebrow: "ANSWER CONTEXT", title: "Evidence before answers",
-    description: "Inspect a sample answer and its exact-version citations.",
-    suggestions: ["Inspect cited sources", "Check freshness"],
-    boundaryTitle: "No live AI", boundaryBody: "This preview uses an explicitly labeled sample answer. No prompt is sent to a model.",
-  },
   "review-queue": {
     eyebrow: "REVIEW CONTEXT", title: "A snapshot to review",
-    description: "Approval and publication are separate preview transitions.",
+    description: "In the sample, final approval automatically publishes the reviewed snapshot.",
     suggestions: ["Check the intended audience", "Request a specific revision"],
     boundaryTitle: "Immutable review snapshot", boundaryBody: "Review applies to the submitted version. Private originals remain excluded.",
   },
@@ -104,7 +101,7 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
   },
 };
 
-type EntryView = "sign-in" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
+type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
 
 function tokenFromInvitationPath(pathname: string): string | null {
   const match = /^\/invite\/([A-Za-z0-9_-]{43})\/?$/.exec(pathname);
@@ -112,6 +109,19 @@ function tokenFromInvitationPath(pathname: string): string | null {
 }
 
 export function ArdenShell({ platform }: ArdenShellProps) {
+  return (
+    <>
+      <ArdenShellContent platform={platform} />
+      <footer className="icon-credits" aria-label="Icon attribution">
+        {platform === "web"
+          ? <a href="https://www.flaticon.com/uicons" target="_blank" rel="noopener noreferrer">Uicons by Flaticon</a>
+          : <span title="https://www.flaticon.com/uicons">Uicons by Flaticon</span>}
+      </footer>
+    </>
+  );
+}
+
+function ArdenShellContent({ platform }: ArdenShellProps) {
   const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
   const [invitationToken, setInvitationToken] = useState<string | null>(() => tokenFromInvitationPath(window.location.pathname));
   const [entryView, setEntryView] = useState<EntryView>(() => invitationToken ? "invite-link" : "sign-in");
@@ -124,14 +134,23 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   const [activeView, setActiveView] = useState<WorkspaceView>("my-work");
   const privateNotes = usePrivateNotes(initialNotes);
   const [contextOpen, setContextOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+  const [contextOverlay, setContextOverlay] = useState(false);
+  const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
+  const shellRef = useRef<HTMLDivElement>(null);
   const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | null>(null);
   const [serverSession, setServerSession] = useState<CurrentSession | null>(null);
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
+  const [createdKnowledgeDraft, setCreatedKnowledgeDraft] = useState<CreatedKnowledgeDraft | null>(null);
+  const [contributionAttempt, setContributionAttempt] = useState<ContributionAttempt | null>(null);
   const restoreStarted = useRef(false);
 
   const enterServerOrganization = (membership: OrganizationMembership) => {
     if (membership.status !== "active" || !membership.canUsePrivateWorkspace) return;
     setServerOrganizationId(membership.organization.id);
+    setCreatedKnowledgeDraft(null);
+    setAssignedReviewCount(undefined);
+    setContributionAttempt(null);
     setOrganization(null);
     setPreviewRole(null);
     setActiveView("personal-workspace");
@@ -140,11 +159,18 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   };
 
   const acceptServerSession = async (current: CurrentSession) => {
+    if (new URLSearchParams(window.location.search).has("auth")) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    setServerSession(current);
+    if (current.account?.passwordSetupRequired === true) {
+      setEntryView("password-setup");
+      return;
+    }
     if (invitationToken) {
       window.history.replaceState(null, "", "/");
       setInvitationToken(null);
     }
-    setServerSession(current);
     const allowed = current.memberships.filter((membership) => membership.status === "active" && membership.canUsePrivateWorkspace);
     if (allowed.length === 1) enterServerOrganization(allowed[0]);
     else setEntryView("workspace-select");
@@ -155,6 +181,7 @@ export function ArdenShell({ platform }: ArdenShellProps) {
     restoreStarted.current = true;
     void restoreSession(platform).then((current) => {
       if (current) {
+        if (current.account?.passwordSetupRequired === true) return acceptServerSession(current);
         if (invitationToken) setServerSession(current);
         else return acceptServerSession(current);
       }
@@ -163,20 +190,37 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   }, [platform, invitationToken]);
 
   useEffect(() => {
-    const compactWindow = window.matchMedia("(max-width: 1180px)");
-    const updateContext = (event: MediaQueryListEvent) => { if (event.matches) setContextOpen(false); };
-    compactWindow.addEventListener("change", updateContext);
-    return () => compactWindow.removeEventListener("change", updateContext);
-  }, []);
+    const shell = shellRef.current;
+    const sidebar = shell?.querySelector<HTMLElement>(".app-sidebar");
+    if (!shell || !sidebar) return;
+    const measure = () => {
+      const sidebarWidth = getComputedStyle(sidebar).position === "fixed" ? 0 : sidebar.getBoundingClientRect().width;
+      setContextOverlay(shell.getBoundingClientRect().width - sidebarWidth < 1100);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(shell); observer.observe(sidebar); measure();
+    return () => observer.disconnect();
+  }, [entryView]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
+      if (navOpen) setNavOpen(false);
+      else if (contextOpen) { setContextOpen(false); document.querySelector<HTMLButtonElement>(".context-toggle")?.focus(); }
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [contextOpen, navOpen]);
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
+    setNavOpen(false);
   }, [activeView, previewRole, entryView]);
 
   const enterMemberWorkspace = (memberId: string) => {
     if (!organization || membershipReadiness(organization, memberId).state !== "ready") return;
     const member = organization.members.find(item => item.id === memberId);
-    setPreviewRole(member?.role === "System Admin" ? "admin" : "member");
+    setPreviewRole(member?.role === "Organization Admin" ? "admin" : "member");
     setPreviewMemberId(memberId);
     if (memberId !== previewMemberId) privateNotes.reset([]);
     setActiveView("my-work");
@@ -202,6 +246,10 @@ export function ArdenShell({ platform }: ArdenShellProps) {
     );
   }
 
+  if (entryView === "password-setup" && serverSession) {
+    return <SetPasswordPage platform={platform} email={serverSession.actor.email} onComplete={acceptServerSession} />;
+  }
+
   if (entryView === "sign-in") {
     return (
       <SignInPage
@@ -210,6 +258,8 @@ export function ArdenShell({ platform }: ArdenShellProps) {
         onEnterPreview={() => {
           setServerSession(null);
           setServerOrganizationId(null);
+          setCreatedKnowledgeDraft(null);
+          setContributionAttempt(null);
           setOrganization(createPreviewOrganization());
           setPreviewRole("member");
           setPreviewMemberId("sample-employee");
@@ -219,6 +269,8 @@ export function ArdenShell({ platform }: ArdenShellProps) {
         onEnterAdminPreview={() => {
           setServerSession(null);
           setServerOrganizationId(null);
+          setCreatedKnowledgeDraft(null);
+          setContributionAttempt(null);
           setOrganization(createPreviewOrganization());
           setPreviewRole("admin");
           setPreviewMemberId("sample-admin");
@@ -284,6 +336,7 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   }
 
   const navigate = (view: WorkspaceView) => {
+    setNavOpen(false);
     if (organizationDirty && activeView === "organization-access" && view !== activeView) {
       setPendingAction(view);
       return;
@@ -293,9 +346,13 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   };
 
   const finishSignOut = () => {
+    setNavOpen(false);
     if (serverSession) void apiSignOut(platform).catch(() => undefined);
     setServerSession(null);
     setServerOrganizationId(null);
+    setCreatedKnowledgeDraft(null);
+    setAssignedReviewCount(undefined);
+    setContributionAttempt(null);
     setPreviewRole(null);
     setEntryView("sign-in");
     setOrganization(null);
@@ -315,11 +372,11 @@ export function ArdenShell({ platform }: ArdenShellProps) {
     finishSignOut();
   };
 
-  const contextControl = { contextOpen, onToggleContext: () => setContextOpen((open) => !open) };
+  const contextControl = { contextOpen, onToggleContext: () => { setNavOpen(false); setContextOpen((open) => !open); } };
   const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
   const liveAdmin = activeMembership?.roleCodes.includes("ORG_ADMIN") ?? false;
-  const isKnowledgeView = activeView === "knowledge" || activeView === "ask-arden" || activeView === "review-queue" || activeView === "knowledge-handover";
+  const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue" || activeView === "knowledge-handover";
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
   const activeContext = activeView === "personal-workspace"
     ? {
@@ -328,10 +385,17 @@ export function ArdenShell({ platform }: ArdenShellProps) {
       description: privateNotes.serverBacked ? "Your private notes are loaded from the selected organization’s Arden server." : "Drafts stay in this preview session when you switch notes or screens.",
       boundaryBody: privateNotes.serverBacked ? "Only you can work with this server-stored note. It is excluded from shared answers." : "Only you can work with this preview note. It is excluded from shared answers. Refreshing or exiting clears this session.",
     }
-    : paneContent[activeView];
+    : serverOrganizationId && activeView === "knowledge"
+      ? { ...paneContent.knowledge, description: "Your server-backed drafts and currently accessible published versions.",
+        boundaryBody: "Drafts remain author-owned. Approved versions are shown only when your current server-side audience and access scope allow them." }
+      : serverOrganizationId && activeView === "review-queue"
+        ? { ...paneContent[activeView], description: "Submissions assigned by an explicit reviewer grant.",
+          boundaryBody: "A reviewer can act only within the granted department and classification, never on their own submission." }
+        : paneContent[activeView];
 
   return (
-    <div className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}`}>
+    <WorkspaceNavigationContext.Provider value={{ open: navOpen, setOpen: setNavOpen }}>
+    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${activeView === "my-work" ? " is-my-work" : ""}`}>
       <a className="skip-link" href="#arden-main">Skip to content</a>
       <AppSidebar
         activeView={activeView}
@@ -345,24 +409,37 @@ export function ArdenShell({ platform }: ArdenShellProps) {
         memberRole={serverSession ? serverSession.memberships.find((item) => item.organization.id === serverOrganizationId)?.roleCodes.join(", ") || "Organization member" : previewMember?.role || "Awaiting assignment"}
         memberDepartment={serverSession ? "Member" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
+        assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined}
+        canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
+        onSwitchWorkspace={() => { setNavOpen(false); setContextOpen(false); setEntryView("workspace-select"); }}
+        onCloseNavigation={() => setNavOpen(false)}
         onNavigate={navigate}
         onSignOut={signOut}
       />
+      {navOpen && <button type="button" className="shell-nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
 
       {activeView === "my-work" ? (
         <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
       ) : activeView === "organization-access" && serverOrganizationId && activeMembership && liveAdmin ? (
-        <OrganizationAdminPage platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} {...contextControl} />
+        <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} {...contextControl} />
       ) : activeView === "organization-access" && organization && previewRole === "admin" ? (
         <OrganizationAccessPage organization={organization} onChange={setOrganization} onDirtyChange={setOrganizationDirty} onOpenSetup={() => { if (organizationDirty) setPendingAction("setup"); else setEntryView("setup"); }} onPreviewInvitation={(id) => { setInvitationId(id); setEntryView("invitation"); }} onPreviewAccess={(id) => { setAccessMemberId(id); setEntryView("access"); }} {...contextControl} />
       ) : activeView === "personal-workspace" ? (
-        <PersonalWorkspacePage key={serverOrganizationId ?? previewMemberId} controller={privateNotes} platform={platform} organizationId={serverOrganizationId ?? ""} {...contextControl} />
+        <PersonalWorkspacePage key={serverOrganizationId ?? previewMemberId} controller={privateNotes} platform={platform} organizationId={serverOrganizationId ?? ""} contributionAttempt={contributionAttempt} onContributionAttemptChange={setContributionAttempt} onKnowledgeDraftCreated={(draft) => { setCreatedKnowledgeDraft(draft); navigate("knowledge"); }} {...contextControl} />
       ) : null}
 
       <div className="knowledge-feature-slot" hidden={!isKnowledgeView}>
-        <KnowledgeFeaturePage view={knowledgeView} active={isKnowledgeView} organizationName={organization?.name} departmentName={organization?.departments.find(department => department.id === previewMember?.departmentId)?.name} showPrivateSample={previewMemberId === "sample-employee"} onNavigate={navigate} {...contextControl} />
+        <KnowledgeFeaturePage key={serverOrganizationId ?? "sample"} view={knowledgeView} active={isKnowledgeView}
+          platform={platform} organizationId={serverOrganizationId}
+          organizationName={activeMembership?.organization.name ?? organization?.name}
+          departmentName={activeMembership ? "Personal contribution" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+          showPrivateSample={!serverSession && previewMemberId === "sample-employee"}
+          createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
+          onAssignedReviewCount={setAssignedReviewCount}
+          onNavigate={navigate} {...contextControl} />
       </div>
 
+      {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close context" onClick={contextControl.onToggleContext} />}
       <KnowledgePane content={activeContext} open={contextOpen} onToggle={contextControl.onToggleContext} />
       {pendingAction && (
         <DiscardChangesDialog
@@ -380,5 +457,6 @@ export function ArdenShell({ platform }: ArdenShellProps) {
         />
       )}
     </div>
+    </WorkspaceNavigationContext.Provider>
   );
 }

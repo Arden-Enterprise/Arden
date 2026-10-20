@@ -1,47 +1,25 @@
-import { Icon, type IconName } from "../shared/Icon";
+import { Icon } from "../shared/Icon";
+import type { WorkQueueItem } from "./workQueueModel";
 
-export type QueueItem = {
-  title: string;
-  meta: string;
-  description: string;
-  icon?: IconName;
-  tone?: "amber" | "blue";
-  action?: "knowledge" | "handover";
-};
-
-type PriorityQueueProps = {
-  items: QueueItem[];
-  onClearSearch: () => void;
-  searchActive?: boolean;
+export function PriorityQueue({ items, filtersActive, onClearFilters, onOpenKnowledge, onOpenReview, onOpenHandover }: {
+  items: readonly WorkQueueItem[];
+  filtersActive: boolean;
+  onClearFilters: () => void;
   onOpenKnowledge?: () => void;
+  onOpenReview?: () => void;
   onOpenHandover?: () => void;
-};
-
-export function PriorityQueue({ items, onClearSearch, searchActive, onOpenKnowledge, onOpenHandover }: PriorityQueueProps) {
-  return (
-    <section className="my-work-queue" aria-labelledby="priority-title">
-      <h2 id="priority-title">{searchActive ? "Search results in your queue" : "Next in your queue"}</h2>
-      <div className="my-work-queue-list">
-        {items.map((item) => {
-          const onOpen = item.action === "handover" ? onOpenHandover : onOpenKnowledge;
-          return (
-            <button type="button" className="my-work-queue-row" key={item.title} onClick={onOpen} disabled={!onOpen}>
-              <Icon name={item.icon ?? "document"} size={24} />
-              <span className="my-work-queue-copy"><strong>{item.title}</strong><span>{item.description}</span></span>
-              <span className={`my-work-queue-status tone-${item.tone ?? "amber"}`}>{item.meta}</span>
-            </button>
-          );
-        })}
-        {items.length === 0 && (
-          <div className="empty-state">
-            <strong>No other sample work matches this search.</strong>
-            <button type="button" onClick={onClearSearch}>
-              Clear search
-            </button>
-          </div>
-        )}
-      </div>
-      <p className="planned-feature-note">Sample work · Review and handover previews do not change shared knowledge.</p>
-    </section>
-  );
+}) {
+  return <section className="my-work-queue" aria-labelledby="priority-title">
+    <div className="my-work-queue-list">
+      {items.map((item) => {
+        const onOpen = item.type === "handover" ? onOpenHandover : item.type === "review" ? onOpenReview : onOpenKnowledge;
+        return <button type="button" className={`my-work-task tone-${item.tone}`} key={item.id} onClick={onOpen} disabled={!onOpen}>
+          <span className="my-work-icon-tile"><Icon name={item.type === "handover" ? "handover" : item.type === "review" ? "review" : "document"} size={25} /></span>
+          <span className="my-work-task-copy"><strong>{item.title}</strong><span className="my-work-task-badges"><span className="my-work-status"><span aria-hidden="true" className="my-work-status-dot" />{item.statusLabel}</span><span className="my-work-detail">{item.detail}</span></span><span className="my-work-task-metadata">{item.metadata}</span></span>
+          <span className={item.assignee === "Unassigned" ? "my-work-unassigned" : "my-work-avatar"} aria-label={`Assigned to ${item.assignee}`}>{item.assignee}</span><Icon name="chevron" size={18} />
+        </button>;
+      })}
+      {items.length === 0 && <div className="empty-state" role="status"><strong>No sample work matches your filters.</strong>{filtersActive && <button type="button" onClick={onClearFilters}>Clear filters</button>}</div>}
+    </div>
+  </section>;
 }

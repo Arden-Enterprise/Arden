@@ -11,16 +11,16 @@ Deployment and hosted identity status updated 12 October 2026. Library versions 
 | Area | Present in the scaffold | Target, not yet implemented |
 | --- | --- | --- |
 | Runtime/tooling | Node.js 24 CI; pnpm 11.19.0; TypeScript 5.9.3; pnpm workspaces | Same baseline, reviewed upgrades |
-| Web/shared UI | React/react-dom 19.3.0; Vite 7.3.6; React plugin 5.2.0; typed fetch client for auth/private notes | React Router and TanStack Query |
-| Desktop | Electron 44.4.3; electron-vite 5.0.0; shared React UI; narrow preload IPC backed by Electron safeStorage | Signed Windows installer/update flow |
-| API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15; Supabase Auth via `@supabase/supabase-js` 2.117.2; BFF sign-in/sign-up/session/org-create/invitation/private-draft routes; ordered SQL migration runner | Organization admin list/role/department/member lifecycle routes, Supabase Realtime notifications |
-| Data | Local `pgvector/pgvector:pg17` container; ordered SQL migrations 0001/0002; transaction-local actor/org/admin/invitation RLS context and non-bypass Arden runtime role; protected local note-object storage | Drizzle Kit migration authoring for future domain schema, full-text/vector search, Supabase Storage integration |
-| Identity | Supabase Auth email/password through a server-only Fastify adapter; verified user UUID maps to `user_account.user_id`; Arden-owned organization bootstrap and hashed-token email invitation lifecycle; SMTP through Nodemailer 10.0.10. Fenced test adapters support loopback-only local sign-in and the historical SSH-only dev-2 no-login target; the latter is inactive in the current four Supabase-authenticated hosted slots | Recovery |
-| Editor | React textarea-based session previews for private notes and shared knowledge | BlockNote core behind a versioned Arden document interface |
+| Web/shared UI | React/react-dom 19.3.0; Vite 7.3.6; React plugin 5.2.0; typed fetch client for auth, private notes, shared knowledge, Audience administration, and System Admin workflows | React Router and TanStack Query |
+| Desktop | Electron 44.4.3; electron-vite 5.0.0; shared React UI; narrow preload IPC backed by Electron safeStorage, with allowlisted auth, knowledge, Audience, and System Admin API routes | Signed Windows installer/update flow |
+| API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15; Supabase Auth via `@supabase/supabase-js` 2.117.2; BFF email/password and Google PKCE flows; organization, invitation, private-note, Mainflow 2 review/publication, Audience, and System Admin routes; ordered SQL migration runner | Supabase Realtime notifications |
+| Data | Local `pgvector/pgvector:pg17` container; ordered SQL migrations 0001–0017; transaction-local actor/organization/admin/invitation RLS context and non-bypass Arden runtime role; migration 0017 compatibility bridge; protected local note-object storage | Drizzle Kit migration authoring for future domain schema, full-text/vector search, Supabase Storage integration, and Phase 5 legacy-role contraction |
+| Identity | Supabase Auth email/password and Google PKCE through server-only Fastify adapters; verified user UUID maps to `user_account.user_id`; Arden-owned organization bootstrap and hashed-token email invitation lifecycle; SMTP through Nodemailer 10.0.10. Fenced test adapters support loopback-only local sign-in and the historical SSH-only dev-2 no-login target; the latter is inactive in the current four Supabase-authenticated hosted slots. Arden System Admin has no organization/content bypass | Recovery |
+| Editor | React textarea for private notes; BlockNote core/react/Ariakit 0.55.0 behind a versioned Arden document interface for server-backed shared knowledge | Expand only when supported document capabilities require it |
 | Graph | Local decorative Figma SVGs; no graph view or authorized graph data | Sigma.js + Graphology on authorized API projections |
 | Jobs | None | pg-boss in `apps/worker` |
 | Storage | Protected local note-content volume via `LocalPrivateContentStorage`; opaque UUID `source_uri`, SHA-256 integrity check, production persistent mount required | Broader attachment/document storage; optional S3-compatible backend later |
-| AI | Explicit prerecorded Ask Arden sample; no model request | Arden gateway to customer-controlled Ollama/compatible private endpoint |
+| AI | No Ask Arden UI or model request; Flow 3 deferred | Arden gateway to customer-controlled Ollama/compatible private endpoint |
 | Tests | Vitest 5.0.1, Fastify auth/private-note tests, real-PostgreSQL repository/RLS test gated by `ARDEN_TEST_DATABASE_URL`, pure UI preview and API-client tests | Live Supabase Auth smoke, native Electron interaction, broader Playwright flows |
 | Deployment | Local database Compose; Ubuntu/Windows CI; hosted development commands and four Coolify-managed development API/database slots with local Vite frontends | Immutable release application images, complete isolated staging/production deployments and recovery evidence |
 
@@ -40,6 +40,29 @@ The container image includes pgvector software; the scaffold does not yet create
 - Review software/model licenses for redistribution, notices, commercial/non-core restrictions, and customer deployment. A package being downloadable is not permission for every intended use.
 
 ## 3. React, Vite, routing, and client state
+
+- Shared interface icon assets use `@flaticon/flaticon-uicons` 3.3.1, pinned in
+  `packages/ui/package.json` and the lockfile. `shared/Icon.tsx` maps semantic names
+  to Regular Rounded glyphs; `styles/icons.css` bundles only that family's WOFF2
+  (about 386 KB), not all styles or the vendor's full CSS. SVG text preserves
+  existing sizing/currentColor and decorative accessibility contracts. No CDN,
+  third-party runtime call, script, API secret or database migration is needed.
+  The font must ship with both web and Electron renderer builds under the existing
+  self-only font CSP. Loading can temporarily hide glyphs; labels remain usable.
+  The vendor package declares an old optional Linux esbuild binary; it is not
+  imported or executed by Arden, is not a build tool replacement, and is not
+  bundled in either client. No additional lifecycle scripts are authorized.
+  Keep glyph mappings and asset filename synchronized when upgrading; the adapter
+  tests verify glyph availability against the pinned vendor CSS.
+- Uicons assets retain the Flaticon license, not Arden's source-code license.
+  The free-use implementation preserves visible “Uicons by Flaticon” credit on
+  all screens, linked on web and text-only on desktop (external navigation is
+  still denied). Preserve the package LICENSE and credits when redistributing.
+  Do not remove credit based on an assumed Premium subscription or distribute
+  the icons as a standalone collection. Recheck applicable redistribution/customer
+  use terms before release: [official usage guide](https://www.flaticon.com/uicons/get-started/),
+  [package license](https://github.com/freepik-company/flaticon-uicons/blob/main/LICENSE)
+  and [Flaticon terms](https://www.flaticon.com/legal).
 
 - Shared product UI lives in `packages/ui` and future feature packages. App entry points should be composition/platform adapters, not independent copies of the product.
 - Living Archive assets are local: exported Figma SVGs and variable Sora/DM Sans TTFs with their OFL notices in `src/assets/fonts`. Preserve the font license files on redistribution. No runtime font-service request is needed. The accepted visual contract lives in [DESIGN.md](../../DESIGN.md).
@@ -77,6 +100,7 @@ Consult [Electron's security checklist](https://www.electronjs.org/docs/latest/t
 - Keep construction/testability separate from process startup: extend the existing `buildApp` pattern. Centralize config validation, dependencies, policy services, and shutdown; avoid opening a pool/listener merely by importing a testable module.
 - Validate body, query, parameters, relevant headers, and response shape. Reject unsupported content types and oversize input. Type annotations alone are not validators.
 - Schemas are trusted application code: do not compile schemas supplied by users or imported documents. Authentication, database lookup, and authorization belong in appropriate hooks/services, not asynchronous schema validation. See [Fastify validation/serialization](https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/).
+- Fastify's default Ajv coercion can turn `null` into `""` when a nullable string uses `anyOf` with the string branch first. Use a single `type: ["string", "null"]` schema for optional nullable strings that must remain `null`, and cover the actual handler value with Fastify injection tests. See [Ajv coercion rules](https://ajv.js.org/coercion.html).
 - Derive identity and authorized organization from the session and server policy. Never accept an arbitrary body `userId`/`organizationId` as authority.
 - Apply authentication, object/version/scope authorization, domain transition checks, and bounded resource use before mutations. Validate response fields to prevent accidental secret/private-column exposure.
 - Use parameterized queries, transactions for related canonical changes, concurrency/version checks, and idempotency for retried creates/actions. Keep external network calls outside long-running database transactions.
@@ -100,11 +124,13 @@ Consult [Electron's security checklist](https://www.electronjs.org/docs/latest/t
 - Desktop session cookies are stored encrypted with Electron `safeStorage`. A narrow main-process IPC bridge injects cookies into an allowlisted set of API requests and returns data/headers without exposing cookies to the renderer. Keep context isolation, sandbox, and `webSecurity` enabled; require a trusted `ARDEN_CORE_URL` HTTPS origin in production.
 - The domain migration creates only the non-bypass `arden_runtime` role. Supabase Auth owns credential/session data; Arden's PostgreSQL repository uses transaction-local `arden_runtime`. Apply domain migrations with a separate privileged migration connection.
 - Invitations and role changes need server checks for target organization, actor capability, escalation, expiration, audit, and session/cache invalidation. Test expired/revoked sessions and multi-organization users.
-- Sign-in/bootstrap/recovery must not create a permanent universal bypass. Open private-data recovery and reviewer/publisher separation decisions require explicit policy before implementation.
+- Sign-in/bootstrap/recovery must not create a permanent universal bypass. Private-data recovery remains an open policy decision. In Mainflow 2, final authorized review approval triggers system publication under [decision 0007](../decisions/0007-automatic-publication-after-final-approval.md); there is no separate human publisher role.
 
 References: [Supabase Auth](https://supabase.com/docs/guides/auth), [server-side auth/session guidance](https://supabase.com/docs/guides/auth/server-side), [Supabase `signInWithPassword`](https://supabase.com/docs/reference/javascript/auth-signinwithpassword), [Supabase `signUp`](https://supabase.com/docs/reference/javascript/auth-signup), [Supabase `getUser`](https://supabase.com/docs/reference/javascript/auth-getuser), [Supabase `refreshSession`](https://supabase.com/docs/reference/javascript/auth-refreshsession), [Nodemailer SMTP transport](https://nodemailer.com/smtp), [Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage), [Electron contextBridge](https://www.electronjs.org/docs/latest/api/context-bridge), [electron-vite preload discovery](https://electron-vite.org/guide/dev).
 
 ## 7. PostgreSQL, pgvector, Drizzle, and search
+
+- Migration `0017_audience_and_instance_admin_foundation.sql` introduces canonical managed and group audiences, audience-group membership, instance-level System Admin records, audit events, and the enforceable-snapshot helper. It backfills legacy role audiences and temporarily retains role-backed write projection for staged cutover. New product/API work must use audience terminology and [decision 0010](../decisions/0010-audiences-and-system-administration.md). Run a rollback-only migration/RLS rehearsal before any shared deployment.
 
 - PostgreSQL is the canonical system of record for organization-scoped content, immutable versions, permissions, publications, source revisions, explicit edges, and audit metadata. An SVG/Graphology object, embedding, or client cache is not canonical storage.
 - Use constraints, foreign keys, unique keys, indexes, and transactions to enforce invariants as well as domain checks. Make organization ownership explicit and prevent cross-organization references. IDs are identifiers, not access controls.
@@ -128,6 +154,8 @@ References: [Drizzle migration workflows](https://orm.drizzle.team/docs/migratio
 ## 8. BlockNote and canonical documents
 
 - Adopt BlockNote core only when editing is implemented. Confirm installed version, schema APIs, export/import behavior, and commercial/non-core licensing. Real-time collaboration is outside pilot scope.
+- Shared-knowledge authoring uses `@blocknote/core`, `@blocknote/react` and `@blocknote/ariakit` 0.55.0. All three packages declare MPL-2.0. The Arden adapter disables BlockNote's default menus and limits the schema to paragraphs, two heading sizes, bullet/numbered lists, quotes, and bold/italic/underline/strike/code styles. Font family, color, links, tables, files, media, embeds and remote resources are not part of this format.
+- The API body remains a bounded string for compatibility. Rich documents use the `arden-document:application/vnd.arden.blocks+json;version=1` prefix followed by validated canonical JSON; existing unprefixed bodies open as plain-text paragraphs. Persist stable block IDs, reject malformed/unsupported prefixed content, and render through BlockNote's document model rather than stored HTML. A future format change requires an explicit migration/version adapter.
 - Store a versioned Arden document format behind an editor adapter. Preserve stable block/content references needed for citations and version history. Do not make rendered HTML or one library's live objects the sole durable representation.
 - Validate stored/imported document JSON. Make format migrations explicit and reversible where feasible; retain source fidelity/provenance and export capability.
 - Separate autosaved private/shared drafts from immutable submitted/published snapshots. Show save failure/conflict/unsynced state; never let an editor mutate an approved version in place.

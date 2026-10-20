@@ -15,8 +15,14 @@ function stopFrontend(frontend) {
     if (process.platform === 'win32') {
       // Stop only the process tree we started; otherwise pnpm can leave Vite behind.
       const cleanup = spawn('taskkill', ['/PID', String(frontend.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-      cleanup.once('error', () => { console.error('Could not stop local frontend; close its terminal.'); resolve(); });
-      cleanup.once('close', resolve);
+      const stopDirectChild = () => {
+        // A restricted Windows session may deny taskkill even for our child.
+        // This fallback cannot drain grandchildren, but it closes the process we own.
+        if (frontend.exitCode === null && !frontend.signalCode) frontend.kill('SIGTERM');
+        resolve();
+      };
+      cleanup.once('error', stopDirectChild);
+      cleanup.once('close', code => code === 0 ? resolve() : stopDirectChild());
     } else {
       try { process.kill(-frontend.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') console.error('Could not stop local frontend.'); }
       resolve();

@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test src/main/apiRequestPolicy.test.ts",
     "build": "electron-vite build",
     "preview": "electron-vite preview"
   },

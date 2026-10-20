@@ -2,6 +2,7 @@ import { useState } from "react";
 import { SearchField } from "../shared/SearchField";
 import { useSearchShortcut } from "../shared/useSearchShortcut";
 import { KnowledgeBadge, KnowledgeConnections, KnowledgeHeading, KnowledgeRow } from "./KnowledgePrimitives";
+import type { CreatedKnowledgeDraft } from "../shared/api-client";
 
 const sampleDocuments = [
   { title: "Release readiness checklist", details: "Checklist · Arden Core · Minh Tran", status: "Published", scope: "Company-wide", type: "Checklist" },
@@ -11,7 +12,7 @@ const sampleDocuments = [
   { title: "Data retention policy mapping", details: "Policy · Security · Company-wide", status: "Published", scope: "Company-wide", type: "Policy" },
 ];
 
-export function KnowledgeLibrary({ active, showPrivateSample, onCreate, onEdit, onOpenDocument }: { active: boolean; showPrivateSample: boolean; onCreate: () => void; onEdit: () => void; onOpenDocument: (title: string) => void }) {
+export function KnowledgeLibrary({ active, showPrivateSample, createdDraft, onCreate, onEdit, onOpenDocument }: { active: boolean; showPrivateSample: boolean; createdDraft: CreatedKnowledgeDraft | null; onCreate: () => void; onEdit: () => void; onOpenDocument: (title: string) => void }) {
   const [query, setQuery] = useState("");
   const [departmentOnly, setDepartmentOnly] = useState(false);
   const [publishedOnly, setPublishedOnly] = useState(false);
@@ -21,7 +22,15 @@ export function KnowledgeLibrary({ active, showPrivateSample, onCreate, onEdit, 
   const filtered = samples.filter((document) => `${document.title} ${document.details}`.toLowerCase().includes(query.trim().toLowerCase()) && (!departmentOnly || document.scope === "Department") && (!publishedOnly || document.status === "Published") && (documentType === "All types" || document.type === documentType));
   const showFeatured = "api gateway runbook lan nguyen product engineering".includes(query.trim().toLowerCase()) && (documentType === "All types" || documentType === "Runbook");
   return <>
-    <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Knowledge, connected." description="Find trusted decisions, guides and the context behind them." action={<button type="button" className="primary-button" onClick={onCreate}>Create knowledge</button>} />
+    <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Knowledge, connected."  action={<button type="button" className="primary-button" onClick={onCreate}>Explore sample creation</button>} />
+    {createdDraft && <section className="knowledge-server-draft" aria-labelledby="knowledge-server-draft-title">
+      <span className="meta-label knowledge-tone-jade">CREATED ON ARDEN SERVER · NOT PUBLISHED</span>
+      <h2 id="knowledge-server-draft-title">{createdDraft.title}</h2>
+      <div className="knowledge-inline-meta"><KnowledgeBadge tone="jade">Shared draft · v{createdDraft.version}</KnowledgeBadge><KnowledgeBadge tone="blue">{createdDraft.classification}</KnowledgeBadge></div>
+
+      <details><summary>View copied text</summary><pre>{createdDraft.body}</pre></details>
+
+    </section>}
     <SearchField ref={searchRef} value={query} onChange={setQuery} placeholder="Search sample knowledge, decisions and people…" />
     <div className="knowledge-filters" aria-label="Sample knowledge filters">
       <button type="button" className="knowledge-filter is-current" onClick={() => { setDepartmentOnly(false); setPublishedOnly(false); setDocumentType("All types"); }}><KnowledgeBadge tone="amber">All knowledge · {samples.length + 1} samples</KnowledgeBadge></button>
@@ -35,7 +44,7 @@ export function KnowledgeLibrary({ active, showPrivateSample, onCreate, onEdit, 
     </button>}
     <div className="knowledge-section-heading"><h2>Recently updated</h2><span>{filtered.length} sample items shown</span></div>
     <div className="knowledge-row-list">{filtered.map((document) => <KnowledgeRow key={document.title} title={document.title} details={document.details} status={document.status} tone={document.status === "Published" ? "jade" : document.status === "Private" ? "blue" : "amber"} onClick={() => onOpenDocument(document.title)} />)}</div>
-    {filtered.length === 0 && !showFeatured && <div className="knowledge-empty"><h2>No matching samples</h2><p>Change the search or clear the filters to see the sample library.</p><button type="button" className="secondary-button" onClick={() => { setQuery(""); setDepartmentOnly(false); setPublishedOnly(false); setDocumentType("All types"); }}>Clear filters</button></div>}
-    <p className="knowledge-preview-footnote">Synthetic sample library. Live search, content permissions and persistence require Arden Core.</p>
+    {filtered.length === 0 && !showFeatured && <div className="knowledge-empty"><h2>No matching samples</h2><button type="button" className="secondary-button" onClick={() => { setQuery(""); setDepartmentOnly(false); setPublishedOnly(false); setDocumentType("All types"); }}>Clear filters</button></div>}
+
   </>;
 }

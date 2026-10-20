@@ -9,6 +9,8 @@ coverage/
 *.log
 *.tsbuildinfo
 .DS_Store
+__pycache__/
+*.py[cod]
 .playwright-cli/
 .impeccable/review/
 

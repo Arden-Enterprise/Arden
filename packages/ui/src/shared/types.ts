@@ -1,12 +1,13 @@
 export type Platform = "web" | "desktop";
 
-export type WorkspaceView = "my-work" | "personal-workspace" | "organization-access" | "knowledge" | "ask-arden" | "review-queue" | "knowledge-handover";
+export type WorkspaceView = "my-work" | "personal-workspace" | "organization-access" | "knowledge" | "review-queue" | "knowledge-handover";
 
 export type PrivateNote = {
   id: string;
   title: string;
   body: string;
   updatedLabel: string;
+  sourceVersionId?: string;
 };
 
 export type PaneContent = {

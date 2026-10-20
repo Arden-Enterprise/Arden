@@ -1,5 +1,7 @@
 # Mainflow 1 — frontend preview
 
+> The former three-role/custom-role preview contract is superseded by [decision 0010](../decisions/0010-audiences-and-system-administration.md). Current preview terminology uses Member and Organization Admin; review authority is ReviewerGrant, and Arden System Admin is installation-level and outside organizations.
+
 Status: implemented session-memory UI, 4 October 2026. This is a reviewable frontend journey, not production authentication or authorization. The accepted visual reference is [Figma: Living Archive](https://www.figma.com/design/UmW5qb5cTWo6lwMYZ4Z9bC/Arden?node-id=147-2).
 
 ## Screens and transitions
@@ -12,7 +14,7 @@ Status: implemented session-memory UI, 4 October 2026. This is a reviewable fron
 6. Members → Awaiting assignment opens a form for primary department, one of three fixed roles and organization/department responsibility. Review shows the current/proposed assignment and effective boundaries before confirmation. A suspended membership stays suspended when its assignment changes; restoration is separate. The last eligible System Admin cannot be suspended or demoted.
 7. Preview access renders checking, pending, denied, expired-session or ready states. Only ready synthetic memberships can enter the workspace. Switching demo members clears private notes, with discard confirmation for unsaved private drafts.
 
-Preview state is in React memory. Refresh or confirmed exit clears it. Authenticated organization creation and invite-link acceptance are server operations; the synthetic administration preview itself remains local. Private-note drafts survive selection/navigation within one identity; they are never added to shared knowledge or sample answers. Knowledge review and handover are separate sample workflows, and Ask Arden uses a prerecorded answer with inspectable sample citations.
+Preview state is in React memory. Refresh or confirmed exit clears it. Authenticated organization creation and invite-link acceptance are server operations; the synthetic administration preview itself remains local. Private-note drafts survive selection/navigation within one identity; they are never added to shared knowledge or sample answers. Knowledge review and handover are separate sample workflows. The Ask Arden sample screen, navigation and context composer were removed on 13 October 2026; Flow 3 remains deferred.
 
 ## Preview conventions, not settled production policy
 

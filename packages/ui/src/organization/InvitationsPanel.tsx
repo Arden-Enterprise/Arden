@@ -23,7 +23,7 @@ export function InviteMemberDialog({ organization, onChange, onClose }: {
   return <OrganizationDialog title={discarding ? "Discard invitation draft?" : created ? "Invitation ready to preview" : "Invite a member"} description={discarding ? "This invitation has not been created." : created ? "The invitation exists in this session. No email has been sent." : "Invite someone to join the organization. Their primary department and role are assigned after they accept."} onClose={close}>
     {discarding ? <div className="organization-dialog-actions"><button type="button" className="secondary-button" autoFocus onClick={() => setDiscarding(false)}>Keep editing</button><button type="button" className="primary-button" onClick={onClose}>Discard changes</button></div> : created ? <div className="organization-form">
       <div className="organization-notice is-success"><strong>{name.trim()}</strong><span>{email.trim().toLowerCase()} · Pending acceptance</span></div>
-      <p className="organization-helper">Open Invitations → Preview invitation to follow the receiving member's journey.</p>
+
       <div className="organization-dialog-actions"><button className="primary-button" type="button" autoFocus onClick={onClose}>View invitations</button></div>
     </div> : <form className="organization-form" onSubmit={submit}>
       <label className="organization-field"><span>Member name</span><input value={name} maxLength={80} onChange={(event) => { setName(event.target.value); setError(""); }} placeholder="e.g. An Le" autoFocus required /></label>
@@ -53,10 +53,10 @@ export function InvitationsPanel({ organization, onChange, onPreviewInvitation, 
   };
   const target = invitations.find((invitation) => invitation.id === revoking);
   return <section className="organization-editor-stack">
-    <div className="organization-section-heading"><div><span className="meta-label">MEMBERSHIP STARTS HERE</span><h2>Invitations</h2><p>Track acceptance before assigning a primary department and role.</p></div><button type="button" className="primary-button" onClick={onInvite}>Invite member</button></div>
+    <div className="organization-section-heading"><div><span className="meta-label">MEMBERSHIP STARTS HERE</span><h2>Invitations</h2></div><button type="button" className="primary-button" onClick={onInvite}>Invite member</button></div>
     {message && <p className="organization-feedback" role="status">{message}</p>}
     {error && <p className="organization-form-error" role="alert">{error}</p>}
-    {!invitations.length ? <div className="organization-empty-state"><span className="organization-state-number">01</span><h3>No invitations yet</h3><p>Invite a member to start the acceptance and access-assignment workflow.</p><button type="button" className="secondary-button" onClick={onInvite}>Invite your first member</button></div> : <div className="organization-invitation-list">
+    {!invitations.length ? <div className="organization-empty-state"><span className="organization-state-number">01</span><h3>No invitations yet</h3><button type="button" className="secondary-button" onClick={onInvite}>Invite your first member</button></div> : <div className="organization-invitation-list">
       {invitations.map((invitation) => {
         const status = invitationStatus(invitation, Date.now());
         return <article className="organization-invitation-row" key={invitation.id}>

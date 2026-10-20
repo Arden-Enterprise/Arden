@@ -28,7 +28,7 @@ export function DepartmentEditor({ organization, onChange }: {
   };
   return (
     <section className="organization-editor-stack">
-      <div className="organization-section-heading"><div><span className="meta-label">ORGANIZATION → DEPARTMENT</span><h2>Departments</h2><p>A clear home for each member and their department knowledge.</p></div><button className="secondary-button" type="button" onClick={() => { setAdding(true); setName(""); }}><Icon name="plus" size={16} />Add department</button></div>
+      <div className="organization-section-heading"><div><span className="meta-label">ORGANIZATION → DEPARTMENT</span><h2>Departments</h2></div><button className="secondary-button" type="button" onClick={() => { setAdding(true); setName(""); }}><Icon name="plus" size={16} />Add department</button></div>
       <div className="department-list">
         {organization.departments.map((department, index) => {
           const count = organization.members.filter((member) => member.departmentId === department.id).length;
@@ -40,7 +40,7 @@ export function DepartmentEditor({ organization, onChange }: {
           </div>;
         })}
       </div>
-      <p className="organization-helper">Departments with assigned members cannot be removed. Move those members first.</p>
+
       {(editing || adding) && <OrganizationDialog title={discarding ? "Discard department changes?" : editing ? "Edit department" : "Add department"} description="Department names are unique within this organization. Changes stay in this preview session." onClose={requestClose}>
         {discarding ? <div className="organization-dialog-actions"><button type="button" className="secondary-button" autoFocus onClick={() => setDiscarding(false)}>Keep editing</button><button type="button" className="primary-button" onClick={close}>Discard changes</button></div> : <form className="organization-form" onSubmit={save}>
           <label className="organization-field"><span>Department name</span><input value={name} maxLength={80} onChange={(event) => { setName(event.target.value); setError(""); }} autoFocus required placeholder="e.g. Product Engineering" /></label>

@@ -25,7 +25,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
           <span className="meta-label">01 / YOUR ORGANIZATION</span>
           <h2 id="workspace-select-title">Choose your workspace</h2>
           {testMode && <p className="preview-disclaimer" role="status">Kiet Local test session · no login · changes are saved to the development database; invitation emails are not sent.</p>}
-          <p>Your selection establishes organization context. It does not grant access by itself.</p>
+
           {isLive ? <div className="workspace-memberships">
             {choices.map((membership) => <button type="button" key={membership.organization.id} className="workspace-membership" onClick={() => onContinue(membership.organization.id)}>
               <span className="workspace-membership-heading"><img src={entryAssets.selectedWorkspace} alt="" width={26} height={26} /><strong>{membership.organization.name}</strong><span className="workspace-membership-status">AVAILABLE</span></span>
@@ -48,7 +48,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
               <label><span>Your primary department</span><input required maxLength={80} value={departmentInput} onChange={(event) => setDepartmentInput(event.target.value)} /></label>
               {createError && <p role="alert">{createError}</p>}
               <button type="submit" className="primary-button" disabled={creating}>{creating ? "Creating…" : "Create organization"}</button>
-              <small>You will become its Org Admin and receive the primary department’s default role.</small>
+
             </form>}
           </div> : <div className="workspace-memberships">
             <div className="workspace-membership is-selected" aria-label={`${organizationName}, selected sample workspace`}>
@@ -59,7 +59,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
                   <img src={entryAssets.statusAmber} alt="" width={7} height={7} />SELECTED
                 </span>
               </div>
-              <p>Product Engineering · Employee</p>
+              <p>Product Engineering · Member</p>
             </div>
             <button type="button" className="workspace-membership is-unavailable" disabled>
               <span className="workspace-membership-heading">
@@ -73,8 +73,8 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
             </button>
           </div>}
           {!isLive && <><button type="button" className="primary-button workspace-continue" onClick={() => onContinue()}>Continue to workspace</button>
-          <p className="workspace-preview-identity">Sample member · Lan Nguyen · Employee</p>
-          <p className="preview-disclaimer">Member preview uses sample data. Workspace selection does not sign you in or grant organization access.</p></>}
+
+          </>}
           <button type="button" className="text-button workspace-back" onClick={onBack}>{isLive ? "Sign out" : "Back to sign in"}</button>
         </div>
       </section>

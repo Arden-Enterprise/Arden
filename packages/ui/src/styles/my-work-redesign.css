@@ -1,0 +1,88 @@
+/* My Work layout; shared palette and controls live in workspace-theme.css. */
+.is-my-work .my-work-title-row .meta-label { display: none; }
+.is-my-work .my-work-title-row h1 { font-size: clamp(30px, 3vw, 40px); line-height: 1.25; letter-spacing: -.035em; }
+.is-my-work .my-work-title-row .secondary-button { display: inline-flex; align-items: center; gap: 8px; background: var(--arden-surface); }
+.is-my-work .workspace-scroll-content { padding-top: 8px; }
+.is-my-work .my-work-search { margin-bottom: 20px; }
+.is-my-work .my-work-search .workspace-search { width: 100%; min-height: 52px; padding: 0 16px; border: 1px solid #56616a; border-radius: 8px; background: var(--arden-surface); }
+.is-my-work .my-work-search .workspace-search input { flex: 1; min-width: 0; width: 100%; font-size: 14px; }
+.is-my-work .my-work-search kbd { flex: none; padding: 2px 8px; border: 1px solid var(--arden-line); border-radius: 4px; background: #2a3238; color: var(--arden-text-secondary); }
+.is-my-work .my-work-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.is-my-work .my-work-summary-card { display: flex; align-items: center; gap: 16px; min-width: 0; min-height: 88px; padding: 16px; border: 1px solid var(--arden-line); border-radius: 8px; color: var(--arden-text-primary); background: var(--arden-surface); text-align: left; }
+.is-my-work .my-work-summary-card > span:nth-child(2) { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.is-my-work .my-work-summary-card strong { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.is-my-work .my-work-summary-card > span > span { font-size: 13px; color: var(--arden-text-secondary); }
+.is-my-work .my-work-summary-card > svg { flex: none; color: var(--arden-text-secondary); }
+.is-my-work .my-work-icon-tile { display: grid; flex: none; place-items: center; width: 52px; height: 54px; border-radius: 12px; background: #2d3439; color: var(--arden-text-primary); }
+.is-my-work .tone-amber { --work-tone: #e6b66e; --work-tint: #403829; }
+.is-my-work .tone-blue { --work-tone: #8cbaea; --work-tint: #2d3d4b; }
+.is-my-work .tone-green { --work-tone: #9bcfaf; --work-tint: #304137; }
+.is-my-work .tone-red { --work-tone: #e5a0a0; --work-tint: #473233; }
+.is-my-work .my-work-summary-card .my-work-icon-tile,
+.is-my-work .my-work-activity-row[class*="tone-"] .my-work-icon-tile { background: var(--work-tint); color: var(--work-tone); }
+.is-my-work .my-work-dashboard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .46fr); gap: 28px; align-items: start; margin-top: 28px; }
+.is-my-work .my-work-queue-column { min-width: 0; }
+.is-my-work .my-work-queue-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 18px; }
+.is-my-work .my-work-queue-heading h2 { margin: 0; font-size: 24px; line-height: 1.35; letter-spacing: -.025em; }
+.is-my-work .my-work-filters { display: flex; gap: 10px; flex-wrap: wrap; }
+.is-my-work .my-work-filters label { min-width: 0; }
+.is-my-work .my-work-filters select { min-height: 44px; max-width: 100%; padding: 8px 10px; border: 1px solid #56616a; border-radius: 6px; background: var(--arden-surface); color: var(--arden-text-secondary); font-size: 12px; }
+.is-my-work .my-work-queue-list { gap: 12px; }
+.is-my-work .my-work-task { position: relative; display: flex; align-items: center; gap: 16px; width: 100%; min-width: 0; padding: 17px 20px 17px 18px; border: 1px solid var(--arden-line); border-radius: 8px; color: var(--arden-text-primary); background: var(--arden-surface); text-align: left; overflow: hidden; }
+.is-my-work .my-work-task::before { position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--work-tone); content: ""; }
+.is-my-work .my-work-task-copy { display: grid; flex: 1; min-width: 0; gap: 7px; }
+.is-my-work .my-work-task-copy > strong { font-size: 15px; line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
+.is-my-work .my-work-task-badges { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; line-height: 1.6; }
+.is-my-work .my-work-status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 5px; color: var(--work-tone); background: var(--work-tint); }
+.is-my-work .my-work-status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.is-my-work .my-work-detail { padding: 2px 9px; border-radius: 5px; color: var(--arden-text-secondary); background: #30383e; }
+.is-my-work .my-work-task-metadata { font-size: 12px; line-height: 1.6; color: var(--arden-text-muted); }
+.is-my-work .my-work-avatar { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; background: #49434d; color: #f2ece2; font-size: 11px; }
+.is-my-work .my-work-unassigned { font-size: 11px; color: var(--arden-text-muted); }
+.is-my-work .my-work-task > svg { flex: none; color: var(--arden-text-secondary); }
+.is-my-work .my-work-activity { min-width: 0; border: 1px solid var(--arden-line); border-radius: 8px; background: var(--arden-surface); }
+.is-my-work .my-work-activity > section { padding: 14px 16px; }
+.is-my-work .my-work-activity > section + section { border-top: 1px solid var(--arden-line); }
+.is-my-work .my-work-activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.is-my-work .my-work-activity-heading h2 { margin: 0; font-family: "DM Sans", sans-serif; font-size: 15px; font-weight: 600; }
+.is-my-work .my-work-activity-heading > button { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 0; border: 0; background: transparent; color: var(--arden-text-muted); font-size: 11px; }
+.is-my-work .my-work-activity-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 70px; padding: 8px 0; border: 0; border-radius: 4px; background: transparent; color: var(--arden-text-primary); text-align: left; }
+.is-my-work .my-work-activity-row .my-work-icon-tile { width: 40px; height: 42px; border-radius: 9px; }
+.is-my-work .my-work-activity-row > span:last-child { display: grid; min-width: 0; gap: 3px; }
+.is-my-work .my-work-activity-row strong { font-size: 13px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+.is-my-work .my-work-activity-row > span > span { color: var(--arden-text-muted); font-size: 12px; }
+.is-my-work .my-work-summary-card:hover:not(:disabled),
+.is-my-work .my-work-task:hover:not(:disabled),
+.is-my-work .my-work-activity-row:hover:not(:disabled) { background: var(--arden-elevated); border-color: var(--arden-line-strong); }
+.is-my-work button:disabled { opacity: .6; }
+.is-my-work button:focus-visible, .is-my-work select:focus-visible { outline: 2px solid var(--arden-info); outline-offset: 3px; }
+.is-my-work .my-work-search .workspace-search:focus-within { outline: 2px solid var(--arden-info); outline-offset: 2px; }
+@container workspace (max-width: 900px) {
+  .is-my-work .my-work-dashboard { grid-template-columns: minmax(0, 1fr); }
+  .is-my-work .my-work-activity { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .is-my-work .my-work-activity > section + section { border-top: 0; border-left: 1px solid var(--arden-line); }
+  .is-my-work .my-work-summary-card { gap: 10px; padding: 12px; }
+  .is-my-work .my-work-summary-card .my-work-icon-tile { width: 40px; height: 44px; }
+}
+@container workspace (max-width: 640px) {
+  .is-my-work .my-work-summary-card { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .is-my-work .my-work-summary-card > svg { display: none; }
+  .is-my-work .my-work-summary-card strong { font-size: 24px; }
+  .is-my-work .my-work-activity { display: block; }
+  .is-my-work .my-work-activity > section + section { border-left: 0; border-top: 1px solid var(--arden-line); }
+  .is-my-work .my-work-task { gap: 12px; padding: 16px 14px; }
+  .is-my-work .my-work-task .my-work-icon-tile { width: 40px; height: 44px; }
+}
+@container workspace (max-width: 420px) {
+  .is-my-work .preview-state { display: block; max-width: none; font-size: 9px; }
+  .is-my-work .my-work-summary { gap: 8px; }
+  .is-my-work .my-work-summary-card { padding: 10px; }
+  .is-my-work .my-work-summary-card > span > span { font-size: 11px; }
+  .is-my-work .my-work-task { flex-wrap: wrap; }
+  .is-my-work .my-work-task-copy { flex-basis: calc(100% - 56px); }
+  .is-my-work .my-work-avatar, .is-my-work .my-work-unassigned { margin-left: 52px; }
+  .is-my-work .my-work-task > svg { margin-left: auto; }
+  .is-my-work .my-work-filters { width: 100%; }
+  .is-my-work .my-work-filters label { flex: 1; }
+  .is-my-work .my-work-filters select { width: 100%; }
+}
