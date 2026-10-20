@@ -4,22 +4,22 @@ import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePa
 import { ActionToast } from "../shared/ActionToast";
 import {
   ApiError, changePrimaryDepartment, createDepartment, createReviewerGrant, deactivateReviewerGrant,
-  inviteOrganizationMember, listReviewerGrants, loadCustomRoles, loadOrganizationAdministration,
-  resendOrganizationInvitation, revokeCustomRole, revokeOrganizationInvitation,
+  inviteOrganizationMember, listReviewerGrants, loadAudienceGroups, loadOrganizationAdministration,
+  removeAudienceGroupMember, resendOrganizationInvitation, revokeOrganizationInvitation,
   type OrganizationAdministration, type ReviewerGrant,
 } from "../shared/api-client";
 import type { Platform } from "../shared/types";
-import type { CustomRoleRecord } from "../shared/role-contracts";
-import { ServerRoleConfigurationPanel } from "./ServerRoleConfigurationPanel";
+import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
+import { ServerAudienceGroupPanel } from "./ServerAudienceGroupPanel";
 import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 
 type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void } & ContextControlProps;
-type AdminTab = "members" | "departments" | "roles" | "invitations" | "reviewers";
+type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers";
 type Member = OrganizationAdministration["members"][number];
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
 const classifications = ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] as const;
 const tabNames: Record<AdminTab, string> = {
-  members: "Members", departments: "Departments", roles: "Roles", invitations: "Invitations", reviewers: "Reviewer authority",
+  members: "Members", departments: "Departments", audiences: "Audiences", invitations: "Invitations", reviewers: "Reviewer authority",
 };
 function memberStatusLabel(status: string): string {
   return status === "ACTIVE" ? "Active" : status === "INVITED" ? "Awaiting assignment" : "Inactive";
@@ -43,12 +43,12 @@ function ConfirmAction({ confirmation, busy, error, onClose, onConfirm }: {
   </dialog>;
 }
 
-function MemberDrawer({ member, departmentName, grants, departments, organizationRoles, customRoles, rolesLoading, busy, feedback, feedbackError, onClose, onDepartmentChange, onGrant, onManageRoles, onRevokeRole }: {
+function MemberDrawer({ member, departmentName, grants, departments, organizationRoles, audienceGroups, groupsLoading, busy, feedback, feedbackError, onClose, onDepartmentChange, onGrant, onManageAudiences, onRemoveFromAudience }: {
   member: Member; departmentName: (id: string | null) => string; grants: ReviewerGrant[];
   departments: OrganizationAdministration["departments"]; organizationRoles: OrganizationAdministration["roles"];
-  customRoles: CustomRoleRecord[]; rolesLoading: boolean; busy: boolean; feedback: string; feedbackError: string; onClose: () => void;
-  onDepartmentChange: (id: string) => void; onGrant: () => void; onManageRoles: () => void;
-  onRevokeRole: (role: CustomRoleRecord, assignmentId: string) => void;
+  audienceGroups: AudienceGroupRecord[]; groupsLoading: boolean; busy: boolean; feedback: string; feedbackError: string; onClose: () => void;
+  onDepartmentChange: (id: string) => void; onGrant: () => void; onManageAudiences: () => void;
+  onRemoveFromAudience: (group: AudienceGroupRecord, groupMembershipId: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
@@ -67,16 +67,21 @@ function MemberDrawer({ member, departmentName, grants, departments, organizatio
       onChange={(event) => onDepartmentChange(event.target.value)}>{departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       <small aria-live="polite">{busy ? "Saving…" : feedback === "Primary department updated." ? "Saved. Primary department updated." : "Changes save immediately."}</small>
       {(member.departmentIds ?? []).filter((id) => id !== member.departmentId).length > 0 && <p>Also in {(member.departmentIds ?? []).filter((id) => id !== member.departmentId).map(departmentName).join(", ")}</p>}</section>
-    <section><h3>Roles</h3>{member.roleIds.length ? <ul>{member.roleIds.map((id, index) => {
-      const role = organizationRoles.find((item) => item.id === id);
-      const custom = customRoles.find((item) => item.id === id);
-      const assignments = custom?.assignments.filter((item) => item.membershipId === member.id && item.status === "ACTIVE") ?? [];
-      return <li key={id}><strong>{role?.name ?? custom?.name ?? member.roleNames[index] ?? "Role"}</strong>
-        {role?.code === "ORG_ADMIN" ? <small>Protected by Arden</small> : role?.isDefault ? <small>Department default role</small>
-          : rolesLoading ? <small>Loading role scope…</small> : assignments.length ? assignments.map((assignment) => <span key={assignment.id} className="admin-member-role-assignment"><small>Custom role · {assignment.scope.type === "ORGANIZATION" ? "Organization" : departmentName(assignment.scope.departmentId)}</small><button type="button" className="admin-text-danger" disabled={busy} onClick={() => custom && onRevokeRole(custom, assignment.id)}>Revoke…</button></span>)
-            : <small>Custom role</small>}</li>;
-    })}</ul> : <p className="field-error">No roles yet. Members need a department role before they can use the workspace.</p>}
-      <button type="button" className="secondary-button" onClick={onManageRoles}>Manage roles</button></section>
+    <section><h3>Organization access</h3><ul>
+      <li><strong>Member</strong><small>Active organization membership</small></li>
+      {member.roleIds.map((id, index) => {
+        const role = organizationRoles.find(item => item.id === id);
+        return role?.code === "ORG_ADMIN" ? <li key={id}><strong>Organization Admin</strong><small>Protected administration capability</small></li>
+          : role?.isDefault ? null : <li key={id}><strong>{role?.name ?? member.roleNames[index] ?? "Protected capability"}</strong></li>;
+      })}</ul></section>
+    <section><h3>Audience groups</h3>{groupsLoading ? <p>Loading audience groups…</p> : (() => {
+      const memberships = audienceGroups.flatMap(group => group.members
+        .filter(groupMember => groupMember.membershipId === member.id && groupMember.status === "ACTIVE")
+        .map(groupMember => ({ group, groupMember })));
+      return memberships.length ? <ul>{memberships.map(({ group, groupMember }) => <li key={groupMember.id}><strong>{group.name}</strong>
+        <span className="admin-member-role-assignment"><small>May read publications targeted to this group</small><button type="button" className="admin-text-danger" disabled={busy} onClick={() => onRemoveFromAudience(group, groupMember.id)}>Remove…</button></span></li>)}</ul>
+        : <p>No custom audience groups.</p>;
+    })()}<button type="button" className="secondary-button" onClick={onManageAudiences}>Manage audiences</button></section>
     <section><h3>Reviewer authority</h3>{grants.length ? <ul>{grants.map((grant) => <li key={grant.id}><strong>{departmentName(grant.departmentId)}</strong>
       <span>{grant.classifications.join(", ")} · {grant.level.toLowerCase()} · {grant.status.toLowerCase()}</span></li>)}</ul> : <p>No reviewer authority.</p>}
       <button type="button" className="primary-button" onClick={onGrant} disabled={member.status !== "ACTIVE"}>Grant reviewer authority</button>
@@ -88,10 +93,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [data, setData] = useState<OrganizationAdministration | null>(null);
   const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
   const [tab, setTab] = useState<AdminTab>("members");
-  const [roleDirty, setRoleDirty] = useState(false);
+  const [audienceDirty, setAudienceDirty] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
-  const [memberCustomRoles, setMemberCustomRoles] = useState<CustomRoleRecord[]>([]);
-  const [memberRolesLoading, setMemberRolesLoading] = useState(false);
+  const [memberAudienceGroups, setMemberAudienceGroups] = useState<AudienceGroupRecord[]>([]);
+  const [memberGroupsLoading, setMemberGroupsLoading] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
   const [memberStatus, setMemberStatus] = useState("ALL");
   const [memberDepartment, setMemberDepartment] = useState("ALL");
@@ -109,7 +114,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [departmentError, setDepartmentError] = useState("");
   const [grantSubmitted, setGrantSubmitted] = useState(false);
   const [lastCreatedGrantId, setLastCreatedGrantId] = useState<string | null>(null);
-  const [roleCreateSignal, setRoleCreateSignal] = useState(0);
+  const [audienceCreateSignal, setAudienceCreateSignal] = useState(0);
   const [pendingTab, setPendingTab] = useState<AdminTab | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState("");
   const [loading, setLoading] = useState(true);
@@ -117,8 +122,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
-  const reportRoleDirty = useCallback((dirty: boolean) => {
-    setRoleDirty(dirty);
+  const reportAudienceDirty = useCallback((dirty: boolean) => {
+    setAudienceDirty(dirty);
     onDirtyChange?.(dirty);
   }, [onDirtyChange]);
 
@@ -144,10 +149,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   useEffect(() => {
     if (!selectedMemberId) return;
     let active = true;
-    setMemberCustomRoles([]); setMemberRolesLoading(true);
-    void loadCustomRoles(platform, organizationId).then((roles) => { if (active) setMemberCustomRoles(roles); })
-      .catch(() => { if (active) setError("Custom role assignments could not be loaded. Try reopening this member."); })
-      .finally(() => { if (active) setMemberRolesLoading(false); });
+    setMemberAudienceGroups([]); setMemberGroupsLoading(true);
+    void loadAudienceGroups(platform, organizationId).then((groups) => { if (active) setMemberAudienceGroups(groups); })
+      .catch(() => { if (active) setError("Audience group memberships could not be loaded. Try reopening this member."); })
+      .finally(() => { if (active) setMemberGroupsLoading(false); });
     return () => { active = false; };
   }, [platform, organizationId, selectedMemberId]);
 
@@ -162,7 +167,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     finally { setBusy(false); }
   };
   const selectTab = (next: AdminTab) => {
-    if (tab === "roles" && next !== "roles" && roleDirty) { setPendingTab(next); return; }
+    if (tab === "audiences" && next !== "audiences" && audienceDirty) { setPendingTab(next); return; }
     setError(""); setMessage(""); setTab(next);
     document.querySelector(".organization-live-admin .workspace-scroll-region")?.scrollTo(0, 0);
   };
@@ -183,7 +188,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       setDepartmentError("A department with this name already exists."); document.getElementById("admin-department-name")?.focus(); return;
     }
     setDepartmentError("");
-    void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentNameInput(""); }, "Department created with its default role.");
+    void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentNameInput(""); }, "Department created with its managed audience.");
   };
   const submitInvite = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -220,13 +225,13 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const tabCount: Record<AdminTab, number> = {
     members: data?.members.length ?? 0, departments: data?.departments.length ?? 0,
-    roles: data?.roles.filter((item) => !item.isDefault).length ?? 0,
+    audiences: memberAudienceGroups.length,
     invitations: data?.invitations.filter((item) => item.status === "PENDING" && new Date(item.expiresAt).getTime() > Date.now()).length ?? 0,
     reviewers: reviewerGrants.filter((grant) => grant.status === "ACTIVE").length,
   };
   const focusTabForm = (targetTab: AdminTab, selector: string) => {
     selectTab(targetTab);
-    if (targetTab === tab || !(tab === "roles" && roleDirty)) window.setTimeout(() => document.querySelector<HTMLElement>(selector)?.focus(), 0);
+    if (targetTab === tab || !(tab === "audiences" && audienceDirty)) window.setTimeout(() => document.querySelector<HTMLElement>(selector)?.focus(), 0);
   };
   const overlappingGrant = reviewerGrants.some((grant) => grant.status === "ACTIVE" && grant.reviewerMembershipId === reviewerId
     && grant.departmentId === reviewDepartmentId && grant.classifications.some((item) => reviewClassifications.includes(item)));
@@ -244,9 +249,9 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           onClick={() => {
             if (tab === "members" || tab === "invitations") focusTabForm("invitations", "#admin-invite-email");
             else if (tab === "departments") focusTabForm("departments", "#admin-department-name");
-            else if (tab === "roles") setRoleCreateSignal((value) => value + 1);
+            else if (tab === "audiences") setAudienceCreateSignal((value) => value + 1);
             else focusTabForm("reviewers", "#admin-reviewer-select");
-          }}>+ {tab === "departments" ? "Add department" : tab === "roles" ? "Create role" : tab === "reviewers" ? "Grant authority" : "Invite member"}</button>} />
+          }}>+ {tab === "departments" ? "Add department" : tab === "audiences" ? "Create audience group" : tab === "reviewers" ? "Grant authority" : "Invite member"}</button>} />
       <div className="admin-tabs" role="tablist" aria-label="Administration sections">{(Object.keys(tabNames) as AdminTab[]).map((name) => <button key={name}
         type="button" role="tab" aria-selected={tab === name} className={tab === name ? "is-active" : ""}
         onClick={() => selectTab(name)}>{tabNames[name]} <span>{tabCount[name]}</span></button>)}</div>
@@ -258,23 +263,23 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             <label><span className="sr-only">Filter membership status</span><select value={memberStatus} onChange={(event) => setMemberStatus(event.target.value)}><option value="ALL">All statuses</option><option value="ACTIVE">Active</option><option value="INVITED">Awaiting assignment</option><option value="INACTIVE">Inactive</option></select></label>
             <label><span className="sr-only">Filter department</span><select value={memberDepartment} onChange={(event) => setMemberDepartment(event.target.value)}><option value="ALL">All departments</option>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             <span aria-live="polite">{matchingMembers.length} of {data.members.length} members</span></div>
-          {matchingMembers.length ? <div className="admin-table-wrap"><table className="admin-members-table"><thead><tr><th>Member</th><th>Membership</th><th>Department</th><th>Roles</th><th>Reviewer authority</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{matchingMembers.map((member) => {
+          {matchingMembers.length ? <div className="admin-table-wrap"><table className="admin-members-table"><thead><tr><th>Member</th><th>Membership</th><th>Department</th><th>System capability</th><th>Reviewer authority</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{matchingMembers.map((member) => {
             const grants = reviewerGrants.filter((grant) => grant.reviewerMembershipId === member.id && grant.status === "ACTIVE");
             return <tr key={member.id} className={selectedMemberId === member.id ? "is-selected" : ""}><td data-label="Member"><button type="button" className="admin-member-open" onClick={() => setSelectedMemberId(member.id)} aria-label={`Open details for ${member.name}`}><span className="sidebar-avatar" aria-hidden="true">{member.name.split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span><span><strong>{member.name}</strong><small>{member.email}</small></span></button></td>
               <td data-label="Membership"><span className={`admin-status status-${memberStatusClass(member.status)}`}>{memberStatusLabel(member.status)}</span></td>
               <td data-label="Department">{departmentName(member.departmentId)}<small>Primary{(member.departmentIds ?? []).filter((id) => id !== member.departmentId).length ? ` · also ${(member.departmentIds ?? []).filter((id) => id !== member.departmentId).map(departmentName).join(", ")}` : ""}</small></td>
-              <td data-label="Roles">{member.roleNames.join(", ") || "No roles assigned"}</td>
+              <td data-label="System capability">{data.roles.some(role => role.code === "ORG_ADMIN" && member.roleIds.includes(role.id)) ? "Organization Admin" : "Member"}</td>
               <td data-label="Reviewer authority">{grants.length ? <>{grants.map((grant) => departmentName(grant.departmentId)).join(", ")}<small>Up to {grants.some((grant) => grant.classifications.includes("RESTRICTED")) ? "Restricted" : grants.some((grant) => grant.classifications.includes("CONFIDENTIAL")) ? "Confidential" : "Internal"}</small></> : "None"}</td>
               <td><button type="button" className="secondary-button" onClick={() => setSelectedMemberId(member.id)} aria-label={`Manage ${member.name}`}>Manage</button></td></tr>;
           })}</tbody></table></div> : <div className="organization-empty-state"><h3>{data.members.length ? "No matching members" : "No members yet"}</h3><p>{data.members.length ? "Try a different search or clear the filters." : "Invite a member to start building your organization."}</p><button type="button" className="secondary-button" onClick={() => { setMemberQuery(""); setMemberStatus("ALL"); setMemberDepartment("ALL"); }}>{data.members.length ? "Clear filters" : "Reset"}</button></div>}
         </section>}
         {tab === "departments" && <section role="tabpanel" aria-label="Departments" className="admin-section admin-narrow">
-          <div className="admin-section-heading"><div><h2>Departments</h2><p>Every department has a default role for its members.</p></div></div>
-          <form className="admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department *</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || "Arden also creates a default member role for the department."}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
-          {data.departments.length ? <div className="admin-table-wrap"><table className="admin-departments-table"><thead><tr><th>Department</th><th>Default role</th><th>Members</th></tr></thead><tbody>{data.departments.map((department) => <tr key={department.id}><td>{department.name}</td><td>{department.defaultRoleName}</td><td>{data.members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id)).length} members · {data.members.filter((member) => member.departmentId === department.id).length} primary</td></tr>)}</tbody></table></div> : <div className="organization-empty-state"><h3>No departments yet</h3><p>Create one before inviting members. Every member needs a primary department.</p></div>}
+          <div className="admin-section-heading"><div><h2>Departments</h2><p>Every department has a managed audience containing its active members.</p></div></div>
+          <form className="admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department *</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || "Arden also creates a managed department audience."}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
+          {data.departments.length ? <div className="admin-table-wrap"><table className="admin-departments-table"><thead><tr><th>Department</th><th>Managed audience</th><th>Members</th></tr></thead><tbody>{data.departments.map((department) => <tr key={department.id}><td>{department.name}</td><td>{department.name} members</td><td>{data.members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id)).length} members · {data.members.filter((member) => member.departmentId === department.id).length} primary</td></tr>)}</tbody></table></div> : <div className="organization-empty-state"><h3>No departments yet</h3><p>Create one before inviting members. Every member needs a primary department.</p></div>}
         </section>}
-        {tab === "roles" && <div role="tabpanel" aria-label="Roles" className="admin-section admin-roles"><ServerRoleConfigurationPanel platform={platform} organizationId={organizationId} members={data.members} departments={data.departments}
-          onDirtyChange={reportRoleDirty} onRolesChanged={() => void reload().catch(() => setError("Roles changed, but organization data could not refresh."))} createSignal={roleCreateSignal} /></div>}
+        {tab === "audiences" && <div role="tabpanel" aria-label="Audiences" className="admin-section admin-roles"><ServerAudienceGroupPanel platform={platform} organizationId={organizationId} members={data.members}
+          onDirtyChange={reportAudienceDirty} onGroupsChanged={() => void reload().catch(() => setError("Audiences changed, but organization data could not refresh."))} createSignal={audienceCreateSignal} /></div>}
         {tab === "invitations" && <section role="tabpanel" aria-label="Invitations" className="admin-section">
           <div className="admin-section-heading"><div><h2>Invitations</h2><p>Invite someone by email. They appear as a member after accepting the invitation.</p></div></div>
           {data.departments.length ? <form className="admin-inline-form" noValidate onSubmit={submitInvite}>
@@ -321,18 +326,18 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       </>}
     </WorkspacePageContent>
     {selectedMember && <MemberDrawer member={selectedMember} departmentName={departmentName} departments={data?.departments ?? []} organizationRoles={data?.roles ?? []}
-      customRoles={memberCustomRoles} rolesLoading={memberRolesLoading} feedback={message} feedbackError={error}
+      audienceGroups={memberAudienceGroups} groupsLoading={memberGroupsLoading} feedback={message} feedbackError={error}
       grants={reviewerGrants.filter((grant) => grant.reviewerMembershipId === selectedMember.id && grant.status === "ACTIVE")} busy={busy}
       onClose={() => setSelectedMemberId(null)} onDepartmentChange={(id) => void perform(() => changePrimaryDepartment(platform, organizationId, selectedMember.id, id), "Primary department updated.")}
-      onManageRoles={() => { setSelectedMemberId(null); selectTab("roles"); }}
-      onRevokeRole={(role, assignmentId) => setConfirmation({
-        title: `Revoke ${role.name} from ${selectedMember.name}?`, description: "This member will lose access granted by this role. Other roles remain unchanged.", action: "Revoke assignment",
-        run: async () => { const updated = await revokeCustomRole(platform, organizationId, role.id, assignmentId); setMemberCustomRoles((current) => current.map((item) => item.id === updated.id ? updated : item)); },
+      onManageAudiences={() => { setSelectedMemberId(null); selectTab("audiences"); }}
+      onRemoveFromAudience={(group, groupMembershipId) => setConfirmation({
+        title: `Remove ${selectedMember.name} from ${group.name}?`, description: "This member will lose access granted by this audience group on their next request.", action: "Remove member",
+        run: async () => { const updated = await removeAudienceGroupMember(platform, organizationId, group.id, groupMembershipId); setMemberAudienceGroups((current) => current.map((item) => item.id === updated.id ? updated : item)); },
       })}
       onGrant={() => { setReviewerId(selectedMember.id); setReviewDepartmentId(selectedMember.departmentId ?? ""); setSelectedMemberId(null); focusTabForm("reviewers", "#admin-reviewer-select"); }} />}
     {confirmation && <ConfirmAction confirmation={confirmation} busy={busy} error={error} onClose={() => setConfirmation(null)} onConfirm={confirmAction} />}
-    {pendingTab && <KnowledgeDialog confirmation title="Discard unsaved role changes?" onClose={() => setPendingTab(null)}>
-      <p>Changes to this role have not been saved. Discard them and open {tabNames[pendingTab]}?</p>
+    {pendingTab && <KnowledgeDialog confirmation title="Discard unsaved audience changes?" onClose={() => setPendingTab(null)}>
+      <p>Changes to this audience group have not been saved. Discard them and open {tabNames[pendingTab]}?</p>
       <div className="dialog-actions"><button type="button" className="secondary-button" autoFocus onClick={() => setPendingTab(null)}>Keep editing</button>
         <button type="button" className="admin-danger-button" onClick={() => { setTab(pendingTab); setPendingTab(null); }}>Discard changes</button></div>
     </KnowledgeDialog>}

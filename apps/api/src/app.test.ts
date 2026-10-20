@@ -10,6 +10,8 @@ import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationEmail, InvitationMailer } from "./email/smtp-mailer.js";
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
+import { AudienceGroupError, type AudienceGroup, type AudienceGroupStore } from "./audiences/store.js";
+import { SystemAdministrationError, type SystemAdministrator, type SystemAdministrationStore } from "./system-administration/store.js";
 
 const ownerId = "11111111-1111-4111-8111-111111111111";
 const otherId = "22222222-2222-4222-8222-222222222222";
@@ -20,6 +22,7 @@ const versionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
 const sharedDraftId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const sharedVersionId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const createKey = "99999999-9999-4999-8999-999999999999";
+const systemAdminCandidateId = "33333333-3333-4333-8333-333333333333";
 
 describe("API auth and private draft routes", () => {
   let root: string;
@@ -168,24 +171,27 @@ describe("API auth and private draft routes", () => {
     expect(repository.createdOrganization).toMatchObject({ userId: ownerId, email: "owner@example.test", name: "Product Team" });
   });
 
-  it("exposes organization administration and role/department mutations only to the Org Admin", async () => {
+  it("exposes organization administration and audience/department mutations only to the Org Admin", async () => {
     const adminSession = await desktopSession(app, "owner@example.test");
     const adminData = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/administration`, headers: { cookie: adminSession } });
     expect(adminData.statusCode).toBe(200);
     expect(adminData.json().departments[0].name).toBe("Product");
 
-    const createdRole = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/roles`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Reviewer" } });
-    expect(createdRole.statusCode).toBe(201);
+    const createdAudience = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Operations readers", description: "Operations knowledge audience" } });
+    expect(createdAudience.statusCode).toBe(201);
+    expect(createdAudience.json()).toMatchObject({ name: "Operations readers", members: [] });
+    expect(createdAudience.headers.etag).toBe('"audience-group-1"');
     const createdDepartment = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/departments`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Operations" } });
     expect(createdDepartment.statusCode).toBe(201);
-    const assigned = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/members/77777777-7777-4777-8777-777777777777/roles`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { roleId: "88888888-8888-4888-8888-888888888888" } });
+    const assigned = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups/${createdAudience.json().id}/members`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { membershipId: "77777777-7777-4777-8777-777777777777" } });
     expect(assigned.statusCode).toBe(201);
 
     const memberSession = await desktopSession(app, "member@example.test");
     const denied = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/administration`, headers: { cookie: memberSession } });
     expect(denied.statusCode).toBe(404);
-    const deniedRoleWrite = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/roles`, headers: { cookie: memberSession, origin: "http://localhost:5180" }, payload: { name: "Forged role" } });
-    expect(deniedRoleWrite.statusCode).toBe(404);
+    const deniedAudienceWrite = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups`, headers: { cookie: memberSession, origin: "http://localhost:5180" }, payload: { name: "Forged audience", description: "" } });
+    expect(deniedAudienceWrite.statusCode).toBe(404);
+    expect((await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/roles`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Legacy role" } })).statusCode).toBe(404);
   });
 
   it("requires a signed-in verified email and validates organization setup input", async () => {
@@ -195,6 +201,40 @@ describe("API auth and private draft routes", () => {
     const invalid = await app.inject({ method: "POST", url: "/api/v1/organizations", headers: { cookie: session, origin: "http://localhost:5180" }, payload: { name: "  ", departmentName: "Team" } });
     expect(invalid.statusCode).toBe(400);
     expect(repository.createdOrganization).toBeNull();
+  });
+
+  it("keeps instance administration separate from organization administration", async () => {
+    const administrator = await desktopSession(app, "owner@example.test");
+    const overview = await app.inject({ method: "GET", url: "/api/v1/system/administrators",
+      headers: { cookie: administrator } });
+    expect(overview.statusCode).toBe(200);
+    expect(overview.json().administrators).toMatchObject([{ userId: ownerId, status: "ACTIVE" }]);
+    const granted = await app.inject({ method: "POST", url: "/api/v1/system/administrators",
+      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: { userId: systemAdminCandidateId } });
+    expect(granted.statusCode).toBe(201);
+    expect(granted.json()).toMatchObject({ userId: systemAdminCandidateId, status: "ACTIVE" });
+
+    const candidate = await desktopSession(app, "system-admin@example.test");
+    expect((await app.inject({ method: "GET", url: "/api/v1/system/administrators",
+      headers: { cookie: candidate } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET",
+      url: `/api/v1/organizations/${organizationId}/administration`,
+      headers: { cookie: candidate } })).statusCode).toBe(404);
+
+    const ordinaryMember = await desktopSession(app, "member@example.test");
+    const denied = await app.inject({ method: "GET", url: "/api/v1/system/administrators",
+      headers: { cookie: ordinaryMember } });
+    expect(denied.statusCode).toBe(404);
+    expect(denied.json().error.code).toBe("SYSTEM_ADMINISTRATION_UNAVAILABLE");
+  });
+
+  it("does not allow revoking the last active Arden System Admin", async () => {
+    const administrator = await desktopSession(app, "owner@example.test");
+    const revoked = await app.inject({ method: "POST",
+      url: `/api/v1/system/administrators/${ownerId}/revoke`,
+      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: {} });
+    expect(revoked.statusCode).toBe(409);
+    expect(revoked.json().error.code).toBe("SYSTEM_ADMINISTRATOR_LAST_ACTIVE");
   });
 
   it("sends opaque invitations and accepts them only for the matching authenticated email once", async () => {
@@ -550,7 +590,7 @@ describe("API auth and private draft routes", () => {
       payload: { title: "Original PDF", classification: "INTERNAL",
         responsibleDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
         targetScopeType: "DEPARTMENT", teamTag: null, projectTag: null,
-        audienceRoleIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } });
+        audienceIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } });
     expect(updated.statusCode).toBe(200);
     expect(updated.json()).toMatchObject({ pdfBase64, teamTag: null, projectTag: null,
       currentVersion: { mimeType: "application/pdf", version: 2 } });
@@ -595,7 +635,7 @@ describe("API auth and private draft routes", () => {
       url: `/api/v1/organizations/${organizationId}/knowledge/options`, headers: { cookie: session } });
     expect(options.statusCode).toBe(200);
     expect(options.json()).toMatchObject({ departments: [{ name: "Product" }],
-      audienceRoles: [{ name: "Product Member" }] });
+      audiences: [{ name: "Product members" }] });
     expect(options.headers["cache-control"]).toBe("no-store");
     const otherOrganization = await app.inject({ method: "GET",
       url: `/api/v1/organizations/${otherOrganizationId}/knowledge/options`, headers: { cookie: session } });
@@ -646,7 +686,7 @@ describe("API auth and private draft routes", () => {
     const updated = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
       headers: { ...ownerHeaders, "if-match": '"1"' },
       payload: { responsibleDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-        targetScopeType: "DEPARTMENT", audienceRoleIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } });
+        targetScopeType: "DEPARTMENT", audienceIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } });
     expect(updated.statusCode).toBe(200);
     const submit = await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
       headers: { ...ownerHeaders, "idempotency-key": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "if-match": '"2"' } });
@@ -696,7 +736,7 @@ describe("API auth and private draft routes", () => {
     const metadata = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
       payload: { responsibleDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
-        targetScopeType: "DEPARTMENT", audienceRoleIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } });
+        targetScopeType: "DEPARTMENT", audienceIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } });
     expect(metadata.statusCode).toBe(200);
     const first = await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"2"',
@@ -764,8 +804,10 @@ class FakeAuthProvider implements AuthProvider {
 
   async signIn(credentials: { email: string; password: string }) {
     if (credentials.password !== "synthetic-password" || !credentials.email.endsWith("@example.test")) throw new Error("INVALID_CREDENTIALS");
-    const suffix = credentials.email.startsWith("owner") ? "owner" : credentials.email.startsWith("manager") ? "manager" : "other";
-    const userId = suffix === "owner" ? ownerId : otherId;
+    const suffix = credentials.email.startsWith("owner") ? "owner"
+      : credentials.email.startsWith("manager") ? "manager"
+        : credentials.email.startsWith("system-admin") ? "system-admin" : "other";
+    const userId = suffix === "owner" ? ownerId : suffix === "system-admin" ? systemAdminCandidateId : otherId;
     const tokens = { accessToken: `access-${suffix}`, refreshToken: `refresh-${suffix}`, expiresIn: 3600 };
     const email = credentials.email.trim().toLowerCase();
     this.usersByAccessToken.set(tokens.accessToken, { userId, email, passwordSetupRequired: false });
@@ -801,7 +843,116 @@ class FakeAuthProvider implements AuthProvider {
   }
 }
 
+class MemoryAudienceGroupStore implements AudienceGroupStore {
+  private groups: AudienceGroup[] = [];
+
+  private authorize(userId: string, requestedOrganization: string) {
+    if (userId !== ownerId || requestedOrganization !== organizationId) {
+      throw new AudienceGroupError("AUDIENCE_GROUP_UNAVAILABLE");
+    }
+  }
+
+  async list(userId: string, requestedOrganization: string) {
+    this.authorize(userId, requestedOrganization);
+    return this.groups;
+  }
+
+  async get(userId: string, requestedOrganization: string, audienceGroupId: string) {
+    this.authorize(userId, requestedOrganization);
+    const group = this.groups.find(item => item.id === audienceGroupId);
+    if (!group) throw new AudienceGroupError("AUDIENCE_GROUP_UNAVAILABLE");
+    return group;
+  }
+
+  async create(userId: string, requestedOrganization: string,
+    input: { name: string; description: string }) {
+    this.authorize(userId, requestedOrganization);
+    const group: AudienceGroup = {
+      id: "88888888-8888-4888-8888-888888888888", name: input.name.trim(),
+      description: input.description, status: "ACTIVE", version: 1, members: [],
+    };
+    this.groups = [group];
+    return group;
+  }
+
+  async update(userId: string, requestedOrganization: string, audienceGroupId: string,
+    version: number, input: { name: string; description: string }) {
+    const group = await this.get(userId, requestedOrganization, audienceGroupId);
+    if (group.version !== version) throw new AudienceGroupError("AUDIENCE_GROUP_CONFLICT");
+    Object.assign(group, input, { version: version + 1 });
+    return group;
+  }
+
+  async addMember(userId: string, requestedOrganization: string, audienceGroupId: string,
+    membershipId: string) {
+    const group = await this.get(userId, requestedOrganization, audienceGroupId);
+    group.members.push({ id: createKey, membershipId, status: "ACTIVE",
+      validFrom: "2026-10-20T00:00:00.000Z", validUntil: null });
+    group.version += 1;
+    return group;
+  }
+
+  async removeMember(userId: string, requestedOrganization: string, audienceGroupId: string,
+    groupMembershipId: string) {
+    const group = await this.get(userId, requestedOrganization, audienceGroupId);
+    const member = group.members.find(item => item.id === groupMembershipId);
+    if (!member) throw new AudienceGroupError("AUDIENCE_GROUP_CONFLICT");
+    member.status = "REVOKED";
+    group.version += 1;
+    return group;
+  }
+
+  async deactivate(userId: string, requestedOrganization: string, audienceGroupId: string,
+    version: number) {
+    const group = await this.get(userId, requestedOrganization, audienceGroupId);
+    if (group.version !== version) throw new AudienceGroupError("AUDIENCE_GROUP_CONFLICT");
+    group.status = "INACTIVE";
+    group.version += 1;
+    return group;
+  }
+}
+
+class MemorySystemAdministrationStore implements SystemAdministrationStore {
+  private administrators: SystemAdministrator[] = [{ userId: ownerId, status: "ACTIVE", grantedByUserId: null,
+    grantedAt: new Date("2026-10-20T00:00:00.000Z"), revokedByUserId: null, revokedAt: null }];
+
+  private authorize(actorUserId: string) {
+    if (!this.administrators.some(item => item.userId === actorUserId && item.status === "ACTIVE")) {
+      throw new SystemAdministrationError("SYSTEM_ADMINISTRATION_UNAVAILABLE");
+    }
+  }
+
+  async overview(actorUserId: string) {
+    this.authorize(actorUserId);
+    return { administrators: this.administrators, recentEvents: [] };
+  }
+
+  async grant(actorUserId: string, targetUserId: string) {
+    this.authorize(actorUserId);
+    const administrator = { userId: targetUserId, status: "ACTIVE" as const,
+      grantedByUserId: actorUserId, grantedAt: new Date("2026-10-20T00:00:00.000Z"),
+      revokedByUserId: null, revokedAt: null };
+    this.administrators.push(administrator);
+    return administrator;
+  }
+
+  async revoke(actorUserId: string, targetUserId: string) {
+    this.authorize(actorUserId);
+    const administrator = this.administrators.find(item => item.userId === targetUserId);
+    if (!administrator) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
+    if (this.administrators.filter(item => item.status === "ACTIVE").length === 1) {
+      throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_LAST_ACTIVE");
+    }
+    const revoked = { ...administrator, status: "REVOKED" as const, revokedByUserId: actorUserId,
+      revokedAt: new Date("2026-10-20T00:01:00.000Z") };
+    Object.assign(administrator, revoked);
+    return revoked;
+  }
+}
+
 class MemoryRepository implements ArdenDataRepository {
+  readonly audienceGroups: AudienceGroupStore = new MemoryAudienceGroupStore();
+  readonly systemAdministration: SystemAdministrationStore = new MemorySystemAdministrationStore();
   createdOrganization: { userId: string; email: string; name: string } | null = null;
   pendingInvitation: { invitationId: string; email: string; tokenHash: string; expiresAt: Date; accepted: boolean } | null = null;
   currentBody = "Private body";
@@ -846,14 +997,12 @@ class MemoryRepository implements ArdenDataRepository {
     if ((userId !== ownerId && userId !== otherId) || requestedOrganization !== organizationId) return null;
     return {
       departments: [{ id: "ffffffff-ffff-4fff-8fff-ffffffffffff", name: "Product" }],
-      audienceRoles: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product Member",
-        departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", kind: "ROLE" }],
+      audiences: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product members",
+        departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", kind: "DEPARTMENT_ALL" }],
     };
   }
 
   async createDepartment(userId: string, requestedOrganization: string, _name: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
-  async createOrganizationRole(userId: string, requestedOrganization: string, _name: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
-  async assignOrganizationRole(userId: string, requestedOrganization: string, _membershipId: string, _roleId: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
   async changePrimaryDepartment(userId: string, requestedOrganization: string, _membershipId: string, _departmentId: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
 
   async createInvitation(userId: string, requestedOrganization: string, departmentId: string, email: string, tokenHash: string, expiresAt: Date): Promise<{ invitationId: string; email: string; organizationName: string; expiresAt: Date } | null> {

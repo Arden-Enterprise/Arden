@@ -5,9 +5,8 @@ import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateD
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
 import type { KnowledgeClassification } from "./knowledge/policy.js";
-import { registerCustomRoleRoutes, roleFailure, roleWriteProperties } from "./roles/routes.js";
-import { validCustomRoleName, type RolePermission } from "./roles/policy.js";
-import { RoleError } from "./roles/store.js";
+import { registerAudienceGroupRoutes } from "./audiences/routes.js";
+import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -57,7 +56,8 @@ export function buildApp(dependencies: AppDependencies) {
   });
   const requestActor = (request: FastifyRequest, reply: FastifyReply) =>
     requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, dependencies.testActor);
-  registerCustomRoleRoutes(app, dependencies.repository.customRoles, requestActor, uuidPattern);
+  registerAudienceGroupRoutes(app, dependencies.repository.audienceGroups, requestActor, uuidPattern);
+  registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
       return reply.code(400).send(safeError("INVALID_REQUEST", "The request is invalid.", request.id));
@@ -323,54 +323,6 @@ export function buildApp(dependencies: AppDependencies) {
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Department creation failed");
       return reply.code(isUniqueViolation(error) ? 409 : 500).send(safeError(isUniqueViolation(error) ? "DEPARTMENT_CONFLICT" : "INTERNAL_ERROR", isUniqueViolation(error) ? "A department with this name could not be created." : "The request could not be completed.", request.id));
-    }
-  });
-
-  app.post<{ Params: { organizationId: string }; Body: { name: string; description?: string; permissions?: RolePermission[] } }>("/api/v1/organizations/:organizationId/roles", {
-    schema: {
-      params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
-      body: { type: "object", additionalProperties: false, required: ["name"], properties: roleWriteProperties },
-    },
-  }, async (request, reply) => {
-    const context = await requestActor(request, reply);
-    if (!context) return;
-    const name = request.body.name.trim();
-    if (!isValidLabel(name, 80) || !validCustomRoleName(name)) return reply.code(400).send(safeError("INVALID_REQUEST", "Enter a valid custom role name.", request.id));
-    try {
-      if (dependencies.repository.customRoles) {
-        const role = await dependencies.repository.customRoles.create(context.userId, request.params.organizationId,
-          { name, description: request.body.description ?? "", permissions: request.body.permissions ?? [] }, request.id);
-        reply.header("Cache-Control", "no-store").header("ETag", `"role-${role.version}"`);
-        return reply.code(201).send(role);
-      }
-      const created = await dependencies.repository.createOrganizationRole(context.userId, request.params.organizationId, name, request.id);
-      if (!created) return reply.code(404).send(resourceNotAvailable(request.id));
-      return reply.code(201).send({ name, audiencePermissions: [] });
-    } catch (error) {
-      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Role creation failed");
-      if (error instanceof RoleError) return roleFailure(reply, error);
-      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
-    }
-  });
-
-  app.post<{ Params: { organizationId: string; membershipId: string }; Body: { roleId: string } }>("/api/v1/organizations/:organizationId/members/:membershipId/roles", {
-    schema: {
-      params: {
-        type: "object", required: ["organizationId", "membershipId"],
-        properties: { organizationId: { type: "string", pattern: uuidPattern }, membershipId: { type: "string", pattern: uuidPattern } },
-      },
-      body: { type: "object", additionalProperties: false, required: ["roleId"], properties: { roleId: { type: "string", pattern: uuidPattern } } },
-    },
-  }, async (request, reply) => {
-    const context = await requestActor(request, reply);
-    if (!context) return;
-    try {
-      const assigned = await dependencies.repository.assignOrganizationRole(context.userId, request.params.organizationId, request.params.membershipId, request.body.roleId, request.id);
-      if (!assigned) return reply.code(404).send(resourceNotAvailable(request.id));
-      return reply.code(201).send({ membershipId: request.params.membershipId, roleId: request.body.roleId, status: "active" });
-    } catch (error) {
-      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Role assignment failed");
-      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
   });
 
@@ -791,7 +743,7 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.patch<{ Params: { organizationId: string; draftId: string }; Body: SharedDraftPatch }>(
+  app.patch<{ Params: { organizationId: string; draftId: string }; Body: Omit<SharedDraftPatch, "audienceRoleIds"> & { audienceIds?: string[] } }>(
     "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId", {
       schema: {
         params: { type: "object", required: ["organizationId", "draftId"], properties: {
@@ -806,7 +758,7 @@ export function buildApp(dependencies: AppDependencies) {
           targetScopeType: { enum: ["ORGANIZATION", "DEPARTMENT", null] },
           teamTag: { type: ["string", "null"], maxLength: 100 },
           projectTag: { type: ["string", "null"], maxLength: 100 },
-          audienceRoleIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
+          audienceIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
         } },
       },
     }, async (request, reply) => {
@@ -815,7 +767,7 @@ export function buildApp(dependencies: AppDependencies) {
       const expectedVersion = parseEtag(request.headers["if-match"]);
       if (expectedVersion === "missing") return reply.code(428).send(safeError("PRECONDITION_REQUIRED", "Reload the draft before saving.", request.id));
       if (expectedVersion === null) return reply.code(400).send(safeError("INVALID_REQUEST", "The version precondition is invalid.", request.id));
-      const patch = request.body;
+      const { audienceIds, ...patch } = request.body;
       if ((patch.title !== undefined && (!patch.title.trim() || !isValidText(patch.title, 800, maxTitleCodePoints)))
         || (patch.body !== undefined && !isValidText(patch.body, maxBodyBytes, maxBodyBytes))
         || (patch.teamTag !== undefined && patch.teamTag !== null && !patch.teamTag.trim())
@@ -840,7 +792,7 @@ export function buildApp(dependencies: AppDependencies) {
         if (patch.body !== undefined) stored = await dependencies.storage.write(patch.body);
         updateAttempted = true;
         const result = await dependencies.repository.updateKnowledgeDraft(context.userId, organizationId, draftId,
-          expectedVersion, { ...patch, title: patch.title?.trim(),
+          expectedVersion, { ...patch, audienceRoleIds: audienceIds, title: patch.title?.trim(),
             teamTag: patch.teamTag === null ? null : patch.teamTag?.trim(),
             projectTag: patch.projectTag === null ? null : patch.projectTag?.trim() },
           stored, request.id);
@@ -1140,7 +1092,7 @@ export function buildApp(dependencies: AppDependencies) {
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
           classification: publication.classification, ...content, mimeType, contentHash: publication.contentHash,
-          audienceRoleIds: publication.audienceRoleIds,
+          audienceIds: publication.audienceRoleIds,
           publishedAt: publication.publishedAt.toISOString(), validFrom: publication.validFrom.toISOString(),
           validUntil: publication.validUntil?.toISOString() ?? null };
       } catch (error) {
@@ -1453,7 +1405,7 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
     targetScopeType: draft.targetScopeType,
     teamTag: draft.teamTag,
     projectTag: draft.projectTag,
-    audienceRoleIds: draft.audienceRoleIds,
+    audienceIds: draft.audienceRoleIds,
     currentVersion: {
       id: draft.versionId,
       version: draft.currentVersion,
@@ -1475,7 +1427,7 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     responsibleDepartmentId: submission.responsibleDepartmentId,
     targetScopeType: submission.targetScopeType,
     targetDepartmentId: submission.targetDepartmentId,
-    audienceRoleIds: submission.audienceRoleIds,
+    audienceIds: submission.audienceRoleIds,
     contentHash: submission.contentHash,
     status: submission.status,
     decisionComment: submission.decisionComment,

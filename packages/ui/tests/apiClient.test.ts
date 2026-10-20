@@ -216,7 +216,7 @@ describe("governed knowledge transport", () => {
     await decideKnowledgeReview("web", organizationId, {
       id: sourceVersionId, draftId: createdDraft.id, snapshotVersionId: createdDraft.currentVersion.id,
       title: "Runbook", classification: "INTERNAL", responsibleDepartmentId: sourceVersionId,
-      targetScopeType: "DEPARTMENT", targetDepartmentId: sourceVersionId, audienceRoleIds: [],
+      targetScopeType: "DEPARTMENT", targetDepartmentId: sourceVersionId, audienceIds: [],
       contentHash: createdDraft.currentVersion.contentHash, status: "PENDING_REVIEW",
       submittedAt: "2026-10-12T00:00:00.000Z", publishedVersionId: null, body: "Steps", mimeType: "text/plain",
       submittedByMembershipId: actorId, teamTag: null, projectTag: null,

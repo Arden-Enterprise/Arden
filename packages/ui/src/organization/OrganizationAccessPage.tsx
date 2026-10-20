@@ -5,15 +5,15 @@ import { AccessRules } from "./AccessRules";
 import { DepartmentEditor } from "./OrganizationEditors";
 import { OrganizationDialog } from "./OrganizationDialog";
 import { InviteMemberDialog, InvitationsPanel } from "./InvitationsPanel";
-import { EffectiveAccessPreview, MemberDirectory, SystemRoleOverview } from "./MemberDirectory";
+import { EffectiveAccessPreview, MemberDirectory } from "./MemberDirectory";
 import { validateOrganization, type OrganizationPreview } from "./previewModel";
-import { RoleConfigurationPanel } from "./RoleConfigurationPanel";
+import { AudienceConfigurationPanel } from "./AudienceConfigurationPanel";
 
-type AccessTab = "organization" | "departments" | "members" | "invitations" | "roles" | "policies" | "audit";
+type AccessTab = "organization" | "departments" | "members" | "invitations" | "audiences" | "policies" | "audit";
 const tabs: { id: AccessTab; label: string }[] = [
   { id: "organization", label: "Organization" }, { id: "departments", label: "Departments" },
   { id: "members", label: "Members" }, { id: "invitations", label: "Invitations" },
-  { id: "roles", label: "Roles & permissions" }, { id: "policies", label: "Policies" }, { id: "audit", label: "Audit" },
+  { id: "audiences", label: "Audiences" }, { id: "policies", label: "Policies" }, { id: "audit", label: "Audit" },
 ];
 
 function OrganizationMetadataDialog({ organization, onChange, onClose, onDirtyChange }: {
@@ -46,7 +46,7 @@ export function OrganizationAccessPage({ organization, onChange, onDirtyChange, 
   onPreviewAccess?: (memberId: string) => void;
   onOpenSetup?: () => void;
 } & ContextControlProps) {
-  const [tab, setTab] = useState<AccessTab>("roles");
+  const [tab, setTab] = useState<AccessTab>("audiences");
   const [showInvite, setShowInvite] = useState(false);
   const [showMetadata, setShowMetadata] = useState(false);
   const [selectedAccessMember, setSelectedAccessMember] = useState("sample-employee");
@@ -63,10 +63,8 @@ export function OrganizationAccessPage({ organization, onChange, onDirtyChange, 
     />}>
       <nav className="organization-tabs" aria-label="Organization and access sections">{tabs.map((item) => <button key={item.id} type="button" className={tab === item.id ? "is-active" : ""} aria-current={tab === item.id ? "page" : undefined} onClick={() => setTab(item.id)}>{item.label}{item.id === "invitations" && pendingCount > 0 ? ` · ${pendingCount}` : item.id === "members" && waitingCount > 0 ? ` · ${waitingCount} waiting` : ""}</button>)}</nav>
       <div className="organization-tab-panel">
-        <div hidden={tab !== "roles"}><RoleConfigurationPanel onDirtyChange={onDirtyChange} members={organization.members.map((member) => ({
-          id: member.id, name: member.name, email: member.email, active: member.status === "active",
-        }))} /></div>
-        {tab === "roles" && <><div className="organization-governance-grid"><section className="organization-surface organization-department-overview"><span className="meta-label organization-jade">{organization.name.toUpperCase()} · ONE SELF-HOSTED INSTALLATION</span><h2>{organization.departments.length} departments. One organization.</h2><div className="organization-overview-departments">{organization.departments.map((department, index) => <div key={department.id}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{department.name}</strong><small>{organization.members.filter((member) => member.departmentId === department.id).length} members</small></div></div>)}</div><button type="button" className="secondary-button" onClick={() => setTab("departments")}>Manage departments</button></section><SystemRoleOverview /></div><div className="organization-access-selector"><label className="organization-field"><span>Preview effective access for</span><select value={selectedMember?.id ?? ""} onChange={(event) => setSelectedAccessMember(event.target.value)}>{organization.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>{selectedMember && onPreviewAccess && <button type="button" className="secondary-button" onClick={() => onPreviewAccess(selectedMember.id)}>Check member access</button>}</div><EffectiveAccessPreview organization={organization} member={selectedMember} /></>}
+        <div hidden={tab !== "audiences"}><AudienceConfigurationPanel onDirtyChange={onDirtyChange} members={organization.members} /></div>
+        {tab === "audiences" && <><div className="organization-access-selector"><label className="organization-field"><span>Preview effective access for</span><select value={selectedMember?.id ?? ""} onChange={(event) => setSelectedAccessMember(event.target.value)}>{organization.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>{selectedMember && onPreviewAccess && <button type="button" className="secondary-button" onClick={() => onPreviewAccess(selectedMember.id)}>Check member access</button>}</div><EffectiveAccessPreview organization={organization} member={selectedMember} /></>}
         {tab === "departments" && <section className="organization-surface"><DepartmentEditor organization={organization} onChange={onChange} /></section>}
         {tab === "members" && <MemberDirectory organization={organization} onChange={onChange} onPreviewAccess={onPreviewAccess} onDirtyChange={onDirtyChange} />}
         {tab === "invitations" && <section className="organization-surface"><InvitationsPanel organization={organization} onChange={onChange} onPreviewInvitation={onPreviewInvitation} onInvite={() => setShowInvite(true)} /></section>}
@@ -74,7 +72,7 @@ export function OrganizationAccessPage({ organization, onChange, onDirtyChange, 
         {tab === "policies" && <section className="organization-surface"><AccessRules /></section>}
         {tab === "audit" && <section className="organization-surface organization-editor-stack"><span className="meta-label organization-blue">ACCOUNTABILITY</span><h2>Recorded changes</h2><div className="organization-empty-state"><h3>No server audit records in preview</h3></div></section>}
       </div>
-      <div className="organization-notice is-success"><strong>Setup readiness</strong><span>{organization.departments.length} departments · {organization.members.length} members · {pendingCount} invitations pending · {waitingCount} awaiting assignment. {waitingCount ? "Assign departments and roles before those members enter the workspace." : "Review role assignments and document audiences before granting real access."}</span></div>
+      <div className="organization-notice is-success"><strong>Setup readiness</strong><span>{organization.departments.length} departments · {organization.members.length} members · {pendingCount} invitations pending · {waitingCount} awaiting assignment. {waitingCount ? "Assign a department and organization capability before those members enter the workspace." : "Review organization capabilities and document audiences before granting real access."}</span></div>
     </WorkspacePageContent>
     {showInvite && <InviteMemberDialog organization={organization} onChange={onChange} onClose={() => { setShowInvite(false); setTab("invitations"); }} />}
     {showMetadata && <OrganizationMetadataDialog organization={organization} onChange={onChange} onClose={() => setShowMetadata(false)} onDirtyChange={onDirtyChange} />}

@@ -1,5 +1,7 @@
 # Mainflow 1 — frontend preview
 
+> The former three-role/custom-role preview contract is superseded by [decision 0010](../decisions/0010-audiences-and-system-administration.md). Current preview terminology uses Member and Organization Admin; review authority is ReviewerGrant, and Arden System Admin is installation-level and outside organizations.
+
 Status: implemented session-memory UI, 4 October 2026. This is a reviewable frontend journey, not production authentication or authorization. The accepted visual reference is [Figma: Living Archive](https://www.figma.com/design/UmW5qb5cTWo6lwMYZ4Z9bC/Arden?node-id=147-2).
 
 ## Screens and transitions

@@ -1,5 +1,6 @@
 import type { Platform } from "./types";
-import { parseCustomRole, parseCustomRoleList, type CustomRoleRecord, type CustomRoleWrite, type CustomRoleAssignment } from "./role-contracts";
+import { parseAudienceGroup, parseAudienceGroupList, type AudienceGroupRecord,
+  type AudienceGroupWrite } from "./audience-group-contracts";
 import type {} from "./desktop-session";
 import { isKnowledgeClassification, type KnowledgeClassification } from "./knowledge-classification";
 
@@ -33,7 +34,8 @@ export type CreatedKnowledgeDraft = {
 
 export type KnowledgeOptions = {
   departments: Array<{ id: string; name: string }>;
-  audienceRoles: Array<{ id: string; name: string; departmentId: string | null; kind: "ROLE" | "ALL_MEMBERS" }>;
+  audiences: Array<{ id: string; name: string; departmentId: string | null;
+    kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
 };
 export type KnowledgeDraftRecord = {
   id: string;
@@ -48,7 +50,7 @@ export type KnowledgeDraftRecord = {
   targetScopeType: "ORGANIZATION" | "DEPARTMENT" | null;
   teamTag: string | null;
   projectTag: string | null;
-  audienceRoleIds: string[];
+  audienceIds: string[];
   currentVersion: { id: string; version: number; mimeType: "text/plain" | "application/pdf"; contentHash: string };
   createdAt: string;
   updatedAt: string;
@@ -62,7 +64,7 @@ export type KnowledgeDraftSummary = {
   targetScopeType: "ORGANIZATION" | "DEPARTMENT" | null;
   teamTag: string | null;
   projectTag: string | null;
-  audienceRoleIds: string[];
+  audienceIds: string[];
   versionId: string;
   mimeType: "text/plain" | "application/pdf";
   contentHash: string;
@@ -80,7 +82,7 @@ export type KnowledgeSubmission = {
   responsibleDepartmentId: string;
   targetScopeType: "ORGANIZATION" | "DEPARTMENT";
   targetDepartmentId: string | null;
-  audienceRoleIds: string[];
+  audienceIds: string[];
   contentHash: string;
   status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED" | "WITHDRAWN";
   submittedAt: string;
@@ -109,7 +111,7 @@ export type PublishedKnowledge = {
   draftId: string;
   title: string;
   classification: KnowledgeClassification;
-  audienceRoleIds: string[];
+  audienceIds: string[];
   contentHash: string;
   publishedAt: string;
   validFrom: string;
@@ -172,7 +174,7 @@ export async function createPdfKnowledgeDraft(platform: Platform, organizationId
 }
 
 export function saveKnowledgeDraft(platform: Platform, organizationId: string, draftId: string, version: number,
-  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceRoleIds">>): Promise<KnowledgeDraftRecord> {
+  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">>): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`, {
     method: "PATCH", headers: { "If-Match": `"${version}"` }, body: JSON.stringify(patch),
   });
@@ -315,35 +317,36 @@ export async function createDepartment(platform: Platform, organizationId: strin
   await request(platform, `/api/v1/organizations/${organizationId}/departments`, { method: "POST", body: JSON.stringify({ name }) });
 }
 
-export async function createOrganizationRole(platform: Platform, organizationId: string, name: string): Promise<void> {
-  await request(platform, `/api/v1/organizations/${organizationId}/roles`, { method: "POST", body: JSON.stringify({ name }) });
+export async function loadAudienceGroups(platform: Platform, organizationId: string): Promise<AudienceGroupRecord[]> {
+  return parseAudienceGroupList(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/audience-groups`));
 }
-
-export async function loadCustomRoles(platform: Platform, organizationId: string): Promise<CustomRoleRecord[]> {
-  return parseCustomRoleList(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles`));
-}
-export async function saveCustomRole(platform: Platform, organizationId: string, existing: CustomRoleRecord | null, write: CustomRoleWrite): Promise<CustomRoleRecord> {
-  return parseCustomRole(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles${existing ? "/" + existing.id : ""}`, {
+export async function saveAudienceGroup(platform: Platform, organizationId: string,
+  existing: AudienceGroupRecord | null, write: AudienceGroupWrite): Promise<AudienceGroupRecord> {
+  return parseAudienceGroup(await request<unknown>(platform,
+    `/api/v1/organizations/${organizationId}/audience-groups${existing ? "/" + existing.id : ""}`, {
     method: existing ? "PATCH" : "POST", body: JSON.stringify(write),
-    headers: existing ? { "If-Match": `"role-${existing.version}"` } : {},
+    headers: existing ? { "If-Match": `"audience-group-${existing.version}"` } : {},
   }));
 }
-export async function assignCustomRole(platform: Platform, organizationId: string, roleId: string, membershipId: string, scope: CustomRoleAssignment["scope"]): Promise<CustomRoleRecord> {
-  return parseCustomRole(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles/${roleId}/assignments`, {
-    method: "POST", body: JSON.stringify({ membershipId, scopeType: scope.type, departmentId: scope.departmentId }),
+export async function addAudienceGroupMember(platform: Platform, organizationId: string,
+  audienceGroupId: string, membershipId: string): Promise<AudienceGroupRecord> {
+  return parseAudienceGroup(await request<unknown>(platform,
+    `/api/v1/organizations/${organizationId}/audience-groups/${audienceGroupId}/members`, {
+    method: "POST", body: JSON.stringify({ membershipId }),
   }));
 }
-export async function revokeCustomRole(platform: Platform, organizationId: string, roleId: string, assignmentId: string): Promise<CustomRoleRecord> {
-  return parseCustomRole(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles/${roleId}/assignments/${assignmentId}/revoke`, { method: "POST", body: "{}" }));
+export async function removeAudienceGroupMember(platform: Platform, organizationId: string,
+  audienceGroupId: string, groupMembershipId: string): Promise<AudienceGroupRecord> {
+  return parseAudienceGroup(await request<unknown>(platform,
+    `/api/v1/organizations/${organizationId}/audience-groups/${audienceGroupId}/members/${groupMembershipId}/remove`,
+    { method: "POST", body: "{}" }));
 }
-export async function deactivateCustomRole(platform: Platform, organizationId: string, role: CustomRoleRecord): Promise<CustomRoleRecord> {
-  return parseCustomRole(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/roles/${role.id}/deactivate`, {
-    method: "POST", body: "{}", headers: { "If-Match": `"role-${role.version}"` },
+export async function deactivateAudienceGroup(platform: Platform, organizationId: string,
+  group: AudienceGroupRecord): Promise<AudienceGroupRecord> {
+  return parseAudienceGroup(await request<unknown>(platform,
+    `/api/v1/organizations/${organizationId}/audience-groups/${group.id}/deactivate`, {
+    method: "POST", body: "{}", headers: { "If-Match": `"audience-group-${group.version}"` },
   }));
-}
-
-export async function assignOrganizationRole(platform: Platform, organizationId: string, membershipId: string, roleId: string): Promise<void> {
-  await request(platform, `/api/v1/organizations/${organizationId}/members/${membershipId}/roles`, { method: "POST", body: JSON.stringify({ roleId }) });
 }
 
 export async function changePrimaryDepartment(platform: Platform, organizationId: string, membershipId: string, departmentId: string): Promise<void> {

@@ -5,13 +5,13 @@ import type { KnowledgeDraftSummary, KnowledgeSubmission } from "../src/shared/a
 const draft: KnowledgeDraftSummary = {
   id: "draft", organizationId: "org", title: "Guide", classification: "INTERNAL",
   responsibleDepartmentId: null, targetScopeType: null, teamTag: null, projectTag: null,
-  audienceRoleIds: [], versionId: "version-2", mimeType: "application/pdf", contentHash: "hash",
+  audienceIds: [], versionId: "version-2", mimeType: "application/pdf", contentHash: "hash",
   currentVersion: 2, hasPendingSubmission: false, createdAt: "2026-10-01T00:00:00Z", updatedAt: "2026-10-02T00:00:00Z",
 };
 const submission: KnowledgeSubmission = {
   id: "submission", draftId: "draft", snapshotVersionId: "version-2", title: "Guide",
   classification: "INTERNAL", responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT",
-  targetDepartmentId: "dept", audienceRoleIds: ["role"], contentHash: "hash", status: "APPROVED",
+  targetDepartmentId: "dept", audienceIds: ["audience"], contentHash: "hash", status: "APPROVED",
   submittedAt: "2026-10-02T00:00:00Z", publishedVersionId: "published", decisionComment: null,
 };
 
@@ -27,7 +27,7 @@ describe("redesigned knowledge states", () => {
   it("distinguishes a published snapshot from a later working version", () => {
     expect(draftStatus(draft).label).toBe("Draft · metadata incomplete");
     expect(draftStatus({ ...draft, responsibleDepartmentId: "dept" }).label).toBe("Draft · metadata incomplete");
-    expect(draftStatus({ ...draft, responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT", audienceRoleIds: ["role"] }).label).toBe("Draft");
+    expect(draftStatus({ ...draft, responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT", audienceIds: ["audience"] }).label).toBe("Draft");
     expect(draftStatus({ ...draft, hasPendingSubmission: true }, submission).label).toBe("Awaiting review");
     expect(draftStatus(draft, submission).label).toBe("Published");
     expect(draftStatus({ ...draft, versionId: "version-3" }, submission).label).toBe("Edited after publication");

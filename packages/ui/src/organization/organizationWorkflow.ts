@@ -78,7 +78,7 @@ function replaceInvitation(
 }
 
 function isActiveAdmin(organization: OrganizationPreview, member: OrganizationMember): boolean {
-  return member.role === "System Admin" && membershipReadiness(organization, member.id).state === "ready";
+  return member.role === "Organization Admin" && membershipReadiness(organization, member.id).state === "ready";
 }
 
 function isLastActiveAdmin(organization: OrganizationPreview, member: OrganizationMember): boolean {
@@ -101,7 +101,7 @@ export function membershipReadiness(organization: OrganizationPreview, memberId:
     };
   }
   const validRoleScope = member.roleScope === "organization" || member.roleScope === "department";
-  if (!validRoleScope || (member.role === "System Admin" && member.roleScope !== "organization")) {
+  if (!validRoleScope || (member.role === "Organization Admin" && member.roleScope !== "organization")) {
     return { state: "denied", message: "Your access configuration needs an administrator's review." };
   }
   return { state: "ready", message: "Your membership is active and its department and role are assigned." };
@@ -205,11 +205,11 @@ export function transitionOrganization(
     if (action.roleScope !== "organization" && action.roleScope !== "department") {
       return { organization, error: "Choose an organization or department role scope." };
     }
-    if (action.role === "System Admin" && action.roleScope !== "organization") {
-      return { organization, error: "System Admin manages the organization and requires organization scope." };
+    if (action.role === "Organization Admin" && action.roleScope !== "organization") {
+      return { organization, error: "Organization Admin requires organization scope." };
     }
-    if (action.role !== "System Admin" && isLastActiveAdmin(organization, member)) {
-      return { organization, error: "Keep at least one active System Admin before changing this role." };
+    if (action.role !== "Organization Admin" && isLastActiveAdmin(organization, member)) {
+      return { organization, error: "Keep at least one active Organization Admin before changing this capability." };
     }
     return {
       organization: {
@@ -227,7 +227,7 @@ export function transitionOrganization(
   }
 
   if (action.status === "suspended" && isLastActiveAdmin(organization, member)) {
-    return { organization, error: "Keep at least one active System Admin before suspending this member." };
+    return { organization, error: "Keep at least one active Organization Admin before suspending this member." };
   }
   if (action.status === "active") {
     const readiness = membershipReadiness({

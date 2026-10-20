@@ -38,14 +38,14 @@ type Props = ContextControlProps & {
 };
 
 type EditorValues = Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" |
-  "targetScopeType" | "teamTag" | "projectTag" | "audienceRoleIds">;
+  "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">;
 
 function valuesFromDraft(draft: KnowledgeDraftRecord): EditorValues {
   return {
     title: draft.title, body: draft.body, classification: draft.classification,
     responsibleDepartmentId: draft.responsibleDepartmentId,
     targetScopeType: draft.targetScopeType, teamTag: draft.teamTag,
-    projectTag: draft.projectTag, audienceRoleIds: [...draft.audienceRoleIds],
+    projectTag: draft.projectTag, audienceIds: [...draft.audienceIds],
   };
 }
 
@@ -228,10 +228,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const latest = draft ? latestByDraft.get(draft.id) : undefined;
   const currentDraftStatus = draft ? draftStatus({ hasPendingSubmission: draft.hasPendingSubmission,
     responsibleDepartmentId: draft.responsibleDepartmentId, targetScopeType: draft.targetScopeType,
-    audienceRoleIds: draft.audienceRoleIds, versionId: draft.currentVersion.id }, latest) : null;
+    audienceIds: draft.audienceIds, versionId: draft.currentVersion.id }, latest) : null;
   const snapshotAlreadySubmitted = Boolean(latest && draft && latest.snapshotVersionId === draft.currentVersion.id);
   const ready = Boolean(editor?.responsibleDepartmentId && editor.targetScopeType
-    && validAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], editor.targetScopeType));
+    && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType));
   const filteredDrafts = drafts.filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
   const filteredPublished = published.filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
@@ -269,7 +269,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <dl><div><dt>Submitted by</dt><dd>{review.submittedByMembershipId}</dd></div><div><dt>Submitted</dt><dd>{new Date(review.submittedAt).toLocaleString()}</dd></div>
               <div><dt>Department</dt><dd>{departmentName(review.responsibleDepartmentId)}</dd></div>
               <div><dt>Access scope</dt><dd>{review.targetScopeType === "DEPARTMENT" ? "Responsible department" : "Organization"}</dd></div>
-              <div><dt>Audience</dt><dd>{review.audienceRoleIds.map((id) => options?.audienceRoles.find((role) => role.id === id)?.name ?? `${id} (inactive)`).join(", ") || "None"}</dd></div>
+              <div><dt>Audience</dt><dd>{review.audienceIds.map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? `${id} (inactive)`).join(", ") || "None"}</dd></div>
               <div><dt>Team tag</dt><dd>{review.teamTag || "All teams"}</dd></div><div><dt>Project tag</dt><dd>{review.projectTag || "All projects"}</dd></div>
               <div><dt>Snapshot hash</dt><dd className="knowledge-hash">{review.contentHash}</dd></div></dl></section>
           <aside className="knowledge-panel knowledge-live-decision"><span className="meta-label knowledge-tone-amber">HUMAN DECISION</span>
@@ -351,22 +351,22 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         </section><aside className="knowledge-panel knowledge-live-form"><div className="knowledge-live-meta-heading"><h2>Governance metadata</h2><small>* Required to submit</small></div>
           <label>Responsible department *<select disabled={busy || draft.hasPendingSubmission} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => {
             const responsibleDepartmentId = event.target.value || null;
-            setEditor({ ...editor, responsibleDepartmentId, audienceRoleIds: editor.audienceRoleIds.filter((id) => {
-              const role = options?.audienceRoles.find((item) => item.id === id);
-              return role?.kind === "ALL_MEMBERS" || !role?.departmentId || role.departmentId === responsibleDepartmentId;
+            setEditor({ ...editor, responsibleDepartmentId, audienceIds: editor.audienceIds.filter((id) => {
+              const audience = options?.audiences.find((item) => item.id === id);
+              return audience?.kind === "ORGANIZATION_ALL" || !audience?.departmentId || audience.departmentId === responsibleDepartmentId;
             }) });
           }}>
             <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Reviewers are drawn from this department.</small></label>
           <fieldset className="knowledge-option-cards" disabled={busy || draft.hasPendingSubmission}><legend>Access scope *</legend>{(["DEPARTMENT", "ORGANIZATION"] as const).map((scope) => <label key={scope} className={editor.targetScopeType === scope ? "is-selected" : ""}><input type="radio" name="knowledge-scope" checked={editor.targetScopeType === scope} onChange={() => setEditor({ ...editor, targetScopeType: scope,
-            audienceRoleIds: normalizeAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], scope) })} /><span><strong>{scope === "DEPARTMENT" ? "Responsible department" : "Organization"}</strong><small>{scope === "DEPARTMENT" ? "Only roles in the selected department" : "Organization-wide audiences"}</small></span></label>)}</fieldset>
+            audienceIds: normalizeAudienceSelection(editor.audienceIds, options?.audiences ?? [], scope) })} /><span><strong>{scope === "DEPARTMENT" ? "Responsible department" : "Organization"}</strong><small>{scope === "DEPARTMENT" ? "Department and eligible group audiences" : "Organization and eligible group audiences"}</small></span></label>)}</fieldset>
           <fieldset className="knowledge-option-cards knowledge-classification-cards" disabled={busy || draft.hasPendingSubmission}><legend>Classification *</legend>{(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] as const).map((classification) => <label key={classification} className={editor.classification === classification ? "is-selected" : ""}><input type="radio" name="knowledge-classification" checked={editor.classification === classification} onChange={() => setEditor({ ...editor, classification })} /><span><strong>{classification[0]}{classification.slice(1).toLowerCase()}</strong></span></label>)}</fieldset>
-          <fieldset disabled={busy || draft.hasPendingSubmission}><legend>Audience roles *</legend>
+          <fieldset disabled={busy || draft.hasPendingSubmission}><legend>Audience *</legend>
 
-            {!editor.targetScopeType ? <p className="knowledge-field-helper">Choose an access scope to see available roles.</p> : <div className="knowledge-live-role-list">{availableAudienceOptions(options?.audienceRoles ?? [], editor.targetScopeType).map((role) => <label key={role.id}>
-              <input type="checkbox" checked={editor.audienceRoleIds.includes(role.id)} onChange={(event) => setEditor({ ...editor,
-                audienceRoleIds: event.target.checked ? [...editor.audienceRoleIds, role.id] : editor.audienceRoleIds.filter((id) => id !== role.id) })} />
-              <span>{role.name}{role.kind === "ALL_MEMBERS" ? " · Organization default"
-                : role.departmentId ? ` · ${departmentName(role.departmentId)}` : " · Organization"}</span></label>)}</div>}
+            {!editor.targetScopeType ? <p className="knowledge-field-helper">Choose an access scope to see available audiences.</p> : <div className="knowledge-live-role-list">{availableAudienceOptions(options?.audiences ?? [], editor.targetScopeType).map((audience) => <label key={audience.id}>
+              <input type="checkbox" checked={editor.audienceIds.includes(audience.id)} onChange={(event) => setEditor({ ...editor,
+                audienceIds: event.target.checked ? [...editor.audienceIds, audience.id] : editor.audienceIds.filter((id) => id !== audience.id) })} />
+              <span>{audience.name}{audience.kind === "ORGANIZATION_ALL" ? " · Organization default"
+                : audience.kind === "DEPARTMENT_ALL" ? ` · ${departmentName(audience.departmentId ?? "")}` : " · Audience group"}</span></label>)}</div>}
             <small>Only roles available for the selected scope are listed.</small>
           </fieldset>
           <label>Team tag (optional)<input maxLength={100} disabled={busy || draft.hasPendingSubmission} value={editor.teamTag ?? ""} onChange={(event) => setEditor({ ...editor, teamTag: event.target.value || null })} /></label>
@@ -375,7 +375,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <span>{editor.title.trim() ? "✓" : "✕"} Title <small>{editor.title.trim() ? "Done" : "Missing"}</small></span>
             <span>{editor.responsibleDepartmentId ? "✓" : "✕"} Responsible department <small>{editor.responsibleDepartmentId ? "Done" : "Missing"}</small></span>
             <span>{editor.targetScopeType ? "✓" : "✕"} Access scope <small>{editor.targetScopeType ? "Done" : "Missing"}</small></span>
-            <span>{validAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], editor.targetScopeType) ? "✓" : "✕"} Audience roles <small>{validAudienceSelection(editor.audienceRoleIds, options?.audienceRoles ?? [], editor.targetScopeType) ? "Done" : "Missing"}</small></span>
+            <span>{validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType) ? "✓" : "✕"} Audience <small>{validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType) ? "Done" : "Missing"}</small></span>
           </div>
         </aside></div></div>
         <div className="knowledge-live-action-bar" role="group" aria-label="Draft actions"><span aria-live="polite">{dirty ? "Unsaved changes · " : ""}{submitHint}</span>
@@ -396,7 +396,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <div><dt>Published</dt><dd>{new Date(document.publishedAt).toLocaleString()}</dd></div>
           <div><dt>Valid from</dt><dd>{new Date(document.validFrom).toLocaleString()}</dd></div>
           <div><dt>Valid until</dt><dd>{document.validUntil ? new Date(document.validUntil).toLocaleString() : "No end date"}</dd></div>
-          <div><dt>Audience</dt><dd>{document.audienceRoleIds.map((id) => options?.audienceRoles.find((role) => role.id === id)?.name ?? `${id} (inactive)`).join(", ") || "None"}</dd></div>
+          <div><dt>Audience</dt><dd>{document.audienceIds.map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? `${id} (inactive)`).join(", ") || "None"}</dd></div>
           <div><dt>Content hash</dt><dd className="knowledge-hash">{document.contentHash}</dd></div>
         </dl></aside></div>
       </> : <>

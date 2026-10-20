@@ -220,7 +220,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const enterMemberWorkspace = (memberId: string) => {
     if (!organization || membershipReadiness(organization, memberId).state !== "ready") return;
     const member = organization.members.find(item => item.id === memberId);
-    setPreviewRole(member?.role === "System Admin" ? "admin" : "member");
+    setPreviewRole(member?.role === "Organization Admin" ? "admin" : "member");
     setPreviewMemberId(memberId);
     if (memberId !== previewMemberId) privateNotes.reset([]);
     setActiveView("my-work");
