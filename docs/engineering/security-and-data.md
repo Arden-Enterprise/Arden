@@ -13,17 +13,7 @@ These are application design and implementation requirements. The current backen
 
 ## 2. Identity, organization scope, and authorization
 
-The accepted custom-role V1 contract is [decision 0009](../decisions/0009-custom-role-scope-and-owner-defaults.md).
-Owner-private access is a fixed active-member capability; it cannot be configured in custom roles.
-Published readership requires VIEW on a matching audience role and exact Organization/Department
-scope, without inheritance. Search follows VIEW. Older role-contribution and private-grant guidance
-below describes the previous slice and does not override this decision. API/UI rollout remains
-partial; see [implementation status](custom-role-implementation.md).
-
-`ALL_MEMBERS` is the sole assignment-free exception: it is a reserved server-managed audience for
-Organization-scoped publications, and active organization membership is the grant. It is not a
-custom role, cannot be assigned or configured, never applies to Department scope, and never grants
-private access. Department publications still require an exact live default/custom-role assignment.
+The accepted contract is [decision 0010](../decisions/0010-audiences-and-system-administration.md). Owner-private access is fixed and owner-only. Published readership uses canonical managed organization/department audiences or explicit audience groups. Audience membership never grants administration, review, edit, or publish authority. ReviewerGrant is checked separately, and Arden System Admin has no organization/content bypass.
 
 Manual local Mainflow 1 testing may use the dedicated local adapter in `apps/api/src/auth/local-flow1-test.ts` only when startup verifies a loopback API, loopback PostgreSQL database named `arden_test_*`, synthetic `@example.test` identities, no Supabase configuration, and non-production mode. It supplies test authentication only; it is not identity proof and must never be exposed through a tunnel or pointed at shared/Coolify data. Its invitation mail sink never sends email. A no-login actor is automatically selected only for the dedicated Kiet Local `dev-2` API/database (`NODE_ENV=development`, PostgreSQL `postgres/arden_dev_2`, no Supabase config). Anyone with that slot's SSH access can act as the fixed synthetic Org Admin; therefore this mode is not authentication and must never be exposed through a public domain. Keep the API port loopback-bound behind the assigned SSH tunnel. Test writes persist. Without SMTP settings invitations are saved with no delivery; configuring all six SMTP settings enables real outbound invitation email in dev-2. Treat this as an external write: send only to intended test recipients and use a team-controlled sender account. The invite URL points to the developer's local frontend and is not reachable by invitees on other devices. No project-wide test-mode variable is used.
 
@@ -31,7 +21,7 @@ Manual local Mainflow 1 testing may use the dedicated local adapter in `apps/api
 - Stable IDs, obscure URLs, hiding a button, filtering in the renderer, and a broad connector token are not access controls.
 - Operational roles and content permissions are separate. Managers/admin UI roles must not implicitly grant read access to another user's personal workspace. Each personal workspace belongs to its user **within an organization**.
 - Central domain functions determine actor + scope + object/version + action. Use them consistently from HTTP, jobs, events, search, graph, citation resolution, file download/export, AI, and native-cache access.
-- Published Arden content may use exact-scope custom/default-role audiences or the reserved Organization-only `ALL_MEMBERS` audience. A verified active member with a matching assigned role, or any active organization member for `ALL_MEMBERS`, may view, search, and submit a separate contribution copy of the published version. Apply this rule on the server; Org Admin capability is not an implicit content grant. See [decision 0009](../decisions/0009-custom-role-scope-and-owner-defaults.md).
+- Published Arden content may use `ORGANIZATION_ALL`, a matching `DEPARTMENT_ALL`, or an explicit `GROUP`. A verified active member with any one matching audience may view, search, and submit a separate contribution copy. Org Admin, ReviewerGrant, and System Admin are not implicit content grants.
 - Test grants, membership removal, role changes, revoked/expired sessions, multiple organization memberships, and attempted cross-organization references. Unknown policy/source audience fails closed.
 - Privileged workers/migration accounts do not replace end-user authorization. Use narrow service capabilities and explicitly trace the initiating actor where a task acts for someone.
 - RLS is defense in depth, not the sole policy layer. Test real runtime roles and pooled tenant context; development DB superuser success proves neither production denial nor RLS correctness.

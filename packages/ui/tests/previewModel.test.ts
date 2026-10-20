@@ -21,7 +21,7 @@ describe("organization preview configuration", () => {
 
   it("allows empty departments and pending members without premature assignments", () => {
     const organization = createPreviewOrganization();
-    organization.members = organization.members.filter((member) => member.role !== "Manager / Knowledge Reviewer" && member.id !== "sample-operations-employee");
+    organization.members = organization.members.filter((member) => member.id !== "sample-reviewer" && member.id !== "sample-operations-employee");
     organization.members.push({id: "pending", name: "An Le", email: "an@company.example", departmentId: "", role: "", status: "pending-assignment"});
     expect(validateOrganization(organization)).toEqual([]);
   });
@@ -39,8 +39,8 @@ describe("organization preview configuration", () => {
     organization.members = organization.members
       .filter((member) => member.departmentId === organization.departments[0].id);
     expect(validateOrganization(organization)).toEqual([]);
-    organization.members = organization.members.map((member) => ({ ...member, role: "Employee" as const }));
-    expect(validateOrganization(organization)).toContain("Keep at least one active System Admin.");
+    organization.members = organization.members.map((member) => ({ ...member, role: "Member" as const }));
+    expect(validateOrganization(organization)).toContain("Keep at least one active Organization Admin.");
   });
 
   it("requires an explicit scope and does not count an unscoped admin", () => {
@@ -48,7 +48,7 @@ describe("organization preview configuration", () => {
     delete organization.members[0].roleScope;
     expect(validateOrganization(organization)).toEqual(expect.arrayContaining([
       "Assign every active member an explicit role scope.",
-      "Keep at least one active System Admin.",
+      "Keep at least one active Organization Admin.",
     ]));
   });
 

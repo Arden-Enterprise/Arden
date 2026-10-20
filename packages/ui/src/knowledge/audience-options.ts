@@ -1,19 +1,21 @@
 import type { KnowledgeOptions } from "../shared/api-client";
 
 export type KnowledgeScope = "ORGANIZATION" | "DEPARTMENT" | null;
-export type KnowledgeAudienceOption = KnowledgeOptions["audienceRoles"][number];
+export type KnowledgeAudienceOption = KnowledgeOptions["audiences"][number];
 
-export function availableAudienceOptions(roles: readonly KnowledgeAudienceOption[], scope: KnowledgeScope): KnowledgeAudienceOption[] {
-  return roles.filter((role) => role.kind !== "ALL_MEMBERS" || scope === "ORGANIZATION");
+export function availableAudienceOptions(audiences: readonly KnowledgeAudienceOption[], scope: KnowledgeScope): KnowledgeAudienceOption[] {
+  return audiences.filter(audience => audience.kind === "GROUP"
+    || (audience.kind === "ORGANIZATION_ALL" && scope === "ORGANIZATION")
+    || (audience.kind === "DEPARTMENT_ALL" && scope === "DEPARTMENT"));
 }
 
-export function normalizeAudienceSelection(ids: readonly string[], roles: readonly KnowledgeAudienceOption[], scope: KnowledgeScope): string[] {
-  const allowed = new Set(availableAudienceOptions(roles, scope).map((role) => role.id));
+export function normalizeAudienceSelection(ids: readonly string[], audiences: readonly KnowledgeAudienceOption[], scope: KnowledgeScope): string[] {
+  const allowed = new Set(availableAudienceOptions(audiences, scope).map(audience => audience.id));
   return ids.filter((id) => allowed.has(id));
 }
 
-export function validAudienceSelection(ids: readonly string[], roles: readonly KnowledgeAudienceOption[], scope: KnowledgeScope): boolean {
+export function validAudienceSelection(ids: readonly string[], audiences: readonly KnowledgeAudienceOption[], scope: KnowledgeScope): boolean {
   if (ids.length === 0 || new Set(ids).size !== ids.length) return false;
-  const allowed = new Set(availableAudienceOptions(roles, scope).map((role) => role.id));
+  const allowed = new Set(availableAudienceOptions(audiences, scope).map(audience => audience.id));
   return ids.every((id) => allowed.has(id));
 }

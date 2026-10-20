@@ -1,10 +1,10 @@
 # 0004: Role-tagged audiences for published content
 
-Status: accepted  
+Status: superseded
 Date: 2026-10-05  
 Decision owner/approval: task owner confirmed that Org Admins create and assign roles and that one matching role is sufficient for access  
 Implementation: not started for shared-content audiences; current role/permission tables are used only by the first owner-private note slice  
-Supersedes / superseded by: none
+Supersedes / superseded by: superseded by [0010 audience access and Arden system administration](0010-audiences-and-system-administration.md)
 
 ## Context and requirement
 

@@ -21,14 +21,16 @@ const knowledgeReviewDecision = new RegExp(`^/api/v1/organizations/${uuid}/knowl
 const publishedKnowledgeItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}$`);
 const reviewerGrantDeactivate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants/${uuid}/deactivate$`);
 const administrationPath = new RegExp(`^/api/v1/organizations/${uuid}/administration$`);
-const adminCreatePath = new RegExp(`^/api/v1/organizations/${uuid}/(departments|roles|invitations)$`);
-const adminMemberRolePath = new RegExp(`^/api/v1/organizations/${uuid}/members/${uuid}/(roles|department)$`);
+const adminCreatePath = new RegExp(`^/api/v1/organizations/${uuid}/(departments|invitations)$`);
+const adminMemberDepartmentPath = new RegExp(`^/api/v1/organizations/${uuid}/members/${uuid}/department$`);
 const adminInvitationActionPath = new RegExp(`^/api/v1/organizations/${uuid}/invitations/${uuid}/(resend|revoke)$`);
-const customRoleReadPath = new RegExp(`^/api/v1/organizations/${uuid}/(permissions|roles(?:/${uuid})?)$`);
-const customRoleItemPath = new RegExp(`^/api/v1/organizations/${uuid}/roles/${uuid}$`);
-const customRoleAssignPath = new RegExp(`^/api/v1/organizations/${uuid}/roles/${uuid}/assignments$`);
-const customRoleRevokePath = new RegExp(`^/api/v1/organizations/${uuid}/roles/${uuid}/assignments/${uuid}/revoke$`);
-const customRoleDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/roles/${uuid}/deactivate$`);
+const audienceGroupReadPath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups(?:/${uuid})?$`);
+const audienceGroupItemPath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}$`);
+const audienceGroupMemberPath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/members$`);
+const audienceGroupRemovePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/members/${uuid}/remove$`);
+const audienceGroupDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/deactivate$`);
+const systemAdministratorCollection = /^\/api\/v1\/system\/administrators$/;
+const systemAdministratorRevoke = new RegExp(`^/api/v1/system/administrators/${uuid}/revoke$`);
 
 export function validateDesktopApiRequest(value: unknown): value is DesktopApiRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -87,17 +89,23 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && !request.body && !request.ifMatch && !request.idempotencyKey;
   const adminGet = administrationPath.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
-  const customRoleGet = customRoleReadPath.test(url.pathname) && request.method === "GET"
+  const audienceGroupGet = audienceGroupReadPath.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
-  const customRolePatch = customRoleItemPath.test(url.pathname) && request.method === "PATCH"
-    && Boolean(request.body) && typeof request.ifMatch === "string" && /^"role-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
-  const customRoleAssign = customRoleAssignPath.test(url.pathname) && request.method === "POST"
+  const audienceGroupPatch = audienceGroupItemPath.test(url.pathname) && request.method === "PATCH"
+    && Boolean(request.body) && typeof request.ifMatch === "string" && /^"audience-group-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
+  const audienceGroupAddMember = audienceGroupMemberPath.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
-  const customRoleRevoke = customRoleRevokePath.test(url.pathname) && request.method === "POST"
+  const audienceGroupRemoveMember = audienceGroupRemovePath.test(url.pathname) && request.method === "POST"
     && request.body === "{}" && !request.ifMatch && !request.idempotencyKey;
-  const customRoleDeactivate = customRoleDeactivatePath.test(url.pathname) && request.method === "POST"
-    && request.body === "{}" && typeof request.ifMatch === "string" && /^"role-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
-  const adminPost = (adminCreatePath.test(url.pathname) || adminMemberRolePath.test(url.pathname))
+  const audienceGroupDeactivate = audienceGroupDeactivatePath.test(url.pathname) && request.method === "POST"
+    && request.body === "{}" && typeof request.ifMatch === "string" && /^"audience-group-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
+  const systemAdministrationGet = systemAdministratorCollection.test(url.pathname) && request.method === "GET"
+    && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const systemAdministrationGrant = systemAdministratorCollection.test(url.pathname) && request.method === "POST"
+    && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
+  const systemAdministrationRevoke = systemAdministratorRevoke.test(url.pathname) && request.method === "POST"
+    && request.body === "{}" && !request.ifMatch && !request.idempotencyKey;
+  const adminPost = (adminCreatePath.test(url.pathname) || adminMemberDepartmentPath.test(url.pathname))
     && request.method === "POST" && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const adminAction = adminInvitationActionPath.test(url.pathname) && request.method === "POST"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
@@ -113,6 +121,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
   return (otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
     || knowledgeSubmit || knowledgeDecision || grantCreate || grantDeactivate || adminGet
-    || adminPost || adminAction || accountPost || customRoleGet || customRolePatch
-    || customRoleAssign || customRoleRevoke || customRoleDeactivate) && (!url.search || queryAllowed);
+    || adminPost || adminAction || accountPost || audienceGroupGet || audienceGroupPatch
+    || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
+    || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke) && (!url.search || queryAllowed);
 }

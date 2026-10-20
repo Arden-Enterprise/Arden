@@ -45,7 +45,7 @@ export function AppSidebar({
   authenticated = false,
   showAdmin = false,
   memberName = "Lan Nguyen",
-  memberRole = "Employee",
+  memberRole = "Member",
   memberDepartment = "Product Engineering",
   environmentLabel,
   assignedReviewCount,

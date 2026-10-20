@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
-import { PgCustomRoleStore, RoleError, type CustomRoleStore } from "../roles/store.js";
+import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
+import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
@@ -336,11 +337,13 @@ export type OrganizationAdminData = {
 };
 export type KnowledgeOptions = {
   departments: Array<{ id: string; name: string }>;
-  audienceRoles: Array<{ id: string; name: string; departmentId: string | null; kind: "ROLE" | "ALL_MEMBERS" }>;
+  audiences: Array<{ id: string; name: string; departmentId: string | null;
+    kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
 };
 
 export interface ArdenDataRepository {
-  readonly customRoles?: CustomRoleStore;
+  readonly audienceGroups?: AudienceGroupStore;
+  readonly systemAdministration?: SystemAdministrationStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
   createOrganization(userId: string, email: string, fullName: string | null, setup: OrganizationSetup, requestId: string): Promise<CreatedOrganization>;
@@ -351,8 +354,6 @@ export interface ArdenDataRepository {
   getOrganizationAdministration(userId: string, organizationId: string): Promise<OrganizationAdminData | null>;
   getKnowledgeOptions(userId: string, organizationId: string): Promise<KnowledgeOptions | null>;
   createDepartment(userId: string, organizationId: string, name: string, requestId: string): Promise<boolean>;
-  createOrganizationRole(userId: string, organizationId: string, name: string, requestId: string): Promise<boolean>;
-  assignOrganizationRole(userId: string, organizationId: string, membershipId: string, roleId: string, requestId: string): Promise<boolean>;
   changePrimaryDepartment(userId: string, organizationId: string, membershipId: string, departmentId: string, requestId: string): Promise<boolean>;
   listDrafts(userId: string, organizationId: string, limit: number, cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null>;
   getDraft(userId: string, organizationId: string, draftId: string): Promise<PrivateDraft | null>;
@@ -433,9 +434,11 @@ function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): strin
 }
 
 export class ArdenRepository implements ArdenDataRepository {
-  readonly customRoles: CustomRoleStore;
+  readonly audienceGroups: AudienceGroupStore;
+  readonly systemAdministration: SystemAdministrationStore;
   constructor(private readonly pool: Pool) {
-    this.customRoles = new PgCustomRoleStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
+    this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
+    this.systemAdministration = new PgSystemAdministrationStore((user, work) => this.withSystemAdmin(user, work));
   }
 
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
@@ -519,6 +522,10 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission
         WHERE code = 'PUBLISHED_CONTENT_VIEW' AND status = 'ACTIVE'`, [allMembersRoleId]);
+      await client.query(`INSERT INTO audience (
+          audience_id, organization_id, kind, name, description, is_managed, legacy_role_id)
+        VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone in organization',
+          'Every active member of the organization', true, $1)`, [allMembersRoleId, organizationId]);
 
       const role = await client.query<{ role_id: string }>(`
         INSERT INTO role (organization_id, code, name, description, is_system)
@@ -532,6 +539,11 @@ export class ArdenRepository implements ArdenDataRepository {
         RETURNING department_id`, [organizationId, setup.departmentName, roleId]);
       const departmentId = department.rows[0]?.department_id;
       if (!departmentId) throw new Error("Department creation returned no id");
+      await client.query(`INSERT INTO audience (
+          audience_id, organization_id, kind, department_id, name, description, is_managed, legacy_role_id)
+        VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
+          'Every active member of the department', true, $1)`,
+      [roleId, organizationId, departmentId, `${setup.departmentName} members`]);
       await client.query(`
         INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission
@@ -684,19 +696,15 @@ export class ArdenRepository implements ArdenDataRepository {
       const departments = await client.query<{ id: string; name: string }>(`
         SELECT department_id AS id, name FROM department
         WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY name`, [organizationId]);
-      const roles = await client.query<{ id: string; name: string; department_id: string | null; code: string }>(`
-        SELECT r.role_id AS id, r.name, d.department_id, r.code
-        FROM role r LEFT JOIN department d ON d.default_role_id = r.role_id
-          AND d.organization_id = r.organization_id AND d.status = 'ACTIVE'
-        WHERE r.organization_id = $1 AND r.status = 'ACTIVE' AND NOT r.is_system
-          AND EXISTS (SELECT 1 FROM role_permission rp JOIN permission p ON p.permission_id = rp.permission_id
-            WHERE rp.role_id = r.role_id AND p.code = 'PUBLISHED_CONTENT_VIEW')
-        ORDER BY r.name`, [organizationId]);
+      const audiences = await client.query<{ id: string; name: string; department_id: string | null;
+        kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>(`SELECT audience_id AS id,
+        name, department_id, kind FROM audience WHERE organization_id = $1 AND status = 'ACTIVE'
+        ORDER BY kind, name, audience_id`, [organizationId]);
       return {
         departments: departments.rows,
-        audienceRoles: roles.rows.map((role) => ({
-          id: role.id, name: role.name, departmentId: role.department_id,
-          kind: role.code === "ALL_MEMBERS" ? "ALL_MEMBERS" : "ROLE",
+        audiences: audiences.rows.map(audience => ({
+          id: audience.id, name: audience.name, departmentId: audience.department_id,
+          kind: audience.kind,
         })),
       };
     });
@@ -717,6 +725,12 @@ export class ArdenRepository implements ArdenDataRepository {
         VALUES ($1, $2, $3, $4) RETURNING department_id`, [organizationId, departmentCode, name, roleId]);
       const departmentId = department.rows[0]?.department_id;
       if (!departmentId) throw new Error("Department creation returned no id");
+      await client.query(`INSERT INTO audience (
+          audience_id, organization_id, kind, department_id, name, description, is_managed, legacy_role_id,
+          created_by_membership_id)
+        VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
+          'Every active member of the department', true, $1, $5)`,
+      [roleId, organizationId, departmentId, `${name} members`, actorMembershipId]);
       await client.query(`
         INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission
@@ -729,27 +743,6 @@ export class ArdenRepository implements ArdenDataRepository {
       [organizationId, actorMembershipId, JSON.stringify({ departmentId, requestId })]);
       return true;
     })) ?? false;
-  }
-
-  async createOrganizationRole(userId: string, organizationId: string, name: string, requestId: string): Promise<boolean> {
-    try {
-      await this.customRoles.create(userId, organizationId, { name, description: "", permissions: [] }, requestId);
-      return true;
-    } catch (error) {
-      if (error instanceof RoleError) return false;
-      throw error;
-    }
-  }
-
-  async assignOrganizationRole(userId: string, organizationId: string, membershipId: string, roleId: string, requestId: string): Promise<boolean> {
-    try {
-      await this.customRoles.assign(userId, organizationId, roleId, membershipId,
-        { type: "ORGANIZATION", departmentId: null }, requestId);
-      return true;
-    } catch (error) {
-      if (error instanceof RoleError) return false;
-      throw error;
-    }
   }
 
   async changePrimaryDepartment(userId: string, organizationId: string, membershipId: string, departmentId: string, requestId: string): Promise<boolean> {
@@ -772,6 +765,17 @@ export class ArdenRepository implements ArdenDataRepository {
         await client.query(`UPDATE role_assignment SET status = 'REVOKED'
           WHERE membership_id = $1 AND role_id = (SELECT default_role_id FROM department WHERE department_id = $2)
             AND status = 'ACTIVE'`, [membershipId, currentDepartmentId]);
+        await client.query(`UPDATE role_assignment ra SET status = 'REVOKED'
+          WHERE ra.membership_id = $1
+            AND ra.access_scope_id = (SELECT access_scope_id FROM access_scope
+              WHERE organization_id = $3 AND department_id = $2
+                AND scope_type = 'DEPARTMENT' AND status = 'ACTIVE')
+            AND ra.status = 'ACTIVE'
+            AND EXISTS (SELECT 1 FROM audience_group_membership agm
+              JOIN audience a ON a.audience_id = agm.audience_id
+             WHERE agm.membership_id = $1 AND agm.status = 'ACTIVE'
+               AND a.organization_id = $3 AND a.kind = 'GROUP'
+               AND a.legacy_role_id = ra.role_id)`, [membershipId, currentDepartmentId, organizationId]);
         await client.query(`UPDATE department_membership SET status = 'REMOVED', removed_at = now()
           WHERE membership_id = $1 AND department_id = $2 AND is_primary AND status = 'ACTIVE'`, [membershipId, currentDepartmentId]);
       }
@@ -779,6 +783,15 @@ export class ArdenRepository implements ArdenDataRepository {
         VALUES ($1, $2, true, 'ACTIVE')`, [membershipId, departmentId]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [membershipId, assignment.default_role_id, assignment.access_scope_id]);
+      await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
+        SELECT $1, a.legacy_role_id, $2
+          FROM audience_group_membership agm
+          JOIN audience a ON a.audience_id = agm.audience_id
+         WHERE agm.membership_id = $1 AND agm.status = 'ACTIVE'
+           AND agm.valid_from <= now() AND (agm.valid_until IS NULL OR agm.valid_until > now())
+           AND a.organization_id = $3 AND a.kind = 'GROUP' AND a.status = 'ACTIVE'
+           AND a.legacy_role_id IS NOT NULL
+        ON CONFLICT DO NOTHING`, [membershipId, assignment.access_scope_id, organizationId]);
       await client.query(`
         INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
         VALUES ($1, $2, 'PRIMARY_DEPARTMENT_CHANGED', 'SUCCESS', $3::jsonb)`,
@@ -874,6 +887,33 @@ export class ArdenRepository implements ArdenDataRepository {
       }
       await client.query("SELECT set_config('arden.org_admin', 'true', true)");
       const result = await work(client, membershipId);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async withSystemAdmin<T>(userId: string, work: (client: PoolClient) => Promise<T>): Promise<T | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE arden_runtime");
+      await client.query("SET LOCAL search_path TO arden, public");
+      await client.query(`SELECT set_config('arden.actor_id', $1, true),
+        set_config('arden.organization_id', '', true), set_config('arden.org_admin', 'false', true),
+        set_config('arden.instance_admin', 'false', true)`, [userId]);
+      const administrator = await client.query(`SELECT 1 FROM system_administrator
+        WHERE user_id = $1 AND status = 'ACTIVE'`, [userId]);
+      if (!administrator.rowCount) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      await client.query("SELECT set_config('arden.instance_admin', 'true', true)");
+      const result = await work(client);
       await client.query("COMMIT");
       return result;
     } catch (error) {
@@ -1122,14 +1162,13 @@ export class ArdenRepository implements ArdenDataRepository {
         return { kind: "invalid-metadata" };
       }
       if (next.audienceRoleIds.length > 0) {
-        const roles = await client.query<{ role_id: string }>(`
-          SELECT r.role_id FROM role r WHERE r.organization_id = $1 AND r.role_id = ANY($2::uuid[])
-            AND r.status = 'ACTIVE' AND r.is_system = false
-            AND (r.code <> 'ALL_MEMBERS' OR $3 = 'ORGANIZATION')
-            AND EXISTS (SELECT 1 FROM role_permission rp JOIN permission p ON p.permission_id = rp.permission_id
-              WHERE rp.role_id = r.role_id AND p.code = 'PUBLISHED_CONTENT_VIEW' AND p.status = 'ACTIVE')`,
-        [organizationId, next.audienceRoleIds, next.targetScopeType]);
-        if (roles.rowCount !== next.audienceRoleIds.length) return { kind: "invalid-metadata" };
+        const audiences = await client.query(`SELECT audience_id FROM audience
+          WHERE organization_id = $1 AND audience_id = ANY($2::uuid[]) AND status = 'ACTIVE'
+            AND ((kind = 'ORGANIZATION_ALL' AND $3 = 'ORGANIZATION')
+              OR (kind = 'DEPARTMENT_ALL' AND $3 = 'DEPARTMENT' AND department_id = $4)
+              OR kind = 'GROUP')`,
+        [organizationId, next.audienceRoleIds, next.targetScopeType, next.responsibleDepartmentId]);
+        if (audiences.rowCount !== next.audienceRoleIds.length) return { kind: "invalid-metadata" };
       }
       await client.query(`UPDATE shared_draft SET title = $3, classification = $4,
         responsible_department_id = $5, target_scope_type = $6, team_tag = $7, project_tag = $8
@@ -1178,22 +1217,25 @@ export class ArdenRepository implements ArdenDataRepository {
       }
       if (row.current_version_no !== expectedVersion) return { kind: "conflict" };
       if (!row.responsible_department_id || !row.target_scope_type) return { kind: "not-ready" };
-      const roles = await client.query<{ role_id: string; organization_id: string; status: "ACTIVE" | "INACTIVE"; is_system: boolean; code: string }>(`
-        SELECT role_id, organization_id, status, is_system, code FROM role
-         WHERE organization_id = $1 AND role_id = ANY($2::uuid[])`, [organizationId, row.audience_role_ids]);
+      const audiences = await client.query<{ audience_id: string; organization_id: string;
+        status: "ACTIVE" | "INACTIVE"; kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP";
+        department_id: string | null }>(`SELECT audience_id, organization_id, status, kind, department_id
+        FROM audience WHERE organization_id = $1 AND audience_id = ANY($2::uuid[])`,
+      [organizationId, row.audience_role_ids]);
       const ready = canSubmitSnapshot({
         actor: { membershipId: row.author_membership_id, organizationId, status: "ACTIVE" },
         draft: { organizationId, authorMembershipId: row.author_membership_id, status: row.status,
           currentVersionId: row.shared_draft_version_id },
         snapshot: { versionId: row.shared_draft_version_id, contentHash: row.content_hash,
-          classification: row.classification, audienceRoleIds: row.audience_role_ids,
+          classification: row.classification, audienceIds: row.audience_role_ids,
           scope: row.target_scope_type === "ORGANIZATION"
             ? { type: "ORGANIZATION", departmentId: null }
             : { type: "DEPARTMENT", departmentId: row.responsible_department_id } },
-        audienceRoles: roles.rows.map((role) => ({ roleId: role.role_id, organizationId: role.organization_id,
-          status: role.status, isSystem: role.is_system,
-          kind: role.code === "ALL_MEMBERS" ? "ALL_MEMBERS" : "ROLE" })),
-        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids, row.target_scope_type),
+        audiences: audiences.rows.map(audience => ({ audienceId: audience.audience_id,
+          organizationId: audience.organization_id, status: audience.status, kind: audience.kind,
+          departmentId: audience.department_id })),
+        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids,
+          row.target_scope_type, row.responsible_department_id),
       });
       const department = await client.query(`SELECT 1 FROM department
         WHERE department_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [row.responsible_department_id, organizationId]);
@@ -1315,7 +1357,8 @@ export class ArdenRepository implements ArdenDataRepository {
         submission: reviewAuthorizationFromRow(row, organizationId),
         reviewerGrants: grants,
         effectivePolicyVersion: 1,
-        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids, row.target_scope_type),
+        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids,
+          row.target_scope_type, row.responsible_department_id),
       })));
       return listAssignedReviews({ actor, now, candidates });
     });
@@ -1379,7 +1422,8 @@ export class ArdenRepository implements ArdenDataRepository {
           submissionId, snapshotVersionId: row.shared_draft_version_id, contentHash: row.content_hash },
         reviewerGrants: grants,
         effectivePolicyVersion: 1,
-        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids, row.target_scope_type),
+        audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids,
+          row.target_scope_type, row.responsible_department_id),
         policy: { kind: "SINGLE_REVIEWER" },
         now: new Date(),
       }, { action, expectedSnapshotVersionId, expectedContentHash, comment });
@@ -1673,15 +1717,11 @@ export class ArdenRepository implements ArdenDataRepository {
     }));
   }
 
-  private async audienceEnforceable(client: PoolClient, organizationId: string, roleIds: string[], targetScopeType: "ORGANIZATION" | "DEPARTMENT"): Promise<boolean> {
-    if (roleIds.length === 0 || roleIds.length > 100 || new Set(roleIds).size !== roleIds.length) return false;
-    const result = await client.query(`SELECT 1 FROM role r WHERE r.organization_id = $1
-      AND r.role_id = ANY($2::uuid[]) AND r.status = 'ACTIVE' AND r.is_system = false
-      AND (r.code <> 'ALL_MEMBERS' OR $3 = 'ORGANIZATION')
-      AND EXISTS (SELECT 1 FROM role_permission rp JOIN permission p ON p.permission_id = rp.permission_id
-        WHERE rp.role_id = r.role_id AND p.code = 'PUBLISHED_CONTENT_VIEW' AND p.status = 'ACTIVE')`,
-    [organizationId, roleIds, targetScopeType]);
-    return result.rowCount === roleIds.length;
+  private async audienceEnforceable(client: PoolClient, organizationId: string, audienceIds: string[],
+    targetScopeType: "ORGANIZATION" | "DEPARTMENT", departmentId: string | null): Promise<boolean> {
+    const result = await client.query<{ enforceable: boolean }>(`SELECT audience_snapshot_enforceable(
+      $1, $2::uuid[], $3, $4) AS enforceable`, [organizationId, audienceIds, targetScopeType, departmentId]);
+    return result.rows[0]?.enforceable === true;
   }
 
   private async appendAudit(client: PoolClient, organizationId: string, membershipId: string, eventType: string, draftId: string, version: number, requestId: string) {

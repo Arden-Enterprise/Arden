@@ -8,19 +8,20 @@ const idempotencyKey = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const sharedDraftPath = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
 
 describe("desktop API request allowlist", () => {
-  it("bounds custom-role routes and requires role-specific update preconditions", () => {
-    const role = `/api/v1/organizations/${organizationId}/roles/${sourcePrivateVersionId}`;
-    assert.equal(validateDesktopApiRequest({ path: role, method: "GET" }), true);
-    assert.equal(validateDesktopApiRequest({ path: role, method: "PATCH", body: "{}", ifMatch: '"role-2"' }), true);
-    assert.equal(validateDesktopApiRequest({ path: role, method: "PATCH", body: "{}" }), false);
-    assert.equal(validateDesktopApiRequest({ path: role, method: "PATCH", body: "{}", ifMatch: '"2"' }), false);
-    assert.equal(validateDesktopApiRequest({ path: `${role}/assignments`, method: "POST", body: "{}" }), true);
-    assert.equal(validateDesktopApiRequest({ path: `${role}/assignments/${idempotencyKey}/revoke`, method: "POST", body: "{}" }), true);
-    assert.equal(validateDesktopApiRequest({ path: `${role}/deactivate`, method: "POST", body: "{}", ifMatch: '"role-2"' }), true);
-    assert.equal(validateDesktopApiRequest({ path: `${role}/deactivate`, method: "POST", body: "{}" }), false);
-    assert.equal(validateDesktopApiRequest({ path: `${role}/deactivate`, method: "POST", body: '{"unexpected":true}', ifMatch: '"role-2"' }), false);
-    assert.equal(validateDesktopApiRequest({ path: `${role}?next=1`, method: "GET" }), false);
-    assert.equal(validateDesktopApiRequest({ path: `${role}/permissions`, method: "POST", body: "{}" }), false);
+  it("bounds audience-group routes and requires group-specific update preconditions", () => {
+    const group = `/api/v1/organizations/${organizationId}/audience-groups/${sourcePrivateVersionId}`;
+    assert.equal(validateDesktopApiRequest({ path: group, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: group, method: "PATCH", body: "{}", ifMatch: '"audience-group-2"' }), true);
+    assert.equal(validateDesktopApiRequest({ path: group, method: "PATCH", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: group, method: "PATCH", body: "{}", ifMatch: '"role-2"' }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${group}/members`, method: "POST", body: "{}" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${group}/members/${idempotencyKey}/remove`, method: "POST", body: "{}" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${group}/deactivate`, method: "POST", body: "{}", ifMatch: '"audience-group-2"' }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${group}/deactivate`, method: "POST", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${group}/deactivate`, method: "POST", body: '{"unexpected":true}', ifMatch: '"audience-group-2"' }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${group}?next=1`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${group}/permissions`, method: "POST", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/roles/${sourcePrivateVersionId}`, method: "GET" }), false);
   });
   it("permits a bounded shared-draft create with its idempotency key", () => {
     assert.equal(validateDesktopApiRequest({
@@ -78,6 +79,10 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${grant}/${sourcePrivateVersionId}/deactivate`, method: "POST" }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/administration`, method: "GET" }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/departments`, method: "POST", body: "{}" }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/administrators", method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/administrators", method: "POST", body: JSON.stringify({ userId: sourcePrivateVersionId }) }), true);
+    assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}/revoke`, method: "POST", body: "{}" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}/revoke`, method: "GET" }), false);
   });
 
   it("rejects method, precondition and route confusion across knowledge endpoints", () => {

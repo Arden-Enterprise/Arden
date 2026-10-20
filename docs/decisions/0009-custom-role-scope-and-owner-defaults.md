@@ -1,10 +1,10 @@
 # 0009: Custom-role scopes and owner-private defaults
 
-Status: accepted
+Status: superseded
 Date: 2026-10-14
 Decision owner/approval: branch owner, explicit Phase 0 approval
 Implementation: partial; policy migrations and configurable API/UI implemented, Flow 2 matching remains
-Supersedes: custom-role contribution/private permissions and inherited scope assumptions in earlier slice documents
+Supersedes / superseded by: supersedes custom-role contribution/private permissions and inherited scope assumptions in earlier slice documents; superseded by [0010 audience access and Arden system administration](0010-audiences-and-system-administration.md)
 
 ## Decision
 

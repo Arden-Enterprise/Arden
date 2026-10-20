@@ -130,18 +130,7 @@ References: [Supabase Auth](https://supabase.com/docs/guides/auth), [server-side
 
 ## 7. PostgreSQL, pgvector, Drizzle, and search
 
-- Custom-role foundation `0011_custom_role_policy_foundation.sql` adds configuration version and
-  fixed owner-private RLS, with exact publication assignment scopes. Existing publication data
-  requires a reviewed backfill before this migration can run. The runtime role stays non-bypass;
-  the owner helper is SECURITY INVOKER. Do not bypass the existing schema migration owner or
-  alter old migrations. [Decision 0009](../decisions/0009-custom-role-scope-and-owner-defaults.md)
-  and [implementation status](custom-role-implementation.md) separate implemented policy from
-  pending configurable APIs, UI and Share integration. Rollback-only runtime-role rehearsal exists
-  in `tools/roles/policy-rehearsal.sql`; it does not replace broader integration tests.
-- Organization audience migration `0012_all_members_organization_audience.sql` reserves one
-  non-configurable `ALL_MEMBERS` marker per organization. It grants Organization publication
-  readership from active membership without creating assignments. It must remain excluded from
-  role-management APIs and must be rejected for Department audiences.
+- Migration `0017_audience_and_instance_admin_foundation.sql` introduces canonical managed and group audiences, audience-group membership, instance-level System Admin records, audit events, and the enforceable-snapshot helper. It backfills legacy role audiences and temporarily retains role-backed write projection for staged cutover. New product/API work must use audience terminology and [decision 0010](../decisions/0010-audiences-and-system-administration.md). Run a rollback-only migration/RLS rehearsal before any shared deployment.
 
 - PostgreSQL is the canonical system of record for organization-scoped content, immutable versions, permissions, publications, source revisions, explicit edges, and audit metadata. An SVG/Graphology object, embedding, or client cache is not canonical storage.
 - Use constraints, foreign keys, unique keys, indexes, and transactions to enforce invariants as well as domain checks. Make organization ownership explicit and prevent cross-organization references. IDs are identifiers, not access controls.

@@ -1,4 +1,4 @@
-export type PrimaryRole = "Employee" | "Manager / Knowledge Reviewer" | "System Admin";
+export type PrimaryRole = "Member" | "Organization Admin";
 export type Department = { id: string; name: string };
 export type OrganizationMember = {
   id: string;
@@ -26,7 +26,7 @@ export type OrganizationPreview = {
   members: OrganizationMember[];
   invitations?: OrganizationInvitation[];
 };
-export const primaryRoles: PrimaryRole[] = ["Employee", "Manager / Knowledge Reviewer", "System Admin"];
+export const primaryRoles: PrimaryRole[] = ["Member", "Organization Admin"];
 export function isPrimaryRole(value: string): value is PrimaryRole {
   return primaryRoles.some((role) => role === value);
 }
@@ -38,7 +38,7 @@ export const previewTemplates = [
 export const accessRules = [
   { scope: "Company-wide", audience: "Authorized organization members", detail: "A company-wide publication is available to eligible organization members, regardless of their primary department." },
   { scope: "Department", audience: "Members of the selected department", detail: "Department publications follow their audience. A role label alone does not grant access to another department's documents." },
-  { scope: "Private", audience: "Owner only", detail: "Managers and System Admins do not automatically see another member's private notes." },
+  { scope: "Private", audience: "Owner only", detail: "Organization and Arden System Admins do not see another member's private notes." },
 ] as const;
 export function createPreviewOrganization(templateId: string = previewTemplates[0].id): OrganizationPreview {
   const template = previewTemplates.find((item) => item.id === templateId) ?? previewTemplates[0];
@@ -46,12 +46,12 @@ export function createPreviewOrganization(templateId: string = previewTemplates[
   return {
     name: "FPT Digital", templateId: template.id, departments,
     members: [
-      { id: "sample-admin", name: "Tuan Le", email: "tuan@fpt-digital.example", departmentId: departments[0].id, role: "System Admin", status: "active", roleScope: "organization" },
-      { id: "sample-employee", name: "Lan Nguyen", email: "lan@fpt-digital.example", departmentId: departments[0].id, role: "Employee", status: "active", roleScope: "department" },
-      { id: "sample-reviewer", name: "Minh Tran", email: "minh@fpt-digital.example", departmentId: departments[2].id, role: "Manager / Knowledge Reviewer", status: "active", roleScope: "department" },
-      { id: "sample-operations-employee", name: "Hoa Bui", email: "hoa@fpt-digital.example", departmentId: departments[1].id, role: "Employee", status: "active", roleScope: "department" },
-      { id: "sample-finance-employee", name: "Mai Pham", email: "mai@fpt-digital.example", departmentId: departments[3].id, role: "Employee", status: "active", roleScope: "department" },
-      { id: "sample-security-employee", name: "Bao Vu", email: "bao@fpt-digital.example", departmentId: departments[2].id, role: "Employee", status: "active", roleScope: "department" },
+      { id: "sample-admin", name: "Tuan Le", email: "tuan@fpt-digital.example", departmentId: departments[0].id, role: "Organization Admin", status: "active", roleScope: "organization" },
+      { id: "sample-employee", name: "Lan Nguyen", email: "lan@fpt-digital.example", departmentId: departments[0].id, role: "Member", status: "active", roleScope: "department" },
+      { id: "sample-reviewer", name: "Minh Tran", email: "minh@fpt-digital.example", departmentId: departments[2].id, role: "Member", status: "active", roleScope: "department" },
+      { id: "sample-operations-employee", name: "Hoa Bui", email: "hoa@fpt-digital.example", departmentId: departments[1].id, role: "Member", status: "active", roleScope: "department" },
+      { id: "sample-finance-employee", name: "Mai Pham", email: "mai@fpt-digital.example", departmentId: departments[3].id, role: "Member", status: "active", roleScope: "department" },
+      { id: "sample-security-employee", name: "Bao Vu", email: "bao@fpt-digital.example", departmentId: departments[2].id, role: "Member", status: "active", roleScope: "department" },
     ], invitations: [],
   };
 }
@@ -70,7 +70,7 @@ export function validateOrganization(organization: OrganizationPreview): string[
   if (assignedMembers.some((member) => !organization.departments.some((department) => department.id === member.departmentId))) problems.push("Assign every active member to an existing department.");
   if (assignedMembers.some((member) => !isPrimaryRole(member.role))) problems.push("Assign every active member a supported system role.");
   if (assignedMembers.some((member) => member.roleScope !== "organization" && member.roleScope !== "department")) problems.push("Assign every active member an explicit role scope.");
-  if (organization.members.some((member) => member.role === "System Admin" && member.roleScope === "department")) problems.push("System Admin responsibilities apply to the organization.");
-  if (!organization.members.some((member) => member.role === "System Admin" && member.status !== "suspended" && member.status !== "pending-assignment" && member.roleScope === "organization" && organization.departments.some((department) => department.id === member.departmentId))) problems.push("Keep at least one active System Admin.");
+  if (organization.members.some((member) => member.role === "Organization Admin" && member.roleScope === "department")) problems.push("Organization Admin responsibilities apply to the organization.");
+  if (!organization.members.some((member) => member.role === "Organization Admin" && member.status !== "suspended" && member.status !== "pending-assignment" && member.roleScope === "organization" && organization.departments.some((department) => department.id === member.departmentId))) problems.push("Keep at least one active Organization Admin.");
   return problems;
 }

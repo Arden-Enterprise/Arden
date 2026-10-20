@@ -33,8 +33,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const migration = await pool.query<{ count: string }>(`
       SELECT count(*)::text AS count FROM public.arden_schema_migrations
        WHERE migration_id IN ('0001_initial_schema', '0008_enable_private_shared_draft_creation',
-         '0015_org_admin_member_profiles', '0016_fix_flow2_cross_actor_validation')`);
-    if (migration.rows[0]?.count !== "4") throw new Error("Apply the current schema migrations to the isolated test database first");
+         '0015_org_admin_member_profiles', '0016_fix_flow2_cross_actor_validation',
+         '0017_audience_and_instance_admin_foundation')`);
+    if (migration.rows[0]?.count !== "5") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {

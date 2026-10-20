@@ -59,7 +59,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
                   <img src={entryAssets.statusAmber} alt="" width={7} height={7} />SELECTED
                 </span>
               </div>
-              <p>Product Engineering · Employee</p>
+              <p>Product Engineering · Member</p>
             </div>
             <button type="button" className="workspace-membership is-unavailable" disabled>
               <span className="workspace-membership-heading">
