@@ -1,10 +1,10 @@
 # 0004: Role-tagged audiences for published content
 
-Status: accepted  
+Status: superseded
 Date: 2026-10-05  
 Decision owner/approval: task owner confirmed that Org Admins create and assign roles and that one matching role is sufficient for access  
 Implementation: not started for shared-content audiences; current role/permission tables are used only by the first owner-private note slice  
-Supersedes / superseded by: none
+Supersedes / superseded by: superseded by [0010 audience access and Arden system administration](0010-audiences-and-system-administration.md)
 
 ## Context and requirement
 
@@ -22,7 +22,7 @@ Mainflow 1 is focused on organization creation, invitations, membership, departm
 - A published item's audience may contain one or more roles. A member can view it if their active membership has **at least one** matching active assigned role; matching is OR/any-match, not all-match.
 - An absent, empty, malformed, or unknown audience grants no access. The API does not infer organization-wide visibility from missing role tags.
 - The same role-audience grant permits viewing the published item, including retrieval by authorized search/RAG, and submitting a contribution as a separate copy of the visible published version.
-- A contribution does not mutate the source publication and does not become published automatically. It follows the separate review and explicit publication policy.
+- A contribution does not mutate the source publication or become published on copy. Its own submitted snapshot follows review; final authorized approval triggers system publication under [decision 0007](0007-automatic-publication-after-final-approval.md).
 - Org Admin authority to manage memberships, departments, and roles is separate from content audience. Org Admin status alone does not reveal content or another member's private notes.
 - Private originals remain owner-only and are excluded from shared-organization search/RAG. Role audiences apply to published shared content, not private drafts.
 - This decision does not select detailed role assignment scopes, invitation expiry/email delivery, or initial organization bootstrap behavior. Mainflow 1 establishes organization-scoped roles and assignments; published-content search/contribution enforcement remains later implementation work.
@@ -31,7 +31,7 @@ Mainflow 1 is focused on organization creation, invitations, membership, departm
 
 Role creation/assignment, audience checks, search candidate selection, citation resolution, and contribution submission must use current server-verified membership and role state. Do not accept role IDs as proof of access from the client. Select authorized published versions before text/vector retrieval and model-context construction; recheck the version and audience before returning results, citations, or performing a contribution action. Role removal, membership suspension, unpublishing, or audience changes must block subsequent access before derived-index cleanup completes.
 
-The `Org Admin` management capability must not be a user-created audience tag that can be deleted or casually granted. The private-workspace owner boundary remains unchanged. This is not a decision to implement Discord-style permission precedence, role hierarchy, private-note sharing, or automatic publication.
+The `Org Admin` management capability must not be a user-created audience tag that can be deleted or casually granted. The private-workspace owner boundary remains unchanged. This decision itself does not establish Discord-style permission precedence, role hierarchy, private-note sharing, or automatic publication. The later [decision 0007](0007-automatic-publication-after-final-approval.md) establishes system publication after final authorized knowledge approval.
 
 ## Verification and rollout
 

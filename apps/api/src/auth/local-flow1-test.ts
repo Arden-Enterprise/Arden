@@ -61,6 +61,7 @@ export class LocalFlow1TestAuthProvider implements AuthProvider {
       email: session.account.email,
       fullName: session.account.fullName,
       emailVerified: true,
+      passwordSetupRequired: false,
     };
   }
 

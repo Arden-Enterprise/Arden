@@ -4,20 +4,29 @@ import { PrivateNoteEditor } from "./PrivateNoteEditor";
 import { PrivateNoteList } from "./PrivateNoteList";
 import { SearchField } from "../shared/SearchField";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
+import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 import { useSearchShortcut } from "../shared/useSearchShortcut";
+import { ContributePrivateNoteDialog, type ContributionAttempt } from "./ContributePrivateNoteDialog";
+import type { CreatedKnowledgeDraft } from "../shared/api-client";
 import type { PrivateNotesController } from "./usePrivateNotes";
 import type { Platform } from "../shared/types";
 
-export function PersonalWorkspacePage({ controller, platform, organizationId, contextOpen, onToggleContext }: {
+export function PersonalWorkspacePage({ controller, platform, organizationId, contributionAttempt, onContributionAttemptChange, onKnowledgeDraftCreated, contextOpen, onToggleContext }: {
   controller: PrivateNotesController;
   platform: Platform;
   organizationId: string;
+  contributionAttempt: ContributionAttempt | null;
+  onContributionAttemptChange: (attempt: ContributionAttempt | null) => void;
+  onKnowledgeDraftCreated: (draft: CreatedKnowledgeDraft) => void;
 } & ContextControlProps) {
   const [query, setQuery] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
+  const [contributionOpen, setContributionOpen] = useState(false);
   const revealSearch = useCallback(() => setEditorOpen(false), []);
   const searchRef = useSearchShortcut(revealSearch);
   const { state, selectedNote, draft, isDirty, serverBacked, loading, saving, error, saveMessage } = controller;
+  const sourceVersionId = selectedNote?.sourceVersionId;
+  const matchingAttempt = contributionAttempt?.sourceVersionId === sourceVersionId ? contributionAttempt : null;
   const visibleNotes = useMemo(() => state.notes.filter((note) => {
     const current = state.drafts[note.id] ?? note;
     return `${current.title} ${current.body}`.toLowerCase().includes(query.trim().toLowerCase());
@@ -32,17 +41,14 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   return (
     <main id="arden-main" className="workspace-page" aria-labelledby="personal-workspace-title" tabIndex={-1}>
       <WorkspaceTopbar breadcrumb="Arden / Personal Workspace" previewLabel={serverBacked ? "PRIVATE NOTES · SERVER" : "SAMPLE NOTES · SESSION ONLY"} contextOpen={contextOpen} onToggleContext={onToggleContext} />
-      <div className={`workspace-content personal-content${editorOpen ? " is-editing-note" : ""}`}>
-        <div className="page-title-row personal-title-row">
-          <div>
-            <span className="meta-label">PERSONAL / OWNER PRIVATE</span>
-            <h1 id="personal-workspace-title">{editorOpen ? draft.title.trim() || "Untitled private note" : "Private notes"}</h1>
-            <p>{editorOpen ? isDirty ? "Unsaved changes · Your draft is kept while you work." : serverBacked ? "Saved to your private workspace on the Arden server." : "Saved in this preview session." : "Only you can view these notes. Sharing always creates a separate governed copy."}</p>
-          </div>
-          {!editorOpen && <button type="button" className="primary-button" onClick={() => { controller.createNote(); setQuery(""); openEditor(); }}>
+      <WorkspacePageContent className={`personal-content${editorOpen ? " is-editing-note" : ""}`} header={<WorkspacePageHeader className="personal-title-row"
+        eyebrow="PERSONAL / OWNER PRIVATE"
+        title={editorOpen ? draft.title.trim() || "Untitled private note" : "Private notes"}
+        titleId="personal-workspace-title"
+        action={editorOpen ? <span className="private-state">{isDirty ? "Unsaved changes" : serverBacked ? "Saved · Server" : "Saved · Preview"}</span> : <button type="button" className="primary-button" onClick={() => { controller.createNote(); setQuery(""); openEditor(); }}>
             <Icon name="plus" size={16} /> New private note
           </button>}
-        </div>
+      />}>
         {!editorOpen && <SearchField ref={searchRef} value={query} onChange={setQuery} placeholder="Search your private notes…" />}
         {editorOpen && <div className="private-editor-toolbar">
           <span className="private-state"><Icon name="lock" size={14} /> PRIVATE · ONLY YOU</span>
@@ -51,6 +57,8 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
           requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".note-list .is-selected")?.focus());
         }}>Back to notes</button>
           <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : serverBacked ? "Save private note" : "Save preview note"}</button>
+          {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}>Contribute copy</button>}
+
         </div>}
         {loading && <p role="status">Loading your private notes…</p>}
         {error && <p className="sign-in-message" role="alert">{error}</p>}
@@ -61,14 +69,23 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
             <Icon name="lock" size={32} />
             <span className="meta-label">{editorOpen ? "PRIVACY" : "PRIVATE BY DEFAULT"}</span>
             <h2>{editorOpen ? "Only you" : <>Your working <br />memory</>}</h2>
-            <p>A private note is visible only to its owner.</p>
-            <hr />
-            <p>Publishing or contributing creates a separate governed item. It never changes this note silently.</p>
+
+
             <span className="private-guidance-badge">YOU DECIDE WHAT TO SHARE</span>
             {editorOpen && <p className="private-save-status" aria-live="polite">{isDirty ? "Your draft has unsaved changes." : state.savedMessage || "No pending changes."}</p>}
           </aside>
         </div>
-      </div>
+      </WorkspacePageContent>
+      {contributionOpen && serverBacked && selectedNote && sourceVersionId && !isDirty && <ContributePrivateNoteDialog
+        key={sourceVersionId}
+        platform={platform}
+        organizationId={organizationId}
+        source={{ title: selectedNote.title, body: selectedNote.body, versionId: sourceVersionId }}
+        attempt={matchingAttempt}
+        onAttemptChange={onContributionAttemptChange}
+        onClose={() => setContributionOpen(false)}
+        onCreated={(created) => { onContributionAttemptChange(null); setContributionOpen(false); onKnowledgeDraftCreated(created); }}
+      />}
     </main>
   );
 }

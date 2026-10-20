@@ -14,6 +14,10 @@ type AppSidebarProps = {
   memberRole?: string;
   memberDepartment?: string;
   environmentLabel?: string;
+  assignedReviewCount?: number;
+  canSwitchWorkspace?: boolean;
+  onSwitchWorkspace?: () => void;
+  onCloseNavigation?: () => void;
   onNavigate: (view: WorkspaceView) => void;
   onSignOut: () => void;
 };
@@ -28,9 +32,8 @@ type NavigationItem = {
 const workspaceNavigation: NavigationItem[] = [
   { label: "My Work", icon: "work", view: "my-work" },
   { label: "Knowledge", icon: "knowledge", view: "knowledge" },
-  { label: "Ask Arden", icon: "knowledge", view: "ask-arden" },
-  { label: "Review Queue", icon: "check", view: "review-queue" },
-  { label: "Knowledge Handover", icon: "arrow", view: "knowledge-handover" },
+  { label: "Review Queue", icon: "review", view: "review-queue" },
+  { label: "Knowledge Handover", icon: "handover", view: "knowledge-handover" },
 ];
 
 export function AppSidebar({
@@ -42,27 +45,31 @@ export function AppSidebar({
   authenticated = false,
   showAdmin = false,
   memberName = "Lan Nguyen",
-  memberRole = "Employee",
+  memberRole = "Member",
   memberDepartment = "Product Engineering",
   environmentLabel,
+  assignedReviewCount,
+  canSwitchWorkspace = false,
+  onSwitchWorkspace,
+  onCloseNavigation,
   onNavigate,
   onSignOut,
 }: AppSidebarProps) {
   return (
-    <aside className="app-sidebar" aria-label="Main navigation">
+    <aside id="arden-primary-navigation" className="app-sidebar" aria-label="Main navigation">
       <div className="sidebar-brand">
         <span className="sidebar-brand-mark" aria-hidden="true"><Icon name="knowledge" size={24} /></span>
         <span>ARDEN</span>
         <small>{environmentLabel ?? (!authenticated ? "PREVIEW" : null)}</small>
+        <button type="button" className="sidebar-mobile-close" aria-label="Close navigation" onClick={onCloseNavigation}>×</button>
       </div>
 
-      <section className="access-card" aria-labelledby="access-card-title">
-        <span className="meta-label" id="access-card-title">
-          {organizationLabel ?? organization?.name ?? "FPT DIGITAL"}
-        </span>
-        <strong>{previewRole === "admin" ? "Organization" : memberDepartment}</strong>
-        <span>{previewRole === "admin" ? "Configuration access" : "Member workspace"}</span>
-      </section>
+      <button type="button" className="access-card" disabled={!canSwitchWorkspace} onClick={onSwitchWorkspace}
+        aria-label={`Workspace: ${organizationLabel ?? organization?.name ?? "FPT Digital"}${canSwitchWorkspace ? ". Switch workspace" : ""}`}>
+        <span className="access-card-mark" aria-hidden="true">{(organizationLabel ?? organization?.name ?? "FPT DIGITAL").split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span>
+        <span className="access-card-copy"><strong id="access-card-title">{organizationLabel ?? organization?.name ?? "FPT DIGITAL"}</strong>
+          <span>{authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`}</span></span>
+      </button>
 
       <nav className="sidebar-navigation" aria-label="Workspace">
           <span className="meta-label navigation-label">WORKSPACE</span>
@@ -74,13 +81,14 @@ export function AppSidebar({
               type="button"
               className={`sidebar-nav-item${active ? " is-active" : ""}`}
               onClick={() => { if (item.view) onNavigate(item.view); }}
-              disabled={item.planned || authenticated}
-              aria-label={item.label}
+              disabled={item.planned || (authenticated && item.view !== "knowledge" && item.view !== "review-queue")}
+              aria-label={item.label === "Review Queue" && assignedReviewCount !== undefined ? `Review Queue, ${assignedReviewCount} assigned` : item.label}
               aria-current={active ? "page" : undefined}
-              title={item.planned ? `${item.label} is not connected yet` : item.label}
+              title={authenticated && item.view === "knowledge" ? "View server draft and labeled sample library" : item.planned ? `${item.label} is not connected yet` : item.label}
             >
               <Icon name={item.icon} size={16} />
               <span>{item.label}</span>
+              {item.label === "Review Queue" && assignedReviewCount !== undefined && assignedReviewCount > 0 && <small className="sidebar-review-count">{assignedReviewCount}</small>}
               {item.planned && <small>Planned</small>}
             </button>
           );
@@ -99,7 +107,7 @@ export function AppSidebar({
           <span><span className="nav-label-full">Personal Workspace</span><span className="nav-label-short" aria-hidden="true">Notes</span></span>
         </button>
         <button type="button" className="sidebar-nav-item" disabled title="Integrations are not connected" aria-label="Integrations — not connected">
-          <Icon name="plus" size={16} /><span>Integrations</span><small>Planned</small>
+          <Icon name="integrations" size={16} /><span>Integrations</span><small>Planned</small>
         </button>
 
         {((previewRole === "admin" && !authenticated) || showAdmin) && (
@@ -113,7 +121,7 @@ export function AppSidebar({
               title="Organization & Access"
               aria-current={activeView === "organization-access" ? "page" : undefined}
             >
-              <Icon name="work" size={16} />
+              <Icon name="organization" size={16} />
               <span><span className="nav-label-full">Administration</span><span className="nav-label-short" aria-hidden="true">Admin</span></span>
             </button>
           </>
@@ -126,7 +134,7 @@ export function AppSidebar({
           <div><strong>{memberName}</strong><span>{memberRole}</span></div>
         </div>
         <span>{platform === "desktop" ? "WINDOWS" : "WEB"} · {authenticated ? "SIGNED IN" : "SAMPLE SESSION"}</span>
-        <button type="button" onClick={onSignOut} aria-label="Exit preview">
+        <button type="button" onClick={onSignOut} aria-label={authenticated ? "Sign out" : "Exit preview"}>
           <Icon name="logout" size={15} />
           <span><span className="nav-label-full">{authenticated ? "Sign out" : "Exit preview"}</span><span className="nav-label-short" aria-hidden="true">Exit</span></span>
         </button>

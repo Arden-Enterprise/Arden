@@ -1,0 +1,46 @@
+/* Local asset only: no remote font request or full Uicons stylesheet. */
+@font-face {
+  font-family: "Arden Uicons";
+  src: url("@flaticon/flaticon-uicons/css/uicons-regular-rounded-J3WOUERV.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+.arden-icon { flex-shrink: 0; overflow: visible; }
+.arden-icon text {
+  font-family: "Arden Uicons";
+  font-size: 24px;
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: 0;
+}
+
+.icon-credits {
+  position: fixed;
+  right: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 5;
+  height: 18px;
+  padding: 2px 8px;
+  text-align: right;
+  background: #1b1f21;
+  color: #a8b3bd;
+  font-size: 10px;
+  line-height: 14px;
+}
+.icon-credits a { color: inherit; text-decoration: none; }
+.icon-credits a:hover { text-decoration: underline; }
+.icon-credits a:focus-visible { outline: 2px solid #8cbaea; outline-offset: 2px; }
+
+/* Reserve the credit strip so it never covers a scrolling row or an action. */
+.arden-app-shell { min-height: calc(100dvh - 18px); }
+.arden-app-shell .app-sidebar,
+.arden-app-shell .workspace-page,
+.arden-app-shell .knowledge-pane-redesign { height: calc(100dvh - 18px); }
+@media (max-width: 760px) {
+  .arden-app-shell .app-sidebar { height: 64px; }
+  .arden-app-shell .workspace-page { height: calc(100dvh - 82px); }
+  .arden-app-shell .knowledge-pane-redesign { height: auto; }
+}

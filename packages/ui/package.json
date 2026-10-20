@@ -18,5 +18,11 @@
     "@types/react": "19.3.0",
     "react": "19.3.0",
     "vitest": "5.0.1"
+  },
+  "dependencies": {
+    "@blocknote/ariakit": "0.55.0",
+    "@blocknote/core": "0.55.0",
+    "@blocknote/react": "0.55.0",
+    "@flaticon/flaticon-uicons": "3.3.1"
   }
 }

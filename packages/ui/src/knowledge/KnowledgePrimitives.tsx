@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Icon, type IconName } from "../shared/Icon";
+import { WorkspacePageHeader } from "../shared/WorkspacePageContent";
 
 const statusAssets = {
   amber: new URL("./assets/status-amber.svg", import.meta.url).href,
@@ -7,16 +8,16 @@ const statusAssets = {
   muted: new URL("./assets/status-muted.svg", import.meta.url).href,
 };
 
-export function KnowledgeBadge({ children, tone = "muted" }: { children: ReactNode; tone?: "amber" | "jade" | "muted" | "blue" }) {
-  return <span className={`knowledge-badge knowledge-tone-${tone}`}><img src={statusAssets[tone === "blue" ? "muted" : tone]} alt="" width={7} height={7} />{children}</span>;
+export function KnowledgeBadge({ children, tone = "muted", classification }: { children: ReactNode; tone?: "amber" | "jade" | "muted" | "blue"; classification?: "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED" }) {
+  return <span className={`knowledge-badge knowledge-tone-${tone}`} data-classification={classification}>{!classification && <img src={statusAssets[tone === "blue" ? "muted" : tone]} alt="" width={7} height={7} />}{children}</span>;
 }
 
-export function KnowledgeNotice({ title, children, tone = "blue" }: { title: string; children: ReactNode; tone?: "amber" | "jade" | "blue" }) {
+export function KnowledgeNotice({ title, children, tone = "blue" }: { title: string; children: ReactNode; tone?: "amber" | "jade" | "blue" | "danger" }) {
   return <div className={`knowledge-notice knowledge-tone-${tone}`}><div><strong>{title}</strong><p>{children}</p></div></div>;
 }
 
-export function KnowledgeHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
-  return <header className="knowledge-heading"><span className="meta-label">{eyebrow}</span><div><h1>{title}</h1>{action}</div><p>{description}</p></header>;
+export function KnowledgeHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description?: string; action?: ReactNode }) {
+  return <WorkspacePageHeader className="knowledge-heading" eyebrow={eyebrow} title={title} description={description} action={action} />;
 }
 
 export function KnowledgeSteps({ steps, active }: { steps: string[]; active: number }) {

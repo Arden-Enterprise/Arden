@@ -1,4 +1,4 @@
-import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, type Session, type SupabaseClient, type User } from "@supabase/supabase-js";
 
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -9,8 +9,16 @@ export type AuthSessionTokens = {
   refreshToken: string;
   expiresIn: number;
 };
+export type GoogleOAuthStart = { url: string; flowId: string; verifier: string };
+export type GoogleOAuthResult = {
+  userId: string;
+  email: string;
+  fullName: string | null;
+  tokens: AuthSessionTokens;
+  passwordSetupRequired: boolean;
+};
 export type SessionResolution =
-  | { kind: "authenticated"; userId: string; email: string; fullName: string | null; emailVerified: boolean; rotatedSession?: AuthSessionTokens }
+  | { kind: "authenticated"; userId: string; email: string; fullName: string | null; emailVerified: boolean; passwordSetupRequired: boolean; rotatedSession?: AuthSessionTokens }
   | { kind: "unauthenticated" }
   | { kind: "unavailable" };
 
@@ -19,6 +27,9 @@ export interface AuthProvider {
   signUp(credentials: SupabaseSignUp): Promise<{ tokens: AuthSessionTokens | null; emailVerified: boolean }>;
   resolveSession(tokens: AuthSessionTokens): Promise<SessionResolution>;
   signOut(tokens: AuthSessionTokens): Promise<void>;
+  startGoogleSignIn?(redirectTo: string): Promise<GoogleOAuthStart>;
+  completeGoogleSignIn?(code: string, flowId: string, verifier: string): Promise<GoogleOAuthResult>;
+  setInitialPassword?(tokens: AuthSessionTokens, password: string): Promise<void>;
 }
 
 export class SupabaseAuthProvider implements AuthProvider {
@@ -33,6 +44,19 @@ export class SupabaseAuthProvider implements AuthProvider {
   private createAuthClient(): SupabaseClient {
     return createClient(this.url, this.publishableKey, {
       auth: { autoRefreshToken: false, detectSessionInUrl: false, persistSession: false },
+    });
+  }
+
+  private createPkceClient(storage: MapStorage): SupabaseClient {
+    return createClient(this.url, this.publishableKey, {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
+        flowType: "pkce",
+        storage,
+        storageKey: "arden-google-pkce",
+      },
     });
   }
 
@@ -68,6 +92,7 @@ export class SupabaseAuthProvider implements AuthProvider {
           kind: "authenticated", userId: current.data.user.id,
           email: normalizeEmail(current.data.user.email), fullName: profileName(current.data.user.user_metadata),
           emailVerified: Boolean(current.data.user.email_confirmed_at),
+          passwordSetupRequired: passwordSetupRequired(current.data.user),
         };
       }
       if (current.error && !isClientAuthFailure(current.error)) return { kind: "unavailable" };
@@ -89,7 +114,8 @@ export class SupabaseAuthProvider implements AuthProvider {
       return {
         kind: "authenticated", userId: verified.data.user.id,
         email: normalizeEmail(verified.data.user.email), fullName: profileName(verified.data.user.user_metadata),
-        emailVerified: Boolean(verified.data.user.email_confirmed_at), rotatedSession,
+        emailVerified: Boolean(verified.data.user.email_confirmed_at),
+        passwordSetupRequired: passwordSetupRequired(verified.data.user), rotatedSession,
       };
     } catch {
       return { kind: "unavailable" };
@@ -106,6 +132,61 @@ export class SupabaseAuthProvider implements AuthProvider {
     if (sessionError) return;
     const { error } = await auth.signOut({ scope: "local" });
     if (error && !isClientAuthFailure(error)) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
+  }
+
+  async startGoogleSignIn(redirectTo: string): Promise<GoogleOAuthStart> {
+    const storage = new MapStorage();
+    const { data, error } = await this.createPkceClient(storage).auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo, skipBrowserRedirect: true },
+    });
+    if (error || !data.url || !data.flowId) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
+    const verifier = storage.findVerifier(data.flowId);
+    if (!verifier) throw new Error("INVALID_AUTH_RESPONSE");
+    return { url: data.url, flowId: data.flowId, verifier };
+  }
+
+  async completeGoogleSignIn(code: string, flowId: string, verifier: string): Promise<GoogleOAuthResult> {
+    const storage = new MapStorage();
+    storage.setVerifier(flowId, verifier);
+    const { data, error } = await this.createPkceClient(storage).auth.exchangeCodeForSession(code, { flowId });
+    if (error) throw new Error(isClientAuthFailure(error) ? "INVALID_OAUTH_CALLBACK" : "SUPABASE_AUTH_UNAVAILABLE");
+    if (!data.user || !data.session || !userIdPattern.test(data.user.id)) throw new Error("INVALID_AUTH_RESPONSE");
+    const tokens = toTokens(data.session);
+    if (!tokens) throw new Error("INVALID_AUTH_RESPONSE");
+    return {
+      userId: data.user.id,
+      email: normalizeEmail(data.user.email),
+      fullName: profileName(data.user.user_metadata),
+      tokens,
+      passwordSetupRequired: passwordSetupRequired(data.user),
+    };
+  }
+
+  async setInitialPassword(tokens: AuthSessionTokens, password: string): Promise<void> {
+    const auth = this.createAuthClient().auth;
+    const session = await auth.setSession({ access_token: tokens.accessToken, refresh_token: tokens.refreshToken });
+    if (session.error || !session.data.user) throw new Error(isClientAuthFailure(session.error ?? {}) ? "UNAUTHENTICATED" : "SUPABASE_AUTH_UNAVAILABLE");
+    if (!passwordSetupRequired(session.data.user)) throw new Error("PASSWORD_ALREADY_INITIALIZED");
+    const { error } = await auth.updateUser({
+      password,
+      data: { ...session.data.user.user_metadata, arden_password_initialized: true },
+    });
+    if (error) throw new Error(isClientAuthFailure(error) ? "PASSWORD_REJECTED" : "SUPABASE_AUTH_UNAVAILABLE");
+  }
+}
+
+class MapStorage {
+  private readonly values = new Map<string, string>();
+  getItem(key: string): string | null { return this.values.get(key) ?? null; }
+  setItem(key: string, value: string): void { this.values.set(key, value); }
+  removeItem(key: string): void { this.values.delete(key); }
+  findVerifier(flowId: string): string | null {
+    return this.values.get(`arden-google-pkce-flow-${flowId}-code-verifier`) ??
+      [...this.values.entries()].find(([key]) => key.endsWith(`-flow-${flowId}-code-verifier`))?.[1] ?? null;
+  }
+  setVerifier(flowId: string, verifier: string): void {
+    this.values.set(`arden-google-pkce-flow-${flowId}-code-verifier`, verifier);
   }
 }
 
@@ -138,4 +219,12 @@ function profileName(metadata: unknown): string | null {
   if (typeof metadata !== "object" || metadata === null || !("full_name" in metadata)) return null;
   const value = metadata.full_name;
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 200) : null;
+}
+
+function passwordSetupRequired(user: User): boolean {
+  if (user.user_metadata?.arden_password_initialized === true) return false;
+  const providers = Array.isArray(user.app_metadata?.providers)
+    ? user.app_metadata.providers.filter((provider): provider is string => typeof provider === "string")
+    : [];
+  return providers.includes("google") && !providers.includes("email");
 }

@@ -94,9 +94,9 @@ describe("organization invitation workflow", () => {
   it("rejects existing member emails regardless of casing and membership state", () => {
     for (const status of ["active", "pending-assignment", "suspended"] as const) {
       const organization = createPreviewOrganization();
-      const member = organization.members.find((item) => item.role === "Employee");
+      const member = organization.members.find((item) => item.role === "Member");
       expect(member).toBeDefined();
-      if (!member) throw new Error("The synthetic organization must include an Employee.");
+      if (!member) throw new Error("The synthetic organization must include a Member.");
       member.status = status;
       expectRejected(organization, {
         type: "invite", id: "duplicate-member", name: "Duplicate", email: ` ${member.email.toUpperCase()} `,
@@ -178,7 +178,7 @@ describe("organization invitation workflow", () => {
     const organization = invitedOrganization();
     organization.members = [...organization.members, {
       id: "joined-elsewhere", name: "Jules Park", email: "JULES@northstar.example",
-      departmentId: organization.departments[0].id, role: "Employee", status: "active",
+      departmentId: organization.departments[0].id, role: "Member", status: "active",
     }];
     expectRejected(organization, { type: "accept", invitationId, email: "jules@northstar.example", memberId });
     expectRejected(organization, { type: "resend", invitationId });
@@ -198,11 +198,11 @@ describe("organization membership assignment and readiness", () => {
     const organization = acceptedOrganization();
     const departmentId = organization.departments[0].id;
     const result = transitionOrganization(organization, {
-      type: "assign", memberId, departmentId, role: "Employee", roleScope: "department",
+      type: "assign", memberId, departmentId, role: "Member", roleScope: "department",
     }, now);
     expect(result.error).toBeUndefined();
     expect(result.organization.members.find((member) => member.id === memberId)).toMatchObject({
-      departmentId, role: "Employee", roleScope: "department", status: "active",
+      departmentId, role: "Member", roleScope: "department", status: "active",
     });
     expect(membershipReadiness(result.organization, memberId).state).toBe("ready");
     expect(membershipReadiness(organization, memberId).state).toBe("pending");
@@ -211,62 +211,62 @@ describe("organization membership assignment and readiness", () => {
   it("rejects assignment to an unknown department or member", () => {
     const organization = acceptedOrganization();
     expectRejected(organization, {
-      type: "assign", memberId, departmentId: "another-organization-department", role: "Employee", roleScope: "department",
+      type: "assign", memberId, departmentId: "another-organization-department", role: "Member", roleScope: "department",
     });
     expectRejected(organization, {
-      type: "assign", memberId: "missing", departmentId: organization.departments[0].id, role: "Employee", roleScope: "organization",
+      type: "assign", memberId: "missing", departmentId: organization.departments[0].id, role: "Member", roleScope: "organization",
     });
   });
 
-  it("rejects department-scoped System Admin and accepts organization scope", () => {
+  it("rejects department-scoped Organization Admin and accepts organization scope", () => {
     const organization = acceptedOrganization();
     const departmentId = organization.departments[0].id;
     expectRejected(organization, {
-      type: "assign", memberId, departmentId, role: "System Admin", roleScope: "department",
+      type: "assign", memberId, departmentId, role: "Organization Admin", roleScope: "department",
     });
     const result = transitionOrganization(organization, {
-      type: "assign", memberId, departmentId, role: "System Admin", roleScope: "organization",
+      type: "assign", memberId, departmentId, role: "Organization Admin", roleScope: "organization",
     }, now);
     expect(result.error).toBeUndefined();
     expect(membershipReadiness(result.organization, memberId).state).toBe("ready");
   });
 
-  it("protects the last active System Admin from demotion and suspension", () => {
+  it("protects the last active Organization Admin from demotion and suspension", () => {
     const organization = createPreviewOrganization();
-    const admin = organization.members.find((member) => member.role === "System Admin");
+    const admin = organization.members.find((member) => member.role === "Organization Admin");
     expect(admin).toBeDefined();
-    if (!admin) throw new Error("The synthetic organization must include a System Admin.");
+    if (!admin) throw new Error("The synthetic organization must include an Organization Admin.");
     expectRejected(organization, {
-      type: "assign", memberId: admin.id, departmentId: admin.departmentId, role: "Employee", roleScope: "organization",
+      type: "assign", memberId: admin.id, departmentId: admin.departmentId, role: "Member", roleScope: "organization",
     });
     expectRejected(organization, { type: "status", memberId: admin.id, status: "suspended" });
   });
 
   it("does not count a suspended admin as a replacement for the last active admin", () => {
     const organization = createPreviewOrganization();
-    const admin = organization.members.find((member) => member.role === "System Admin");
-    if (!admin) throw new Error("The synthetic organization must include a System Admin.");
+    const admin = organization.members.find((member) => member.role === "Organization Admin");
+    if (!admin) throw new Error("The synthetic organization must include an Organization Admin.");
     organization.members = [...organization.members, { ...admin, id: "suspended-admin", email: "suspended@northstar.example", status: "suspended" }];
     expectRejected(organization, { type: "status", memberId: admin.id, status: "suspended" });
   });
 
   it("does not count an invalid department-scoped admin as a replacement", () => {
     const organization = createPreviewOrganization();
-    const admin = organization.members.find((member) => member.role === "System Admin");
-    if (!admin) throw new Error("The synthetic organization must include a System Admin.");
+    const admin = organization.members.find((member) => member.role === "Organization Admin");
+    if (!admin) throw new Error("The synthetic organization must include an Organization Admin.");
     organization.members = [...organization.members, {
       ...admin, id: "invalid-admin", email: "invalid-admin@northstar.example", roleScope: "department",
     }];
     expectRejected(organization, {
-      type: "assign", memberId: admin.id, departmentId: admin.departmentId, role: "Employee", roleScope: "department",
+      type: "assign", memberId: admin.id, departmentId: admin.departmentId, role: "Member", roleScope: "department",
     });
     expectRejected(organization, { type: "status", memberId: admin.id, status: "suspended" });
   });
 
   it("does not count an admin without an explicit role scope as a replacement", () => {
     const organization = createPreviewOrganization();
-    const admin = organization.members.find((member) => member.role === "System Admin");
-    if (!admin) throw new Error("The synthetic organization must include a System Admin.");
+    const admin = organization.members.find((member) => member.role === "Organization Admin");
+    if (!admin) throw new Error("The synthetic organization must include an Organization Admin.");
     const replacement = { ...admin, id: "unscoped-admin", email: "unscoped-admin@northstar.example" };
     delete replacement.roleScope;
     organization.members = [...organization.members, replacement];
@@ -275,11 +275,11 @@ describe("organization membership assignment and readiness", () => {
 
   it("allows admin demotion and suspension once another active admin exists", () => {
     const organization = createPreviewOrganization();
-    const admin = organization.members.find((member) => member.role === "System Admin");
-    if (!admin) throw new Error("The synthetic organization must include a System Admin.");
+    const admin = organization.members.find((member) => member.role === "Organization Admin");
+    if (!admin) throw new Error("The synthetic organization must include an Organization Admin.");
     organization.members = [...organization.members, { ...admin, id: "second-admin", email: "second@northstar.example", status: "active" }];
     const demotion = transitionOrganization(organization, {
-      type: "assign", memberId: admin.id, departmentId: admin.departmentId, role: "Employee", roleScope: "department",
+      type: "assign", memberId: admin.id, departmentId: admin.departmentId, role: "Member", roleScope: "department",
     }, now);
     expect(demotion.error).toBeUndefined();
     const suspension = transitionOrganization(organization, { type: "status", memberId: admin.id, status: "suspended" }, now);
@@ -289,12 +289,12 @@ describe("organization membership assignment and readiness", () => {
 
   it("does not restore a suspended member merely by changing their assignment", () => {
     const organization = createPreviewOrganization();
-    const member = organization.members.find((item) => item.role === "Employee");
-    if (!member) throw new Error("The synthetic organization must include an Employee.");
+    const member = organization.members.find((item) => item.role === "Member");
+    if (!member) throw new Error("The synthetic organization must include a Member.");
     member.status = "suspended";
     const result = transitionOrganization(organization, {
       type: "assign", memberId: member.id, departmentId: organization.departments[1].id,
-      role: "Manager / Knowledge Reviewer", roleScope: "department",
+      role: "Member", roleScope: "department",
     }, now);
     expect(result.error).toBeUndefined();
     expect(membershipReadiness(result.organization, member.id).state).toBe("denied");
@@ -311,8 +311,8 @@ describe("organization membership assignment and readiness", () => {
 
   it("returns pending for missing departments and denied for unknown or suspended memberships", () => {
     const organization = createPreviewOrganization();
-    const member = organization.members.find((item) => item.role === "Employee");
-    if (!member) throw new Error("The synthetic organization must include an Employee.");
+    const member = organization.members.find((item) => item.role === "Member");
+    if (!member) throw new Error("The synthetic organization must include a Member.");
     expect(membershipReadiness(organization, member.id).state).toBe("ready");
     organization.departments = organization.departments.filter((department) => department.id !== member.departmentId);
     expect(membershipReadiness(organization, member.id).state).toBe("pending");
@@ -323,16 +323,16 @@ describe("organization membership assignment and readiness", () => {
 
   it("denies a malformed department-scoped administrator configuration", () => {
     const organization = createPreviewOrganization();
-    const admin = organization.members.find((member) => member.role === "System Admin");
-    if (!admin) throw new Error("The synthetic organization must include a System Admin.");
+    const admin = organization.members.find((member) => member.role === "Organization Admin");
+    if (!admin) throw new Error("The synthetic organization must include an Organization Admin.");
     admin.roleScope = "department";
     expect(membershipReadiness(organization, admin.id).state).toBe("denied");
   });
 
   it.each(["missing", "unknown"])("denies an assigned member with a %s role scope and blocks restoration", (scopeState) => {
     const organization = createPreviewOrganization();
-    const member = organization.members.find((item) => item.role === "Employee");
-    if (!member) throw new Error("The synthetic organization must include an Employee.");
+    const member = organization.members.find((item) => item.role === "Member");
+    if (!member) throw new Error("The synthetic organization must include a Member.");
     if (scopeState === "missing") delete member.roleScope;
     else Object.assign(member, { roleScope: "unknown-runtime-scope" });
     expect(membershipReadiness(organization, member.id).state).toBe("denied");
