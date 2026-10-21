@@ -81,7 +81,8 @@ def operation(slot, action, token):
         return {'ok': True, 'port': port, 'busy': status.get('expires', 0) > time.time(), 'files': status.get('files', 0)}
     require_slot_owner(slot, os.getuid())
     with development_operation(ROOT), (state / 'sync.lock').open('a') as lock:
-        os.chmod(state / 'sync.lock', 0o600)
+        # Provisioning owns this group-writable lock. Changing its mode here
+        # breaks a slot shared by multiple contributors in the same Unix group.
         fcntl.flock(lock, fcntl.LOCK_EX)
         lease_path = state / 'lease.json'
         manifest_path = state / 'manifest.json'
