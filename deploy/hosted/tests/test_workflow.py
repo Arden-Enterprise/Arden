@@ -88,6 +88,20 @@ class HostedFixture(unittest.TestCase):
 
 
 class SyncTests(HostedFixture):
+    def test_sync_keeps_operator_managed_lock_permissions(self):
+        lock = self.root / 'dev/dev-1/state/sync.lock'
+        lock.touch(mode=0o660)
+        original = os.chmod
+        changed = []
+
+        def record(path, mode):
+            changed.append(Path(path))
+            return original(path, mode)
+
+        with patch.object(sync.os, 'chmod', side_effect=record):
+            self.call('acquire')
+        self.assertNotIn(lock, changed)
+
     def test_competing_writer_cannot_replace_lease(self):
         self.call('acquire')
         with self.assertRaisesRegex(ValueError, 'active writer'):
