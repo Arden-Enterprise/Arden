@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 BlockId = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
+ARDEN_DOCUMENT_PREFIX = "arden-document:application/vnd.arden.semantic-blocks+json;version=1\n"
 
 
 class StrictModel(BaseModel):
@@ -183,4 +185,14 @@ class SemanticDocument(StrictModel):
 
 BlockBase.model_rebuild()
 SemanticDocument.model_rebuild()
+
+
+def parse_semantic_document(body: str) -> SemanticDocument:
+    if not body.startswith(ARDEN_DOCUMENT_PREFIX):
+        raise ValueError("snapshot content is not an Arden Semantic Document v1")
+    try:
+        decoded = json.loads(body[len(ARDEN_DOCUMENT_PREFIX) :])
+    except json.JSONDecodeError as error:
+        raise ValueError("Semantic Document JSON is malformed") from error
+    return SemanticDocument.model_validate(decoded)
 

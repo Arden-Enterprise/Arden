@@ -9,7 +9,7 @@ from arden_ai.domain.semantic_document import SemanticDocument
 
 def build_schemas() -> dict[str, dict[str, object]]:
     semantic = SemanticDocument.model_json_schema(by_alias=True)
-    indexing_map, indexing_root = models_json_schema(
+    _, indexing_root = models_json_schema(
         [
             (IndexGenerationRequest, "validation"),
             (IndexGenerationManifest, "validation"),
@@ -17,10 +17,6 @@ def build_schemas() -> dict[str, dict[str, object]]:
         by_alias=True,
         title="Arden indexing contract v1",
     )
-    indexing_root["$defs"] = {
-        **indexing_root.get("$defs", {}),
-        **{key.__name__: value for (key, _), value in indexing_map.items()},
-    }
     return {
         "semantic-document-v1.schema.json": semantic,
         "index-generation-v1.schema.json": indexing_root,

@@ -1,206 +1,5 @@
 {
   "$defs": {
-    "AssetBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "children": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "asset": "#/$defs/AssetBlock",
-                "bulletListItem": "#/$defs/BulletListItemBlock",
-                "code": "#/$defs/CodeBlock",
-                "heading": "#/$defs/HeadingBlock",
-                "numberedListItem": "#/$defs/NumberedListItemBlock",
-                "paragraph": "#/$defs/ParagraphBlock",
-                "quote": "#/$defs/QuoteBlock",
-                "table": "#/$defs/TableBlock"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/ParagraphBlock"
-              },
-              {
-                "$ref": "#/$defs/HeadingBlock"
-              },
-              {
-                "$ref": "#/$defs/BulletListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/NumberedListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/QuoteBlock"
-              },
-              {
-                "$ref": "#/$defs/CodeBlock"
-              },
-              {
-                "$ref": "#/$defs/TableBlock"
-              },
-              {
-                "$ref": "#/$defs/AssetBlock"
-              }
-            ]
-          },
-          "title": "Children",
-          "type": "array"
-        },
-        "content": {
-          "items": {
-            "type": "null"
-          },
-          "maxItems": 0,
-          "title": "Content",
-          "type": "array"
-        },
-        "id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$",
-          "title": "Id",
-          "type": "string"
-        },
-        "props": {
-          "$ref": "#/$defs/AssetProps"
-        },
-        "type": {
-          "const": "asset",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "children",
-        "type",
-        "props",
-        "content"
-      ],
-      "title": "AssetBlock",
-      "type": "object"
-    },
-    "AssetProps": {
-      "additionalProperties": false,
-      "properties": {
-        "assetVersionId": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$",
-          "title": "Assetversionid",
-          "type": "string"
-        },
-        "label": {
-          "anyOf": [
-            {
-              "maxLength": 512,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Label"
-        }
-      },
-      "required": [
-        "assetVersionId",
-        "label"
-      ],
-      "title": "AssetProps",
-      "type": "object"
-    },
-    "BulletListItemBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "children": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "asset": "#/$defs/AssetBlock",
-                "bulletListItem": "#/$defs/BulletListItemBlock",
-                "code": "#/$defs/CodeBlock",
-                "heading": "#/$defs/HeadingBlock",
-                "numberedListItem": "#/$defs/NumberedListItemBlock",
-                "paragraph": "#/$defs/ParagraphBlock",
-                "quote": "#/$defs/QuoteBlock",
-                "table": "#/$defs/TableBlock"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/ParagraphBlock"
-              },
-              {
-                "$ref": "#/$defs/HeadingBlock"
-              },
-              {
-                "$ref": "#/$defs/BulletListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/NumberedListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/QuoteBlock"
-              },
-              {
-                "$ref": "#/$defs/CodeBlock"
-              },
-              {
-                "$ref": "#/$defs/TableBlock"
-              },
-              {
-                "$ref": "#/$defs/AssetBlock"
-              }
-            ]
-          },
-          "title": "Children",
-          "type": "array"
-        },
-        "content": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "link": "#/$defs/Link",
-                "text": "#/$defs/TextRun"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/TextRun"
-              },
-              {
-                "$ref": "#/$defs/Link"
-              }
-            ]
-          },
-          "title": "Content",
-          "type": "array"
-        },
-        "id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$",
-          "title": "Id",
-          "type": "string"
-        },
-        "props": {
-          "$ref": "#/$defs/EmptyProps"
-        },
-        "type": {
-          "const": "bulletListItem",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "children",
-        "type",
-        "props",
-        "content"
-      ],
-      "title": "BulletListItemBlock",
-      "type": "object"
-    },
     "ChunkManifestEntry": {
       "additionalProperties": false,
       "properties": {
@@ -261,823 +60,143 @@
       "title": "ChunkManifestEntry",
       "type": "object"
     },
-    "CodeBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "children": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "asset": "#/$defs/AssetBlock",
-                "bulletListItem": "#/$defs/BulletListItemBlock",
-                "code": "#/$defs/CodeBlock",
-                "heading": "#/$defs/HeadingBlock",
-                "numberedListItem": "#/$defs/NumberedListItemBlock",
-                "paragraph": "#/$defs/ParagraphBlock",
-                "quote": "#/$defs/QuoteBlock",
-                "table": "#/$defs/TableBlock"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/ParagraphBlock"
-              },
-              {
-                "$ref": "#/$defs/HeadingBlock"
-              },
-              {
-                "$ref": "#/$defs/BulletListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/NumberedListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/QuoteBlock"
-              },
-              {
-                "$ref": "#/$defs/CodeBlock"
-              },
-              {
-                "$ref": "#/$defs/TableBlock"
-              },
-              {
-                "$ref": "#/$defs/AssetBlock"
-              }
-            ]
-          },
-          "title": "Children",
-          "type": "array"
-        },
-        "content": {
-          "items": {
-            "$ref": "#/$defs/TextRun"
-          },
-          "title": "Content",
-          "type": "array"
-        },
-        "id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$",
-          "title": "Id",
-          "type": "string"
-        },
-        "props": {
-          "$ref": "#/$defs/CodeProps"
-        },
-        "type": {
-          "const": "code",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "children",
-        "type",
-        "props",
-        "content"
-      ],
-      "title": "CodeBlock",
-      "type": "object"
-    },
-    "CodeProps": {
-      "additionalProperties": false,
-      "properties": {
-        "language": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "title": "Language"
-        }
-      },
-      "required": [
-        "language"
-      ],
-      "title": "CodeProps",
-      "type": "object"
-    },
-    "EmptyProps": {
-      "additionalProperties": false,
-      "properties": {},
-      "title": "EmptyProps",
-      "type": "object"
-    },
-    "HeadingBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "children": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "asset": "#/$defs/AssetBlock",
-                "bulletListItem": "#/$defs/BulletListItemBlock",
-                "code": "#/$defs/CodeBlock",
-                "heading": "#/$defs/HeadingBlock",
-                "numberedListItem": "#/$defs/NumberedListItemBlock",
-                "paragraph": "#/$defs/ParagraphBlock",
-                "quote": "#/$defs/QuoteBlock",
-                "table": "#/$defs/TableBlock"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/ParagraphBlock"
-              },
-              {
-                "$ref": "#/$defs/HeadingBlock"
-              },
-              {
-                "$ref": "#/$defs/BulletListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/NumberedListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/QuoteBlock"
-              },
-              {
-                "$ref": "#/$defs/CodeBlock"
-              },
-              {
-                "$ref": "#/$defs/TableBlock"
-              },
-              {
-                "$ref": "#/$defs/AssetBlock"
-              }
-            ]
-          },
-          "title": "Children",
-          "type": "array"
-        },
-        "content": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "link": "#/$defs/Link",
-                "text": "#/$defs/TextRun"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/TextRun"
-              },
-              {
-                "$ref": "#/$defs/Link"
-              }
-            ]
-          },
-          "title": "Content",
-          "type": "array"
-        },
-        "id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$",
-          "title": "Id",
-          "type": "string"
-        },
-        "props": {
-          "$ref": "#/$defs/HeadingProps"
-        },
-        "type": {
-          "const": "heading",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "children",
-        "type",
-        "props",
-        "content"
-      ],
-      "title": "HeadingBlock",
-      "type": "object"
-    },
-    "HeadingProps": {
-      "additionalProperties": false,
-      "properties": {
-        "level": {
-          "enum": [
-            1,
-            2,
-            3
-          ],
-          "title": "Level",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "level"
-      ],
-      "title": "HeadingProps",
-      "type": "object"
-    },
     "IndexGenerationManifest": {
-      "$ref": "#/$defs/IndexGenerationManifest"
-    },
-    "IndexGenerationRequest": {
-      "$ref": "#/$defs/IndexGenerationRequest"
-    },
-    "Link": {
       "additionalProperties": false,
       "properties": {
-        "content": {
-          "items": {
-            "$ref": "#/$defs/TextRun"
-          },
-          "title": "Content",
-          "type": "array"
-        },
-        "href": {
-          "maxLength": 2048,
-          "title": "Href",
+        "chunkingVersion": {
+          "title": "Chunkingversion",
           "type": "string"
         },
-        "type": {
-          "const": "link",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "type",
-        "href",
-        "content"
-      ],
-      "title": "Link",
-      "type": "object"
-    },
-    "NumberedListItemBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "children": {
+        "chunks": {
           "items": {
-            "discriminator": {
-              "mapping": {
-                "asset": "#/$defs/AssetBlock",
-                "bulletListItem": "#/$defs/BulletListItemBlock",
-                "code": "#/$defs/CodeBlock",
-                "heading": "#/$defs/HeadingBlock",
-                "numberedListItem": "#/$defs/NumberedListItemBlock",
-                "paragraph": "#/$defs/ParagraphBlock",
-                "quote": "#/$defs/QuoteBlock",
-                "table": "#/$defs/TableBlock"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/ParagraphBlock"
-              },
-              {
-                "$ref": "#/$defs/HeadingBlock"
-              },
-              {
-                "$ref": "#/$defs/BulletListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/NumberedListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/QuoteBlock"
-              },
-              {
-                "$ref": "#/$defs/CodeBlock"
-              },
-              {
-                "$ref": "#/$defs/TableBlock"
-              },
-              {
-                "$ref": "#/$defs/AssetBlock"
-              }
-            ]
-          },
-          "title": "Children",
-          "type": "array"
-        },
-        "content": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "link": "#/$defs/Link",
-                "text": "#/$defs/TextRun"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/TextRun"
-              },
-              {
-                "$ref": "#/$defs/Link"
-              }
-            ]
-          },
-          "title": "Content",
-          "type": "array"
-        },
-        "id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$",
-          "title": "Id",
-          "type": "string"
-        },
-        "props": {
-          "$ref": "#/$defs/EmptyProps"
-        },
-        "type": {
-          "const": "numberedListItem",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "children",
-        "type",
-        "props",
-        "content"
-      ],
-      "title": "NumberedListItemBlock",
-      "type": "object"
-    },
-    "ParagraphBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "children": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "asset": "#/$defs/AssetBlock",
-                "bulletListItem": "#/$defs/BulletListItemBlock",
-                "code": "#/$defs/CodeBlock",
-                "heading": "#/$defs/HeadingBlock",
-                "numberedListItem": "#/$defs/NumberedListItemBlock",
-                "paragraph": "#/$defs/ParagraphBlock",
-                "quote": "#/$defs/QuoteBlock",
-                "table": "#/$defs/TableBlock"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/ParagraphBlock"
-              },
-              {
-                "$ref": "#/$defs/HeadingBlock"
-              },
-              {
-                "$ref": "#/$defs/BulletListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/NumberedListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/QuoteBlock"
-              },
-              {
-                "$ref": "#/$defs/CodeBlock"
-              },
-              {
-                "$ref": "#/$defs/TableBlock"
-              },
-              {
-                "$ref": "#/$defs/AssetBlock"
-              }
-            ]
-          },
-          "title": "Children",
-          "type": "array"
-        },
-        "content": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "link": "#/$defs/Link",
-                "text": "#/$defs/TextRun"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/TextRun"
-              },
-              {
-                "$ref": "#/$defs/Link"
-              }
-            ]
-          },
-          "title": "Content",
-          "type": "array"
-        },
-        "id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$",
-          "title": "Id",
-          "type": "string"
-        },
-        "props": {
-          "$ref": "#/$defs/EmptyProps"
-        },
-        "type": {
-          "const": "paragraph",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "children",
-        "type",
-        "props",
-        "content"
-      ],
-      "title": "ParagraphBlock",
-      "type": "object"
-    },
-    "QuoteBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "children": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "asset": "#/$defs/AssetBlock",
-                "bulletListItem": "#/$defs/BulletListItemBlock",
-                "code": "#/$defs/CodeBlock",
-                "heading": "#/$defs/HeadingBlock",
-                "numberedListItem": "#/$defs/NumberedListItemBlock",
-                "paragraph": "#/$defs/ParagraphBlock",
-                "quote": "#/$defs/QuoteBlock",
-                "table": "#/$defs/TableBlock"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/ParagraphBlock"
-              },
-              {
-                "$ref": "#/$defs/HeadingBlock"
-              },
-              {
-                "$ref": "#/$defs/BulletListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/NumberedListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/QuoteBlock"
-              },
-              {
-                "$ref": "#/$defs/CodeBlock"
-              },
-              {
-                "$ref": "#/$defs/TableBlock"
-              },
-              {
-                "$ref": "#/$defs/AssetBlock"
-              }
-            ]
-          },
-          "title": "Children",
-          "type": "array"
-        },
-        "content": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "link": "#/$defs/Link",
-                "text": "#/$defs/TextRun"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/TextRun"
-              },
-              {
-                "$ref": "#/$defs/Link"
-              }
-            ]
-          },
-          "title": "Content",
-          "type": "array"
-        },
-        "id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$",
-          "title": "Id",
-          "type": "string"
-        },
-        "props": {
-          "$ref": "#/$defs/EmptyProps"
-        },
-        "type": {
-          "const": "quote",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "children",
-        "type",
-        "props",
-        "content"
-      ],
-      "title": "QuoteBlock",
-      "type": "object"
-    },
-    "SemanticDocument": {
-      "additionalProperties": false,
-      "properties": {
-        "blocks": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "asset": "#/$defs/AssetBlock",
-                "bulletListItem": "#/$defs/BulletListItemBlock",
-                "code": "#/$defs/CodeBlock",
-                "heading": "#/$defs/HeadingBlock",
-                "numberedListItem": "#/$defs/NumberedListItemBlock",
-                "paragraph": "#/$defs/ParagraphBlock",
-                "quote": "#/$defs/QuoteBlock",
-                "table": "#/$defs/TableBlock"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/ParagraphBlock"
-              },
-              {
-                "$ref": "#/$defs/HeadingBlock"
-              },
-              {
-                "$ref": "#/$defs/BulletListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/NumberedListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/QuoteBlock"
-              },
-              {
-                "$ref": "#/$defs/CodeBlock"
-              },
-              {
-                "$ref": "#/$defs/TableBlock"
-              },
-              {
-                "$ref": "#/$defs/AssetBlock"
-              }
-            ]
+            "$ref": "#/$defs/ChunkManifestEntry"
           },
           "minItems": 1,
-          "title": "Blocks",
+          "title": "Chunks",
           "type": "array"
         },
-        "schemaVersion": {
+        "chunksDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunksdigest",
+          "type": "string"
+        },
+        "compilerVersion": {
+          "title": "Compilerversion",
+          "type": "string"
+        },
+        "contractVersion": {
           "const": 1,
-          "title": "Schemaversion",
+          "default": 1,
+          "title": "Contractversion",
           "type": "integer"
-        }
-      },
-      "required": [
-        "schemaVersion",
-        "blocks"
-      ],
-      "title": "SemanticDocument",
-      "type": "object"
-    },
-    "TableBlock": {
-      "additionalProperties": false,
-      "properties": {
-        "children": {
-          "items": {
-            "discriminator": {
-              "mapping": {
-                "asset": "#/$defs/AssetBlock",
-                "bulletListItem": "#/$defs/BulletListItemBlock",
-                "code": "#/$defs/CodeBlock",
-                "heading": "#/$defs/HeadingBlock",
-                "numberedListItem": "#/$defs/NumberedListItemBlock",
-                "paragraph": "#/$defs/ParagraphBlock",
-                "quote": "#/$defs/QuoteBlock",
-                "table": "#/$defs/TableBlock"
-              },
-              "propertyName": "type"
-            },
-            "oneOf": [
-              {
-                "$ref": "#/$defs/ParagraphBlock"
-              },
-              {
-                "$ref": "#/$defs/HeadingBlock"
-              },
-              {
-                "$ref": "#/$defs/BulletListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/NumberedListItemBlock"
-              },
-              {
-                "$ref": "#/$defs/QuoteBlock"
-              },
-              {
-                "$ref": "#/$defs/CodeBlock"
-              },
-              {
-                "$ref": "#/$defs/TableBlock"
-              },
-              {
-                "$ref": "#/$defs/AssetBlock"
-              }
-            ]
-          },
-          "title": "Children",
-          "type": "array"
         },
-        "content": {
-          "items": {
-            "$ref": "#/$defs/TableRow"
-          },
-          "title": "Content",
-          "type": "array"
-        },
-        "id": {
-          "pattern": "^[A-Za-z0-9_-]{1,128}$",
-          "title": "Id",
-          "type": "string"
-        },
-        "props": {
-          "$ref": "#/$defs/TableProps"
-        },
-        "type": {
-          "const": "table",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "children",
-        "type",
-        "props",
-        "content"
-      ],
-      "title": "TableBlock",
-      "type": "object"
-    },
-    "TableProps": {
-      "additionalProperties": false,
-      "properties": {
-        "columns": {
-          "maximum": 32,
-          "minimum": 1,
-          "title": "Columns",
+        "embeddingDimensions": {
+          "exclusiveMinimum": 0,
+          "title": "Embeddingdimensions",
           "type": "integer"
-        }
-      },
-      "required": [
-        "columns"
-      ],
-      "title": "TableProps",
-      "type": "object"
-    },
-    "TableRow": {
-      "additionalProperties": false,
-      "properties": {
-        "cells": {
-          "items": {
-            "items": {
-              "discriminator": {
-                "mapping": {
-                  "link": "#/$defs/Link",
-                  "text": "#/$defs/TextRun"
-                },
-                "propertyName": "type"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/$defs/TextRun"
-                },
-                {
-                  "$ref": "#/$defs/Link"
-                }
-              ]
-            },
-            "type": "array"
-          },
-          "title": "Cells",
-          "type": "array"
-        }
-      },
-      "required": [
-        "cells"
-      ],
-      "title": "TableRow",
-      "type": "object"
-    },
-    "TextRun": {
-      "additionalProperties": false,
-      "properties": {
-        "styles": {
-          "$ref": "#/$defs/TextStyles"
         },
-        "text": {
-          "title": "Text",
+        "embeddingModel": {
+          "title": "Embeddingmodel",
           "type": "string"
         },
-        "type": {
-          "const": "text",
-          "title": "Type",
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "jobId": {
+          "format": "uuid",
+          "title": "Jobid",
+          "type": "string"
+        },
+        "markdownContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Markdowncontenthash",
+          "type": "string"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
           "type": "string"
         }
       },
       "required": [
-        "type",
-        "text",
-        "styles"
+        "jobId",
+        "generationId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "compilerVersion",
+        "chunkingVersion",
+        "embeddingModel",
+        "embeddingDimensions",
+        "markdownContentHash",
+        "chunksDigest",
+        "chunks"
       ],
-      "title": "TextRun",
+      "title": "IndexGenerationManifest",
       "type": "object"
     },
-    "TextStyles": {
+    "IndexGenerationRequest": {
       "additionalProperties": false,
       "properties": {
-        "bold": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Bold"
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
         },
-        "code": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Code"
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
         },
-        "italic": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Italic"
+        "jobId": {
+          "format": "uuid",
+          "title": "Jobid",
+          "type": "string"
         },
-        "strike": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Strike"
+        "organizationId": {
+          "format": "uuid",
+          "title": "Organizationid",
+          "type": "string"
         },
-        "underline": {
-          "anyOf": [
-            {
-              "const": true,
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Underline"
+        "snapshotContent": {
+          "maxLength": 1500000,
+          "minLength": 1,
+          "title": "Snapshotcontent",
+          "type": "string"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        },
+        "submissionId": {
+          "format": "uuid",
+          "title": "Submissionid",
+          "type": "string"
         }
       },
-      "title": "TextStyles",
+      "required": [
+        "jobId",
+        "organizationId",
+        "submissionId",
+        "generationId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "snapshotContent"
+      ],
+      "title": "IndexGenerationRequest",
       "type": "object"
     }
   },

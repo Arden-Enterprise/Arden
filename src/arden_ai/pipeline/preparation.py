@@ -13,7 +13,7 @@ class PreparedGeneration:
 
 
 def prepare_generation(request: IndexGenerationRequest) -> PreparedGeneration:
-    compiled = compile_markdown(request.document)
+    compiled = compile_markdown(request.semantic_document())
     chunks = chunk_markdown(compiled, str(request.generation_id))
     if not chunks:
         raise ValueError("approved snapshot produced no indexable chunks")
