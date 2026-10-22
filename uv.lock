@@ -164,12 +164,14 @@ dependencies = [
     { name = "langfuse" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "tiktoken" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "httpx" },
+    { name = "jsonschema" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -187,12 +189,14 @@ requires-dist = [
     { name = "langfuse", specifier = ">=3.0.0,<4" },
     { name = "pydantic", specifier = ">=2.12.0,<3" },
     { name = "pydantic-settings", specifier = ">=2.11.0,<3" },
+    { name = "tiktoken", specifier = ">=0.12.0,<1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.38.0,<1" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "httpx", specifier = ">=0.28.0,<1" },
+    { name = "jsonschema", specifier = ">=4.26.0,<5" },
     { name = "mypy", specifier = ">=1.18.0,<2" },
     { name = "pytest", specifier = ">=8.4.0,<10" },
     { name = "pytest-cov", specifier = ">=7.0.0,<8" },

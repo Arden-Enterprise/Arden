@@ -23,6 +23,18 @@ uv run uvicorn arden_ai.main:app --reload --port 8080
 
 Health endpoints are available at `/health/live` and `/health/ready`.
 
+Versioned cross-repository schemas are checked into `schemas/`. Regenerate them after an intentional
+contract change with:
+
+```powershell
+uv run arden-ai-export-schemas
+```
+
+The current chunker derives deterministic section boundaries from Arden's source map, then uses
+LangChain's token-aware `RecursiveCharacterTextSplitter` inside each section. Default child chunks
+target 600 tokens with 60-token overlap; section breadcrumbs are included in embedding text while
+raw Markdown offsets remain exact for citations.
+
 ## Pipeline boundary
 
 1. Arden core creates a durable indexing generation for an approved immutable snapshot.
