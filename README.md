@@ -23,6 +23,11 @@ uv run uvicorn arden_ai.main:app --reload --port 8080
 
 Health endpoints are available at `/health/live` and `/health/ready`.
 
+Arden core submits approved immutable snapshots to `POST /v1/index-generations` using an
+`Authorization: Bearer <ARDEN_AI_SERVICE_TOKEN>` header. The endpoint returns a candidate index
+manifest only after every chunk has been embedded and acknowledged by ChromaDB. Arden core remains
+responsible for validating that manifest and atomically activating the generation.
+
 Versioned cross-repository schemas are checked into `schemas/`. Regenerate them after an intentional
 contract change with:
 
