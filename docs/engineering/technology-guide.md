@@ -14,17 +14,20 @@ Deployment and hosted identity status updated 12 October 2026. Library versions 
 | Web/shared UI | React/react-dom 19.3.0; Vite 7.3.6; React plugin 5.2.0; typed fetch client for auth, private notes, shared knowledge, Audience administration, and System Admin workflows | React Router and TanStack Query |
 | Desktop | Electron 44.4.3; electron-vite 5.0.0; shared React UI; narrow preload IPC backed by Electron safeStorage, with allowlisted auth, knowledge, Audience, and System Admin API routes | Signed Windows installer/update flow |
 | API | Fastify 5.12.5; `pg` 8.23.0; `tsx` 4.23.15; Supabase Auth via `@supabase/supabase-js` 2.117.2; BFF email/password and Google PKCE flows; organization, invitation, private-note, Mainflow 2 review/publication, Audience, and System Admin routes; ordered SQL migration runner | Supabase Realtime notifications |
-| Data | Local `pgvector/pgvector:pg17` container; ordered SQL migrations 0001–0017; transaction-local actor/organization/admin/invitation RLS context and non-bypass Arden runtime role; migration 0017 compatibility bridge; protected local note-object storage | Drizzle Kit migration authoring for future domain schema, full-text/vector search, Supabase Storage integration, and Phase 5 legacy-role contraction |
+| Data | Local PostgreSQL container; ordered SQL migrations 0001–0018; transaction-local actor/organization/admin/invitation RLS context and non-bypass Arden runtime role; migration 0017 compatibility bridge; protected local note-object storage | Drizzle Kit migration authoring, PostgreSQL full-text search, separate persistent ChromaDB retrieval index, Supabase Storage integration, and Phase 5 legacy-role contraction |
 | Identity | Supabase Auth email/password and Google PKCE through server-only Fastify adapters; verified user UUID maps to `user_account.user_id`; Arden-owned organization bootstrap and hashed-token email invitation lifecycle; SMTP through Nodemailer 10.0.10. Fenced test adapters support loopback-only local sign-in and the historical SSH-only dev-2 no-login target; the latter is inactive in the current four Supabase-authenticated hosted slots. Arden System Admin has no organization/content bypass | Recovery |
 | Editor | React textarea for private notes; BlockNote core/react/Ariakit 0.55.0 behind a versioned Arden document interface for server-backed shared knowledge | Expand only when supported document capabilities require it |
 | Graph | Local decorative Figma SVGs; no graph view or authorized graph data | Sigma.js + Graphology on authorized API projections |
-| Jobs | None | pg-boss in `apps/worker` |
+| Jobs | Publication preparation state in PostgreSQL; no indexing worker yet | Durable core outbox/generation orchestration plus separate Python `Arden-AI` worker |
 | Storage | Protected local note-content volume via `LocalPrivateContentStorage`; opaque UUID `source_uri`, SHA-256 integrity check, production persistent mount required | Broader attachment/document storage; optional S3-compatible backend later |
-| AI | No Ask Arden UI or model request; Flow 3 deferred | Arden gateway to customer-controlled Ollama/compatible private endpoint |
+| AI | Separate Python 3.11 `Arden-AI` scaffold with deterministic compiler/source maps; no production indexing or Ask Arden route yet | OpenAI embeddings/generation, LangChain standalone packages, self-hosted ChromaDB and Langfuse |
 | Tests | Vitest 5.0.1, Fastify auth/private-note tests, real-PostgreSQL repository/RLS test gated by `ARDEN_TEST_DATABASE_URL`, pure UI preview and API-client tests | Live Supabase Auth smoke, native Electron interaction, broader Playwright flows |
 | Deployment | Local database Compose; Ubuntu/Windows CI; hosted development commands and four Coolify-managed development API/database slots with local Vite frontends | Immutable release application images, complete isolated staging/production deployments and recovery evidence |
 
-The container image includes pgvector software; the scaffold does not yet create the extension or prove embedding queries work. The Electron build is not a packaged installer. No installed auth/schema/query/editor/graph/job library should be inferred from this target table.
+The existing PostgreSQL image may include pgvector software, but Mainflow 3 vector retrieval targets
+the separate ChromaDB service under [decision 0012](../decisions/0012-separate-python-ai-service-and-chromadb.md).
+The Electron build is not a packaged installer. No unlisted schema/query/editor/graph/job capability
+should be inferred from this target table.
 
 ## 2. Dependency and TypeScript discipline
 
@@ -124,11 +127,11 @@ Consult [Electron's security checklist](https://www.electronjs.org/docs/latest/t
 - Desktop session cookies are stored encrypted with Electron `safeStorage`. A narrow main-process IPC bridge injects cookies into an allowlisted set of API requests and returns data/headers without exposing cookies to the renderer. Keep context isolation, sandbox, and `webSecurity` enabled; require a trusted `ARDEN_CORE_URL` HTTPS origin in production.
 - The domain migration creates only the non-bypass `arden_runtime` role. Supabase Auth owns credential/session data; Arden's PostgreSQL repository uses transaction-local `arden_runtime`. Apply domain migrations with a separate privileged migration connection.
 - Invitations and role changes need server checks for target organization, actor capability, escalation, expiration, audit, and session/cache invalidation. Test expired/revoked sessions and multi-organization users.
-- Sign-in/bootstrap/recovery must not create a permanent universal bypass. Private-data recovery remains an open policy decision. In Mainflow 2, final authorized review approval triggers system publication under [decision 0007](../decisions/0007-automatic-publication-after-final-approval.md); there is no separate human publisher role.
+- Sign-in/bootstrap/recovery must not create a permanent universal bypass. Private-data recovery remains an open policy decision. Final authorized approval enters publication preparation under [decision 0011](../decisions/0011-permission-aware-publication-and-semantic-documents.md); index-ready activation is separate and there is no human publisher role.
 
 References: [Supabase Auth](https://supabase.com/docs/guides/auth), [server-side auth/session guidance](https://supabase.com/docs/guides/auth/server-side), [Supabase `signInWithPassword`](https://supabase.com/docs/reference/javascript/auth-signinwithpassword), [Supabase `signUp`](https://supabase.com/docs/reference/javascript/auth-signup), [Supabase `getUser`](https://supabase.com/docs/reference/javascript/auth-getuser), [Supabase `refreshSession`](https://supabase.com/docs/reference/javascript/auth-refreshsession), [Nodemailer SMTP transport](https://nodemailer.com/smtp), [Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage), [Electron contextBridge](https://www.electronjs.org/docs/latest/api/context-bridge), [electron-vite preload discovery](https://electron-vite.org/guide/dev).
 
-## 7. PostgreSQL, pgvector, Drizzle, and search
+## 7. PostgreSQL, ChromaDB, Drizzle, and search
 
 - Migration `0017_audience_and_instance_admin_foundation.sql` introduces canonical managed and group audiences, audience-group membership, instance-level System Admin records, audit events, and the enforceable-snapshot helper. It backfills legacy role audiences and temporarily retains role-backed write projection for staged cutover. New product/API work must use audience terminology and [decision 0010](../decisions/0010-audiences-and-system-administration.md). Run a rollback-only migration/RLS rehearsal before any shared deployment.
 
@@ -144,18 +147,26 @@ References: [Supabase Auth](https://supabase.com/docs/guides/auth), [server-side
 - Do not use schema push as the shared staging/production workflow. Keep schema, migration SQL/metadata, backfill plan, tests, and application compatibility in one change. Never edit already-applied migration history to hide a new change.
 - Run migrations once per deployment with serialization/locking, not on every API/worker replica startup. Use expand -> backfill/migrate -> contract and keep older desktop/API compatibility until the support window allows removal.
 - Test fresh installation and upgrades from a populated prior schema with realistic denied-access cases. Record lock/runtime impact, disk requirements, restoration plan, and unsupported downgrade behavior.
-- Explicitly provision/test the pgvector extension. Record embedding provider/model/version/dimension/chunking and source revision. Never compare incompatible vectors or overwrite the old corpus midway through a model migration.
-- Start with exact similarity search on authorized candidates plus PostgreSQL full-text. Add HNSW/other approximate indexing only with measured recall/latency and selective authorization-filter tests. Do not treat ANN output ordering as proof of permission or complete recall.
+- PostgreSQL remains canonical for content/version state, AccessPolicy and active-generation pointers.
+  ChromaDB contains rebuildable chunks, embeddings and retrieval metadata only. Record embedding
+  provider/model/version/dimension, compiler/chunking version and exact source snapshot.
+- Arden core computes allowed active generation IDs from current AccessPolicy before calling
+  `Arden-AI`. Chroma applies that allow-list as a metadata filter; Arden core rechecks returned
+  evidence before context, citation or response emission. Do not copy policy into Chroma and then
+  treat stale chunk metadata as authority.
+- Chroma runs on a private network with a persistent volume, pinned version, bounded resources and
+  tested backup/rebuild procedure. Tune its HNSW/index settings only after representative recall,
+  latency and permission-filter measurements.
 - Authorize before returning titles/snippets/ranking details and recheck before response/model context. Preserve exact source/version citations and freshness; never label a newer draft as an approved publication.
 - Avoid N+1/unbounded neighborhood/export/search queries. Use measured plans and representative sanitized workloads; no performance shortcut may relax organization or private-data isolation.
 
-References: [Drizzle migration workflows](https://orm.drizzle.team/docs/migrations), [pgvector](https://github.com/pgvector/pgvector).
+References: [Drizzle migration workflows](https://orm.drizzle.team/docs/migrations), [Chroma architecture](https://docs.trychroma.com/docs/overview/architecture), [Chroma TypeScript/Python data model](https://docs.trychroma.com/reference/typescript/).
 
 ## 8. BlockNote and canonical documents
 
 - Adopt BlockNote core only when editing is implemented. Confirm installed version, schema APIs, export/import behavior, and commercial/non-core licensing. Real-time collaboration is outside pilot scope.
-- Shared-knowledge authoring uses `@blocknote/core`, `@blocknote/react` and `@blocknote/ariakit` 0.55.0. All three packages declare MPL-2.0. The Arden adapter disables BlockNote's default menus and limits the schema to paragraphs, two heading sizes, bullet/numbered lists, quotes, and bold/italic/underline/strike/code styles. Font family, color, links, tables, files, media, embeds and remote resources are not part of this format.
-- The API body remains a bounded string for compatibility. Rich documents use the `arden-document:application/vnd.arden.blocks+json;version=1` prefix followed by validated canonical JSON; existing unprefixed bodies open as plain-text paragraphs. Persist stable block IDs, reject malformed/unsupported prefixed content, and render through BlockNote's document model rather than stored HTML. A future format change requires an explicit migration/version adapter.
+- Shared-knowledge authoring uses `@blocknote/core`, `@blocknote/react` and `@blocknote/ariakit` 0.55.0. All three packages declare MPL-2.0. The current editor adapter authors paragraphs, heading levels 2–3, bullet/numbered lists, quotes, links and allowlisted inline styles. The domain format additionally defines heading level 1, code, tables and immutable asset-version references; the editor fails closed on those blocks until their UI support lands. Font family, color, arbitrary files/media, embeds and remote resources are not canonical format properties.
+- `packages/domain` owns Semantic Document v1. Rich shared documents use the `arden-document:application/vnd.arden.semantic-blocks+json;version=1` prefix followed by validated canonical JSON with required unique stable block IDs. Plain text is normalized at ingestion and is never a second stored shared-document format. Reject malformed/unsupported envelopes and render through an adapter rather than stored HTML. A future format change requires an explicit version migration.
 - Store a versioned Arden document format behind an editor adapter. Preserve stable block/content references needed for citations and version history. Do not make rendered HTML or one library's live objects the sole durable representation.
 - Validate stored/imported document JSON. Make format migrations explicit and reversible where feasible; retain source fidelity/provenance and export capability.
 - Separate autosaved private/shared drafts from immutable submitted/published snapshots. Show save failure/conflict/unsynced state; never let an editor mutate an approved version in place.
@@ -177,9 +188,11 @@ Reference: [BlockNote documentation](https://www.blocknotejs.org/docs).
 
 References: [Sigma documentation](https://www.sigmajs.org/docs/), [Graphology documentation](https://graphology.github.io/).
 
-## 10. pg-boss, files, and connector processing
+## 10. Durable jobs, files, and connector processing
 
-- Run planned pg-boss work in a separate worker process, not request-blocking extraction/inference in the API. Keep queue/schema compatibility and the PostgreSQL version requirements verified for the adopted release.
+- Run AI compilation/indexing in the separate `Arden-AI` worker, never as request-blocking work in
+  the core API. Arden core owns durable generation/outbox state and atomic activation. The precise
+  queue/claim transport remains an implementation decision and must not be inferred as pg-boss.
 - Design for redelivery/retry: use stable idempotency keys, deduplication/unique constraints, bounded attempts/backoff/timeouts, and observable terminal failures. Never promise exactly-once external effects from a queue guarantee alone.
 - Make the canonical write and job scheduling reliable through a verified shared transaction or outbox/reconciliation design. Do not acknowledge saved/indexed content when a failure silently lost its ingestion work.
 - Revalidate current source revision, organization, permissions, approval state, and cancellation before side effects. Stale jobs must not republish, restore revoked sources, or overwrite a newer extraction/embedding.
@@ -191,23 +204,28 @@ References: [Sigma documentation](https://www.sigmajs.org/docs/), [Graphology do
 - Bound initial backfills, page sizes, API rate use, retries, and concurrency. Verify webhook signatures/replay handling; reconcile missed webhooks. Tokens stay server-side and minimally scoped.
 - Source permission uncertainty fails closed. An external-write timeout enters an uncertain/reconciliation state; do not blindly recreate the Jira issue.
 
-References: [pg-boss](https://github.com/timgit/pg-boss), [GitHub App permissions](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app), [Jira issue API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/).
+References: [GitHub App permissions](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app), [Jira issue API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/).
 
-## 11. Ollama and the Arden model gateway
+## 11. OpenAI and the Arden-AI gateway
 
-- All inference/retrieval goes through a server gateway; clients and models do not receive database/connector credentials. Use explicit chat and embedding profiles, capability checks, context limits, timeouts, concurrency, and cancellation.
+- All inference/retrieval goes through the private Python `Arden-AI` service; clients and models do not receive database/connector credentials. Use explicit OpenAI chat and embedding profiles, capability checks, context limits, timeouts, concurrency, retries and cancellation.
 - Only send authorized query/context and necessary provenance. Keep user-selected context inspectable; citations resolve server-side to retrieved exact versions, not model-invented IDs/URLs.
-- Strict-private mode requires local models, cloud-disabled Ollama (currently `OLLAMA_NO_CLOUD=1` or its documented equivalent), restart/config verification, private networking, and an egress test. Disabling cloud features alone is not a complete firewall or air-gap implementation. See [Ollama FAQ](https://docs.ollama.com/faq).
-- Do not expose Ollama directly to public/client networks. Protect a remote private model endpoint with appropriate network/auth/TLS controls and verify what a compatible endpoint actually supports.
-- No automatic cloud fallback. Changing provider/model endpoint is an audited administrative data-flow decision; external processing needs explicit opt-in and a preview/warning of what leaves the installation.
+- The demo intentionally uses the OpenAI API for embeddings and generation. Send only the authorized
+  query, minimum evidence and required provenance; keep API keys only in the AI service secret
+  store. Do not expose Chroma, Langfuse ingestion credentials or OpenAI credentials to clients.
+- There is no automatic provider fallback. A future local/private model path is a new reviewed
+  data-flow and quality decision, not an undocumented `base_url` substitution.
 - Treat retrieved content and model answers as untrusted. Structured output is validated; model text cannot call arbitrary tools, expand its audience, publish, or authorize external actions.
 - Record model/profile/version and evidence references without routinely logging full private prompts. Re-embedding after model/chunking changes requires versioned corpus migration and readiness state.
-- CPU/GPU capacity is measured, not assumed. Benchmark customer hardware and representative concurrency; disclose unsupported/slow profiles. The pilot application host is not a guaranteed multi-user inference host.
+- Measure API latency, token use, embedding throughput, Chroma resource consumption and representative concurrency. The pilot host's CPU count alone is not a capacity guarantee; memory and persistent-disk behavior also matter.
 - Test missing evidence, contradictory/stale sources, denied access, revocation during a run, malicious retrieved instructions, timeout, cancellation, unsupported endpoint capabilities, and no-network/private mode.
 
 ## 12. Tests and documentation obligations
 
-- Vitest unit tests cover deterministic policy/state/adapter behavior. Fastify injection covers HTTP contracts and denial cases; real disposable PostgreSQL covers constraints/RLS/transactions/migrations/pgvector/jobs.
+- Vitest unit tests cover deterministic core policy/state/adapter behavior. Fastify injection covers
+  HTTP contracts and denial cases; real disposable PostgreSQL covers constraints/RLS/transactions,
+  migrations and durable generation state. `Arden-AI` uses pytest for compiler/chunking/retrieval
+  behavior and disposable Chroma collections for integration evidence.
 - Planned Playwright coverage should exercise core web and Windows desktop journeys, using isolated synthetic users/organizations and deterministic fixtures. Do not rely on a live external connector or costly model for ordinary CI tests; add separately gated real integration smoke tests.
 - Fake adapters must preserve failure/permission contracts rather than always succeed. Keep tests repeatable, with bounded retries and no fixed sleeps masking races.
 - Test the same user across organizations, different users/roles, private/shared/external sources, versions, grant/revoke transitions, and delayed work. Add a regression case when fixing a leak or duplicate write.
