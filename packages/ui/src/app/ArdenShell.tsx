@@ -89,8 +89,8 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
   },
   "review-queue": {
     eyebrow: "REVIEW CONTEXT", title: "A snapshot to review",
-    description: "In the sample, final approval automatically publishes the reviewed snapshot.",
-    suggestions: ["Check the intended audience", "Request a specific revision"],
+    description: "In the sample, approval moves the reviewed snapshot into publication preparation.",
+    suggestions: ["Check the intended audience", "Approve or reject the snapshot"],
     boundaryTitle: "Immutable review snapshot", boundaryBody: "Review applies to the submitted version. Private originals remain excluded.",
   },
   "knowledge-handover": {

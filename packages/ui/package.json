@@ -20,6 +20,7 @@
     "vitest": "5.0.1"
   },
   "dependencies": {
+    "@arden/domain": "workspace:*",
     "@blocknote/ariakit": "0.55.0",
     "@blocknote/core": "0.55.0",
     "@blocknote/react": "0.55.0",
