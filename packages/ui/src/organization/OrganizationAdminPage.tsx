@@ -147,6 +147,18 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   }, [platform, organizationId]);
 
   useEffect(() => {
+    const onFocus = () => { void reload().catch(() => undefined); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [reload]);
+
+  useEffect(() => {
+    if (!data?.invitations.some((item) => item.status === "PENDING")) return;
+    const interval = setInterval(() => { void reload().catch(() => undefined); }, 4000);
+    return () => clearInterval(interval);
+  }, [data?.invitations, reload]);
+
+  useEffect(() => {
     if (!selectedMemberId) return;
     let active = true;
     setMemberAudienceGroups([]); setMemberGroupsLoading(true);
