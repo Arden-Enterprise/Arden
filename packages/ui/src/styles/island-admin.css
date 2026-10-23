@@ -1,0 +1,84 @@
+/* Administration in the island system: segmented sections, grid lists and detail islands. */
+.organization-live-admin .organization-access-content { max-width: 1320px; }
+.organization-live-admin .admin-page-header { display: grid; gap: 4px; padding-bottom: 12px; border-bottom: 0; }
+.organization-live-admin .workspace-page-header { padding: 8px 12px 12px; }
+.organization-live-admin .organization-access-heading .meta-label { display: block; }
+.organization-live-admin .organization-access-heading h1 { font-size: 34px; line-height: 1.2; }
+.organization-live-admin .admin-tabs { justify-self: start; margin: 0 12px; padding: 4px; gap: 2px; overflow: visible; }
+.organization-live-admin .admin-tabs button { min-height: 28px; padding: 0 12px; border-bottom: 0; color: var(--arden-text-secondary); }
+.organization-live-admin .admin-tabs button[aria-selected="true"] { color: var(--arden-text-primary); }
+.organization-live-admin .admin-tabs button .island-badge { margin-left: 0; padding: 0 7px; color: var(--arden-text-secondary); background: var(--arden-surface-raised); }
+.organization-live-admin .workspace-scroll-content { padding-top: 8px; }
+
+.organization-live-admin .admin-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.organization-live-admin .admin-search { flex: 1 1 260px; max-width: 360px; }
+.organization-live-admin .admin-search input { min-height: 0; padding: 0; border: 0; background: transparent; }
+.organization-live-admin .admin-feedback { margin: 0; padding: 10px 12px; border: 1px solid var(--arden-success-border); border-radius: 10px; color: var(--arden-success); background: var(--arden-success-subtle); }
+.organization-live-admin .admin-feedback.is-error { border-color: var(--arden-danger-border); color: var(--arden-danger); background: var(--arden-danger-subtle); }
+.organization-live-admin .admin-feedback.is-warning { border-color: var(--arden-warning-border); color: var(--arden-warning); background: var(--arden-warning-subtle); }
+.organization-live-admin .admin-inline-success { margin: 0; color: var(--arden-success); font-size: 13px; }
+.organization-live-admin .admin-loading { padding: 12px 18px; }
+.organization-live-admin .admin-skeleton-row { border-bottom-color: var(--arden-border); }
+.organization-live-admin .admin-skeleton-row > span, .organization-live-admin .admin-skeleton-row > div > span { background: var(--arden-surface-raised); }
+.organization-live-admin .organization-notice { border-radius: 14px; }
+
+.organization-live-admin .admin-inline-form { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; padding: 14px; border-radius: 14px; background: var(--arden-surface-base); }
+.organization-live-admin .admin-inline-form .organization-field { flex: 1 1 260px; }
+.organization-live-admin .admin-inline-form .primary-button { margin-top: 24px; }
+.admin-form-island { gap: 14px; }
+.admin-side-form { display: grid; gap: 14px; }
+.admin-side-form .primary-button, .admin-form-island .admin-grant-actions .primary-button { justify-self: start; }
+.organization-live-admin .organization-field { display: grid; gap: 6px; }
+.organization-live-admin .organization-field small { color: var(--arden-text-secondary); font-size: 12px; font-weight: 400; }
+.admin-grant-classes { display: grid; gap: 2px; margin: 0; padding: 0; border: 0; }
+.admin-grant-classes legend { margin-bottom: 4px; color: var(--arden-text-secondary); font-size: 12px; font-weight: 600; }
+.admin-grant-classes label { display: flex; align-items: center; gap: 10px; min-height: 32px; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
+.admin-grant-classes input { width: 16px; height: 16px; margin: 0; }
+.admin-grant-classes small { color: var(--arden-text-secondary); font-size: 12px; }
+.admin-grant-classes[aria-invalid="true"] legend { color: var(--arden-danger); }
+.admin-grant-tags { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.organization-live-admin .admin-scope-preview { margin: 0; padding: 12px 14px; border: 1px solid var(--arden-border); border-radius: 12px; color: var(--arden-text-secondary); background: var(--arden-surface-raised); font-size: 13px; }
+.organization-live-admin .admin-grant-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.organization-live-admin .admin-new-tag { color: var(--arden-success); font-size: 11px; font-weight: 600; text-transform: uppercase; }
+
+/* Audiences */
+.audience-list { display: grid; gap: 2px; padding: 6px; }
+.audience-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 0 12px; border: 0; border-radius: 10px;
+  color: var(--arden-text-primary); background: transparent; text-align: left; cursor: pointer;
+}
+.audience-row:hover:not(:disabled) { background: var(--arden-surface-hover); }
+.audience-row[aria-pressed="true"], .audience-row.is-pending { background: var(--arden-accent-subtle); }
+.audience-row:disabled { cursor: default; }
+.audience-row-copy { display: grid; flex: 1; min-width: 0; line-height: 1.35; }
+.audience-row-copy strong { font-weight: 600; overflow-wrap: anywhere; }
+.audience-row-copy small { overflow: hidden; color: var(--arden-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.audience-list .island-empty { justify-items: start; padding: 12px; text-align: left; }
+.audience-feedback { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.audience-details { display: grid; gap: 14px; }
+.audience-add { display: flex; gap: 8px; }
+.audience-add .organization-field { flex: 1; min-width: 0; }
+.audience-members { display: grid; margin: 0; padding: 0; list-style: none; }
+.audience-members li { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px 0 6px; border-radius: 8px; }
+.audience-members li:hover { background: var(--arden-surface-hover); }
+.audience-members li > span:nth-child(2) { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
+.audience-members strong { font-size: 13px; }
+.audience-members small { overflow: hidden; color: var(--arden-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.audience-members .island-icon-button { width: 28px; height: 28px; border-color: transparent; }
+.audience-save { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 1px solid var(--arden-accent-border); border-radius: 12px; background: var(--arden-accent-subtle); }
+.audience-save strong { flex: 1; font-size: 13px; }
+.admin-roles .role-config-danger-zone { border-color: var(--arden-danger-border); border-radius: 12px; }
+
+/* Sample (preview) administration keeps its structure but uses the segmented island tabs. */
+.arden-app-shell .organization-tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 4px; border: 1px solid var(--arden-border); border-radius: 12px; background: var(--arden-bg-sidebar); }
+.arden-app-shell .organization-tabs button { min-height: 28px; padding: 0 12px; border: 0; border-radius: 8px; color: var(--arden-text-secondary); background: transparent; font-size: 13px; font-weight: 600; transform: none; box-shadow: none; }
+.arden-app-shell .organization-tabs button::before { content: none; }
+.arden-app-shell .organization-tabs button:hover { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+.arden-app-shell .organization-tabs button.is-active, .arden-app-shell .organization-tabs button.is-active:hover { color: var(--arden-text-primary); border: 0; background: var(--arden-accent-subtle); box-shadow: inset 0 0 0 1px var(--arden-accent-border); }
+.arden-app-shell .organization-surface { border: 1px solid var(--arden-border); border-radius: 14px; background: var(--arden-surface-base); box-shadow: var(--arden-shadow-island); }
+
+@container workspace (max-width: 640px) {
+  .admin-grant-tags { grid-template-columns: 1fr; }
+  .organization-live-admin .admin-search { max-width: none; }
+  .organization-live-admin .admin-inline-form .primary-button { margin-top: 0; }
+}

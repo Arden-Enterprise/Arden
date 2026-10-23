@@ -26,7 +26,7 @@ The web shell runs at `http://127.0.0.1:5180`; the API runs at `http://127.0.0.1
 
 ## Current UI foundation
 
-The shared React package implements the [Living Archive Figma redesign](https://www.figma.com/design/UmW5qb5cTWo6lwMYZ4Z9bC/Arden?node-id=147-2) for web and desktop, using dark surfaces, amber/jade/blue accents and locally bundled Sora/DM Sans fonts:
+The shared React package implements the [Living Archive Figma redesign](https://www.figma.com/design/UmW5qb5cTWo6lwMYZ4Z9bC/Arden?node-id=147-2) for web and desktop, using dark surfaces and locally bundled Sora/DM Sans fonts on authentication screens. The signed-in workspace uses the accepted Island system (graphite tones, one violet accent, locally bundled Inter/Inter Tight, floating navigation and status islands) described in [DESIGN.md](DESIGN.md):
 
 - a minimal sign-in boundary with no public registration;
 - workspace selection and a redesigned `My Work` preview with scoped queue search;

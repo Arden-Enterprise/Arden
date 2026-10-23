@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useAutosizeTextarea } from "../shared/useAutosizeTextarea";
 import { Icon } from "../shared/Icon";
 import type { PrivateNote } from "../shared/types";
@@ -8,6 +9,7 @@ type PrivateNoteEditorProps = {
   draftBody: string;
   isDirty: boolean;
   savedMessage: string;
+  toolbar: ReactNode;
   onTitleChange: (value: string) => void;
   onBodyChange: (value: string) => void;
 };
@@ -18,51 +20,50 @@ export function PrivateNoteEditor({
   draftBody,
   isDirty,
   savedMessage,
+  toolbar,
   onTitleChange,
   onBodyChange,
 }: PrivateNoteEditorProps) {
-  const titleRef = useAutosizeTextarea(draftTitle, 82);
+  const titleRef = useAutosizeTextarea(draftTitle, 40);
 
   return (
-    <section className="note-editor-card" aria-label="Private note editor">
+    <section className="note-editor-card island" aria-label="Private note editor">
       {selectedNote ? (
         <>
-          <header className="editor-header">
-            <div>
-              <span className="meta-label">PRIVATE · PERSONAL WORKSPACE</span>
-              <span className={`edit-state${isDirty ? " is-dirty" : ""}`}>
-                {isDirty ? "Unsaved draft · Kept while you switch notes" : "No pending changes"}
-              </span>
-            </div>
-          </header>
-          <label className="editor-title-label">
-            <span className="sr-only">Note title</span>
-            <textarea
-              ref={titleRef}
-              rows={2}
-              value={draftTitle}
-              onChange={(event) => onTitleChange(event.target.value)}
-              placeholder="Untitled private note"
-            />
-          </label>
-          <label className="editor-body-label">
-            <span className="sr-only">Note content</span>
-            <textarea
-              value={draftBody}
-              onChange={(event) => onBodyChange(event.target.value)}
-              placeholder="Write a private note…"
-            />
-          </label>
+          <div className="private-editor-toolbar" role="toolbar" aria-label="Note actions">{toolbar}</div>
+          <div className="note-editor-page">
+            <label className="editor-title-label">
+              <span className="sr-only">Note title</span>
+              <textarea
+                ref={titleRef}
+                rows={1}
+                value={draftTitle}
+                onChange={(event) => onTitleChange(event.target.value)}
+                placeholder="Untitled private note"
+              />
+            </label>
+            <span className={`edit-state${isDirty ? " is-dirty" : ""}`}>
+              {isDirty ? "Unsaved draft · kept while you switch notes" : selectedNote.updatedLabel}
+            </span>
+            <label className="editor-body-label">
+              <span className="sr-only">Note content</span>
+              <textarea
+                value={draftBody}
+                onChange={(event) => onBodyChange(event.target.value)}
+                placeholder="Write a private note…"
+              />
+            </label>
+          </div>
           <footer className="editor-footer" aria-live="polite">
             <span>{savedMessage || "Session preview. Refreshing or exiting clears your notes."}</span>
             <span>{draftBody.length} characters</span>
           </footer>
         </>
       ) : (
-        <div className="empty-editor">
-          <Icon name="document" size={23} />
-          <strong>Select a private note</strong>
-          <span>Choose a note from the list or create a new preview note.</span>
+        <div className="island-empty empty-editor">
+          <span className="island-tile" aria-hidden="true"><Icon name="lock" size={16} /></span>
+          <h3>Select a private note</h3>
+          <p>Choose a note from the list or create a new one. Only you can open it.</p>
         </div>
       )}
     </section>

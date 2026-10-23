@@ -34,46 +34,41 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
 
   const openEditor = () => {
     setEditorOpen(true);
-    // Focus after React reveals the mobile editor; no content leaves this session.
+    // Focus after React reveals the editor on narrow layouts; no content leaves this session.
     requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(".editor-title-label textarea")?.focus());
+  };
+  const backToNotes = () => {
+    setEditorOpen(false);
+    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".note-list .is-selected")?.focus());
   };
 
   return (
     <main id="arden-main" className="workspace-page" aria-labelledby="personal-workspace-title" tabIndex={-1}>
-      <WorkspaceTopbar breadcrumb="Arden / Personal Workspace" previewLabel={serverBacked ? "PRIVATE NOTES · SERVER" : "SAMPLE NOTES · SESSION ONLY"} contextOpen={contextOpen} onToggleContext={onToggleContext} />
+      <WorkspaceTopbar breadcrumb="Arden / Work / Private Notes" previewLabel={serverBacked ? "PRIVATE NOTES · SERVER" : "SAMPLE NOTES · SESSION ONLY"} contextOpen={contextOpen} onToggleContext={onToggleContext} />
       <WorkspacePageContent className={`personal-content${editorOpen ? " is-editing-note" : ""}`} header={<WorkspacePageHeader className="personal-title-row"
-        eyebrow="PERSONAL / OWNER PRIVATE"
-        title={editorOpen ? draft.title.trim() || "Untitled private note" : "Private notes"}
+        eyebrow="WORK · OWNER PRIVATE"
+        title="Private Notes"
         titleId="personal-workspace-title"
-        action={editorOpen ? <span className="private-state">{isDirty ? "Unsaved changes" : serverBacked ? "Saved · Server" : "Saved · Preview"}</span> : <button type="button" className="primary-button" onClick={() => { controller.createNote(); setQuery(""); openEditor(); }}>
-            <Icon name="plus" size={16} /> New private note
-          </button>}
+        description="Only you can open these. Contributing creates a separate copy for review; the original stays private."
       />}>
-        {!editorOpen && <SearchField ref={searchRef} value={query} onChange={setQuery} placeholder="Search your private notes…" />}
-        {editorOpen && <div className="private-editor-toolbar">
-          <span className="private-state"><Icon name="lock" size={14} /> PRIVATE · ONLY YOU</span>
-          <button type="button" className="secondary-button" onClick={() => {
-          setEditorOpen(false);
-          requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".note-list .is-selected")?.focus());
-        }}>Back to notes</button>
-          <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : serverBacked ? "Save private note" : "Save preview note"}</button>
-          {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}>Contribute copy</button>}
-
-        </div>}
-        {loading && <p role="status">Loading your private notes…</p>}
-        {error && <p className="sign-in-message" role="alert">{error}</p>}
-        {saveMessage && <p role="status">{saveMessage}</p>}
+        {loading && <p className="island-meta" role="status">Loading your private notes…</p>}
+        {error && <p className="admin-feedback is-error personal-feedback" role="alert">{error}</p>}
         <div className="personal-grid">
-          {editorOpen ? <PrivateNoteEditor selectedNote={selectedNote} draftTitle={draft.title} draftBody={draft.body} isDirty={isDirty} savedMessage={saveMessage || state.savedMessage || (serverBacked ? "Private note · server-backed storage." : "Session preview. Refreshing or exiting clears your notes.")} onTitleChange={controller.editTitle} onBodyChange={controller.editBody} /> : <PrivateNoteList notes={visibleNotes} drafts={state.drafts} selectedId={state.selectedId} searching={Boolean(query.trim())} onSelect={(note) => { controller.selectNote(note); openEditor(); }} onClearSearch={() => setQuery("")} />}
-          <aside className="private-ownership-card" aria-label="Private note ownership">
-            <Icon name="lock" size={32} />
-            <span className="meta-label">{editorOpen ? "PRIVACY" : "PRIVATE BY DEFAULT"}</span>
-            <h2>{editorOpen ? "Only you" : <>Your working <br />memory</>}</h2>
-
-
-            <span className="private-guidance-badge">YOU DECIDE WHAT TO SHARE</span>
-            {editorOpen && <p className="private-save-status" aria-live="polite">{isDirty ? "Your draft has unsaved changes." : state.savedMessage || "No pending changes."}</p>}
-          </aside>
+          <PrivateNoteList notes={visibleNotes} drafts={state.drafts} selectedId={state.selectedId} searching={Boolean(query.trim())}
+            search={<SearchField ref={searchRef} value={query} onChange={setQuery} placeholder="Search notes…" />}
+            onCreate={() => { controller.createNote(); setQuery(""); openEditor(); }}
+            onSelect={(note) => { controller.selectNote(note); openEditor(); }} onClearSearch={() => setQuery("")} />
+          <PrivateNoteEditor selectedNote={selectedNote} draftTitle={draft.title} draftBody={draft.body} isDirty={isDirty}
+            savedMessage={saveMessage || state.savedMessage || (serverBacked ? "Private note · server-backed storage." : "Session preview. Refreshing or exiting clears your notes.")}
+            toolbar={<>
+              <span className="island-chip"><Icon name="lock" size={12} />Only you</span>
+              <span className="private-state" aria-live="polite">{isDirty ? "Unsaved changes" : serverBacked ? "Saved · Server" : "Saved · Preview"}</span>
+              <span className="note-toolbar-spacer" />
+              <button type="button" className="secondary-button note-back-button" onClick={backToNotes}>Back to notes</button>
+              {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}><Icon name="layers" size={14} />Contribute copy</button>}
+              <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : serverBacked ? "Save" : "Save preview"}</button>
+            </>}
+            onTitleChange={controller.editTitle} onBodyChange={controller.editBody} />
         </div>
       </WorkspacePageContent>
       {contributionOpen && serverBacked && selectedNote && sourceVersionId && !isDirty && <ContributePrivateNoteDialog
