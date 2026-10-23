@@ -1,5 +1,7 @@
-import { Icon } from "../shared/Icon";
 import type { WorkQueueItem } from "./workQueueModel";
+
+const toneClass: Record<WorkQueueItem["tone"], string> = { amber: "tone-warning", red: "tone-danger", blue: "tone-info" };
+const actionLabel: Record<WorkQueueItem["type"], string> = { review: "Review", handover: "Open handover", knowledge: "Continue" };
 
 export function PriorityQueue({ items, filtersActive, onClearFilters, onOpenKnowledge, onOpenReview, onOpenHandover }: {
   items: readonly WorkQueueItem[];
@@ -9,17 +11,19 @@ export function PriorityQueue({ items, filtersActive, onClearFilters, onOpenKnow
   onOpenReview?: () => void;
   onOpenHandover?: () => void;
 }) {
-  return <section className="my-work-queue" aria-labelledby="priority-title">
-    <div className="my-work-queue-list">
-      {items.map((item) => {
-        const onOpen = item.type === "handover" ? onOpenHandover : item.type === "review" ? onOpenReview : onOpenKnowledge;
-        return <button type="button" className={`my-work-task tone-${item.tone}`} key={item.id} onClick={onOpen} disabled={!onOpen}>
-          <span className="my-work-icon-tile"><Icon name={item.type === "handover" ? "handover" : item.type === "review" ? "review" : "document"} size={25} /></span>
-          <span className="my-work-task-copy"><strong>{item.title}</strong><span className="my-work-task-badges"><span className="my-work-status"><span aria-hidden="true" className="my-work-status-dot" />{item.statusLabel}</span><span className="my-work-detail">{item.detail}</span></span><span className="my-work-task-metadata">{item.metadata}</span></span>
-          <span className={item.assignee === "Unassigned" ? "my-work-unassigned" : "my-work-avatar"} aria-label={`Assigned to ${item.assignee}`}>{item.assignee}</span><Icon name="chevron" size={18} />
-        </button>;
-      })}
-      {items.length === 0 && <div className="empty-state" role="status"><strong>No sample work matches your filters.</strong>{filtersActive && <button type="button" onClick={onClearFilters}>Clear filters</button>}</div>}
-    </div>
-  </section>;
+  return <ul className="my-work-rows" aria-label="Priority queue items">
+    {items.map((item) => {
+      const onOpen = item.type === "handover" ? onOpenHandover : item.type === "review" ? onOpenReview : onOpenKnowledge;
+      return <li className="my-work-row" key={item.id}>
+        <div className="my-work-row-copy">
+          <strong>{item.title}</strong>
+          <span>{item.metadata} · {item.detail}</span>
+        </div>
+        <span className={`island-chip has-dot ${toneClass[item.tone]}`}>{item.statusLabel}</span>
+        <span className={item.assignee === "Unassigned" ? "my-work-unassigned" : "island-avatar is-small"} aria-label={`Assigned to ${item.assignee}`}>{item.assignee === "Unassigned" ? "Unassigned" : item.assignee}</span>
+        <button type="button" className="secondary-button" onClick={onOpen} disabled={!onOpen} aria-label={`${actionLabel[item.type]}: ${item.title}`}>{actionLabel[item.type]}</button>
+      </li>;
+    })}
+    {items.length === 0 && <li className="island-empty" role="status"><h3>No sample work matches your filters.</h3>{filtersActive && <button type="button" className="secondary-button" onClick={onClearFilters}>Clear filters</button>}</li>}
+  </ul>;
 }

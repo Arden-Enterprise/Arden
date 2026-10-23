@@ -1,0 +1,91 @@
+/* My Work and Private Notes in the island system. */
+
+/* ---------- My Work ---------- */
+.arden-app-shell .my-work-content { max-width: 1240px; }
+.arden-app-shell .my-work-dashboard { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; }
+.my-work-queue-card { flex: 2 1 520px; min-width: 0; }
+.my-work-side { display: flex; flex: 1 1 300px; flex-direction: column; gap: 12px; min-width: 0; }
+.my-work-card { padding: 6px; }
+.my-work-card-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px 8px; }
+.my-work-card-heading h2 { margin: 0; font-size: 15px; line-height: 1.3; }
+.my-work-card-heading .island-link-button { margin-left: auto; }
+.arden-app-shell .my-work-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; }
+.my-work-search-scope { margin: 0 12px 6px; color: var(--arden-text-secondary); font-size: 12px; }
+.my-work-rows { display: grid; margin: 0; padding: 0; list-style: none; }
+.my-work-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; padding: 12px; border-radius: 10px; }
+.my-work-row:hover { background: var(--arden-surface-hover); }
+.my-work-row + .my-work-row { box-shadow: 0 -1px 0 var(--arden-border); }
+.my-work-row-copy { display: grid; flex: 1 1 260px; gap: 2px; min-width: 0; }
+.my-work-row-copy strong, .my-work-row-link strong { font-weight: 600; overflow-wrap: anywhere; }
+.my-work-row-copy span, .my-work-row-link span { color: var(--arden-text-secondary); font-size: 12px; }
+.my-work-row .secondary-button { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.my-work-row.is-compact { padding: 10px 12px; }
+.my-work-row-link { display: grid; flex: 1; gap: 2px; min-width: 0; padding: 0; border: 0; color: var(--arden-text-primary); background: transparent; text-align: left; cursor: pointer; }
+.my-work-row-link:hover:not(:disabled) strong { text-decoration: underline; text-underline-offset: 3px; }
+.my-work-row-link:disabled { cursor: default; }
+.my-work-unassigned { color: var(--arden-danger); font-size: 12px; font-weight: 600; }
+.my-work-rows .island-empty { justify-items: start; text-align: left; }
+.my-work-private { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--arden-border); border-radius: 14px; background: var(--arden-bg-sidebar); }
+.my-work-private .my-work-card-heading { padding: 0; }
+.my-work-private p { margin: 0; color: var(--arden-text-secondary); font-size: 13px; }
+.my-work-private .secondary-button { justify-self: start; }
+
+/* ---------- Private Notes ---------- */
+.arden-app-shell .personal-content { max-width: 1240px; }
+.arden-app-shell .personal-grid { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; grid-template-columns: none; }
+.arden-app-shell .note-list-card {
+  display: flex; flex: 1 1 260px; flex-direction: column; gap: 4px; max-width: 320px; min-width: 0; padding: 8px;
+  border: 1px solid var(--arden-border); border-radius: 14px; background: var(--arden-bg-sidebar);
+}
+.arden-app-shell .note-list-header { display: flex; align-items: center; gap: 6px; min-height: 0; padding: 4px 4px 4px; border: 0; }
+.arden-app-shell .note-list-header .workspace-search { flex: 1; min-width: 0; background: var(--arden-bg-app); }
+.arden-app-shell .note-list-count { padding: 6px 8px 2px; }
+.arden-app-shell .note-list { display: grid; gap: 2px; padding: 0; }
+.arden-app-shell .note-list > button {
+  display: grid; gap: 2px; min-height: 0; padding: 10px 12px; border: 0; border-radius: 10px;
+  color: var(--arden-text-primary); background: transparent; text-align: left; box-shadow: none; transform: none;
+}
+.arden-app-shell .note-list > button:hover:not(:disabled) { background: var(--arden-surface-hover); transform: none; box-shadow: none; }
+.arden-app-shell .note-list > button.is-selected, .arden-app-shell .note-list > button.is-selected:hover { border: 0; background: var(--arden-accent-subtle); }
+.arden-app-shell .note-list strong { font-size: 13px; font-weight: 600; line-height: 1.4; }
+.arden-app-shell .note-list .note-row-snippet { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 1; color: var(--arden-text-secondary); font-size: 12px; }
+.arden-app-shell .note-list .note-row-meta { color: var(--arden-text-muted); font-size: 11px; }
+.arden-app-shell .note-list .note-row-meta.is-unsaved { color: var(--arden-warning); font-weight: 600; }
+.arden-app-shell .note-list .island-empty { justify-items: start; padding: 16px 12px; text-align: left; }
+
+.arden-app-shell .note-editor-card {
+  display: flex; flex: 999 1 480px; flex-direction: column; min-width: 0; min-height: 620px; padding: 0;
+  border: 1px solid var(--arden-border); border-radius: 14px; background: var(--arden-surface-base);
+}
+.arden-app-shell .private-editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--arden-border); }
+.arden-app-shell .private-editor-toolbar .private-state { color: var(--arden-text-secondary); font-size: 12px; letter-spacing: 0; }
+.note-toolbar-spacer { flex: 1; }
+.arden-app-shell .private-editor-toolbar .primary-button { min-height: 32px; }
+.arden-app-shell .note-back-button { display: none; }
+.note-editor-page { display: grid; flex: 1; align-content: start; gap: 6px; width: 100%; max-width: 760px; margin: 0 auto; padding: 32px 40px 24px; }
+.arden-app-shell .note-editor-page .editor-title-label, .arden-app-shell .note-editor-page .editor-body-label { display: block; min-height: 0; padding: 0; }
+.arden-app-shell .editor-title-label textarea {
+  width: 100%; min-height: 0; padding: 0 0 4px; border: 0; color: var(--arden-text-primary); background: transparent;
+  font: 600 30px/1.25 var(--arden-font-heading); letter-spacing: -.02em; resize: none;
+}
+.arden-app-shell .editor-title-label textarea:focus-visible { outline: 0; box-shadow: 0 2px 0 var(--arden-accent-border); }
+.arden-app-shell .note-editor-page .edit-state { margin-bottom: 18px; color: var(--arden-text-secondary); font-size: 12px; }
+.arden-app-shell .note-editor-page .edit-state.is-dirty { color: var(--arden-warning); }
+.arden-app-shell .editor-body-label textarea {
+  width: 100%; min-height: 380px; padding: 0; border: 0; border-radius: 0; color: #dcdbe3; background: transparent;
+  font-size: 15px; line-height: 1.75; resize: vertical;
+}
+.arden-app-shell .editor-body-label textarea:focus-visible { outline: 0; }
+.arden-app-shell .editor-footer { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--arden-border); color: var(--arden-text-muted); font-size: 12px; }
+.arden-app-shell .empty-editor { flex: 1; align-content: center; }
+.personal-feedback { margin: 0 0 12px; }
+
+@container workspace (max-width: 760px) {
+  .arden-app-shell .note-list-card { max-width: none; flex-basis: 100%; }
+  .arden-app-shell .personal-content:not(.is-editing-note) .note-editor-card { display: none; }
+  .arden-app-shell .personal-content.is-editing-note .note-list-card { display: none; }
+  .arden-app-shell .personal-content.is-editing-note .personal-title-row { display: none; }
+  .arden-app-shell .note-back-button { display: inline-flex; }
+  .note-editor-page { padding: 24px 18px; }
+  .arden-app-shell .editor-title-label textarea { font-size: 24px; }
+}
