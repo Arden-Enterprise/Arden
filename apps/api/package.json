@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
+    "dev:worker": "tsx watch src/indexing/worker-main.ts",
     "db:migrate": "tsx src/db/migrate.ts",
     "system-admin:bootstrap": "tsx src/db/bootstrap-system-admin.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run src",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "start:worker": "node dist/indexing/worker-main.js"
   },
   "dependencies": {
     "@arden/domain": "workspace:*",
