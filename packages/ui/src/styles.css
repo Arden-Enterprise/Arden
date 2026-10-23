@@ -1,5 +1,7 @@
 @import "@blocknote/ariakit/style.css";
 @import "@flaticon/flaticon-uicons/css/brands/all.css";
+@import "@fontsource-variable/inter/wght.css";
+@import "@fontsource-variable/inter-tight/wght.css";
 @import "./styles/base.css";
 @import "./styles/sign-in.css";
 @import "./styles/app-shell.css";
@@ -17,4 +19,7 @@
 @import "./styles/knowledge-redesign.css";
 @import "./styles/icons.css";
 @import "./styles/shell-redesign.css";
-@import "./styles/action-toast.css";
+@import "./styles/island-shell.css";
+@import "./styles/island-admin.css";
+@import "./styles/island-work.css";
+@import "./styles/island-knowledge.css";

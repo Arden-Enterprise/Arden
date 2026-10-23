@@ -17,6 +17,15 @@ export const iconGlyphs = {
   handover: "\uf5ea",
   organization: "\ufea1",
   integrations: "\ufaa8",
+  sidebar: "\ufc08",
+  menu: "\uf925",
+  shield: "\ufbdb",
+  warning: "\ufe33",
+  layers: "\uf87c",
+  building: "\uf303",
+  people: "\ufea6",
+  expand: "\uf153",
+  pdf: "\uf66a",
 } as const;
 
 export type IconName = keyof typeof iconGlyphs;

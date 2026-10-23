@@ -2,7 +2,9 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 import { plainTextToSemanticDocument, serializeSemanticDocument } from "@arden/domain";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { SearchField } from "../shared/SearchField";
-import { KnowledgeBadge, KnowledgeHeading, KnowledgeNotice, KnowledgeRow } from "./KnowledgePrimitives";
+import { KnowledgeHeading, KnowledgeNotice } from "./KnowledgePrimitives";
+import { Icon } from "../shared/Icon";
+import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { availableAudienceOptions, normalizeAudienceSelection, validAudienceSelection } from "./audience-options";
 import {
   ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listAssignedKnowledgeReviews,
@@ -76,7 +78,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [createMode, setCreateMode] = useState<"text" | "pdf">("text");
   const [newClassification, setNewClassification] = useState<KnowledgeClassification>("INTERNAL");
   const [screen, setScreen] = useState<"library" | "create" | "editor" | "document">("library");
-  const [libraryTab, setLibraryTab] = useState<"drafts" | "published">("drafts");
+  const [libraryTab, setLibraryTab] = useState<"drafts" | "published">("published");
+  const [selectedContributionId, setSelectedContributionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -245,66 +248,88 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           : `Version ${draft?.currentVersion.version ?? 1} is ready to submit.`;
   const chooseFile = (file: File | null) => { setNewFile(file); setNewFileError(file ? validatePdfFile(file) : ""); createRequestKey.current = null; };
 
+  const audienceNames = (ids: string[]) => ids.map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? "Inactive audience").join(", ") || "None";
+  const selectedContribution = drafts.find((item) => item.id === selectedContributionId) ?? null;
+  const selectedContributionLatest = selectedContribution ? latestByDraft.get(selectedContribution.id) : undefined;
+  const activeReview = review ? reviews.find((item) => item.submissionId === review.id) : undefined;
+  const openCreate = (mode: "text" | "pdf") => { setCreateMode(mode); createRequestKey.current = null; setScreen("create"); };
+  const librarySearch = view === "knowledge" && screen === "library"
+    ? <SearchField value={query} onChange={setQuery} placeholder={libraryTab === "drafts" ? "Filter my contributions…" : "Filter publications…"} /> : undefined;
+  const breadcrumb = view === "review-queue" ? `${organizationName} / Knowledge / Reviews`
+    : screen === "library" ? `${organizationName} / Knowledge / ${libraryTab === "drafts" ? "My Contributions" : "Library"}`
+      : screen === "create" ? `${organizationName} / Knowledge / New draft`
+        : `${organizationName} / Knowledge / ${screen === "document" ? document?.title ?? "Publication" : draft?.title ?? "Draft"}`;
+
   return <main id={active ? "arden-main" : undefined} className="workspace-page" tabIndex={-1}>
-    <WorkspaceTopbar breadcrumb={`${organizationName} / ${view === "knowledge" ? "Knowledge" : "Review Queue"}`}
-      previewLabel="ARDEN SERVER · GOVERNED CONTENT" contextOpen={contextOpen} onToggleContext={onToggleContext} />
+    <WorkspaceTopbar breadcrumb={breadcrumb} previewLabel="ARDEN SERVER · GOVERNED CONTENT" contextOpen={contextOpen} onToggleContext={onToggleContext}
+      search={librarySearch} searchActive={Boolean(librarySearch && query)} />
     <div className="knowledge-feature-page knowledge-live-page">
       {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-      {loading ? <div className="knowledge-empty" role="status">Loading governed knowledge…</div> : view === "review-queue" ? <>
-        <KnowledgeHeading eyebrow="WORKSPACE / REVIEW QUEUE" title={review ? review.title : "Review Queue"}
-          description={review ? undefined : "Submissions assigned to you through reviewer authority. You never review your own work."}
-
-          action={<button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>} />
-        {review && <button type="button" className="knowledge-back-button knowledge-live-back" onClick={() => setReview(null)}>← Assigned reviews</button>}
-        {review ? <div className="knowledge-two-column knowledge-live-review-detail">
-          <article className="knowledge-panel knowledge-live-document"><span className="meta-label knowledge-tone-blue">IMMUTABLE SUBMITTED SNAPSHOT</span>
-            <h2>{review.title}</h2><div className="knowledge-inline-meta"><KnowledgeBadge classification={review.classification}>{review.classification}</KnowledgeBadge>
-              <KnowledgeBadge tone="blue">{departmentName(review.responsibleDepartmentId)}</KnowledgeBadge>
-              <KnowledgeBadge tone="amber">{review.targetScopeType}</KnowledgeBadge></div>
-            {review.mimeType === "application/pdf" && review.pdfBase64
-              ? <PdfDocument base64={review.pdfBase64} title={review.title} />
-              : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
-                key={`review:${review.id}:${review.snapshotVersionId}`} body={review.body}
-                instanceKey={`review:${review.id}:${review.snapshotVersionId}`} /></Suspense>}
-            <small>Snapshot hash: {review.contentHash}</small>
-          </article>
-          <div className="knowledge-live-side"><section className="knowledge-panel knowledge-live-submission"><h2>Submission</h2>
-            <dl><div><dt>Submitted by</dt><dd>{review.submittedByMembershipId}</dd></div><div><dt>Submitted</dt><dd>{new Date(review.submittedAt).toLocaleString()}</dd></div>
-              <div><dt>Department</dt><dd>{departmentName(review.responsibleDepartmentId)}</dd></div>
-              <div><dt>Access scope</dt><dd>{review.targetScopeType === "DEPARTMENT" ? "Responsible department" : "Organization"}</dd></div>
-              <div><dt>Audience</dt><dd>{review.audienceIds.map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? `${id} (inactive)`).join(", ") || "None"}</dd></div>
-              <div><dt>Team tag</dt><dd>{review.teamTag || "All teams"}</dd></div><div><dt>Project tag</dt><dd>{review.projectTag || "All projects"}</dd></div>
-              <div><dt>Snapshot hash</dt><dd className="knowledge-hash">{review.contentHash}</dd></div></dl></section>
-          <aside className="knowledge-panel knowledge-live-decision"><span className="meta-label knowledge-tone-amber">HUMAN DECISION</span>
-            <h2>Decision</h2><p>Decide the exact snapshot shown at left. Approval starts publication preparation.</p>
-            {reviews.find((item) => item.submissionId === review.id)?.approvalBlocked &&
-              <KnowledgeNotice title="Audience no longer enforceable" tone="amber">Approval is blocked. Reject this snapshot; the author can submit a new one.</KnowledgeNotice>}
-            <label>Decision reason<textarea ref={decisionReason} rows={4} maxLength={2000} value={comment} disabled={busy} aria-invalid={commentSubmitted && !comment.trim()} aria-describedby="knowledge-decision-help"
-              onChange={(event) => setComment(event.target.value)} placeholder="Required for rejection" /></label>
-            <small id="knowledge-decision-help" className={commentSubmitted && !comment.trim() ? "field-error" : ""}>{commentSubmitted && !comment.trim() ? "Explain why this snapshot is rejected." : "Shared with the author. Required for rejection."}</small>
-            <div className="knowledge-live-actions">
-              <button type="button" className="primary-button" disabled={busy || reviews.find((item) => item.submissionId === review.id)?.approvalBlocked} onClick={() => setDecisionToConfirm("APPROVE")}>Approve</button>
-              <button type="button" className="admin-text-danger" disabled={busy} onClick={() => { if (requireDecisionReason()) setDecisionToConfirm("REJECT"); }}>Reject submission…</button>
+      {loading ? <div className="island island-empty" role="status">Loading governed knowledge…</div> : view === "review-queue" ? <div className="review-workspace">
+        <section className="review-queue" aria-labelledby="review-queue-title">
+          <div className="review-queue-heading"><h1 id="review-queue-title">Review queue</h1><span className="island-badge">{reviews.length}</span>
+            <button type="button" className="island-link-button" disabled={busy} onClick={() => void refresh()}>Refresh</button></div>
+          <p className="island-meta">Submissions your grants cover. Your own are never listed.</p>
+          {reviews.length ? <div className="review-queue-list">{reviews.map((item) => <button type="button" key={item.submissionId} className="review-queue-item"
+            aria-current={review?.id === item.submissionId ? "true" : undefined} onClick={() => openReview(item.submissionId)}>
+            <strong>{item.title}</strong>
+            <span className="island-meta">{departmentName(item.departmentId)} · submitted {new Date(item.submittedAt).toLocaleDateString()}</span>
+            <span className="island-chip-row"><KnowledgeClassificationChip classification={item.classification} />
+              {item.approvalBlocked && <span className="island-chip tone-warning">Approval blocked</span>}</span>
+          </button>)}</div> : <div className="island-empty review-queue-empty"><h3>Queue is clear</h3><p>New submissions in your granted departments appear here.</p></div>}
+        </section>
+        <article className="island review-submission" aria-label="Submission">
+          {review ? <>
+            <header className="review-submission-header">
+              <div><span className="island-meta">Submitted {new Date(review.submittedAt).toLocaleString()}</span>
+                <h2>{review.title}</h2></div>
+              <button type="button" className="island-icon-button" onClick={() => setReview(null)} aria-label="Close submission"><Icon name="close" size={14} /></button>
+            </header>
+            <dl className="review-frozen" aria-label="Frozen submission details">
+              <div><dt>CLASSIFICATION</dt><dd><KnowledgeClassificationChip classification={review.classification} /></dd></div>
+              <div><dt>DEPARTMENT</dt><dd>{departmentName(review.responsibleDepartmentId)}</dd></div>
+              <div><dt>ACCESS SCOPE</dt><dd>{review.targetScopeType === "DEPARTMENT" ? "Responsible department" : "Organization"}</dd></div>
+              <div><dt>AUDIENCE</dt><dd>{audienceNames(review.audienceIds)}</dd></div>
+              <div><dt>TEAM / PROJECT</dt><dd>{review.teamTag || "All teams"} · {review.projectTag || "All projects"}</dd></div>
+              <div><dt>SNAPSHOT</dt><dd className="knowledge-hash">{review.contentHash}</dd></div>
+            </dl>
+            {activeReview?.approvalBlocked && <p className="island-note is-warning" role="note"><Icon name="warning" size={16} /><span><strong>Approval is blocked.</strong> An audience on this snapshot can no longer be enforced. Reject it so the author can submit a new snapshot.</span></p>}
+            <div className="review-document">
+              {review.mimeType === "application/pdf" && review.pdfBase64
+                ? <PdfDocument base64={review.pdfBase64} title={review.title} />
+                : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+                  key={`review:${review.id}:${review.snapshotVersionId}`} body={review.body}
+                  instanceKey={`review:${review.id}:${review.snapshotVersionId}`} /></Suspense>}
             </div>
-          </aside></div>
-        </div> : reviews.length ? <div className="knowledge-row-list">{reviews.map((item) =>
-          <KnowledgeRow key={item.submissionId} title={item.title}
-            details={`${departmentName(item.departmentId)} · ${item.classification} · submitted ${new Date(item.submittedAt).toLocaleString()}`}
-            status={item.approvalBlocked ? "Approval blocked" : "Ready to review"} tone={item.approvalBlocked ? "amber" : "blue"}
-            onClick={() => openReview(item.submissionId)} />)}</div>
-          : <div className="knowledge-empty"><h2>No reviews assigned to you</h2></div>}
-      </> : screen === "create" ? <>
+            <div className="review-decision-bar" role="group" aria-label="Review decision">
+              <label className="island-field"><span>Decision reason · required for rejection, shared with the author</span>
+                <textarea ref={decisionReason} rows={3} maxLength={2000} value={comment} disabled={busy} aria-invalid={commentSubmitted && !comment.trim()} aria-describedby="knowledge-decision-help"
+                  onChange={(event) => setComment(event.target.value)} placeholder="Explain why this snapshot is rejected" /></label>
+              <div className="review-decision-actions">
+                <small id="knowledge-decision-help" className={commentSubmitted && !comment.trim() ? "field-error" : "island-meta"}>{commentSubmitted && !comment.trim() ? "Explain why this snapshot is rejected." : "Approval prepares this exact snapshot for indexing and atomic activation."}</small>
+                <button type="button" className="secondary-button is-danger" disabled={busy} onClick={() => { if (requireDecisionReason()) setDecisionToConfirm("REJECT"); }}>Reject…</button>
+                <button type="button" className="primary-button" disabled={busy || activeReview?.approvalBlocked} onClick={() => setDecisionToConfirm("APPROVE")}><Icon name="check" size={14} />Approve for preparation</button>
+              </div>
+            </div>
+          </> : <div className="island-empty review-submission-empty"><span className="island-tile" aria-hidden="true"><Icon name="review" size={16} /></span>
+            <h3>{reviews.length ? "Select a submission" : "Nothing left to review"}</h3>
+            <p>{reviews.length ? "You decide the exact snapshot the author submitted. Approval starts publication preparation." : "Approved snapshots are preparing or active."}</p></div>}
+        </article>
+      </div> : screen === "create" ? <>
         <button type="button" className="knowledge-back-button knowledge-live-back" disabled={busy} onClick={() => setScreen("library")}>← Knowledge</button>
-        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Create a shared draft" description="The draft stays yours. Governance metadata and review come after it's saved." />
-        <div className="knowledge-two-column"><form className="knowledge-panel knowledge-live-form" onSubmit={(event) => { event.preventDefault(); createDraft(); }}>
+        <KnowledgeHeading eyebrow="KNOWLEDGE" title="New shared draft" description="The draft stays yours. Governance metadata and review come after it's saved." />
+        <form className="island island-panel knowledge-create-island" onSubmit={(event) => { event.preventDefault(); createDraft(); }}>
           <fieldset className="knowledge-create-source" disabled={busy}><legend>Content source</legend>
-            <label className={createMode === "pdf" ? "is-selected" : ""}><input type="radio" name="knowledge-create-mode" checked={createMode === "pdf"} onChange={() => { setCreateMode("pdf"); createRequestKey.current = null; }} /><strong>Upload a PDF</strong><small>Kept as the original file</small></label>
-            <label className={createMode === "text" ? "is-selected" : ""}><input type="radio" name="knowledge-create-mode" checked={createMode === "text"} onChange={() => { setCreateMode("text"); createRequestKey.current = null; }} /><strong>Write document text</strong><small>Arden's formatted editor</small></label>
+            <label className={createMode === "pdf" ? "is-selected" : ""}><input type="radio" name="knowledge-create-mode" checked={createMode === "pdf"} onChange={() => { setCreateMode("pdf"); createRequestKey.current = null; }} /><span className="island-tile" aria-hidden="true"><Icon name="pdf" size={16} /></span><span><strong>Upload a PDF</strong><small>Kept as the original file</small></span></label>
+            <label className={createMode === "text" ? "is-selected" : ""}><input type="radio" name="knowledge-create-mode" checked={createMode === "text"} onChange={() => { setCreateMode("text"); createRequestKey.current = null; }} /><span className="island-tile" aria-hidden="true"><Icon name="document" size={16} /></span><span><strong>Write document text</strong><small>Arden's formatted editor</small></span></label>
           </fieldset>
-          <label>Title *<input id="knowledge-new-title" maxLength={160} value={newTitle} disabled={busy} aria-invalid={Boolean(newTitleError)} aria-describedby="knowledge-new-title-help" onChange={(event) => { setNewTitle(event.target.value); setNewTitleError(""); createRequestKey.current = null; }} /><small id="knowledge-new-title-help" className={newTitleError ? "field-error" : ""}>{newTitleError || "Up to 160 characters."}</small></label>
-          <label>Classification<select value={newClassification} disabled={busy} onChange={(event) => { setNewClassification(event.target.value as KnowledgeClassification); createRequestKey.current = null; }}>
-            <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select><small>You can change it before submitting.</small></label>
+          <div className="knowledge-create-fields">
+            <label className="island-field">Title<input id="knowledge-new-title" maxLength={160} value={newTitle} disabled={busy} aria-invalid={Boolean(newTitleError)} aria-describedby="knowledge-new-title-help" onChange={(event) => { setNewTitle(event.target.value); setNewTitleError(""); createRequestKey.current = null; }} /><small id="knowledge-new-title-help" className={newTitleError ? "field-error" : ""}>{newTitleError || "Up to 160 characters."}</small></label>
+            <label className="island-field">Classification<select value={newClassification} disabled={busy} onChange={(event) => { setNewClassification(event.target.value as KnowledgeClassification); createRequestKey.current = null; }}>
+              <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select><small>You can change it before submitting.</small></label>
+          </div>
           {createMode === "pdf" ? <div className={`knowledge-pdf-choose${dragActive ? " is-drag-active" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragActive(true); }} onDragLeave={() => setDragActive(false)} onDrop={(event) => { event.preventDefault(); setDragActive(false); chooseFile(event.dataTransfer.files[0] ?? null); }}>
+            <span className="island-tile" aria-hidden="true"><Icon name="pdf" size={18} /></span>
             <strong>Choose a PDF from this computer</strong><span>PDF only, up to 5 MB. The original is kept for review and download and isn't converted to editable text.</span>
             <input ref={fileInput} className="knowledge-hidden-file-input" tabIndex={-1} type="file" accept=".pdf,application/pdf" disabled={busy} aria-label="Choose PDF file" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} />
             <button ref={chooseFileButton} type="button" className="secondary-button" disabled={busy} aria-invalid={Boolean(newFileError)} aria-describedby="knowledge-pdf-help" onClick={() => fileInput.current?.click()}>Choose file</button>
@@ -315,111 +340,157 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               body={newBody} instanceKey="new-shared-knowledge" disabled={busy} onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
           </div>}
           <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button>
-            <button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); createRequestKey.current = null; }}>Cancel</button></div>
-        </form></div>
+            <button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); createRequestKey.current = null; }}>Cancel</button>
+            <span className="island-meta">Nothing is shared or submitted until you do it.</span></div>
+        </form>
       </> : screen === "editor" && draft && editor ? <>
-        <button type="button" className="knowledge-back-button knowledge-live-back" onClick={() => { setScreen("library"); void refresh(); }}>← Knowledge</button>
-        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title={draft.title}
-          action={<button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); void refresh(); }}>Back to library</button>} />
-        <div className="knowledge-inline-meta"><span className={`knowledge-live-status ${currentDraftStatus?.tone ?? ""}`}>{currentDraftStatus?.label}</span>
-          <span>v{draft.currentVersion.version} · {draft.currentVersion.mimeType === "application/pdf" ? "PDF" : "Text"} · {departmentName(draft.responsibleDepartmentId)}</span>
-          <KnowledgeBadge classification={draft.classification}>{draft.classification}</KnowledgeBadge>
-          {dirty && <span>Unsaved changes</span>}</div>
-        {draft.hasPendingSubmission && <KnowledgeNotice title="Waiting for a reviewer" tone="amber">
-          A different member needs an active reviewer grant for this department and classification. An Org Admin can assign one if the review queue is empty.
-        </KnowledgeNotice>}
-        {latest?.status === "REJECTED" && <KnowledgeNotice title="Submission rejected" tone="danger">
-          {latest.decisionComment && <>Reviewer: {latest.decisionComment}<br /></>}
-          This version was not published. You may revise the draft and submit a new version.
-        </KnowledgeNotice>}
-        {latest?.status === "APPROVED" && <KnowledgeNotice title="Approved · preparing publication" tone="jade">The reviewed snapshot is waiting for indexing and atomic activation. It is not searchable yet.</KnowledgeNotice>}
-        <div className="knowledge-editor-grid"><section className="knowledge-panel knowledge-live-form">
-          <label>Title *<input maxLength={160} disabled={busy} value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
-          {draft.currentVersion.mimeType === "application/pdf" && draft.pdfBase64
-            ? <PdfDocument base64={draft.pdfBase64} title={draft.title} />
-            : <div className="arden-document-field"><span>Document text</span>
-            <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor
-              key={`${draft.id}:${draft.currentVersion.version}`} body={editor.body}
-              instanceKey={`${draft.id}:${draft.currentVersion.version}`}
-              disabled={busy} onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
-          </div>}
-        </section><div className="knowledge-live-side"><section className="knowledge-panel knowledge-live-history"><h2>Review history</h2>
-          <ol><li><strong>v{draft.currentVersion.version} · {draft.hasPendingSubmission ? "awaiting review" : "working draft"}</strong><small>Updated {new Date(draft.updatedAt).toLocaleDateString()}</small></li>
-            {submissions.filter((item) => item.draftId === draft.id).map((item) => <li key={item.id}><strong>{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
-        </section><aside className="knowledge-panel knowledge-live-form"><div className="knowledge-live-meta-heading"><h2>Governance metadata</h2><small>* Required to submit</small></div>
-          <label>Responsible department *<select disabled={busy} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => {
-            const responsibleDepartmentId = event.target.value || null;
-            setEditor({ ...editor, responsibleDepartmentId, audienceIds: editor.audienceIds.filter((id) => {
-              const audience = options?.audiences.find((item) => item.id === id);
-              return audience?.kind === "ORGANIZATION_ALL" || !audience?.departmentId || audience.departmentId === responsibleDepartmentId;
-            }) });
-          }}>
-            <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Reviewers are drawn from this department.</small></label>
-          <fieldset className="knowledge-option-cards" disabled={busy}><legend>Access scope *</legend>{(["DEPARTMENT", "ORGANIZATION"] as const).map((scope) => <label key={scope} className={editor.targetScopeType === scope ? "is-selected" : ""}><input type="radio" name="knowledge-scope" checked={editor.targetScopeType === scope} onChange={() => setEditor({ ...editor, targetScopeType: scope,
-            audienceIds: normalizeAudienceSelection(editor.audienceIds, options?.audiences ?? [], scope) })} /><span><strong>{scope === "DEPARTMENT" ? "Responsible department" : "Organization"}</strong><small>{scope === "DEPARTMENT" ? "Department and eligible group audiences" : "Organization and eligible group audiences"}</small></span></label>)}</fieldset>
-          <fieldset className="knowledge-option-cards knowledge-classification-cards" disabled={busy}><legend>Classification *</legend>{(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] as const).map((classification) => <label key={classification} className={editor.classification === classification ? "is-selected" : ""}><input type="radio" name="knowledge-classification" checked={editor.classification === classification} onChange={() => setEditor({ ...editor, classification })} /><span><strong>{classification[0]}{classification.slice(1).toLowerCase()}</strong></span></label>)}</fieldset>
-          <fieldset disabled={busy}><legend>Audience *</legend>
-
-            {!editor.targetScopeType ? <p className="knowledge-field-helper">Choose an access scope to see available audiences.</p> : <div className="knowledge-live-role-list">{availableAudienceOptions(options?.audiences ?? [], editor.targetScopeType).map((audience) => <label key={audience.id}>
-              <input type="checkbox" checked={editor.audienceIds.includes(audience.id)} onChange={(event) => setEditor({ ...editor,
-                audienceIds: event.target.checked ? [...editor.audienceIds, audience.id] : editor.audienceIds.filter((id) => id !== audience.id) })} />
-              <span>{audience.name}{audience.kind === "ORGANIZATION_ALL" ? " · Organization default"
-                : audience.kind === "DEPARTMENT_ALL" ? ` · ${departmentName(audience.departmentId ?? "")}` : " · Audience group"}</span></label>)}</div>}
-            <small>Only roles available for the selected scope are listed.</small>
-          </fieldset>
-          <label>Team tag (optional)<input maxLength={100} disabled={busy} value={editor.teamTag ?? ""} onChange={(event) => setEditor({ ...editor, teamTag: event.target.value || null })} /></label>
-          <label>Project tag (optional)<input maxLength={100} disabled={busy} value={editor.projectTag ?? ""} onChange={(event) => setEditor({ ...editor, projectTag: event.target.value || null })} /></label>
-          <div className="knowledge-readiness" aria-label="Submission readiness"><strong>Ready to submit</strong>
-            <span>{editor.title.trim() ? "✓" : "✕"} Title <small>{editor.title.trim() ? "Done" : "Missing"}</small></span>
-            <span>{editor.responsibleDepartmentId ? "✓" : "✕"} Responsible department <small>{editor.responsibleDepartmentId ? "Done" : "Missing"}</small></span>
-            <span>{editor.targetScopeType ? "✓" : "✕"} Access scope <small>{editor.targetScopeType ? "Done" : "Missing"}</small></span>
-            <span>{validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType) ? "✓" : "✕"} Audience <small>{validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType) ? "Done" : "Missing"}</small></span>
-          </div>
-        </aside></div></div>
-        <div className="knowledge-live-action-bar" role="group" aria-label="Draft actions"><span aria-live="polite">{dirty ? "Unsaved changes · " : ""}{submitHint}</span>
-          <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy || !dirty} onClick={saveDraft}>{busy ? "Working…" : "Save new version"}</button>
-            <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit v{draft.currentVersion.version} for review</button></div></div>
+        <button type="button" className="knowledge-back-button knowledge-live-back" onClick={() => { setLibraryTab("drafts"); setScreen("library"); void refresh(); }}>← My Contributions</button>
+        <h1 className="sr-only">{draft.title}</h1>
+        <div className="draft-workspace">
+          <article className="island draft-document" aria-label="Draft">
+            <div className="draft-document-toolbar">
+              <span className={`island-chip has-dot ${chipTone(currentDraftStatus?.tone ?? "")}`}>{currentDraftStatus?.label}</span>
+              <span className="island-meta">v{draft.currentVersion.version} · {draft.currentVersion.mimeType === "application/pdf" ? "PDF original" : "Text"}{dirty ? " · Unsaved changes" : ""}</span>
+            </div>
+            {draft.hasPendingSubmission && <KnowledgeNotice title="Waiting for a reviewer" tone="amber">
+              A different member needs an active reviewer grant for this department and classification. An Org Admin can assign one if the review queue is empty.
+            </KnowledgeNotice>}
+            {latest?.status === "REJECTED" && <KnowledgeNotice title="Submission rejected" tone="danger">
+              {latest.decisionComment && <>Reviewer: {latest.decisionComment}<br /></>}
+              This version was not published. You may revise the draft and submit a new version.
+            </KnowledgeNotice>}
+            {latest?.status === "APPROVED" && <KnowledgeNotice title="Approved · preparing publication" tone="jade">The reviewed snapshot is waiting for indexing and atomic activation. It is not searchable yet.</KnowledgeNotice>}
+            <div className="draft-document-body knowledge-live-form">
+              <label className="draft-title-field"><span className="sr-only">Title</span><input maxLength={160} disabled={busy} value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
+              {draft.currentVersion.mimeType === "application/pdf" && draft.pdfBase64
+                ? <PdfDocument base64={draft.pdfBase64} title={draft.title} />
+                : <div className="arden-document-field"><span className="sr-only">Document text</span>
+                <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor
+                  key={`${draft.id}:${draft.currentVersion.version}`} body={editor.body}
+                  instanceKey={`${draft.id}:${draft.currentVersion.version}`}
+                  disabled={busy} onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
+              </div>}
+            </div>
+          </article>
+          <aside className="island island-panel draft-metadata knowledge-live-form" aria-labelledby="draft-metadata-title">
+            <h2 id="draft-metadata-title">Before you submit</h2>
+            <label className="island-field">Responsible department<select disabled={busy} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => {
+              const responsibleDepartmentId = event.target.value || null;
+              setEditor({ ...editor, responsibleDepartmentId, audienceIds: editor.audienceIds.filter((id) => {
+                const audience = options?.audiences.find((item) => item.id === id);
+                return audience?.kind === "ORGANIZATION_ALL" || !audience?.departmentId || audience.departmentId === responsibleDepartmentId;
+              }) });
+            }}>
+              <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Reviewers are drawn from this department.</small></label>
+            <fieldset className="island-option-group" disabled={busy}><legend>Publication scope</legend>{(["DEPARTMENT", "ORGANIZATION"] as const).map((scope) => <label key={scope} className={editor.targetScopeType === scope ? "is-selected" : ""}><input type="radio" name="knowledge-scope" checked={editor.targetScopeType === scope} onChange={() => setEditor({ ...editor, targetScopeType: scope,
+              audienceIds: normalizeAudienceSelection(editor.audienceIds, options?.audiences ?? [], scope) })} /><span><strong>{scope === "DEPARTMENT" ? "Responsible department" : "Organization"}</strong><small>{scope === "DEPARTMENT" ? "Department and eligible group audiences" : "Organization and eligible group audiences"}</small></span></label>)}</fieldset>
+            <fieldset className="island-option-group is-inline" disabled={busy}><legend>Classification</legend>{(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] as const).map((classification) => <label key={classification} className={editor.classification === classification ? "is-selected" : ""}><input type="radio" name="knowledge-classification" checked={editor.classification === classification} onChange={() => setEditor({ ...editor, classification })} /><span><strong>{classification}</strong></span></label>)}</fieldset>
+            <fieldset className="island-option-group" disabled={busy}><legend>Audience</legend>
+              {!editor.targetScopeType ? <p className="island-meta">Choose a publication scope to see available audiences.</p> : <div className="draft-audience-list">{availableAudienceOptions(options?.audiences ?? [], editor.targetScopeType).map((audience) => <label key={audience.id} className="draft-audience">
+                <input type="checkbox" checked={editor.audienceIds.includes(audience.id)} onChange={(event) => setEditor({ ...editor,
+                  audienceIds: event.target.checked ? [...editor.audienceIds, audience.id] : editor.audienceIds.filter((id) => id !== audience.id) })} />
+                <span>{audience.name}<small>{audience.kind === "ORGANIZATION_ALL" ? "Organization default"
+                  : audience.kind === "DEPARTMENT_ALL" ? departmentName(audience.departmentId ?? "") : "Audience group"}</small></span></label>)}</div>}
+              <small className="island-meta">Only audiences available for the selected scope are listed.</small>
+            </fieldset>
+            <div className="admin-grant-tags">
+              <label className="island-field">Team tag<input maxLength={100} placeholder="Optional" disabled={busy} value={editor.teamTag ?? ""} onChange={(event) => setEditor({ ...editor, teamTag: event.target.value || null })} /></label>
+              <label className="island-field">Project tag<input maxLength={100} placeholder="Optional" disabled={busy} value={editor.projectTag ?? ""} onChange={(event) => setEditor({ ...editor, projectTag: event.target.value || null })} /></label>
+            </div>
+            <ul className="draft-readiness" aria-label="Submission readiness">
+              {([["Title", Boolean(editor.title.trim())], ["Responsible department", Boolean(editor.responsibleDepartmentId)], ["Publication scope", Boolean(editor.targetScopeType)],
+                ["Audience", validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType)]] as const).map(([label, done]) =>
+                <li key={label} className={done ? "is-done" : ""}><Icon name={done ? "check" : "close"} size={12} />{label}<small>{done ? "Done" : "Missing"}</small></li>)}
+            </ul>
+            {editor.classification === "RESTRICTED" && <p className="island-box">RESTRICTED needs a Specialist or Senior reviewer in the responsible department. Approval prepares this exact version for indexing and atomic activation.</p>}
+            <div className="draft-actions" role="group" aria-label="Draft actions">
+              <button type="button" className="secondary-button" disabled={busy || !dirty} onClick={saveDraft}>{busy ? "Working…" : "Save version"}</button>
+              <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit v{draft.currentVersion.version} for review</button>
+              <span className="island-meta" aria-live="polite">{dirty ? "Unsaved changes · " : ""}{submitHint}</span>
+            </div>
+            <section className="island-detail-section" aria-label="Review history"><h3>History</h3>
+              <ol className="island-timeline"><li><strong>v{draft.currentVersion.version} · {draft.hasPendingSubmission ? "awaiting review" : "working draft"}</strong><small>Updated {new Date(draft.updatedAt).toLocaleDateString()}</small></li>
+                {submissions.filter((item) => item.draftId === draft.id).map((item) => <li key={item.id}><strong>{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
+            </section>
+          </aside>
+        </div>
       </> : screen === "document" && document ? <>
-        <KnowledgeHeading eyebrow="WORKSPACE / PUBLISHED KNOWLEDGE" title={document.title}
-          action={<button type="button" className="secondary-button" onClick={() => setScreen("library")}>Back to library</button>} />
-        <div className="knowledge-inline-meta"><KnowledgeBadge tone="jade">Published</KnowledgeBadge><KnowledgeBadge classification={document.classification}>{document.classification}</KnowledgeBadge>
-          <span>Published {new Date(document.publishedAt).toLocaleString()}</span></div>
-        <div className="knowledge-two-column knowledge-live-published"><article className="knowledge-panel knowledge-live-document">
-          {document.mimeType === "application/pdf" && document.pdfBase64
-            ? <PdfDocument base64={document.pdfBase64} title={document.title} />
-            : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
-              key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
-              instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>}
-        </article><aside className="knowledge-panel knowledge-live-submission"><h2>Publication</h2><dl>
-          <div><dt>Published</dt><dd>{new Date(document.publishedAt).toLocaleString()}</dd></div>
-          <div><dt>Valid from</dt><dd>{new Date(document.validFrom).toLocaleString()}</dd></div>
-          <div><dt>Valid until</dt><dd>{document.validUntil ? new Date(document.validUntil).toLocaleString() : "No end date"}</dd></div>
-          <div><dt>Audience</dt><dd>{document.audienceIds.map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? `${id} (inactive)`).join(", ") || "None"}</dd></div>
-          <div><dt>Content hash</dt><dd className="knowledge-hash">{document.contentHash}</dd></div>
-        </dl></aside></div>
+        <button type="button" className="knowledge-back-button knowledge-live-back" onClick={() => setScreen("library")}>← Library</button>
+        <div className="draft-workspace">
+          <article className="island draft-document" aria-label={document.title}>
+            <div className="draft-document-toolbar"><span className="island-chip has-dot tone-success">Published</span><KnowledgeClassificationChip classification={document.classification} />
+              <span className="island-meta">Published {new Date(document.publishedAt).toLocaleString()}</span></div>
+            <div className="draft-document-body"><h1 className="draft-document-title">{document.title}</h1>
+              {document.mimeType === "application/pdf" && document.pdfBase64
+                ? <PdfDocument base64={document.pdfBase64} title={document.title} />
+                : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+                  key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
+                  instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>}</div>
+          </article>
+          <aside className="island island-panel draft-metadata" aria-labelledby="publication-title"><h2 id="publication-title">Publication</h2>
+            <dl className="island-kv">
+              <dt>Published</dt><dd>{new Date(document.publishedAt).toLocaleString()}</dd>
+              <dt>Valid from</dt><dd>{new Date(document.validFrom).toLocaleString()}</dd>
+              <dt>Valid until</dt><dd>{document.validUntil ? new Date(document.validUntil).toLocaleString() : "No end date"}</dd>
+              <dt>Audience</dt><dd>{audienceNames(document.audienceIds)}</dd>
+              <dt>Content hash</dt><dd className="knowledge-hash">{document.contentHash}</dd>
+            </dl>
+            <p className="island-meta">This is the exact snapshot a reviewer approved. Shown only because your current audiences allow it.</p>
+          </aside>
+        </div>
       </> : <>
-        <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Knowledge" description="Drafts you own and the versions published to you."
+        <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : "Knowledge Library"}
+          description={libraryTab === "drafts" ? "Shared drafts you author. Each submission freezes an exact version for review."
+            : `${published.length} ${published.length === 1 ? "publication" : "publications"} you can read in ${organizationName}`}
           action={<div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
-            <button type="button" className="primary-button" onClick={() => setScreen("create")}>Create draft</button></div>} />
-        <div className="knowledge-live-library-controls"><div role="tablist" aria-label="Knowledge library"><button type="button" role="tab" aria-selected={libraryTab === "drafts"} className={libraryTab === "drafts" ? "is-active" : ""} onClick={() => setLibraryTab("drafts")}>My drafts <span>{drafts.length}</span></button>
-          <button type="button" role="tab" aria-selected={libraryTab === "published"} className={libraryTab === "published" ? "is-active" : ""} onClick={() => setLibraryTab("published")}>Published for me <span>{published.length}</span></button></div>
-          <SearchField value={query} onChange={setQuery} placeholder="Filter titles…" /></div>
-        {libraryTab === "drafts" && (filteredDrafts.length ? <div className="knowledge-live-library-list" aria-label="My drafts">{filteredDrafts.map((item) => {
-          const status = draftStatus(item, latestByDraft.get(item.id));
-          return <button type="button" key={item.id} className="knowledge-live-library-row" onClick={() => openDraft(item.id)} aria-label={`Open ${item.title}`}>
-            <span className="knowledge-live-file-kind" aria-hidden="true">{item.mimeType === "application/pdf" ? "PDF" : "TXT"}</span>
-            <span className="knowledge-live-row-title"><strong>{item.title}</strong><small>v{item.currentVersion} · updated {new Date(item.updatedAt).toLocaleDateString()}</small></span>
-            <span className="knowledge-live-classification" data-classification={item.classification}>{item.classification}</span><span>{departmentName(item.responsibleDepartmentId)}</span>
-            <span className={`knowledge-live-status ${status.tone}`}>{status.label}</span>
-          </button>;
-        })}</div> : <div className="knowledge-empty"><h2>{drafts.length ? "No matching drafts" : "No drafts found"}</h2><p>{drafts.length ? "Try another title." : "Create a draft by writing text or uploading a PDF. It stays yours until you submit a version for review."}</p><button type="button" className="secondary-button" onClick={() => setScreen("create")}>Create draft</button></div>)}
-        {libraryTab === "published" && (filteredPublished.length ? <div className="knowledge-live-library-list" aria-label="Published for me">{filteredPublished.map((item) =>
-          <button type="button" className="knowledge-live-library-row" key={item.id} onClick={() => openPublished(item.id)} aria-label={`Read ${item.title}`}>
-            <span className="knowledge-live-file-kind" aria-hidden="true">{item.mimeType === "application/pdf" ? "PDF" : "TXT"}</span>
-            <span className="knowledge-live-row-title"><strong>{item.title}</strong><small>Published {new Date(item.publishedAt).toLocaleDateString()}</small></span>
-            <span className="knowledge-live-classification" data-classification={item.classification}>{item.classification}</span><span>Approved snapshot</span><span className="knowledge-live-status is-success">Published</span>
+            <button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button>
+            <button type="button" className="primary-button" onClick={() => openCreate("pdf")}><Icon name="plus" size={14} />Create from PDF</button></div>} />
+        <div className="island-seg knowledge-library-tabs" role="tablist" aria-label="Knowledge library">
+          <button type="button" role="tab" aria-selected={libraryTab === "published"} onClick={() => setLibraryTab("published")}>Library<span className="island-badge">{published.length}</span></button>
+          <button type="button" role="tab" aria-selected={libraryTab === "drafts"} onClick={() => setLibraryTab("drafts")}>My Contributions<span className="island-badge">{drafts.length}</span></button>
+        </div>
+        {query.trim() && <p className="island-meta" role="status">Filtering titles for “{query.trim()}”.</p>}
+        {libraryTab === "published" && (filteredPublished.length ? <div className="knowledge-card-grid" aria-label="Published for me">{filteredPublished.map((item) =>
+          <button type="button" className="island knowledge-card" key={item.id} onClick={() => openPublished(item.id)} aria-label={`Read ${item.title}`}>
+            <span className="island-chip-row"><KnowledgeClassificationChip classification={item.classification} /><span className="island-meta">{item.mimeType === "application/pdf" ? "PDF" : "Text"}</span></span>
+            <strong>{item.title}</strong>
+            <span className="knowledge-card-footer"><span className="island-meta">{audienceNames(item.audienceIds)}</span><span className="island-meta">{new Date(item.publishedAt).toLocaleDateString()}</span></span>
           </button>)}</div>
-          : <div className="knowledge-empty"><h2>{published.length ? "No matching publications" : "No accessible publication"}</h2></div>)}
+          : <div className="island island-empty"><h3>{published.length ? "No matching publications" : "No accessible publication"}</h3><p>{published.length ? "Try another title." : "Approved knowledge appears here when one of your audiences may read it."}</p></div>)}
+        {libraryTab === "drafts" && (filteredDrafts.length ? <div className="island-split">
+          <div className="island-main"><IslandTable label="My contributions" minWidth={620} columns="minmax(240px, 1.8fr) minmax(110px, 1fr) 110px minmax(150px, auto)"
+            headers={["DOCUMENT", "DEPARTMENT", "UPDATED", "STATUS"]}>
+            {filteredDrafts.map((item) => {
+              const status = draftStatus(item, latestByDraft.get(item.id));
+              return <IslandRow key={item.id} selected={selectedContributionId === item.id}>
+                <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedContributionId(item.id)} aria-label={`Open details for ${item.title}`}>
+                  <span><strong>{item.title} <span className="island-version">· v{item.currentVersion}</span></strong><small>{item.classification} · {item.mimeType === "application/pdf" ? "PDF" : "Text"}</small></span></button></IslandCell>
+                <IslandCell>{departmentName(item.responsibleDepartmentId)}</IslandCell>
+                <IslandCell className="island-row-cell is-number">{new Date(item.updatedAt).toLocaleDateString()}</IslandCell>
+                <IslandCell><span className={`island-chip has-dot ${chipTone(status.tone)}`}>{status.label}</span></IslandCell>
+              </IslandRow>;
+            })}
+          </IslandTable></div>
+          {selectedContribution && <aside className="island island-panel island-side" aria-labelledby="contribution-title">
+            <div className="island-side-header"><div>
+              <span className="island-chip-row"><span className={`island-chip has-dot ${chipTone(draftStatus(selectedContribution, selectedContributionLatest).tone)}`}>{draftStatus(selectedContribution, selectedContributionLatest).label}</span><span className="island-meta">v{selectedContribution.currentVersion}</span></span>
+              <h2 id="contribution-title">{selectedContribution.title}</h2></div>
+              <button type="button" className="island-icon-button" onClick={() => setSelectedContributionId(null)} aria-label="Close contribution details"><Icon name="close" size={14} /></button></div>
+            {selectedContributionLatest?.decisionComment && <blockquote className="island-box contribution-reason"><strong>Reviewer note</strong><p>{selectedContributionLatest.decisionComment}</p></blockquote>}
+            <dl className="island-kv">
+              <dt>Classification</dt><dd>{selectedContribution.classification}</dd>
+              <dt>Department</dt><dd>{departmentName(selectedContribution.responsibleDepartmentId)}</dd>
+              <dt>Audience</dt><dd>{audienceNames(selectedContribution.audienceIds)}</dd>
+              <dt>Snapshot</dt><dd className="knowledge-hash">{selectedContribution.contentHash}</dd>
+            </dl>
+            <section className="island-detail-section" aria-label="History"><h3>History</h3>
+              <ol className="island-timeline"><li><strong>v{selectedContribution.currentVersion} · working version</strong><small>Updated {new Date(selectedContribution.updatedAt).toLocaleDateString()}</small></li>
+                {submissions.filter((item) => item.draftId === selectedContribution.id).map((item) => <li key={item.id}><strong>{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
+            </section>
+            <div className="island-side-footer contribution-actions"><button type="button" className="primary-button" disabled={busy} onClick={() => openDraft(selectedContribution.id)}>Open draft</button>
+              <span className="island-meta">Private originals stay private; this draft is a separate shared copy.</span></div>
+          </aside>}
+        </div> : <div className="island island-empty"><h3>{drafts.length ? "No matching drafts" : "No contributions yet"}</h3><p>{drafts.length ? "Try another title." : "Create a draft by writing text or uploading a PDF. It stays yours until you submit a version for review."}</p><button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button></div>)}
       </>}
     </div>
     {decisionToConfirm && review && <KnowledgeDialog confirmation title={decisionToConfirm === "APPROVE" ? `Approve ${review.title}?` : `Reject ${review.title}?`}
@@ -431,4 +502,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     </KnowledgeDialog>}
     <ActionToast message={message} onDismiss={() => setMessage("")} />
   </main>;
+}
+
+const statusChipTone: Record<string, string> = { "is-info": "tone-info", "is-success": "tone-success", "is-danger": "tone-danger", "is-attention": "tone-warning" };
+function chipTone(tone: string): string { return statusChipTone[tone] ?? ""; }
+
+const classificationChipTone: Record<KnowledgeClassification, string> = { INTERNAL: "tone-strong", CONFIDENTIAL: "tone-info", RESTRICTED: "tone-danger" };
+function KnowledgeClassificationChip({ classification }: { classification: KnowledgeClassification }) {
+  return <span className={`island-chip ${classificationChipTone[classification]}`}>{classification === "RESTRICTED" && <Icon name="lock" size={11} />}{classification}</span>;
 }

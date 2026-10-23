@@ -16,25 +16,45 @@ type AppSidebarProps = {
   environmentLabel?: string;
   assignedReviewCount?: number;
   canSwitchWorkspace?: boolean;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   onSwitchWorkspace?: () => void;
   onCloseNavigation?: () => void;
   onNavigate: (view: WorkspaceView) => void;
   onSignOut: () => void;
 };
 
-type NavigationItem = {
+export type NavigationItem = {
   label: string;
+  shortLabel: string;
   icon: IconName;
   view?: WorkspaceView;
   planned?: boolean;
 };
 
-const workspaceNavigation: NavigationItem[] = [
-  { label: "My Work", icon: "work", view: "my-work" },
-  { label: "Knowledge", icon: "knowledge", view: "knowledge" },
-  { label: "Review Queue", icon: "review", view: "review-queue" },
-  { label: "Knowledge Handover", icon: "handover", view: "knowledge-handover" },
+export const workNavigation: NavigationItem[] = [
+  { label: "My Work", shortLabel: "My Work", icon: "work", view: "my-work" },
+  { label: "Private Notes", shortLabel: "Notes", icon: "lock", view: "personal-workspace" },
 ];
+
+export const knowledgeNavigation: NavigationItem[] = [
+  { label: "Library", shortLabel: "Library", icon: "knowledge", view: "knowledge" },
+  { label: "Reviews", shortLabel: "Reviews", icon: "review", view: "review-queue" },
+  { label: "Handover", shortLabel: "Handover", icon: "handover", view: "knowledge-handover" },
+  { label: "Integrations", shortLabel: "Integrations", icon: "integrations", planned: true },
+];
+
+export const adminNavigation: NavigationItem = { label: "Administration", shortLabel: "Admin", icon: "organization", view: "organization-access" };
+
+/** Server-backed sessions only reach destinations with connected server workflows. */
+export function navigationDisabled(item: NavigationItem, authenticated: boolean): boolean {
+  if (item.planned) return true;
+  return authenticated && (item.view === "my-work" || item.view === "knowledge-handover");
+}
+
+export function initialsOf(label: string): string {
+  return label.split(/[\s.@]+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+}
 
 export function AppSidebar({
   activeView,
@@ -50,93 +70,78 @@ export function AppSidebar({
   environmentLabel,
   assignedReviewCount,
   canSwitchWorkspace = false,
+  collapsed = false,
+  onToggleCollapsed,
   onSwitchWorkspace,
   onCloseNavigation,
   onNavigate,
   onSignOut,
 }: AppSidebarProps) {
+  const organizationName = organizationLabel ?? organization?.name ?? "FPT Digital";
+  const sessionLabel = environmentLabel ?? (authenticated ? "Signed in" : "Preview");
+  const navButton = (item: NavigationItem) => {
+    const active = item.view === activeView;
+    const reviewCount = item.view === "review-queue" ? assignedReviewCount : undefined;
+    const disabled = navigationDisabled(item, authenticated);
+    return (
+      <button
+        key={item.label}
+        type="button"
+        className={`sidebar-nav-item${active ? " is-active" : ""}`}
+        onClick={() => { if (item.view) onNavigate(item.view); }}
+        disabled={disabled}
+        aria-label={reviewCount !== undefined ? `${item.label}, ${reviewCount} assigned` : item.planned ? `${item.label} — not connected` : item.label}
+        aria-current={active ? "page" : undefined}
+        title={item.planned ? `${item.label} is not connected yet` : item.label}
+      >
+        <Icon name={item.icon} size={18} />
+        <span className="sidebar-nav-label"><span className="nav-label-full">{item.label}</span><span className="nav-label-short" aria-hidden="true">{item.shortLabel}</span></span>
+        {reviewCount !== undefined && reviewCount > 0 && <small className="sidebar-review-count">{reviewCount}</small>}
+        {item.planned && <small className="sidebar-planned">Planned</small>}
+      </button>
+    );
+  };
+
   return (
-    <aside id="arden-primary-navigation" className="app-sidebar" aria-label="Main navigation">
+    <aside id="arden-primary-navigation" className={`app-sidebar${collapsed ? " is-collapsed" : ""}`} aria-label="Main navigation">
       <div className="sidebar-brand">
-        <span className="sidebar-brand-mark" aria-hidden="true"><Icon name="knowledge" size={24} /></span>
+        <span className="sidebar-brand-mark" aria-hidden="true"><Icon name="knowledge" size={20} /></span>
         <span>ARDEN</span>
-        <small>{environmentLabel ?? (!authenticated ? "PREVIEW" : null)}</small>
-        <button type="button" className="sidebar-mobile-close" aria-label="Close navigation" onClick={onCloseNavigation}>×</button>
+        <small>{sessionLabel.toUpperCase()}</small>
+        <button type="button" className="sidebar-mobile-close" aria-label="Close navigation" onClick={onCloseNavigation}><Icon name="close" size={18} /></button>
       </div>
 
       <button type="button" className="access-card" disabled={!canSwitchWorkspace} onClick={onSwitchWorkspace}
-        aria-label={`Workspace: ${organizationLabel ?? organization?.name ?? "FPT Digital"}${canSwitchWorkspace ? ". Switch workspace" : ""}`}>
-        <span className="access-card-mark" aria-hidden="true">{(organizationLabel ?? organization?.name ?? "FPT DIGITAL").split(/\s+/).map((part) => part[0]).slice(0, 2).join("")}</span>
-        <span className="access-card-copy"><strong id="access-card-title">{organizationLabel ?? organization?.name ?? "FPT DIGITAL"}</strong>
-          <span>{authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`}</span></span>
+        aria-label={`Workspace: ${organizationName}${canSwitchWorkspace ? ". Switch workspace" : ""}`} title={organizationName}>
+        <span className="access-card-mark" aria-hidden="true">{initialsOf(organizationName)}</span>
+        <span className="access-card-copy"><strong id="access-card-title">{organizationName}</strong>
+          <span>{authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`} · {sessionLabel}</span></span>
+        {canSwitchWorkspace && <span className="access-card-switch" aria-hidden="true"><Icon name="expand" size={14} /></span>}
       </button>
 
       <nav className="sidebar-navigation" aria-label="Workspace">
-          <span className="meta-label navigation-label">WORKSPACE</span>
-        {workspaceNavigation.map((item) => {
-          const active = item.view === activeView;
-          return (
-            <button
-              key={item.label}
-              type="button"
-              className={`sidebar-nav-item${active ? " is-active" : ""}`}
-              onClick={() => { if (item.view) onNavigate(item.view); }}
-              disabled={item.planned || (authenticated && item.view !== "knowledge" && item.view !== "review-queue")}
-              aria-label={item.label === "Review Queue" && assignedReviewCount !== undefined ? `Review Queue, ${assignedReviewCount} assigned` : item.label}
-              aria-current={active ? "page" : undefined}
-              title={authenticated && item.view === "knowledge" ? "View server draft and labeled sample library" : item.planned ? `${item.label} is not connected yet` : item.label}
-            >
-              <Icon name={item.icon} size={16} />
-              <span>{item.label}</span>
-              {item.label === "Review Queue" && assignedReviewCount !== undefined && assignedReviewCount > 0 && <small className="sidebar-review-count">{assignedReviewCount}</small>}
-              {item.planned && <small>Planned</small>}
-            </button>
-          );
-        })}
-
-        <span className="meta-label navigation-label">PERSONAL</span>
-        <button
-          type="button"
-          className={`sidebar-nav-item${activeView === "personal-workspace" ? " is-active" : ""}`}
-          onClick={() => onNavigate("personal-workspace")}
-          aria-label="Personal Workspace"
-          title="Personal Workspace"
-          aria-current={activeView === "personal-workspace" ? "page" : undefined}
-        >
-          <Icon name="lock" size={16} />
-          <span><span className="nav-label-full">Personal Workspace</span><span className="nav-label-short" aria-hidden="true">Notes</span></span>
-        </button>
-        <button type="button" className="sidebar-nav-item" disabled title="Integrations are not connected" aria-label="Integrations — not connected">
-          <Icon name="integrations" size={16} /><span>Integrations</span><small>Planned</small>
-        </button>
-
-        {((previewRole === "admin" && !authenticated) || showAdmin) && (
-          <>
-            <span className="meta-label navigation-label">MANAGE</span>
-            <button
-              type="button"
-              className={`sidebar-nav-item${activeView === "organization-access" ? " is-active" : ""}`}
-              onClick={() => onNavigate("organization-access")}
-              aria-label="Organization & Access"
-              title="Organization & Access"
-              aria-current={activeView === "organization-access" ? "page" : undefined}
-            >
-              <Icon name="organization" size={16} />
-              <span><span className="nav-label-full">Administration</span><span className="nav-label-short" aria-hidden="true">Admin</span></span>
-            </button>
-          </>
-        )}
+        <span className="meta-label navigation-label">WORK</span>
+        {workNavigation.map(navButton)}
+        <span className="meta-label navigation-label">KNOWLEDGE</span>
+        {knowledgeNavigation.map(navButton)}
+        {((previewRole === "admin" && !authenticated) || showAdmin) && <>
+          <span className="meta-label navigation-label">MANAGE ORGANIZATION</span>
+          {navButton(adminNavigation)}
+        </>}
       </nav>
 
       <div className="sidebar-session">
-        <div className="sidebar-member">
-          <span className="sidebar-avatar" aria-hidden="true">{memberName.split(/\s+/).map(part => part[0]).slice(0, 2).join("")}</span>
+        {onToggleCollapsed && <button type="button" className="sidebar-nav-item sidebar-collapse" onClick={onToggleCollapsed}
+          aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} aria-expanded={!collapsed} aria-controls="arden-primary-navigation" title={collapsed ? "Expand navigation" : "Collapse navigation"}>
+          <Icon name="sidebar" size={18} /><span className="sidebar-nav-label">Collapse</span>
+        </button>}
+        <div className="sidebar-member" title={`${memberName} · ${memberRole}`}>
+          <span className="sidebar-avatar" aria-hidden="true">{initialsOf(memberName)}</span>
           <div><strong>{memberName}</strong><span>{memberRole}</span></div>
         </div>
-        <span>{platform === "desktop" ? "WINDOWS" : "WEB"} · {authenticated ? "SIGNED IN" : "SAMPLE SESSION"}</span>
-        <button type="button" onClick={onSignOut} aria-label={authenticated ? "Sign out" : "Exit preview"}>
-          <Icon name="logout" size={15} />
-          <span><span className="nav-label-full">{authenticated ? "Sign out" : "Exit preview"}</span><span className="nav-label-short" aria-hidden="true">Exit</span></span>
+        <span className="sidebar-platform">{platform === "desktop" ? "WINDOWS" : "WEB"} · {authenticated ? "SIGNED IN" : "SAMPLE SESSION"}</span>
+        <button type="button" className="sidebar-sign-out" onClick={onSignOut} aria-label={authenticated ? "Sign out" : "Exit preview"} title={authenticated ? "Sign out" : "Exit preview"}>
+          <Icon name="logout" size={16} />
         </button>
       </div>
     </aside>
