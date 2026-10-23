@@ -1,148 +1,102 @@
 ---
 name: Arden
-description: Living Archive, a dark workspace with measured color for private organizational knowledge and work context.
+description: Island system, a graphite workspace with one violet accent and floating, morphing chrome for private organizational knowledge and work context.
 colors:
-  charcoal: "#1b1f21"
-  warm: "#f2ece2"
-  mist: "#c8cfd5"
-  stone: "#929698"
-  canvas: "#1b1f21"
-  sidebar: "#171b1d"
-  surface: "#212629"
-  elevated: "#292f33"
-  line: "#30373c"
-  strong-line: "#68737c"
-  control-border: "#85929e"
-  text-muted: "#a8b3bd"
-  amber: "#e6b66e"
-  amber-hover: "#f0c78a"
-  jade: "#9bcfaf"
-  blue: "#8cbaea"
-  danger: "#e5a0a0"
+  bg-app: "#101014"
+  bg-sidebar: "#15151a"
+  surface: "#1c1c23"
+  surface-raised: "#25252e"
+  surface-hover: "white 4%"
+  border: "#303039"
+  border-strong: "#6a6976"
+  text-primary: "#f2f1f7"
+  text-secondary: "#a5a4b1"
+  text-muted: "#8c8b98"
+  text-disabled: "#777683"
+  accent: "#8b82f6"
+  accent-hover: "#a69eff"
+  accent-subtle: "violet 14%"
+  text-on-accent: "#101014"
+  success: "#7fcfa3"
+  warning: "#e3b26b"
+  danger: "#f2938a"
+  info: "#7eb0f0"
 typography:
-  family: "DM Sans, Segoe UI, sans-serif"
-  heading-family: "Sora, Segoe UI, sans-serif"
-  headline: "30px / 1.2, weight 600"
-  section: "22px / 1.3, weight 600"
-  body: "14px / 1.6"
+  family: "Inter, Segoe UI, sans-serif"
+  heading-family: "Inter Tight, Inter, Segoe UI, sans-serif"
+  headline: "34px / 1.2, weight 600, -0.03em"
+  section: "15–18px / 1.3, weight 600"
+  body: "14px / 1.55"
   metadata: "12px / 1.5"
 rounded:
-  small: "4px"
-  medium: "6px"
-  large: "8px"
+  chip: "6px"
+  control: "8px"
+  island: "12px"
+  panel: "16px"
 spacing:
   compact: "8px"
-  small: "12px"
+  shell-gap: "12px"
   medium: "16px"
   section: "24px"
-  page: "32px"
 ---
 
 # Design system: Arden
 
 ## Direction
 
-The original 4 October 2026 **Living Archive** foundation follows [Figma page 06 Redesign — Living Archive](https://www.figma.com/design/UmW5qb5cTWo6lwMYZ4Z9bC/Arden?node-id=147-2). On 13 October the user accepted a deeper charcoal/ivory workspace reference, first for My Work and then for every workspace tab. The metadata above records the current workspace palette. Authentication/onboarding retain the original palette; do not restyle those screens merely by changing root tokens.
+On 23 October 2026 the user accepted the **Island system** ([design canvas](https://claude.ai/code/artifact/78a3072a-46d4-4575-a1a6-65ff52221b89)) for every workspace destination. It supersedes the 13 October charcoal/ivory/amber workspace palette and the Sora/DM Sans workspace typography. Authentication/onboarding retain their original appearance; do not restyle those screens by changing root tokens.
 
-Use the shared workspace tokens for canvas, surfaces and dividers. Muted blue carries navigation/selection and source context; amber carries primary actions and attention; sage carries success and connections; muted red carries errors and risk. Pair every status color with a visible label or icon. These accents do not justify gradients, rainbow decoration or fabricated analytics. Keep existing brand explorations separate from the accepted Figma icon assets.
+The palette is low-saturation graphite with one violet accent. Violet marks only the active place, the primary action, AI work and focus. Everything else is told apart by tone, not colour. Status colours (sage success, amber warning, coral danger, blue info) each have a 12% `subtle` fill and 30% border for chips and never mean "selected". Pair every status colour with a visible label or icon. No gradients, glows, rainbow decoration or fabricated analytics.
 
-The implemented UI combines live authentication, server-backed private notes and governed shared knowledge with session-memory previews for My Work and handover. Signed-in members can create text or PDF drafts, edit governance metadata, submit a version for review, and see authorized publications; assigned reviewers can decide an immutable snapshot. Preview content stays labeled and never represents a server write. Ask Arden and the graph remain deferred. Native SVGs exported from the accepted Figma design are local decorative/interface assets, not fetched knowledge projections. [Mainflow 1 preview](docs/engineering/mainflow-1-preview.md) records the earlier demonstration and its then-current boundaries.
+Depth comes from tone: each layer is one step lighter (app → sidebar → surface → raised) plus a 1px border. Only floating islands (status island, detail and form islands, dialogs, mobile tab bar) carry the soft island shadow.
 
-## Typography and geometry
+Tokens live in `packages/ui/src/styles/island-shell.css` under `.arden-app-shell`. Components read the semantic `--arden-*` names there; the earlier `--arden-canvas`, `--arden-accent`, etc. are re-pointed aliases so older rules keep working. A future light theme swaps only the semantic layer.
 
-Interface icons use Flaticon Uicons Regular Rounded through the shared `Icon`
-adapter. Use briefcase for work, book for knowledge/context, clipboard-check for reviews, exchange for handover, lock for private content,
-users for administration and plug for integrations. Generic arrows remain
-navigation controls, not workflow identifiers. Keep inherited semantic colors,
-consistent sizing and accessible button labels; decorative glyphs are hidden from
-screen readers. The free-license attribution remains visible on every screen.
-This does not adopt a new brand mark or replace the rich editor's own toolbar icons.
+The implemented UI combines live authentication, server-backed private notes, governed shared knowledge and Organization administration with session-memory previews for My Work and handover. Preview content stays labelled and never represents a server write. Ask Arden and the graph remain deferred. [Mainflow 1 preview](docs/engineering/mainflow-1-preview.md) records the earlier demonstration and its then-current boundaries.
 
-Use Sora for headings and DM Sans for body, controls and metadata, with Segoe UI/sans-serif fallbacks. The variable TTF files and their OFL notices live in `packages/ui/src/assets/fonts/`; `@font-face` bundles them through Vite without runtime requests to a font service. Redesigned workspace page titles use 28px, section headings 15–18px, body text 14px and metadata typically 12px. Sign-in has a larger editorial heading. Use heading weight 600, restrained tracking and tabular figures for counts. Wrap long note titles instead of hiding the selected title in a single-line input.
+## Typography, icons and geometry
 
-The server-backed shared-knowledge `Document text` field keeps the existing dark bordered writing surface and adds one compact toolbar inside that boundary. Users may choose Normal, Large or Heading text and apply bold, italic, underline, strike, inline code, bullet/numbered lists and quotes. Arden owns the typography: do not expose font family, arbitrary color, background color, remote embeds, files or decorative formatting. The same validated document formatting must appear in authoring, immutable review and published reading. Legacy plain text remains readable, disabled/pending editors retain their formatting without appearing editable, and the toolbar must wrap without horizontal page overflow at narrow widths.
+Inter (body, controls, metadata) and Inter Tight (headings) are bundled through the pinned `@fontsource-variable/inter` and `@fontsource-variable/inter-tight` packages (OFL-1.1) and served locally by Vite; there is no runtime font-service request. They include Vietnamese diacritics. Page titles are 34px Inter Tight 600 with -0.03em tracking, section headings 15–18px, body 14px and metadata 12px. Use tabular figures for counts.
 
-Corners remain square with small softening: 4px for small controls, 6px for buttons/navigation and 8px for major containers. Avoid card nesting when spacing and a divider can express the same relationship. Shadows are unnecessary on ordinary dark workspace surfaces.
+Interface icons use Flaticon Uicons Regular Rounded through the shared `Icon` adapter: briefcase for work, book for knowledge, clipboard-check for reviews, exchange for handover, lock for private content, users for administration, plug for integrations, shield for reviewer authority and sidebar for collapsing navigation. Decorative glyphs are hidden from screen readers and the free-licence attribution stays visible on every screen.
 
-The primary workspace sidebar follows the redesign handoff: 248px on wide layouts, 224px at 900–1199px, and a 64px accessible icon rail at 640–899px. Below 640px it becomes a 280px overlay opened from the top bar, with a scrim and Escape-to-close behavior. Keep the sidebar scrollbar visually hidden at rest and reveal it on sidebar hover or keyboard focus without changing the content width.
+Radii: 6px chips, 8px controls, 12px islands and inner boxes, 14–16px panels. Control heights: 28px (island actions, inner tabs), 32px (default buttons, inputs, filters, nav items), 36px (one primary action per page), 44px+ touch targets on phones.
 
-The redesigned shell, Administration and Knowledge surfaces use dividers, flat tints and a scrim for depth rather than box-shadows. Hover and focus states change background and border without moving controls; reduced-motion preferences remain respected elsewhere in the workspace.
+The server-backed `Document text` field keeps one compact formatting toolbar (Normal/Large/Heading, bold, italic, underline, strike, inline code, lists, quote). Arden owns the typography: no font family, arbitrary colour, background colour, remote embeds or files. The same validated formatting appears in authoring, immutable review and published reading.
 
-## Shell and responsive behavior
+## Shell
 
-The desktop shell has a flexible workspace. Context starts collapsed and occupies no rail; opening it adds a 320px Context pane inline only when the measured workspace width after the sidebar is at least 1100px. Otherwise Context overlays the workspace, with a scrim; on mobile it may take the full width. The top bar remains 56px high and shows structured breadcrumbs. The Review Queue nav item displays the assigned review count when server data is available.
+- **Navigation island** — a 256px rounded panel (bg-sidebar) with the organization button, WORK (My Work, Private Notes), KNOWLEDGE (Library, Reviews with assigned count, Handover, planned Integrations) and MANAGE ORGANIZATION (Administration, admins only). A Collapse control shrinks it to a 72px icon rail; labels remain accessible names and tooltips.
+- **Status island** — centred in the 64px top bar. Idle (380×44): organization mark and breadcrumb, plus a Ctrl K trigger when the page provides a search. Search (600×52): the page's own search field; Esc or blur closes it unless it holds a value. Toast (480×58): every `ActionToast` is announced here through `StatusIslandContext`, with dismiss. It morphs width/height/radius over 500ms `cubic-bezier(.32,.72,0,1)`; reduced motion makes it instant. The island search only searches what the page says it searches (e.g. the priority queue) — never imply a global search that does not exist.
+- The preview/server label and the Context toggle stay at the right of the top bar. The Context pane is a 320px island, collapsed by default and occupying no space; it opens inline when the workspace is at least 1100px wide, otherwise as an overlay with a scrim.
+- Shell gap is 12px around and between islands. The page header and top bar stay fixed while the content region scrolls.
 
-Every primary workspace destination uses the shared page header for its eyebrow, title, description and optional action. The workspace top bar and page header remain visible while only the content region below them scrolls; body scrolling must not move shell navigation or page identity. Keep this split consistent across My Work, Knowledge, Review Queue, Knowledge Handover, Personal Workspace and Organization administration, including narrow layouts.
+## Pages
 
-The workspace is an inline-size query container. Below 760px **of available workspace width**, My Work sections stack; the note layout stacks below 640px. This depends on the actual content width rather than the viewport alone, so opening a pane cannot push editor controls beneath it. Below 500px of content width, compact forms and organization rows stack further.
-
-Below 640px, the top-bar hamburger opens the sidebar over the workspace. Private notes show either the list or the editor. Selecting or creating a note opens the editor and hides the introductory heading/search so writing starts sooner; Back to notes restores the list and New private note action without discarding a draft. The collapsed Context pane occupies no mobile space; opening it overlays the workspace and closing it returns focus to the Context control. Organization tables, setup steps, dialogs and knowledge layouts must reflow without hiding required actions.
-
-On mobile sign-in, keep the brand and a compact introduction above the form. The long desktop explanation is omitted so the form appears sooner.
-
-## My Work and context
-
-My Work uses the accepted reference's deeper charcoal canvas (#1B1F21), ivory text
-(#F2ECE2), muted blue selection, amber urgency, sage success and muted red risk.
-The palette now applies to every workspace destination through
-`styles/workspace-theme.css`: Knowledge, Review Queue, Handover,
-Personal Workspace and Organization administration as well as My Work.
-Authentication/onboarding retain their existing appearance. Blue denotes
-navigation/selection; amber remains an action/attention color, sage indicates
-success and muted red indicates risk. Keep each feature's functional layout:
-editor, context/answer, review queue, handover and role rail are not dashboard
-copies. Retain the shared fixed page header/scroll contract and
-collapsed-by-default context pane. Selection, readable surfaces, keyboard
-focus, search controls and preview badges must stay consistent across tabs.
-
-Priority queue is the main section. Place the full-width queue search above three
-compact status cards, then use a wide priority column beside a narrower activity
-surface (recent publications, handover risk and a private-workspace shortcut).
-The runbook is a queue row, not a separate oversized spotlight. Rows show a
-semantic color edge, status text, metadata and assignee; color alone is never a
-status label. Type/status filters combine with queue search and preserve urgency
-order. Search only filters the sample priority queue, not every document or
-activity. The sample status summary remains a whole-workspace summary while
-filtered. Do not restore explanatory subtitles from the reference. Reflow by
-available workspace width when context opens, with stacked activity on narrow
-layouts and no horizontal page overflow. This remains sample UI, not live work
-counts, real assignee data or server filtering.
-
-The Knowledge Pane retains visible access scope. In Personal Workspace it follows the selected note's draft title. Do not display AI assistance disclosures or an Ask Arden composer while Flow 3 is deferred. Keep preview/sample labels and explain unavailable features without internal ticket IDs or API names in primary actions.
-
-In the sample knowledge workflow, the editor must reflect the immutable snapshot's lifecycle: after approval and automatic sample publication, an unchanged working copy shows **Published · Sample** instead of offering another submission. Editing that copy may start a new reviewable version; it never edits the published snapshot in place. These preview states do not imply server publication or audit records.
+- **Page header** — eyebrow (11px, 0.08em), 34px title, one-line description, optional primary action.
+- **Lists** are islands of grid rows (`IslandTable`), which keep ARIA table/row/cell semantics. Headers are 11px muted capitals; selected rows use accent-subtle. Below 640px of workspace width the rows become stacked cards and the header is visually hidden.
+- **Detail islands** open beside a list (Members, Departments, Audiences, My Contributions) and slide in; focus moves to their heading and returns to the opener on close; Escape closes. Below 640px they stack under the list.
+- **Segmented islands** carry section tabs (Administration, Library/My Contributions) and status filters, with counts.
+- **Administration** — Members (list + member detail with access, primary department, reviewer authority and audience chips), Departments (list + managed audience detail), Audiences (Organization / Departments managed by Arden, Groups managed by Org Admins, detail island to edit groups and members), Invitations (status filters + list + Invite form island), Reviewer access (Active/Inactive + grant list + New grant form island). Values the server does not provide (last active, publication counts) are not invented.
+- **My Work** — Priority queue island with type/status filters and row actions, beside Recently published, Handover at risk and a Private Notes card. Sample data stays labelled; island search filters only the queue.
+- **Private Notes** — a note-list island (sidebar tone, search, new note) beside an editor island with an "Only you" chip, save state, Contribute copy and Save. Below 760px of workspace width only the list or the editor shows, with Back to notes.
+- **Knowledge** — Library as publication cards; My Contributions as a list with a detail island (status, reviewer note, metadata, history, Open draft); the draft editor as a document island beside a "Before you submit" metadata island; Reviews as a queue beside the immutable submission with frozen details and a decision bar (reason required to request revision or reject; approval publishes the exact snapshot).
+- **Phones (<640px)** — a compact status island and menu button at the top, and a bottom tab island (My Work, Notes, Library, Reviews, Admin for admins). The menu drawer keeps every other destination and sign-out.
 
 ## Private-note draft contract
 
-Keep drafts separately for each note in shell-owned session memory. Switching notes, creating another note or navigating to My Work must preserve existing drafts. Saving applies only the selected draft to the in-memory preview; other drafts survive. Show unsaved state in both the editor and the list. Exiting with unsaved work opens an accessible discard confirmation; refreshing/closing gets the browser's unload warning. Switching the demo member identity also guards unsaved private drafts and resets the private-note session before rendering the other member's workspace. Exiting resets notes, drafts and organization state.
+Keep drafts separately for each note in shell-owned session memory. Switching notes, creating another note or navigating to My Work must preserve existing drafts. Saving applies only the selected draft; other drafts survive. Show unsaved state in both the editor and the list. Exiting with unsaved work opens an accessible discard confirmation; refreshing/closing gets the browser's unload warning. Switching the demo member identity also guards unsaved private drafts. Exiting resets notes, drafts and organization state.
 
-This is not persistence, authentication, offline synchronization or authorization. Do not write private notes to browser storage to make a UI demonstration look persistent. Real content still requires server authorization and an accepted storage design.
+This is not persistence, authentication, offline synchronization or authorization. Do not write private notes to browser storage to make a demonstration look persistent.
+
+In the sample knowledge workflow, an unchanged working copy that was approved shows **Published · Sample**; editing it may start a new reviewable version and never edits the published snapshot in place.
 
 ## Future graph surface (planned)
 
-The planned graph home keeps the network dominant within its workspace, with a restrained dot grid, Zoom/Fit controls and a Knowledge Pane for the selected item's identity, provenance, freshness, context and connections. Preserve the shape grammar: shared items use solid-outline circles, personal items dashed-outline circles and external items squares. Neutral fills, visible text labels and a legend accompany those shapes. Adapt selection to the dark palette with warm emphasis and a visible halo; strengthen selected connections before fading unrelated marks, and keep item names legible. Respect reduced motion.
-
-At narrow widths, provide a selected-item summary and a direct navigable item list alongside the pannable graph. Canvas interaction must have a keyboard-accessible alternative. Sample nodes and unavailable actions remain clearly labeled. These are retained design requirements for future implementation, not a claim that this preview ships a graph.
+The planned graph home keeps the network dominant within its workspace, with a restrained dot grid, Zoom/Fit controls and a Knowledge Pane for the selected item's identity, provenance, freshness, context and connections. Shared items use solid-outline circles, personal items dashed-outline circles and external items squares, with neutral fills, visible labels and a legend. Selection uses the violet accent with a visible halo. At narrow widths provide a selected-item summary and a navigable item list; canvas interaction needs a keyboard-accessible alternative. These are requirements for future work, not a claim that the preview ships a graph.
 
 ## Accessibility and verification
 
-Routine screens use concise titles, field labels and functional metadata, without
-explanatory subtitles, repeated helper paragraphs or implementation footnotes.
-Preserve document/answer content, errors, loading/save states, required action
-warnings and confirmation consequences. Sample/server/planned badges remain
-visible so reducing copy never implies live functionality. Permission switches
-retain accessible names even without visible descriptions; remove dangling
-`aria-describedby` references when removing helper text. Do not hide copy globally
-with CSS or remove all `small`/`p` elements: many contain actual data or feedback.
+Text meets 4.5:1 on its surface (text.muted is tuned to 5.1:1; border.strong gives inputs 3.1:1). Focus is a 2px accent-hover ring with 2px offset; inside the status island the island border shows focus. Use real buttons, links and labelled inputs; icon-only buttons have accessible names. Keep sample/server/planned badges visible so reduced copy never implies live functionality. Native dialogs keep focus inside and restore it on dismissal.
 
-Custom-role configuration uses a flat two-column role rail/editor, with Details,
-Permissions and Members sections, permission switches, search and a Save/Reset
-bar. Blue marks selection and jade marks enabled switches. At narrow workspace
-widths the rail stacks above the editor. Private defaults and protected management
-rights are not editable switches. In a signed-in administration session, custom-role
-changes use server APIs; the preview flow remains visibly synthetic. See
-[custom-role UI boundary](docs/engineering/custom-role-ui-preview.md) for the earlier preview contract.
-
-Use stable accessible search names independent of shortcut hints and clear buttons. All editable fields must retain visible keyboard focus. Active navigation must remain legible on hover. Redesigned controls use a blue 2px focus ring, 40px main actions, reduced-motion rules and a skip-to-content link. Native dialog confirmation keeps focus inside the dialog and restores focus on dismissal.
-
-Check 1440px desktop, 1024px narrow windows, 390px/320px mobile, long content and 200% zoom/reflow. Check expanded and collapsed context, mobile editor/back navigation, note switching, save/reset/exit, empty search and keyboard access. Shared UI must be checked in web and Electron; a successful build alone does not prove native behavior.
+Check 1440px desktop, 1024px, the 640–899px icon rail, 375px/320px phones, long content and 200% zoom. Check island search/Esc, toasts, detail islands open/close, collapsed navigation, expanded and collapsed Context, note switching and keyboard access. Shared UI must be checked in web and Electron; a successful build alone does not prove native behaviour.

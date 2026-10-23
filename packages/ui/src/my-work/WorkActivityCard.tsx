@@ -6,18 +6,24 @@ export function WorkActivityCard({ recentItems, onOpenPrivateNotes, onOpenKnowle
   onOpenKnowledge?: () => void;
   onOpenHandover?: () => void;
 }) {
-  return <aside className="my-work-activity" aria-label="Workspace activity">
-    <section aria-labelledby="recently-published-title">
-      <div className="my-work-activity-heading"><h2 id="recently-published-title">Recently published</h2><button type="button" onClick={onOpenKnowledge} disabled={!onOpenKnowledge}>View all <Icon name="arrow" size={14} /></button></div>
-      {recentItems.map(([title, meta]) => <button type="button" className="my-work-activity-row" key={title} onClick={onOpenKnowledge} disabled={!onOpenKnowledge}><span className="my-work-icon-tile"><Icon name="document" size={21} /></span><span><strong>{title}</strong><span>{meta}</span></span></button>)}
+  return <aside className="my-work-side" aria-label="Workspace activity">
+    <section className="island my-work-card" aria-labelledby="recently-published-title">
+      <div className="my-work-card-heading"><h2 id="recently-published-title">Recently published</h2>
+        <button type="button" className="island-link-button" onClick={onOpenKnowledge} disabled={!onOpenKnowledge}>Library</button></div>
+      <ul className="my-work-rows">{recentItems.map(([title, meta]) => <li key={title} className="my-work-row is-compact">
+        <button type="button" className="my-work-row-link" onClick={onOpenKnowledge} disabled={!onOpenKnowledge}><strong>{title}</strong><span>{meta}</span></button></li>)}</ul>
     </section>
-    <section aria-labelledby="handover-risk-title">
-      <div className="my-work-activity-heading"><h2 id="handover-risk-title">Handover at risk</h2><button type="button" onClick={onOpenHandover} disabled={!onOpenHandover}>View all <Icon name="arrow" size={14} /></button></div>
-      <button type="button" className="my-work-activity-row tone-red" onClick={onOpenHandover} disabled={!onOpenHandover}><span className="my-work-icon-tile"><Icon name="handover" size={21} /></span><span><strong>Operations ownership</strong><span>3 assets · Missing owner</span></span></button>
+    <section className="island my-work-card" aria-labelledby="handover-risk-title">
+      <div className="my-work-card-heading"><h2 id="handover-risk-title">Handover at risk</h2>
+        <button type="button" className="island-link-button" onClick={onOpenHandover} disabled={!onOpenHandover}>Handover</button></div>
+      <ul className="my-work-rows"><li className="my-work-row is-compact">
+        <button type="button" className="my-work-row-link" onClick={onOpenHandover} disabled={!onOpenHandover}><strong>Operations ownership</strong><span>3 assets · Missing owner</span></button>
+        <span className="island-chip has-dot tone-danger">At risk</span></li></ul>
     </section>
-    <section aria-labelledby="my-work-private-title">
-      <div className="my-work-activity-heading"><h2 id="my-work-private-title">Personal workspace</h2><Icon name="lock" size={16} /></div>
-      <button type="button" className="my-work-activity-row tone-green" onClick={onOpenPrivateNotes}><span className="my-work-icon-tile"><Icon name="lock" size={21} /></span><span><strong>Questions for architecture review</strong><span>Personal · Private</span></span></button>
+    <section className="my-work-private" aria-labelledby="my-work-private-title">
+      <div className="my-work-card-heading"><span className="island-tile" aria-hidden="true"><Icon name="lock" size={15} /></span><h2 id="my-work-private-title">Private Notes</h2></div>
+      <p>Only you can open these. They stay out of shared search and AI answers.</p>
+      <button type="button" className="secondary-button" onClick={onOpenPrivateNotes}>Open Private Notes</button>
     </section>
   </aside>;
 }
