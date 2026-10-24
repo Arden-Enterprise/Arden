@@ -394,6 +394,45 @@
 .auth-account-email { display: block; margin: 9px 0 24px; color: var(--arden-text-muted); font-size: 12px; text-align: center; }
 .auth-password-card .auth-card-main { margin-bottom: 7px; }
 
+.auth-message.is-success {
+  border-color: rgba(128, 197, 184, .34);
+  color: #a5dcd0;
+  background: rgba(128, 197, 184, .07);
+}
+
+.auth-footer-links {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.auth-text-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--arden-text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 140ms ease;
+}
+
+.auth-text-link:hover {
+  color: var(--arden-accent);
+}
+
+.auth-helper-text {
+  margin: 0;
+  color: var(--arden-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 @media (max-width: 920px) {
   .auth-ambient { inset: -14vmax; opacity: .72; }
   .auth-entry-content { padding-inline: 32px; }
