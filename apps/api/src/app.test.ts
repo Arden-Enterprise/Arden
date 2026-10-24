@@ -97,6 +97,7 @@ describe("API auth and private draft routes", () => {
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
       classification: "INTERNAL", targetScopeType: "ORGANIZATION",
     }];
+    askArden.sourceBlockIds = ["pdf-page-2", "pdf-page-2-heading"];
     const session = await desktopSession(app, "owner@example.test");
     const response = await app.inject({
       method: "POST", url: `/api/v1/organizations/${organizationId}/ai/answers`,
@@ -105,7 +106,7 @@ describe("API auth and private draft routes", () => {
     expect(response.statusCode).toBe(200);
     expect(askArden.lastRequest?.allowedGenerationIds).toEqual([generationId]);
     expect(response.json()).toMatchObject({ status: "ANSWERED", citations: [{
-      documentId: sharedDraftId, versionId, blockId: "mfa", title: "Security policy",
+      documentId: sharedDraftId, versionId, blockId: "pdf-page-2", page: 2, title: "Security policy",
       version: "v3", scope: "Company-wide", classification: "INTERNAL",
     }] });
   });
@@ -998,6 +999,7 @@ class MemorySystemAdministrationStore implements SystemAdministrationStore {
 class FakeAskArdenClient implements AskArdenClient {
   lastRequest: AiAnswerRequest | null = null;
   onAnswer: (() => void) | null = null;
+  sourceBlockIds = ["mfa"];
 
   async answer(request: AiAnswerRequest): Promise<AiAnswerResponse> {
     this.lastRequest = request;
@@ -1012,7 +1014,7 @@ class FakeAskArdenClient implements AskArdenClient {
         snapshotVersionId: sharedVersionId,
         snapshotContentHash: "a".repeat(64),
         chunkId: "b".repeat(64),
-        sourceBlockIds: ["mfa"],
+        sourceBlockIds: this.sourceBlockIds,
         parentSectionBlockId: null,
         excerpt: "All team members must use MFA.",
       }],

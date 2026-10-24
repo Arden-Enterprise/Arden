@@ -112,7 +112,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation }: AskAr
                 key={`${citation.documentId}:${citation.versionId}:${citation.blockId ?? "source"}`}
                 onClick={() => onOpenCitation?.(citation)} disabled={!onOpenCitation}
                 aria-label={`Open source ${index + 1}: ${citation.title}, ${citation.version}`}>
-                <span>{index + 1}</span><div><strong>{citation.title}</strong><small>{citation.version} · {citation.scope}</small></div>
+                <span>{index + 1}</span><div><strong>{citation.title}</strong><small>{citation.version}{citation.page ? ` · Page ${citation.page}` : ""} · {citation.scope}</small></div>
                 <Icon name="arrow" size={13} />
               </button>)}
             </div>}
