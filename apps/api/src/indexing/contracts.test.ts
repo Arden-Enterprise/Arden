@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { IndexContractError, parseIndexGenerationManifest, type IndexGenerationJob } from "./contracts.js";
+import {
+  buildIndexGenerationRequest,
+  IndexContractError,
+  parseIndexGenerationManifest,
+  type IndexGenerationJob,
+} from "./contracts.js";
 
 const job: IndexGenerationJob = {
   jobId: "10000000-0000-4000-8000-000000000001",
@@ -42,6 +47,26 @@ function manifest() {
 }
 
 describe("index generation manifest contract", () => {
+  it("builds MIME-explicit text and PDF requests without changing snapshot identity", () => {
+    const text = "immutable semantic document";
+    const textJob = { ...job, snapshotContentHash: createHash("sha256").update(text).digest("hex") };
+    expect(buildIndexGenerationRequest(textJob, text)).toMatchObject({
+      snapshotMimeType: "text/plain",
+      snapshotContent: text,
+    });
+
+    const pdf = Buffer.from("%PDF-1.7\nfixture\n%%EOF", "utf8");
+    const pdfJob = {
+      ...job,
+      mimeType: "application/pdf",
+      snapshotContentHash: createHash("sha256").update(pdf).digest("hex"),
+    };
+    expect(buildIndexGenerationRequest(pdfJob, pdf)).toMatchObject({
+      snapshotMimeType: "application/pdf",
+      snapshotContentBase64: pdf.toString("base64"),
+    });
+  });
+
   it("accepts the strict Arden-AI v1 manifest and verifies its chunk digest", () => {
     expect(parseIndexGenerationManifest(manifest(), job)).toMatchObject({
       generationId: job.generationId,
