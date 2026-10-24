@@ -2,7 +2,7 @@ export type KnowledgeClassification = "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED"
 export type AudienceScope = { type: "ORGANIZATION"; departmentId: null }
   | { type: "DEPARTMENT"; departmentId: string };
 export type MembershipActor = { membershipId: string; organizationId: string;
-  status: "ACTIVE" | "INVITED" | "SUSPENDED" | "LEFT" };
+  status: "ACTIVE" | "INVITED" | "SUSPENDED" | "LEFT"; isOrganizationAdmin?: boolean };
 export type AudienceDefinition = { audienceId: string; organizationId: string; status: "ACTIVE" | "INACTIVE";
   kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP"; departmentId: string | null };
 export type Publication = { organizationId: string; status: "CURRENT" | "SUPERSEDED" | "ARCHIVED" | "REVOKED";
@@ -38,9 +38,9 @@ export function canReadPublication({ actor, publication, audience, now }: {
 }): boolean {
   if (!activeInOrganization(actor, publication.organizationId) || publication.status !== "CURRENT") return false;
   if (!validAudience(publication.organizationId, publication.audienceIds, audience.audiences, publication.scope, false)) return false;
-  if (!Number.isFinite(now.getTime()) || !Number.isFinite(publication.validFrom.getTime())
-    || publication.validFrom > now || (publication.validUntil !== null
-      && (!Number.isFinite(publication.validUntil.getTime()) || publication.validUntil <= now))) return false;
+  // Publication temporal columns are legacy compatibility metadata. Mainflow 3
+  // eligibility is the active pointer plus current AccessPolicy/audience state.
+  if (!Number.isFinite(now.getTime())) return false;
   const tagged = new Set(publication.audienceIds);
   return audience.audiences.some(definition => {
     if (!tagged.has(definition.audienceId) || definition.status !== "ACTIVE") return false;
@@ -80,7 +80,7 @@ export function canSubmitSnapshot(input: { actor: MembershipActor | null;
 
 export function canReviewSnapshot(input: { actor: MembershipActor | null;
   submission: { organizationId: string; submittedByMembershipId: string; departmentId: string;
-    status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED" | "WITHDRAWN";
+    status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
     classification: KnowledgeClassification; policyVersion: number; teamTag: string | null; projectTag: string | null };
   grant: { membershipId: string; organizationId: string; departmentId: string; status: "ACTIVE" | "INACTIVE";
     classifications: readonly KnowledgeClassification[]; level: "STANDARD" | "SPECIALIST" | "SENIOR";
@@ -89,13 +89,15 @@ export function canReviewSnapshot(input: { actor: MembershipActor | null;
   return input.audienceEnforceable && canRespondToSubmission(input);
 }
 
-// Requesting revision remains possible for an invalid audience; approval does not.
+// Rejection remains possible for an invalid audience; approval does not.
 export function canRespondToSubmission(input: Omit<Parameters<typeof canReviewSnapshot>[0], "audienceEnforceable">): boolean {
   const { actor, submission, grant } = input;
-  return activeInOrganization(actor, submission.organizationId)
-    && actor.membershipId !== submission.submittedByMembershipId && submission.status === "PENDING_REVIEW"
-    && Number.isInteger(submission.policyVersion) && submission.policyVersion > 0
-    && submission.policyVersion === input.effectivePolicyVersion && grant !== null && grant.status === "ACTIVE"
+  if (!activeInOrganization(actor, submission.organizationId) || submission.status !== "PENDING_REVIEW"
+    || !Number.isInteger(submission.policyVersion) || submission.policyVersion <= 0
+    || submission.policyVersion !== input.effectivePolicyVersion) return false;
+  if (actor.isOrganizationAdmin === true) return true;
+  return actor.membershipId !== submission.submittedByMembershipId
+    && grant !== null && grant.status === "ACTIVE"
     && grant.membershipId === actor.membershipId && grant.organizationId === submission.organizationId
     && grant.departmentId === submission.departmentId && grant.classifications.includes(submission.classification)
     && (submission.classification !== "RESTRICTED" || grant.level === "SPECIALIST" || grant.level === "SENIOR")

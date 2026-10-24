@@ -84,7 +84,8 @@ export type KnowledgeSubmission = {
   targetDepartmentId: string | null;
   audienceIds: string[];
   contentHash: string;
-  status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED" | "WITHDRAWN";
+  status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
+  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED";
   submittedAt: string;
   publishedVersionId: string | null;
   decisionComment: string | null;
@@ -111,6 +112,10 @@ export type PublishedKnowledge = {
   draftId: string;
   title: string;
   classification: KnowledgeClassification;
+  responsibleDepartmentId: string;
+  documentCode?: string;
+  versionLabel?: string;
+  summary?: string;
   audienceIds: string[];
   contentHash: string;
   publishedAt: string;
@@ -202,7 +207,7 @@ export function loadKnowledgeReview(platform: Platform, organizationId: string, 
 }
 
 export function decideKnowledgeReview(platform: Platform, organizationId: string, detail: KnowledgeReviewDetail,
-  action: "APPROVE" | "REQUEST_REVISION" | "REJECT", comment: string | null, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  action: "APPROVE" | "REJECT", comment: string | null, idempotencyKey: string): Promise<KnowledgeSubmission> {
   return request(platform, `${knowledgePath(organizationId)}/reviews/${detail.id}/decisions`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ action, expectedSnapshotVersionId: detail.snapshotVersionId,
