@@ -26,6 +26,7 @@ export const iconGlyphs = {
   people: "\ufea6",
   expand: "\uf153",
   pdf: "\uf66a",
+  edit: "\ufa29",
 } as const;
 
 export type IconName = keyof typeof iconGlyphs;

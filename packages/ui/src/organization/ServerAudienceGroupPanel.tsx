@@ -6,6 +6,7 @@ import type { Platform } from "../shared/types";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { Icon } from "../shared/Icon";
 import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
+import { ActionToast } from "../shared/ActionToast";
 import { memberInitials } from "./AdminDetailIslands";
 
 type Props = {
@@ -40,7 +41,8 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
   const [message, setMessage] = useState("");
   const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
   const [deactivationOpen, setDeactivationOpen] = useState(false);
-  const [removeMembershipId, setRemoveMembershipId] = useState<string | null>(null);
+  /** The last removal, kept so the status-island toast can undo it by adding the member back. */
+  const [removal, setRemoval] = useState<{ message: string; groupId: string; membershipId: string } | null>(null);
   const [nameSubmitted, setNameSubmitted] = useState(false);
   const mounted = useRef(false);
   const inFlight = useRef(false);
@@ -125,6 +127,19 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
     const member = members.find(item => item.id === groupMember.membershipId);
     return `${member?.name ?? ""} ${member?.email ?? ""}`.toLowerCase().includes(search);
   });
+  const removeMember = (groupMember: AudienceGroupRecord["members"][number]) => {
+    if (!selected || dirty) return;
+    const group = selected;
+    const name = members.find(item => item.id === groupMember.membershipId)?.name ?? "Member";
+    void mutate(() => removeAudienceGroupMember(platform, organizationId, group.id, groupMember.id), "").then(success => {
+      if (success) setRemoval({ message: `${name} removed from ${group.name}`, groupId: group.id, membershipId: groupMember.membershipId });
+    });
+  };
+  const undoRemoval = () => {
+    if (!removal) return;
+    const { groupId, membershipId } = removal;
+    void mutate(() => addAudienceGroupMember(platform, organizationId, groupId, membershipId), "Member added back to the audience group.");
+  };
   const eligibleMembers = members.filter(member => member.status === "ACTIVE"
     && !activeMembers.some(groupMember => groupMember.membershipId === member.id));
 
@@ -203,7 +218,7 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
           const member = members.find(item => item.id === groupMember.membershipId);
           return <li key={groupMember.id}><span className="island-avatar is-small" aria-hidden="true">{memberInitials(member?.name ?? "Member")}</span>
             <span><strong>{member?.name ?? "Member"}</strong><small>{member?.email}</small></span>
-            <button type="button" className="island-icon-button" disabled={busy || dirty} aria-label={`Remove ${member?.name ?? "member"} from audience group`} onClick={() => setRemoveMembershipId(groupMember.id)}><Icon name="close" size={14} /></button></li>;
+            <button type="button" className="island-icon-button" disabled={busy || dirty} aria-label={`Remove ${member?.name ?? "member"} from audience group`} onClick={() => removeMember(groupMember)}><Icon name="close" size={14} /></button></li>;
         })}</ul>
         {!visibleMembers.length && <p className="island-meta">{activeMembers.length ? "No matching members." : "No members yet."}</p>}
         {creating && <p role="status" className="island-meta">Save the audience group before adding members.</p>}
@@ -226,10 +241,6 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
       <div className="dialog-actions"><button className="secondary-button" type="button" autoFocus disabled={busy} onClick={() => setDeactivationOpen(false)}>Cancel</button>
         <button className="admin-danger-button" type="button" disabled={busy} onClick={() => { if (selected) void mutate(() => deactivateAudienceGroup(platform, organizationId, selected), "Audience group deactivated.").then(success => { if (success) setDeactivationOpen(false); }); }}>{busy ? "Working…" : "Deactivate group"}</button></div>
     </KnowledgeDialog>}
-    {removeMembershipId && selected && <KnowledgeDialog confirmation title={`Remove member from ${selected.name}?`} onClose={() => setRemoveMembershipId(null)} dismissible={!busy}>
-      <p>The member will lose access granted by this audience group on their next request.</p>
-      <div className="dialog-actions"><button className="secondary-button" type="button" autoFocus disabled={busy} onClick={() => setRemoveMembershipId(null)}>Cancel</button>
-        <button className="admin-danger-button" type="button" disabled={busy} onClick={() => { void mutate(() => removeAudienceGroupMember(platform, organizationId, selected.id, removeMembershipId), "Member removed from audience group.").then(success => { if (success) setRemoveMembershipId(null); }); }}>{busy ? "Working…" : "Remove member"}</button></div>
-    </KnowledgeDialog>}
+    <ActionToast message={removal?.message ?? ""} onDismiss={() => setRemoval(null)} action={removal ? { label: "Undo", run: undoRemoval } : undefined} />
   </div>;
 }

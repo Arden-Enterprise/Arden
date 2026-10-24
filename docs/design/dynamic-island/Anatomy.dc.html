@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Arden — Island anatomy and tokens</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Inter+Tight:wght@500;600&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg-app:#101014;--bg-sidebar:#15151a;--surface:#1c1c23;--surface-raised:#25252e;--surface-hover:rgb(255 255 255 / 4%);--border:#303039;--border-strong:#6a6976;--text-primary:#f2f1f7;--text-secondary:#a5a4b1;--text-muted:#8c8b98;--text-disabled:#777683;--accent:#8b82f6;--accent-hover:#a69eff;--accent-subtle:rgb(139 130 246 / 14%);--accent-border:rgb(139 130 246 / 38%);--text-on-accent:#101014;--focus-ring:#a69eff;--success:#7fcfa3;--success-subtle:rgb(127 207 163 / 12%);--warning:#e3b26b;--danger:#f2938a;--danger-subtle:rgb(242 147 138 / 12%);--info:#7eb0f0}
+body{margin:0}
+button{font-family:inherit}
+:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.di{background:var(--surface-raised);border:1px solid var(--border);color:var(--text-primary);overflow:hidden;box-sizing:border-box;transition:width .5s cubic-bezier(.32,.72,0,1),height .5s cubic-bezier(.32,.72,0,1),border-radius .5s cubic-bezier(.32,.72,0,1);box-shadow:0 18px 40px -20px rgb(0 0 0 / 80%)}
+.fade{animation:fade .32s .12s both cubic-bezier(.32,.72,0,1)}
+@keyframes fade{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.di{transition:none}.fade{animation:none}}
+.seg{display:inline-flex;gap:2px;padding:4px;border-radius:12px;background:var(--bg-sidebar);border:1px solid var(--border);flex-wrap:wrap}
+.seg button{height:28px;padding:0 12px;border-radius:8px;border:0;background:transparent;color:var(--text-secondary);font-weight:600;font-size:13px;cursor:pointer}
+.seg button:hover{color:var(--text-primary);background:var(--surface-hover)}
+.seg button[aria-pressed="true"]{background:var(--accent-subtle);color:var(--text-primary);box-shadow:inset 0 0 0 1px var(--accent-border)}
+.lbl{font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--text-muted)}
+.meta{font-size:12px;color:var(--text-secondary)}
+.b{display:inline-flex;align-items:center;height:28px;padding:0 12px;border-radius:8px;font-weight:600;font-size:13px}
+.ico{width:38px;height:38px;flex:none;border-radius:8px;display:inline-flex;align-items:center;justify-content:center}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;display:flex;flex-direction:column;gap:12px}
+.tk{display:grid;grid-template-columns:28px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:34px;font-size:13px}
+.tk .s{width:28px;height:28px;border-radius:7px;border:1px solid var(--border);box-sizing:border-box}
+.tk code{font:500 12px/1.2 "JetBrains Mono",ui-monospace,monospace;color:var(--text-primary)}
+.tk .v{font:500 11px/1.2 "JetBrains Mono",ui-monospace,monospace;color:var(--text-secondary);display:block;margin-top:2px}
+.tk .r{font-size:12px;color:var(--text-secondary);font-variant-numeric:tabular-nums;text-align:right}
+.rd{display:flex;flex-direction:column;align-items:center;gap:8px;font-size:12px}
+.rd span.s{width:56px;height:40px;background:var(--surface-raised);border:1px solid var(--border)}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1600px; box-sizing: border-box; padding: 56px 64px; background: var(--bg-app); color: var(--text-primary); font-family: Inter, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.55; -webkit-font-smoothing: antialiased; font-feature-settings: 'cv11', 'ss03'; display: flex; flex-direction: column; gap: 28px">
+
+  <div>
+    <div class="lbl">ARDEN · ISLAND SYSTEM · GRAPHITE</div>
+    <h1 style="margin: 6px 0 6px; font: 600 40px/1.15 'Inter Tight', Inter, sans-serif; letter-spacing: -.03em">One surface that changes shape</h1>
+    <p style="margin: 0; color: var(--text-secondary); max-width: 780px">Low-saturation graphite with one violet accent. Violet marks only the active place, the primary action, AI work and focus. Everything else is told apart by tone, not colour.</p>
+  </div>
+
+  <!-- LIVE DEMO -->
+  <section aria-label="Live morph demo" style="background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 20px; align-items: center">
+    <div role="group" aria-label="Island state" class="seg">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="6">
+        <button type="button" aria-pressed="{{ t.on }}" onClick="{{ t.pick }}">{{ t.label }}</button>
+      </sc-for>
+    </div>
+    <div style="height: 220px; width: 100%; display: flex; align-items: flex-start; justify-content: center; padding-top: 12px; background: var(--bg-app); border: 1px solid var(--border); border-radius: 12px">
+      <div class="di" role="region" aria-label="Status island" style="width: {{ d.w }}; height: {{ d.h }}; border-radius: {{ d.r }}">
+
+        <sc-if value="{{ is.idle }}" hint-placeholder-val="{{ false }}">
+          <div class="fade" style="display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 6px 0 8px">
+            <span style="width: 28px; height: 28px; flex: none; border-radius: 6px; background: var(--text-primary); color: var(--bg-app); display: inline-flex; align-items: center; justify-content: center; font: 600 10px/1 'Inter Tight', Inter, sans-serif">NS</span>
+            <span style="font-size: 13px; color: var(--text-secondary)">Administration</span><span style="color: var(--text-muted)">/</span>
+            <span style="font-size: 13px; font-weight: 600; flex: 1">Members</span>
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-size: 12px">Ctrl K</span>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ is.search }}" hint-placeholder-val="{{ false }}">
+          <div class="fade" style="display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 8px 0 16px">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#a69eff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <span style="flex: 1; color: var(--text-muted); font-size: 15px">Search members, documents, settings</span>
+            <span class="b" style="border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); font-weight: 500; font-size: 12px">Esc</span>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ is.live }}" hint-placeholder-val="{{ false }}">
+          <div class="fade" style="display: flex; align-items: center; gap: 12px; height: 58px; padding: 0 8px 0 10px">
+            <svg width="38" height="38" viewBox="0 0 38 38" aria-hidden="true"><circle cx="19" cy="19" r="15" fill="none" stroke="#33323d" stroke-width="4"/><circle cx="19" cy="19" r="15" fill="none" stroke="#8b82f6" stroke-width="4" stroke-linecap="round" stroke-dasharray="58.4 94.2" transform="rotate(-90 19 19)"/></svg>
+            <span style="flex: 1; line-height: 1.3"><span style="display: block; font-weight: 600; font-size: 13px">Reading Security baseline v3.pdf</span><span class="meta">62% · Drafting from the PDF</span></span>
+            <span class="b" style="background: var(--surface)">Cancel</span>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ is.notify }}" hint-placeholder-val="{{ true }}">
+          <div class="fade" style="display: flex; flex-direction: column; gap: 12px; padding: 14px 14px 14px 16px">
+            <div style="display: flex; align-items: center; gap: 12px">
+              <span style="width: 40px; height: 40px; flex: none; border-radius: 999px; background: #2c2b3a; display: inline-flex; align-items: center; justify-content: center; font: 600 12px/1 'Inter Tight', Inter, sans-serif">LP</span>
+              <span style="flex: 1; line-height: 1.35"><span style="display: block; font-weight: 600; font-size: 14px">Linh Pham requested a revision</span><span class="meta">Incident response runbook · v2 · just now</span></span>
+            </div>
+            <p style="margin: 0; padding: 10px 14px; border-radius: 8px; background: var(--surface); color: var(--text-secondary); font-size: 13px">"Step 4 still points to the old paging rotation. Please update before Friday."</p>
+            <div style="display: flex; gap: 8px; justify-content: flex-end">
+              <span class="b" style="background: var(--surface)">Later</span>
+              <span class="b" style="background: var(--accent); color: var(--text-on-accent); font-weight: 650">Revise from note</span>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ is.confirm }}" hint-placeholder-val="{{ false }}">
+          <div class="fade" style="display: flex; align-items: center; gap: 12px; height: 62px; padding: 0 10px 0 12px">
+            <span class="ico" style="background: var(--danger-subtle); color: var(--danger)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0"/></svg></span>
+            <span style="flex: 1; line-height: 1.3"><span style="display: block; font-weight: 600; font-size: 13px">Remove Minh Tran?</span><span class="meta">They lose access to Northstar Studio now.</span></span>
+            <span class="b" style="background: var(--surface)">Cancel</span>
+            <span class="b" style="background: var(--danger); color: var(--text-on-accent)">Remove</span>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ is.toast }}" hint-placeholder-val="{{ false }}">
+          <div class="fade" style="display: flex; align-items: center; gap: 12px; height: 58px; padding: 0 8px 0 10px">
+            <span class="ico" style="width: 36px; height: 36px; background: var(--success-subtle); color: var(--success)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg></span>
+            <span style="flex: 1; line-height: 1.3"><span style="display: block; font-weight: 600; font-size: 13px">Minh Tran is now an Organization Admin</span><span class="meta">Saved to Northstar Studio</span></span>
+            <span class="b" style="background: var(--surface); color: var(--accent-hover)">Undo</span>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+    <div style="display: flex; gap: 28px; flex-wrap: wrap; justify-content: center" class="meta">
+      <span>Size <strong style="color: var(--text-primary); font-variant-numeric: tabular-nums">{{ d.w }} × {{ d.h }}</strong></span>
+      <span>Radius <strong style="color: var(--text-primary)">{{ d.r }}</strong></span>
+      <span>Trigger <strong style="color: var(--text-primary)">{{ d.when }}</strong></span>
+      <span>Leaves <strong style="color: var(--text-primary)">{{ d.exit }}</strong></span>
+    </div>
+  </section>
+
+  <!-- SEMANTIC TOKENS -->
+  <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px">
+    <section class="card" aria-labelledby="g1">
+      <h2 id="g1" style="margin: 0; font: 600 15px/1.3 'Inter Tight', Inter, sans-serif">Background</h2>
+      <div class="tk"><span class="s" style="background: #101014"></span><span><code>bg.app</code><span class="v">#101014</span></span><span class="r">canvas</span></div>
+      <div class="tk"><span class="s" style="background: #15151a"></span><span><code>bg.sidebar</code><span class="v">#15151A</span></span><span class="r">nav island</span></div>
+      <div class="tk"><span class="s" style="background: #1c1c23"></span><span><code>surface</code><span class="v">#1C1C23</span></span><span class="r">lists, cards</span></div>
+      <div class="tk"><span class="s" style="background: #25252e"></span><span><code>surface.raised</code><span class="v">#25252E</span></span><span class="r">status island</span></div>
+      <div class="tk"><span class="s" style="background: #1c1c23; box-shadow: inset 0 0 0 20px rgb(255 255 255 / 4%)"></span><span><code>surface.hover</code><span class="v">white 4%</span></span><span class="r">rows</span></div>
+    </section>
+    <section class="card" aria-labelledby="g2">
+      <h2 id="g2" style="margin: 0; font: 600 15px/1.3 'Inter Tight', Inter, sans-serif">Text <span class="meta" style="font-family: Inter; font-weight: 500; letter-spacing: 0">· on surface</span></h2>
+      <div class="tk"><span class="s" style="background: #f2f1f7"></span><span><code>text.primary</code><span class="v">#F2F1F7</span></span><span class="r">15.1:1</span></div>
+      <div class="tk"><span class="s" style="background: #a5a4b1"></span><span><code>text.secondary</code><span class="v">#A5A4B1</span></span><span class="r">6.9:1</span></div>
+      <div class="tk"><span class="s" style="background: #8c8b98"></span><span><code>text.muted</code><span class="v">#8C8B98 · tuned</span></span><span class="r">5.1:1</span></div>
+      <div class="tk"><span class="s" style="background: #777683"></span><span><code>text.disabled</code><span class="v">#777683</span></span><span class="r">disabled only</span></div>
+      <div class="tk"><span class="s" style="background: #101014"></span><span><code>text.on-accent</code><span class="v">#101014</span></span><span class="r">6.0:1 on violet</span></div>
+    </section>
+    <section class="card" aria-labelledby="g3">
+      <h2 id="g3" style="margin: 0; font: 600 15px/1.3 'Inter Tight', Inter, sans-serif">Accent &amp; lines</h2>
+      <div class="tk"><span class="s" style="background: #8b82f6"></span><span><code>accent</code><span class="v">#8B82F6</span></span><span class="r">primary, AI</span></div>
+      <div class="tk"><span class="s" style="background: #a69eff"></span><span><code>accent.hover</code><span class="v">#A69EFF</span></span><span class="r">hover, links, focus</span></div>
+      <div class="tk"><span class="s" style="background: #1c1c23; box-shadow: inset 0 0 0 20px rgb(139 130 246 / 14%)"></span><span><code>accent.subtle</code><span class="v">violet 14%</span></span><span class="r">selected</span></div>
+      <div class="tk"><span class="s" style="background: #303039"></span><span><code>border</code><span class="v">#303039</span></span><span class="r">dividers</span></div>
+      <div class="tk"><span class="s" style="background: #6a6976"></span><span><code>border.strong</code><span class="v">#6A6976 · new</span></span><span class="r">inputs 3.1:1</span></div>
+    </section>
+    <section class="card" aria-labelledby="g4">
+      <h2 id="g4" style="margin: 0; font: 600 15px/1.3 'Inter Tight', Inter, sans-serif">Status</h2>
+      <div class="tk"><span class="s" style="background: #7fcfa3"></span><span><code>success</code><span class="v">#7FCFA3</span></span><span class="r">9.2:1</span></div>
+      <div class="tk"><span class="s" style="background: #e3b26b"></span><span><code>warning</code><span class="v">#E3B26B</span></span><span class="r">8.8:1</span></div>
+      <div class="tk"><span class="s" style="background: #f2938a"></span><span><code>danger</code><span class="v">#F2938A</span></span><span class="r">7.5:1</span></div>
+      <div class="tk"><span class="s" style="background: #7eb0f0"></span><span><code>info</code><span class="v">#7EB0F0</span></span><span class="r">7.6:1</span></div>
+      <p class="meta" style="margin: 0">Each has a 12% <code style="font: 500 11px 'JetBrains Mono', monospace">*.subtle</code> fill for chips. Status colours never mean "selected".</p>
+    </section>
+  </div>
+
+  <!-- SHAPE + COMPONENTS -->
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; flex: 1">
+    <section class="card" aria-labelledby="tk-m">
+      <h2 id="tk-m" style="margin: 0; font: 600 15px/1.3 'Inter Tight', Inter, sans-serif">Type, size, shape &amp; motion</h2>
+      <div style="display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; border-bottom: 1px solid var(--border)">
+        <span style="font: 600 24px/1.2 'Inter Tight', Inter, sans-serif; letter-spacing: -.02em">Inter Tight 600 · headings</span>
+        <span style="font-size: 14px">Inter 400 / 500 / 600 · body and UI, 13–14px</span>
+        <span class="meta">Tabular figures for numbers · full Vietnamese diacritics: Quỳnh Đỗ, Nguyễn Bảo</span>
+      </div>
+      <div style="display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap">
+        <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 8px; background: var(--surface-raised); border: 1px solid var(--border); font-size: 13px; font-weight: 600">sm · 28</span>
+        <span style="display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 8px; background: var(--surface-raised); border: 1px solid var(--border); font-size: 13px; font-weight: 600">md · 32</span>
+        <span style="display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 8px; background: var(--accent); color: var(--text-on-accent); font-size: 13px; font-weight: 650">lg · 36</span>
+        <span style="display: inline-flex; align-items: center; height: 44px; padding: 0 14px; border-radius: 10px; border: 1px dashed var(--border-strong); color: var(--text-secondary); font-size: 13px; font-weight: 600">touch · 44</span>
+      </div>
+      <p class="meta" style="margin: 0; font-size: 13px"><strong style="color: var(--text-primary)">control.sm</strong> island actions, inner tabs · <strong style="color: var(--text-primary)">control.md</strong> default buttons, inputs, filters, icon buttons, nav items · <strong style="color: var(--text-primary)">control.lg</strong> one primary action per page · <strong style="color: var(--text-primary)">touch</strong> mobile only.</p>
+      <div style="display: flex; gap: 14px">
+        <div class="rd"><span class="s" style="border-radius: 6px"></span><span><strong>6</strong> <span class="meta">chip</span></span></div>
+        <div class="rd"><span class="s" style="border-radius: 8px"></span><span><strong>8</strong> <span class="meta">control</span></span></div>
+        <div class="rd"><span class="s" style="border-radius: 12px"></span><span><strong>12</strong> <span class="meta">island</span></span></div>
+        <div class="rd"><span class="s" style="border-radius: 16px"></span><span><strong>16</strong> <span class="meta">panel</span></span></div>
+      </div>
+      <p class="meta" style="margin: 0; font-size: 13px">Depth comes from tone: each layer is one step lighter (app → sidebar → surface → raised) plus a 1px border. One soft shadow on floating islands only; no glows, no gradients. Morph: 500ms cubic-bezier(.32,.72,0,1); instant under reduced motion. Focus: 2px accent.hover ring, 2px offset.</p>
+    </section>
+    <section class="card" aria-labelledby="tk-c">
+      <h2 id="tk-c" style="margin: 0; font: 600 15px/1.3 'Inter Tight', Inter, sans-serif">Tokens in code</h2>
+      <p class="meta" style="margin: 0; font-size: 13px">Three layers: primitives (gray, violet scales) → semantic tokens above → components read only semantic names. Light mode later swaps the semantic layer under <code style="font: 500 12px 'JetBrains Mono', monospace; color: var(--text-primary)">[data-theme="light"]</code>. Existing <code style="font: 500 12px 'JetBrains Mono', monospace; color: var(--text-primary)">--arden-*</code> variables become aliases so current code keeps working.</p>
+      <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px">
+        <li><strong>IslandSurface</strong> <span class="meta" style="font-size: 13px">· DynamicIsland · NavIsland · SegmentedIsland · DetailIsland</span></li>
+      </ul>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"state":{"editor":"enum","options":["idle","search","live","notify","confirm","toast"],"default":"notify"},"$preview":{"width":1440,"height":1600}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const S = {
+      idle: { label: 'Idle', w: '380px', h: '44px', r: '12px', when: 'Default', exit: '—' },
+      search: { label: 'Search', w: '600px', h: '52px', r: '14px', when: 'Ctrl K or tap', exit: 'Esc' },
+      live: { label: 'Live activity', w: '470px', h: '58px', r: '14px', when: 'PDF draft, invite send', exit: 'On finish → toast' },
+      notify: { label: 'Notification', w: '480px', h: '176px', r: '16px', when: 'Review event', exit: '8s or action' },
+      confirm: { label: 'Confirm', w: '520px', h: '62px', r: '14px', when: 'Destructive action', exit: 'Cancel / confirm' },
+      toast: { label: 'Toast + undo', w: '470px', h: '58px', r: '14px', when: 'Saved change', exit: '4.2s or Undo' }
+    };
+    const st = (this.state && this.state.k) || this.props.state || 'notify';
+    const is = {};
+    Object.keys(S).forEach((k) => { is[k] = k === st; });
+    return {
+      d: S[st],
+      is,
+      tabs: Object.keys(S).map((k) => ({ label: S[k].label, on: k === st, pick: () => this.setState({ k }) }))
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -42,9 +42,21 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
     requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".note-list .is-selected")?.focus());
   };
 
+  // Contributing a copy opens inside this page's status island rather than a modal dialog.
+  const contributionPanel = contributionOpen && serverBacked && selectedNote && sourceVersionId && !isDirty ? <ContributePrivateNoteDialog
+    key={sourceVersionId}
+    platform={platform}
+    organizationId={organizationId}
+    source={{ title: selectedNote.title, body: selectedNote.body, versionId: sourceVersionId }}
+    attempt={matchingAttempt}
+    onAttemptChange={onContributionAttemptChange}
+    onClose={() => setContributionOpen(false)}
+    onCreated={(created) => { onContributionAttemptChange(null); setContributionOpen(false); onKnowledgeDraftCreated(created); }}
+  /> : undefined;
+
   return (
     <main id="arden-main" className="workspace-page" aria-labelledby="personal-workspace-title" tabIndex={-1}>
-      <WorkspaceTopbar breadcrumb="Arden / Work / Private Notes" previewLabel={serverBacked ? "PRIVATE NOTES · SERVER" : "SAMPLE NOTES · SESSION ONLY"} contextOpen={contextOpen} onToggleContext={onToggleContext} />
+      <WorkspaceTopbar breadcrumb="Arden / Work / Private Notes" previewLabel={serverBacked ? "PRIVATE NOTES · SERVER" : "SAMPLE NOTES · SESSION ONLY"} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={contributionPanel} />
       <WorkspacePageContent className={`personal-content${editorOpen ? " is-editing-note" : ""}`} header={<WorkspacePageHeader className="personal-title-row"
         eyebrow="WORK · OWNER PRIVATE"
         title="Private Notes"
@@ -71,16 +83,6 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
             onTitleChange={controller.editTitle} onBodyChange={controller.editBody} />
         </div>
       </WorkspacePageContent>
-      {contributionOpen && serverBacked && selectedNote && sourceVersionId && !isDirty && <ContributePrivateNoteDialog
-        key={sourceVersionId}
-        platform={platform}
-        organizationId={organizationId}
-        source={{ title: selectedNote.title, body: selectedNote.body, versionId: sourceVersionId }}
-        attempt={matchingAttempt}
-        onAttemptChange={onContributionAttemptChange}
-        onClose={() => setContributionOpen(false)}
-        onCreated={(created) => { onContributionAttemptChange(null); setContributionOpen(false); onKnowledgeDraftCreated(created); }}
-      />}
     </main>
   );
 }

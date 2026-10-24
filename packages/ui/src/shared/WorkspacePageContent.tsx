@@ -8,10 +8,16 @@ export function WorkspacePageHeader({ eyebrow, title, description, action, title
   titleId?: string;
   className?: string;
 }) {
+  // The action sits beside the whole title block (eyebrow, title, description) so it stays vertically centred on it.
   return <header className={`workspace-page-header${className ? ` ${className}` : ""}`}>
-    <span className="meta-label">{eyebrow}</span>
-    <div className="workspace-page-header-row"><h1 id={titleId}>{title}</h1>{action}</div>
-    {description && <p>{description}</p>}
+    <div className="workspace-page-header-row">
+      <div className="workspace-page-header-text">
+        <span className="meta-label">{eyebrow}</span>
+        <h1 id={titleId}>{title}</h1>
+        {description && <p>{description}</p>}
+      </div>
+      {action}
+    </div>
   </header>;
 }
 

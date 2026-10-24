@@ -147,8 +147,11 @@ export function loadKnowledgeOptions(platform: Platform, organizationId: string)
 }
 
 export async function listKnowledgeDrafts(platform: Platform, organizationId: string): Promise<KnowledgeDraftSummary[]> {
-  const result = await request<{ items: KnowledgeDraftSummary[] }>(platform, `${knowledgePath(organizationId)}/drafts`);
-  return result.items;
+  // The list route returns the repository shape (`audienceRoleIds`), unlike the detail route (`audienceIds`).
+  // Normalize here so screens never receive an undefined audience list.
+  const result = await request<{ items: (Omit<KnowledgeDraftSummary, "audienceIds"> & { audienceIds?: string[] | null; audienceRoleIds?: string[] | null })[] }>(
+    platform, `${knowledgePath(organizationId)}/drafts`);
+  return result.items.map(({ audienceRoleIds, audienceIds, ...item }) => ({ ...item, audienceIds: audienceIds ?? audienceRoleIds ?? [] }));
 }
 
 export function loadKnowledgeDraft(platform: Platform, organizationId: string, draftId: string): Promise<KnowledgeDraftRecord> {

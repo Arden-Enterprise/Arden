@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Arden — Reviews</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Inter+Tight:wght@500;600&amp;display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg-app:#101014;--bg-sidebar:#15151a;--surface:#1c1c23;--surface-raised:#25252e;--surface-hover:rgb(255 255 255 / 4%);--border:#303039;--border-strong:#6a6976;--text-primary:#f2f1f7;--text-secondary:#a5a4b1;--text-muted:#8c8b98;--text-disabled:#777683;--accent:#8b82f6;--accent-hover:#a69eff;--accent-subtle:rgb(139 130 246 / 14%);--accent-border:rgb(139 130 246 / 38%);--text-on-accent:#101014;--focus-ring:#a69eff;--success:#7fcfa3;--success-subtle:rgb(127 207 163 / 12%);--success-border:rgb(127 207 163 / 30%);--warning:#e3b26b;--warning-subtle:rgb(227 178 107 / 12%);--warning-border:rgb(227 178 107 / 30%);--danger:#f2938a;--danger-subtle:rgb(242 147 138 / 12%);--danger-border:rgb(242 147 138 / 32%);--info:#7eb0f0;--info-subtle:rgb(126 176 240 / 12%);--info-border:rgb(126 176 240 / 30%);--shadow-island:inset 0 1px 0 rgb(255 255 255 / 3%),0 16px 36px -20px rgb(0 0 0 / 75%)}
+body{margin:0;background:var(--bg-app);color:var(--text-primary);font-family:Inter,"Segoe UI",sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss03"}
+h1,h2,h3{font-family:"Inter Tight",Inter,"Segoe UI",sans-serif;font-weight:600;margin:0;letter-spacing:-.02em}
+a{color:var(--accent-hover)}a:hover{color:#c2bcff}
+button,textarea{font-family:inherit}
+:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.i{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.isl{background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-island)}
+.nav{width:256px;flex:none;min-height:956px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;padding:10px;box-sizing:border-box;display:flex;flex-direction:column;gap:2px}
+.org{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:6px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);text-align:left;cursor:pointer}
+.logo{width:30px;height:30px;flex:none;border-radius:7px;background:var(--text-primary);color:var(--bg-app);display:inline-flex;align-items:center;justify-content:center;font:600 11px/1 "Inter Tight",Inter,sans-serif}
+.ni{display:flex;align-items:center;gap:10px;min-height:32px;padding:0 10px;border-radius:8px;color:var(--text-secondary);text-decoration:none;font-size:14px;white-space:nowrap}
+.ni:hover{background:var(--surface-hover);color:var(--text-primary)}
+.ni.on{background:var(--accent-subtle);color:var(--text-primary)}
+.ni .i{color:var(--text-muted)}.ni.on .i{color:var(--accent-hover)}
+.gl{font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);padding:0 10px;margin:16px 0 4px}
+.badge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:6px;background:var(--surface-raised);color:var(--text-secondary);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums;box-sizing:border-box}
+.mn{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px;min-height:956px}
+.top{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:12px;min-height:64px}
+.di{display:flex;align-items:center;gap:10px;height:44px;max-width:calc(100vw - 48px);padding:0 6px 0 8px;border-radius:12px;background:var(--surface-raised);border:1px solid var(--border);box-sizing:border-box;box-shadow:0 18px 40px -20px rgb(0 0 0 / 80%);overflow:hidden;transition:width .5s cubic-bezier(.32,.72,0,1),height .5s cubic-bezier(.32,.72,0,1)}
+.mini{width:28px;height:28px;flex:none;border-radius:6px;background:var(--text-primary);color:var(--bg-app);display:inline-flex;align-items:center;justify-content:center;font:600 10px/1 "Inter Tight",Inter,sans-serif}
+.ck{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-secondary);font-size:12px;cursor:pointer;white-space:nowrap;text-decoration:none}
+.ic{width:32px;height:32px;flex:none;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--text-secondary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;position:relative}
+.ic:hover{background:var(--surface-hover);color:var(--text-primary)}
+.btn1{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--text-on-accent);font-weight:650;font-size:13px;white-space:nowrap;cursor:pointer}
+.btn1:hover{background:var(--accent-hover)}
+.btn1[disabled]{background:var(--surface-raised);border-color:var(--border);color:var(--text-disabled);cursor:not-allowed}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);font-weight:600;font-size:13px;white-space:nowrap;cursor:pointer}
+.btn2:hover{background:var(--surface-raised)}
+.chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border-radius:6px;font-size:11px;font-weight:600;border:1px solid var(--border);background:var(--surface-raised);color:var(--text-secondary);white-space:nowrap;box-sizing:border-box}
+.c-con{color:var(--info);border-color:var(--info-border);background:var(--info-subtle)}
+.c-warn{color:var(--warning);border-color:var(--warning-border);background:var(--warning-subtle)}
+.meta{font-size:12px;color:var(--text-secondary)}
+.av{width:24px;height:24px;flex:none;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font:600 10px/1 "Inter Tight",Inter,sans-serif;color:var(--text-primary);background:var(--surface-raised)}
+.chip .i{margin-left:-1px}
+.c-con{color:var(--info);border-color:var(--info-border);background:var(--info-subtle)}
+.c-res{color:var(--danger);border-color:var(--danger-border);background:var(--danger-subtle)}
+.c-warn{color:var(--warning);border-color:var(--warning-border);background:var(--warning-subtle)}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;letter-spacing:0;color:var(--text-muted)}
+.ws{display:grid;grid-template-columns:240px minmax(0,1fr) 312px;gap:12px;padding:0 12px 12px;height:880px;box-sizing:border-box}
+.pane{min-height:0;border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
+.qh{display:flex;align-items:center;gap:8px;padding:12px 12px 4px}
+.ql{flex:1;min-height:0;overflow:auto;padding:4px 6px 8px;display:flex;flex-direction:column;gap:2px}
+.q{display:flex;flex-direction:column;gap:2px;width:100%;padding:9px 10px 10px;border:0;border-radius:10px;background:transparent;color:var(--text-primary);text-align:left;cursor:pointer;box-sizing:border-box;position:relative}
+.q:hover{background:var(--surface-hover)}
+.q[aria-current="true"]{background:var(--accent-subtle)}
+.q[aria-current="true"]::before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:2px;border-radius:2px;background:var(--accent)}
+.qt{font-size:13px;font-weight:600;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dh{padding:20px 32px 16px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:6px}
+.dt{font-size:24px;line-height:1.25}
+.dm{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:13px;color:var(--text-secondary)}
+.dm .sep{color:var(--text-disabled)}
+.db{flex:1;min-height:0;overflow:auto;padding:24px 32px 40px;scroll-behavior:smooth}
+.doc{font-size:15px;line-height:1.75;color:#dcdbe3;max-width:640px}
+.doc p{margin:0 0 14px}
+.doc h3{font-size:16px;margin:24px 0 8px;color:var(--text-primary)}
+.doc h3:first-child{margin-top:0}
+.doc ul{margin:0 0 14px;padding-left:20px}.doc li{margin:0 0 4px}
+.doc table{border-collapse:collapse;width:100%;margin:0 0 14px;font-size:14px}
+.doc th,.doc td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--border)}
+.doc th{color:var(--text-secondary);font-weight:600;font-size:12px}
+.doc mark{background:var(--success-subtle);color:var(--text-primary);border-radius:3px;padding:0 3px}
+.doc del{color:var(--text-muted)}
+.dec{padding:0}
+.dsec{padding:14px 16px;border-bottom:1px solid var(--border)}
+.k{font-size:11px;font-weight:600;letter-spacing:.06em;color:var(--text-muted)}
+.facts{display:grid;grid-template-columns:96px minmax(0,1fr);gap:7px 10px;margin:10px 0 0;font-size:13px}
+.facts dt{color:var(--text-muted)}.facts dd{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ta{width:100%;box-sizing:border-box;min-height:96px;padding:8px 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--bg-sidebar);color:var(--text-primary);font-size:13px;line-height:1.5;resize:vertical}
+.ta.err{border-color:var(--danger)}
+.foot{margin-top:auto;padding:12px 16px 16px;border-top:1px solid var(--border);background:var(--surface-raised);display:flex;flex-direction:column;gap:10px}
+.foot .row{display:flex;gap:8px}
+.foot .row>*{flex:1}
+.btn-d{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--danger-border);background:transparent;color:var(--danger);font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn-d:hover{background:var(--danger-subtle)}
+.btn-d.solid{background:var(--danger);border-color:var(--danger);color:#101014}
+.btn1{height:36px}
+.nav2{display:flex;align-items:center;gap:4px;margin-left:auto}
+.nav2 .ic{width:28px;height:28px}
+.ic[disabled]{color:var(--text-disabled);cursor:not-allowed;background:transparent}
+.cf{animation:up .35s both cubic-bezier(.32,.72,0,1)}
+@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.cf{animation:none}.di{transition:none}.db{scroll-behavior:auto}}
+</style>
+</helmet>
+
+<div style="display: flex; flex-wrap: wrap; gap: 12px; min-height: 980px; padding: 12px; box-sizing: border-box; background: var(--bg-app); align-items: flex-start">
+
+  <nav class="nav" aria-label="Northstar Studio">
+    <button type="button" class="org" aria-haspopup="menu" aria-expanded="false" aria-label="Switch organization — Northstar Studio"><span class="logo">NS</span><span style="display: flex; flex-direction: column; min-width: 0; flex: 1"><span style="font: 600 14px/1.3 'Inter Tight', Inter, sans-serif">Northstar Studio</span><span style="font-size: 12px; color: var(--text-secondary)">Organization Admin</span></span><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-muted); margin-right: 6px"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg></button>
+    <div class="gl">WORK</div>
+    <a class="ni" href="MyWork.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/></svg>My Work</a>
+    <a class="ni" href="PrivateNotes.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Private Notes</a>
+    <div class="gl">KNOWLEDGE</div>
+    <a class="ni" href="Library.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>Library</a>
+    <a class="ni" href="Contributions.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5z"/><path d="m3 13 9 5 9-5"/></svg>Contributions</a>
+    <a class="ni on" href="Reviews.dc.html" aria-current="page" aria-label="Reviews, {{ qn }} assigned"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 13l2 2 4-4"/></svg>Reviews<span class="badge">{{ qn }}</span></a>
+    <div class="gl">MANAGE ORGANIZATION</div>
+    <a class="ni" href="Main.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg>Administration</a>
+    <div style="flex: 1"></div>
+    <a class="ni" href="#" style="padding-left: 6px"><span class="av">HN</span>Account</a>
+  </nav>
+
+
+  <main class="mn">
+<header class="top">
+      <div></div>
+      <div class="di" role="region" aria-label="Status island" style="width: {{ islW }}; height: {{ islH }}">
+        <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}">
+          <span class="mini">NS</span>
+          <span style="font-size: 13px; color: var(--text-secondary); white-space: nowrap">Reviews</span><span style="color: var(--text-muted)" aria-hidden="true">/</span>
+          <span style="font-size: 13px; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ cur.title }}</span>
+          <button type="button" class="ck" aria-label="Search (Ctrl K)"><svg class="i" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Ctrl K</button>
+        </sc-if>
+        <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+          <span role="status" aria-live="polite" style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0">
+            <span style="width: 32px; height: 32px; flex: none; border-radius: 8px; background: {{ toastBg }}; color: {{ toastC }}; display: inline-flex; align-items: center; justify-content: center"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.2"><path d="m5 12 5 5 9-10"/></svg></span>
+            <span style="flex: 1; min-width: 0; line-height: 1.3"><span style="display: block; font-weight: 600; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ toastTitle }}</span><span class="meta" style="white-space: nowrap">{{ toastSub }}</span></span>
+          </span>
+        </sc-if>
+      </div>
+      <div style="display: flex; justify-content: flex-end"><button type="button" class="ic" aria-label="Notifications, 2 new"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span aria-hidden="true" style="position: absolute; top: 6px; right: 7px; width: 7px; height: 7px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 2px var(--bg-app)"></span></button></div>
+    </header>
+
+    <div class="ws">
+      <!-- 1 · QUEUE -->
+      <section class="pane" aria-labelledby="q-h" style="background: var(--bg-sidebar); border: 1px solid var(--border)">
+        <div class="qh"><h1 id="q-h" style="font-size: 15px">Review queue</h1><span class="badge" style="margin-left: 0">{{ qn }}</span></div>
+        <p class="meta" style="margin: 0 12px 6px; color: var(--text-muted)">Covered by your grants. Never your own.</p>
+        <div class="ql">
+          <sc-for list="{{ queue }}" as="q" hint-placeholder-count="4">
+            <button type="button" class="q" onClick="{{ q.pick }}" aria-current="{{ q.cur }}">
+              <span class="mono">{{ q.code }}</span>
+              <span class="qt" title="{{ q.title }}">{{ q.title }}</span>
+              <span class="meta" style="display: flex; align-items: center; gap: 6px; color: var(--text-muted)"><span>{{ q.author }} · {{ q.when }}</span>
+                <sc-if value="{{ q.showCls }}" hint-placeholder-val="{{ false }}"><span class="chip {{ q.clsClass }}" style="height: 18px; padding: 0 5px; font-size: 10px">{{ q.clsShort }}</span></sc-if>
+                <sc-if value="{{ q.blocked }}" hint-placeholder-val="{{ false }}"><span title="Approval blocked" style="width: 6px; height: 6px; border-radius: 999px; background: var(--warning); margin-left: auto"></span></sc-if>
+              </span>
+            </button>
+          </sc-for>
+          <sc-if value="{{ empty }}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 28px 12px; text-align: center"><div style="font-weight: 600; font-size: 13px">Queue is clear</div><div class="meta">New submissions appear here.</div></div>
+          </sc-if>
+        </div>
+      </section>
+
+      <!-- 2 · DOCUMENT -->
+      <article class="pane isl" aria-label="Submitted document">
+        <sc-if value="{{ hasCur }}" hint-placeholder-val="{{ true }}">
+          <header class="dh">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <svg class="i" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-muted)"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+              <span class="mono">{{ cur.code }}</span>
+              <span class="chip" style="height: 20px; margin-left: 4px">{{ cur.verLine }}</span>
+              <sc-if value="{{ cur.showCls }}" hint-placeholder-val="{{ true }}"><span class="chip {{ cur.clsClass }}" style="height: 20px">{{ cur.cls }}</span></sc-if>
+            </div>
+            <h2 class="dt">{{ cur.title }}</h2>
+            <div class="dm"><span class="av" style="width: 20px; height: 20px; font-size: 9px">{{ cur.ini }}</span><span>{{ cur.author }}</span><span class="sep">·</span><span>{{ cur.dept }}</span><span class="sep">·</span><span>Submitted {{ cur.when }}</span><span class="sep">·</span><span>{{ cur.read }} read</span></div>
+          </header>
+          <div class="db" tabindex="0" aria-label="Document text">
+            <div class="doc">
+              <h3>Purpose</h3>
+              <p>This policy sets how long Northstar Studio keeps operational records and who may approve an exception. It replaces v2 from August.</p>
+              <h3>Retention periods</h3>
+              <table>
+                <thead><tr><th>Record</th><th>Keep for</th><th>Then</th></tr></thead>
+                <tbody>
+                  <tr><td>Support tickets</td><td>24 months</td><td>Delete</td></tr>
+                  <tr><td>Application logs</td><td><del>180 days</del> <mark>90 days</mark></td><td>Delete</td></tr>
+                  <tr><td>Incident reports</td><td>5 years</td><td><del>Delete</del> <mark>Archive</mark></td></tr>
+                  <tr><td>Access reviews</td><td>3 years</td><td>Archive</td></tr>
+                </tbody>
+              </table>
+              <h3>Exceptions</h3>
+              <p>An exception keeps a record longer than its period. Only the department lead and the Org Admin together may approve one, and each exception expires after 12 months unless renewed.</p>
+              <ul><li>Legal hold overrides every period until it is lifted.</li><li>Customer deletion requests override "keep for" for personal data only.</li><li>Backups follow the same periods; restored data is re-deleted within 7 days.</li></ul>
+              <h3>Ownership</h3>
+              <p>Engineering owns application logs. Operations owns support tickets and incident reports. Each owner checks once per quarter that deletion jobs ran and records the result in the access review.</p>
+              <h3>What changed since v2</h3>
+              <p>Application logs drop from 180 to 90 days. Incident reports are archived instead of deleted so post-mortems stay searchable.</p>
+            </div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ noCur }}" hint-placeholder-val="{{ false }}">
+          <div style="margin: auto; text-align: center; padding: 40px"><h2 style="font-size: 18px">Nothing left to review</h2><p class="meta" style="font-size: 13px">Approved versions become active once indexing finishes.</p></div>
+        </sc-if>
+      </article>
+
+      <!-- 3 · DECISION -->
+      <aside class="pane isl dec" aria-label="Review decision">
+        <sc-if value="{{ hasCur }}" hint-placeholder-val="{{ true }}">
+          <div class="dsec" style="display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 16px">
+            <h2 style="font-size: 14px">Decision</h2>
+            <div class="nav2"><span class="meta" style="font-variant-numeric: tabular-nums; margin-right: 4px">{{ pos }} of {{ qn }}</span>
+              <button type="button" class="ic" aria-label="Previous submission" onClick="{{ prev }}" disabled="{{ noPrev }}"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg></button>
+              <button type="button" class="ic" aria-label="Next submission" onClick="{{ next }}" disabled="{{ noNext }}"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg></button>
+            </div>
+          </div>
+          <div class="dsec">
+            <span class="k">FROZEN AT SUBMISSION</span>
+            <dl class="facts">
+              <dt>Classification</dt><dd>{{ cur.cls }}</dd>
+              <dt>Department</dt><dd>{{ cur.dept }}</dd>
+              <dt>Access scope</dt><dd>{{ cur.scope }}</dd>
+              <dt>Audience</dt><dd title="{{ cur.aud }}">{{ cur.aud }}</dd>
+              <dt>Team / project</dt><dd>{{ cur.team }}</dd>
+              <dt>Snapshot</dt><dd class="mono" style="color: var(--text-secondary)">{{ cur.hash }}</dd>
+            </dl>
+          </div>
+          <sc-if value="{{ cur.blocked }}" hint-placeholder-val="{{ false }}">
+            <div role="note" style="margin: 12px 16px 0; display: flex; gap: 8px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--warning-border); background: var(--warning-subtle); font-size: 12px; line-height: 1.45">
+              <svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--warning); margin-top: 1px"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0"/></svg>
+              <span><strong>Approval blocked.</strong> "{{ cur.aud }}" can no longer be enforced. You can still reject.</span>
+            </div>
+          </sc-if>
+          <label style="display: flex; flex-direction: column; gap: 6px; padding: 14px 16px">
+            <span style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--text-secondary)"><span>Note to {{ cur.first }}</span><span style="font-weight: 500; color: {{ reasonC }}">{{ reasonHint }}</span></span>
+            <textarea class="ta {{ taErr }}" placeholder="What should change? Required to reject." value="{{ reasonVal }}" onInput="{{ setReason }}" aria-invalid="{{ taInvalid }}"></textarea>
+          </label>
+
+          <div class="foot" role="group" aria-label="Decide">
+            <sc-if value="{{ choose }}" hint-placeholder-val="{{ true }}">
+              <div class="row">
+                <button type="button" class="btn-d" onClick="{{ reject }}">Reject</button>
+                <button type="button" class="btn1" onClick="{{ approve }}" disabled="{{ cur.blocked }}" style="flex: 1.6"><svg class="i" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.2"><path d="m5 12 5 5 9-10"/></svg>Approve</button>
+              </div>
+              <span class="meta" style="color: var(--text-muted); line-height: 1.4">{{ hint }}</span>
+            </sc-if>
+            <sc-if value="{{ confirming }}" hint-placeholder-val="{{ false }}">
+              <div class="cf" role="alertdialog" aria-label="{{ cfTitle }}" style="display: flex; flex-direction: column; gap: 10px">
+                <div><div style="font-weight: 600; font-size: 13px">{{ cfTitle }}</div><div class="meta" style="line-height: 1.45">{{ cfBody }}</div></div>
+                <div class="row">
+                  <button type="button" class="btn2" style="height: 36px" onClick="{{ cancel }}">Cancel</button>
+                  <button type="button" class="{{ cfClass }}" onClick="{{ confirm }}" style="flex: 1.6">{{ cfLabel }}</button>
+                </div>
+              </div>
+            </sc-if>
+          </div>
+        </sc-if>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  componentWillUnmount() { clearTimeout(this._t); }
+  renderVals() {
+    const s = this.state || {};
+    const Q = [
+      { id: 1, code: 'NSS-POL-012', title: 'Data retention policy', ver: 'v3', live: 'v2', author: 'Minh Tran', ini: 'MT', dept: 'Engineering', when: 'Oct 21', read: '3 min', cls: 'CONFIDENTIAL', scope: 'Department', aud: 'Everyone in Engineering', team: 'Platform', hash: '9e41…a07c', blocked: false },
+      { id: 2, code: 'NSS-CHK-004', title: 'Release checklist for mobile and web clients', ver: 'v1', live: 'none', author: 'An Le', ini: 'AL', dept: 'Engineering', when: 'Oct 22', read: '2 min', cls: 'INTERNAL', scope: 'Department', aud: 'Everyone in Engineering', team: '—', hash: '3c88…11f2', blocked: false },
+      { id: 3, code: 'NSS-OPS-031', title: 'Customer escalation guide', ver: 'v2', live: 'v1', author: 'Quynh Do', ini: 'QD', dept: 'Operations', when: 'Today', read: '4 min', cls: 'INTERNAL', scope: 'Group', aud: 'Support partners', team: 'Support', hash: 'b710…6d3e', blocked: true },
+      { id: 4, code: 'NSS-SEC-002', title: 'Production access break-glass procedure', ver: 'v5', live: 'v4', author: 'Bao Nguyen', ini: 'BN', dept: 'Engineering', when: 'Today', read: '5 min', cls: 'RESTRICTED', scope: 'Group', aud: 'On-call engineers', team: 'SRE', hash: '51d0…e9b4', blocked: false }
+    ];
+    const done = s.done || [];
+    const left = Q.filter((q) => done.indexOf(q.id) < 0);
+    const idx0 = left.findIndex((q) => q.id === s.sel);
+    const idx = idx0 >= 0 ? idx0 : 0;
+    const cur0 = left[idx];
+    const cur = cur0 ? Object.assign({}, cur0, { first: cur0.author.split(' ')[0], verLine: cur0.live === 'none' ? cur0.ver + ' · new document' : cur0.ver + ' · replaces ' + cur0.live, showCls: cur0.cls !== 'INTERNAL', clsClass: cur0.cls === 'RESTRICTED' ? 'c-res' : 'c-con' }) : {};
+    const mode = s.mode || 'choose';
+    const reason = (s.reason || '').trim();
+    const go = (i) => { const q = left[i]; if (q) this.setState({ sel: q.id, mode: 'choose', reason: '', err: false }); };
+    const finish = (title, sub, ok) => {
+      const nextQ = left[idx + 1] || left[idx - 1];
+      this.setState({ done: done.concat([cur.id]), sel: nextQ ? nextQ.id : null, mode: 'choose', reason: '', err: false, toast: true, toastTitle: title, toastSub: sub, ok });
+      clearTimeout(this._t);
+      this._t = setTimeout(() => this.setState({ toast: false }), 4800);
+    };
+    return {
+      qn: left.length, pos: idx + 1,
+      queue: left.map((q, i) => Object.assign({}, q, {
+        cur: i === idx ? 'true' : 'false',
+        showCls: q.cls !== 'INTERNAL', clsShort: q.cls === 'RESTRICTED' ? 'RESTR.' : 'CONF.', clsClass: q.cls === 'RESTRICTED' ? 'c-res' : 'c-con',
+        pick: () => go(i)
+      })),
+      empty: left.length === 0,
+      cur, hasCur: !!cur0, noCur: !cur0,
+      noPrev: idx <= 0, noNext: idx >= left.length - 1,
+      prev: () => go(idx - 1), next: () => go(idx + 1),
+      setReason: (e) => this.setState({ reason: e.target.value, err: false }),
+      reasonVal: s.reason || '',
+      taErr: s.err ? 'err' : '', taInvalid: s.err ? 'true' : 'false',
+      reasonHint: s.err ? 'Required to reject' : 'Optional to approve',
+      reasonC: s.err ? 'var(--danger)' : 'var(--text-muted)',
+      choose: mode === 'choose', confirming: mode !== 'choose',
+      hint: cur.blocked ? 'Approval needs an enforceable audience.' : 'Approve prepares this exact snapshot for indexing. It becomes active for ' + cur.aud + ' afterwards.',
+      reject: () => reason ? this.setState({ mode: 'reject' }) : this.setState({ err: true }),
+      approve: () => { if (!cur.blocked) this.setState({ mode: 'approve' }); },
+      cancel: () => this.setState({ mode: 'choose' }),
+      cfTitle: mode === 'reject' ? 'Reject ' + cur.ver + '?' : 'Approve ' + cur.ver + ' for preparation?',
+      cfBody: mode === 'reject' ? cur.first + ' gets your note. Their working draft stays editable.' : 'Snapshot ' + cur.hash + ' is indexed first; it is not active until indexing finishes.',
+      cfLabel: mode === 'reject' ? 'Reject with note' : 'Approve for preparation',
+      cfClass: mode === 'reject' ? 'btn-d solid' : 'btn1',
+      confirm: () => mode === 'reject'
+        ? finish('Rejected ' + cur.title + ' ' + cur.ver, 'Note sent · working draft remains editable', false)
+        : finish('Approved ' + cur.title + ' ' + cur.ver, 'Preparing for indexing · not active yet', true),
+      toast: !!s.toast, idle: !s.toast,
+      toastTitle: s.toastTitle || '', toastSub: s.toastSub || '',
+      toastBg: s.ok ? 'var(--success-subtle)' : 'var(--surface)', toastC: s.ok ? 'var(--success)' : 'var(--text-secondary)',
+      islW: s.toast ? '460px' : '380px', islH: s.toast ? '54px' : '44px'
+    };
+  }
+}
+</script>
+</body>
+</html>

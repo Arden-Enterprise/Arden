@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Arden — Administration · Reviewer access</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Inter+Tight:wght@500;600&amp;display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg-app:#101014;--bg-sidebar:#15151a;--surface:#1c1c23;--surface-raised:#25252e;--surface-hover:rgb(255 255 255 / 4%);--border:#303039;--border-strong:#6a6976;--text-primary:#f2f1f7;--text-secondary:#a5a4b1;--text-muted:#8c8b98;--text-disabled:#777683;--accent:#8b82f6;--accent-hover:#a69eff;--accent-subtle:rgb(139 130 246 / 14%);--accent-border:rgb(139 130 246 / 38%);--text-on-accent:#101014;--focus-ring:#a69eff;--success:#7fcfa3;--success-subtle:rgb(127 207 163 / 12%);--success-border:rgb(127 207 163 / 30%);--warning:#e3b26b;--warning-subtle:rgb(227 178 107 / 12%);--warning-border:rgb(227 178 107 / 30%);--danger:#f2938a;--danger-subtle:rgb(242 147 138 / 12%);--danger-border:rgb(242 147 138 / 32%);--info:#7eb0f0;--info-subtle:rgb(126 176 240 / 12%);--info-border:rgb(126 176 240 / 30%);--shadow-island:inset 0 1px 0 rgb(255 255 255 / 3%),0 16px 36px -20px rgb(0 0 0 / 75%)}
+body{margin:0;background:var(--bg-app);color:var(--text-primary);font-family:Inter,"Segoe UI",sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss03"}
+h1,h2,h3{font-family:"Inter Tight",Inter,"Segoe UI",sans-serif;font-weight:600;margin:0;letter-spacing:-.02em}
+a{color:var(--accent-hover)}a:hover{color:#c2bcff}
+button,input,select{font-family:inherit}
+:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.i{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.isl{background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-island)}
+.nav{width:256px;flex:none;min-height:956px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;padding:10px;box-sizing:border-box;display:flex;flex-direction:column;gap:2px}
+.org{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:6px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);text-align:left;cursor:pointer}
+.logo{width:30px;height:30px;flex:none;border-radius:7px;background:var(--text-primary);color:var(--bg-app);display:inline-flex;align-items:center;justify-content:center;font:600 11px/1 "Inter Tight",Inter,sans-serif}
+.ni{display:flex;align-items:center;gap:10px;min-height:32px;padding:0 10px;border-radius:8px;color:var(--text-secondary);text-decoration:none;font-size:14px;white-space:nowrap}
+.ni:hover{background:var(--surface-hover);color:var(--text-primary)}
+.ni.on{background:var(--accent-subtle);color:var(--text-primary)}
+.ni .i{color:var(--text-muted)}.ni.on .i{color:var(--accent-hover)}
+.gl{font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);padding:0 10px;margin:16px 0 4px}
+.badge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:6px;background:var(--surface-raised);color:var(--text-secondary);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums;box-sizing:border-box}
+.mn{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px;min-height:956px}
+.top{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:12px;min-height:64px}
+.di{display:flex;align-items:center;gap:10px;height:44px;width:380px;max-width:calc(100vw - 48px);padding:0 6px 0 8px;border-radius:12px;background:var(--surface-raised);border:1px solid var(--border);box-sizing:border-box;box-shadow:0 18px 40px -20px rgb(0 0 0 / 80%);overflow:hidden}
+.mini{width:28px;height:28px;flex:none;border-radius:6px;background:var(--text-primary);color:var(--bg-app);display:inline-flex;align-items:center;justify-content:center;font:600 10px/1 "Inter Tight",Inter,sans-serif}
+.ck{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-secondary);font-size:12px;cursor:pointer;white-space:nowrap}
+.ic{width:32px;height:32px;flex:none;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--text-secondary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;position:relative}
+.ic:hover{background:var(--surface-hover);color:var(--text-primary)}
+.pg{display:flex;flex-direction:column;gap:16px;padding:8px 12px 40px;box-sizing:border-box}
+.eb{font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--text-muted)}
+.btn1{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--text-on-accent);font-weight:650;font-size:13px;white-space:nowrap;cursor:pointer}
+.btn1:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);font-weight:600;font-size:12px;white-space:nowrap;cursor:pointer}
+.btn2:hover{background:var(--surface-raised)}
+.seg{display:inline-flex;gap:2px;padding:4px;border-radius:12px;background:var(--bg-sidebar);border:1px solid var(--border);flex-wrap:wrap;align-self:flex-start}
+.seg a{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-radius:8px;color:var(--text-secondary);text-decoration:none;font-weight:600;font-size:13px}
+.seg a:hover{color:var(--text-primary);background:var(--surface-hover)}
+.seg a[aria-current="page"]{background:var(--accent-subtle);color:var(--text-primary);box-shadow:inset 0 0 0 1px var(--accent-border)}
+.chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.02em;border:1px solid var(--border);background:var(--surface-raised);color:var(--text-secondary);white-space:nowrap;box-sizing:border-box}
+.c-int{color:var(--text-primary)}
+.c-con{color:var(--info);border-color:var(--info-border);background:var(--info-subtle)}
+.c-res{color:var(--danger);border-color:var(--danger-border);background:var(--danger-subtle)}
+.meta{font-size:12px;color:var(--text-secondary)}
+.av{width:28px;height:28px;flex:none;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font:600 10px/1 "Inter Tight",Inter,sans-serif;color:var(--text-primary);background:var(--surface-raised)}
+.split{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
+.grow{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px}
+.side{flex:1 1 300px;max-width:340px;min-width:0;border-radius:16px;padding:18px;box-sizing:border-box;display:flex;flex-direction:column;gap:14px}
+.tr{display:grid;grid-template-columns:minmax(180px,1.4fr) minmax(96px,.8fr) minmax(180px,1.3fr) 124px 72px;align-items:center;column-gap:10px;min-height:60px;padding:6px 10px 6px 14px;border-radius:10px}
+.tr.th{padding-top:0;padding-bottom:0}
+.th{min-height:36px;font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--text-muted)}
+.rw:hover{background:var(--surface-hover)}
+.fl{display:flex;flex-direction:column;gap:6px}
+.fl>span{font-size:12px;font-weight:600;color:var(--text-secondary)}
+.sel{width:100%;box-sizing:border-box;height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--bg-sidebar);color:var(--text-primary);font-size:13px}
+.ck2{display:flex;align-items:center;gap:10px;min-height:32px;font-size:13px}
+.ck2 input{accent-color:#8b82f6;width:16px;height:16px;margin:0}
+.note{display:flex;gap:10px;padding:12px 14px;border-radius:12px;background:var(--surface-raised);border:1px solid var(--border);font-size:13px;color:var(--text-secondary)}
+</style>
+</helmet>
+
+<div style="display: flex; flex-wrap: wrap; gap: 12px; min-height: 980px; padding: 12px; box-sizing: border-box; background: var(--bg-app); align-items: flex-start">
+
+  <nav class="nav" aria-label="Northstar Studio">
+    <button type="button" class="org" aria-haspopup="menu" aria-expanded="false" aria-label="Switch organization — Northstar Studio"><span class="logo">NS</span><span style="display: flex; flex-direction: column; min-width: 0; flex: 1"><span style="font: 600 14px/1.3 'Inter Tight', Inter, sans-serif">Northstar Studio</span><span style="font-size: 12px; color: var(--text-secondary)">Organization Admin</span></span><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-muted); margin-right: 6px"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg></button>
+    <div class="gl">WORK</div>
+    <a class="ni" href="MyWork.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/></svg>My Work</a>
+    <a class="ni" href="PrivateNotes.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Private Notes</a>
+    <div class="gl">KNOWLEDGE</div>
+    <a class="ni" href="Library.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>Library</a>
+    <a class="ni" href="Contributions.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5z"/><path d="m3 13 9 5 9-5"/></svg>Contributions</a>
+    <a class="ni" href="Reviews.dc.html" aria-label="Reviews, 3 assigned"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 13l2 2 4-4"/></svg>Reviews<span class="badge">3</span></a>
+    <div class="gl">MANAGE ORGANIZATION</div>
+    <a class="ni on" href="Main.dc.html" aria-current="page"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg>Administration</a>
+    <div style="flex: 1"></div>
+    <a class="ni" href="#" style="padding-left: 6px"><span class="av" style="width: 24px; height: 24px">HN</span>Account</a>
+  </nav>
+
+  <main class="mn">
+    <header class="top">
+      <div></div>
+      <div class="di" role="region" aria-label="Status island">
+        <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}">
+          <span class="mini">NS</span>
+          <span style="font-size: 13px; color: var(--text-secondary); white-space: nowrap">Administration</span><span style="color: var(--text-muted)" aria-hidden="true">/</span>
+          <span style="font-size: 13px; font-weight: 600; flex: 1; white-space: nowrap">Reviewer access</span>
+          <button type="button" class="ck" aria-label="Search (Ctrl K)"><svg class="i" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Ctrl K</button>
+        </sc-if>
+        <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+          <span role="status" aria-live="polite" style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0">
+            <span style="width: 28px; height: 28px; flex: none; border-radius: 7px; background: var(--success-subtle); color: var(--success); display: inline-flex; align-items: center; justify-content: center"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.2"><path d="m5 12 5 5 9-10"/></svg></span>
+            <span style="font-size: 13px; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ toastText }}</span>
+          </span>
+        </sc-if>
+      </div>
+      <div style="display: flex; justify-content: flex-end"><button type="button" class="ic" aria-label="Notifications, 2 new"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span aria-hidden="true" style="position: absolute; top: 6px; right: 7px; width: 7px; height: 7px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 2px var(--bg-app)"></span></button></div>
+    </header>
+
+    <div class="pg">
+      <div style="display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap">
+        <div style="flex: 1 1 320px; min-width: 0">
+          <div class="eb">MANAGE ORGANIZATION</div>
+          <h1 style="font-size: 34px; line-height: 1.2; margin: 4px 0 4px">Reviewer access</h1>
+          <p style="margin: 0; color: var(--text-secondary); max-width: 700px">Who may decide on submissions, per department and classification.</p>
+        </div>
+      </div>
+
+      <nav class="seg" aria-label="Administration sections">
+        <a href="Main.dc.html">Members<span class="badge" style="margin-left: 0">48</span></a>
+        <a href="Departments.dc.html">Departments<span class="badge" style="margin-left: 0">4</span></a>
+        <a href="Audiences.dc.html">Audiences</a>
+        <a href="Invitations.dc.html">Invitations<span class="badge" style="margin-left: 0">3</span></a>
+        <a href="ReviewerAccess.dc.html" aria-current="page">Reviewer access</a>
+      </nav>
+
+      <div class="split">
+        <div class="grow">
+          <section class="isl" aria-label="Reviewer grants" style="border-radius: 14px; padding: 6px; overflow-x: auto">
+            <div style="min-width: 680px">
+              <div class="tr th"><span>REVIEWER</span><span>DEPARTMENT</span><span>CLASSIFICATIONS</span><span>STATUS</span><span></span></div>
+              <sc-for list="{{ grants }}" as="g" hint-placeholder-count="7">
+                <div class="tr rw" style="opacity: {{ g.op }}">
+                  <span style="display: flex; align-items: center; gap: 10px; min-width: 0"><span class="av" style="background: {{ g.bg }}">{{ g.ini }}</span><span style="min-width: 0; line-height: 1.3"><span style="display: block; font-weight: 600">{{ g.name }}</span><span class="meta">{{ g.level }} · {{ g.tags }}</span></span></span>
+                  <span style="color: var(--text-secondary)">{{ g.dept }}</span>
+                  <span style="display: flex; gap: 4px; flex-wrap: wrap">
+                    <sc-if value="{{ g.int }}" hint-placeholder-val="{{ true }}"><span class="chip c-int">INTERNAL</span></sc-if>
+                    <sc-if value="{{ g.con }}" hint-placeholder-val="{{ true }}"><span class="chip c-con">CONFIDENTIAL</span></sc-if>
+                    <sc-if value="{{ g.res }}" hint-placeholder-val="{{ false }}"><span class="chip c-res"><svg class="i" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.4"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>RESTRICTED</span></sc-if>
+                  </span>
+                  <span style="display: flex; flex-direction: column; align-items: flex-start; gap: 3px"><span class="chip" style="color: {{ g.stC }}; border-color: {{ g.stB }}; background: {{ g.stBg }}">{{ g.status }}</span><span class="meta" style="font-variant-numeric: tabular-nums">{{ g.valid }}</span></span>
+                  <span style="display: flex; justify-content: flex-end"><sc-if value="{{ g.canRevoke }}" hint-placeholder-val="{{ true }}"><button type="button" class="btn2" onClick="{{ g.revoke }}" style="color: var(--danger)">Revoke</button></sc-if></span>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+          <div class="note">
+            <svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="margin-top: 2px; color: var(--info)"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+            <span>Reviewers see only the exact submitted snapshot. Approving does not make them a reader of the published version, and no one can approve their own submission.</span>
+          </div>
+        </div>
+
+        <aside class="isl side" aria-labelledby="ng-h">
+          <h2 id="ng-h" style="font-size: 17px">New grant</h2>
+          <label class="fl"><span>Reviewer</span><select class="sel"><option>Tuan Bui · Engineering</option><option>Hoa Vu · Operations</option><option>Mai Nguyen · Operations</option></select></label>
+          <label class="fl"><span>Department</span><select class="sel"><option>Engineering</option><option>Operations</option><option>Design</option><option>People &amp; Culture</option></select></label>
+          <label class="fl"><span>Level</span><select class="sel" onChange="{{ pickLevel }}"><option value="Standard">Standard</option><option value="Specialist">Specialist</option><option value="Senior">Senior</option></select></label>
+          <fieldset style="border: 0; margin: 0; padding: 0">
+            <legend style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px">Classifications</legend>
+            <label class="ck2"><input type="checkbox" checked>INTERNAL</label>
+            <label class="ck2"><input type="checkbox" checked>CONFIDENTIAL</label>
+            <label class="ck2" style="color: {{ resColor }}"><input type="checkbox" disabled="{{ resLocked }}">RESTRICTED</label>
+            <span class="meta">{{ resHint }}</span>
+          </fieldset>
+          <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+            <label class="fl"><span>From</span><input class="sel" type="text" value="Oct 24, 2026"></label>
+            <label class="fl"><span>Until</span><input class="sel" type="text" placeholder="No end date"></label>
+          </div>
+          <button type="button" class="btn1" onClick="{{ create }}">Create grant</button>
+        </aside>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  componentWillUnmount() { clearTimeout(this._t); }
+  renderVals() {
+    const s = this.state || {};
+    const G = [
+      { id: 1, name: 'Linh Pham', ini: 'LP', bg: '#2c2b3a', dept: 'Engineering', c: 'icr', level: 'Senior', valid: 'Sep 1 – no end', status: 'Active' },
+      { id: 2, name: 'Minh Tran', ini: 'MT', bg: '#2a2d33', dept: 'Engineering', c: 'ic', level: 'Standard', valid: 'Oct 1 – Dec 31', status: 'Active' },
+      { id: 3, name: 'Duc Vo', ini: 'DV', bg: '#2a3030', dept: 'Engineering', c: 'r', level: 'Specialist', tags: 'Tag: security', valid: 'Oct 10 – Jan 10', status: 'Active' },
+      { id: 4, name: 'Quynh Do', ini: 'QD', bg: '#322b33', dept: 'Operations', c: 'i', level: 'Standard', valid: 'Oct 1 – Oct 31', status: 'Ends in 8 days' },
+      { id: 5, name: 'Mai Nguyen', ini: 'MN', bg: '#2c2b3a', dept: 'Operations', c: 'ic', level: 'Standard', valid: 'Oct 15 – no end', status: 'Active' },
+      { id: 6, name: 'Khang Ho', ini: 'KH', bg: '#2a3030', dept: 'Design', c: 'i', level: 'Standard', valid: 'Sep 20 – no end', status: 'Active' },
+      { id: 7, name: 'Lan Phan', ini: 'LN', bg: '#322b33', dept: 'People & Culture', c: 'ic', level: 'Standard', valid: 'Sep 3 – no end', status: 'Active' },
+      { id: 8, name: 'An Le', ini: 'AL', bg: '#2a2d33', dept: 'Engineering', c: 'i', level: 'Standard', valid: 'Aug 20 – Oct 12', status: 'Revoked' }
+    ];
+    const revoked = s.revoked || [];
+    const added = s.added || [];
+    const ST = {
+      'Active': ['var(--success)', 'var(--success-border)', 'var(--success-subtle)'],
+      'Ends in 8 days': ['var(--info)', 'var(--info-border)', 'var(--info-subtle)'],
+      'Revoked': ['var(--text-secondary)', 'var(--border)', 'var(--surface-raised)']
+    };
+    const grants = added.concat(G).map((g0) => {
+      const g = Object.assign({}, g0, revoked.indexOf(g0.id) >= 0 ? { status: 'Revoked', valid: g0.valid.split(' – ')[0] + ' – today' } : {});
+      const c = ST[g.status];
+      return Object.assign({}, g, {
+        tags: g.tags || 'All tags',
+        int: g.c.indexOf('i') >= 0, con: g.c.indexOf('c') >= 0, res: g.c.indexOf('r') >= 0,
+        stC: c[0], stB: c[1], stBg: c[2],
+        op: g.status === 'Revoked' ? '.6' : '1',
+        canRevoke: g.status !== 'Revoked',
+        revoke: () => this.flash('Grant for ' + g.name + ' revoked — effective on their next request', { revoked: revoked.concat([g.id]) })
+      });
+    });
+    const level = s.level || 'Standard';
+    const locked = level === 'Standard';
+    return {
+      grants,
+      resLocked: locked,
+      resColor: locked ? 'var(--text-disabled)' : 'var(--text-primary)',
+      resHint: locked ? 'RESTRICTED needs a Specialist or Senior grant.' : 'Allowed for this level.',
+      pickLevel: (e) => this.setState({ level: e.target.value }),
+      toast: !!s.toast, idle: !s.toast, toastText: s.toastText || '',
+      create: () => {
+        if (added.length) return;
+        this.flash('Grant created for Tuan Bui · Engineering', { added: [{ id: 9, name: 'Tuan Bui', ini: 'TB', bg: '#2a2d33', dept: 'Engineering', c: locked ? 'ic' : 'icr', level, valid: 'Oct 24 – no end', status: 'Active' }] });
+      }
+    };
+  }
+  flash(text, patch) {
+    this.setState(Object.assign({ toast: true, toastText: text }, patch));
+    clearTimeout(this._t);
+    this._t = setTimeout(() => this.setState({ toast: false }), 4000);
+  }
+}
+</script>
+</body>
+</html>

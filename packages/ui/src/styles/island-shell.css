@@ -24,7 +24,7 @@
   --arden-warning-subtle: rgb(227 178 107 / 12%);
   --arden-warning-border: rgb(227 178 107 / 30%);
   --arden-danger-subtle: rgb(242 147 138 / 12%);
-  --arden-danger-border: rgb(242 147 138 / 32%);
+  --arden-danger-border: rgb(242 147 138 / 30%);
   --arden-info-subtle: rgb(126 176 240 / 12%);
   --arden-info-border: rgb(126 176 240 / 30%);
   --arden-shadow-island: inset 0 1px 0 rgb(255 255 255 / 3%), 0 16px 36px -20px rgb(0 0 0 / 75%);
@@ -32,6 +32,12 @@
   --arden-morph: cubic-bezier(.32, .72, 0, 1);
   --arden-font-body: "Inter Variable", "Segoe UI", sans-serif;
   --arden-font-heading: "Inter Tight Variable", "Inter Variable", "Segoe UI", sans-serif;
+  /* Control heights: sm = island actions and inner tabs, md = buttons/inputs/filters/icon buttons/nav items,
+     lg = the one primary action on a page. Phones raise them to the 44px touch target (see max-width: 639px). */
+  --arden-control-sm: 28px;
+  --arden-control-md: 32px;
+  --arden-control-lg: 36px;
+  --arden-control-touch: 44px;
   --arden-shell-gap: 12px;
   --arden-shell-height: calc(100dvh - 18px - 2 * var(--arden-shell-gap));
 
@@ -56,6 +62,8 @@
   --arden-radius-xs: 6px;
   --arden-radius-sm: 8px;
   --arden-radius-md: 12px;
+  --arden-radius-island: 14px;
+  --arden-radius-panel: 16px;
 
   gap: var(--arden-shell-gap);
   padding: var(--arden-shell-gap);
@@ -109,10 +117,10 @@
 .arden-app-shell .access-card-copy > span { color: var(--arden-text-secondary); font-size: 12px; }
 .access-card-switch { margin: 0 6px 0 auto; color: var(--arden-text-muted); }
 .arden-app-shell .sidebar-navigation { display: flex; flex-direction: column; flex: 1; gap: 2px; min-height: 0; }
-.arden-app-shell .navigation-label { margin: 16px 10px 4px; white-space: nowrap; }
+.arden-app-shell .navigation-label { margin: 16px 0 4px; padding: 0 10px; white-space: nowrap; }
 .arden-app-shell .navigation-label:first-child { margin-top: 12px; }
 .arden-app-shell .sidebar-nav-item {
-  gap: 10px; min-height: 32px; padding: 0 10px; border-radius: 8px; color: var(--arden-text-secondary);
+  gap: 10px; min-height: var(--arden-control-md); padding: 0 10px; border-radius: 8px; color: var(--arden-text-secondary);
   font-size: 14px; font-weight: 500; white-space: nowrap; box-shadow: none; transform: none;
 }
 .arden-app-shell .sidebar-nav-item svg { width: 18px; height: 18px; color: var(--arden-text-muted); }
@@ -154,12 +162,17 @@
 .app-sidebar.is-collapsed .access-card-copy, .app-sidebar.is-collapsed .access-card-switch,
 .app-sidebar.is-collapsed .sidebar-nav-label, .app-sidebar.is-collapsed .sidebar-planned,
 .app-sidebar.is-collapsed .sidebar-member > div { display: none; }
-.app-sidebar.is-collapsed .navigation-label { height: 1px; margin: 10px 8px; overflow: hidden; color: transparent; background: var(--arden-border); }
+.app-sidebar.is-collapsed .navigation-label { height: 1px; margin: 10px 8px; padding: 0; overflow: hidden; color: transparent; background: var(--arden-border); }
 .app-sidebar.is-collapsed .sidebar-nav-item { justify-content: center; padding: 0; min-height: 36px; }
 .app-sidebar.is-collapsed .sidebar-review-count { position: absolute; transform: translate(12px, -10px); min-width: 18px; height: 18px; padding: 0 4px; font-size: 10px; }
 .app-sidebar.is-collapsed .sidebar-nav-item { position: relative; }
-.app-sidebar.is-collapsed .sidebar-session { flex-direction: column; }
-.app-sidebar.is-collapsed .sidebar-member { flex: none; padding: 4px 0; }
+/* Collapsed footer: one centered column. `flex: 1 0 100%` on the collapse button means 100% HEIGHT in a column,
+   which stretched it and wrapped the avatar and sign-out into a second column (horizontal scroll). */
+.arden-app-shell .app-sidebar.is-collapsed { overflow: hidden; }
+.arden-app-shell .app-sidebar.is-collapsed .sidebar-session { flex-direction: column; flex-wrap: nowrap; align-items: center; gap: 4px; }
+.arden-app-shell .app-sidebar.is-collapsed .sidebar-collapse { flex: none; width: 100%; }
+.arden-app-shell .app-sidebar.is-collapsed .sidebar-member { flex: none; justify-content: center; padding: 4px 0; }
+.arden-app-shell .app-sidebar.is-collapsed .sidebar-sign-out { flex: none; }
 
 /* ---------- Top bar and status island ---------- */
 .arden-app-shell .workspace-topbar {
@@ -171,7 +184,7 @@
 .arden-app-shell .preview-state { color: var(--arden-text-muted); font-size: 10px; font-weight: 600; letter-spacing: .06em; }
 .arden-app-shell .preview-state::before { background: var(--arden-success); }
 .arden-app-shell .context-toggle {
-  min-height: 32px; padding: 0 10px; border: 1px solid var(--arden-border); border-radius: 8px;
+  min-height: var(--arden-control-md); padding: 0 10px; border: 1px solid var(--arden-border); border-radius: 8px;
   color: var(--arden-text-secondary); background: var(--arden-surface-base); font-size: 13px; font-weight: 500;
 }
 .arden-app-shell .context-toggle:hover, .arden-app-shell .context-toggle[aria-expanded="true"] { color: var(--arden-text-primary); background: var(--arden-surface-raised); border-color: var(--arden-border-strong); }
@@ -239,32 +252,32 @@
 .arden-app-shell .workspace-page-header .meta-label { display: block; color: var(--arden-text-muted); font-size: 11px; }
 .arden-app-shell .workspace-page-header h1 { font: 600 34px/1.2 var(--arden-font-heading); letter-spacing: -.03em; }
 .arden-app-shell .workspace-page-header p { margin: 0; color: var(--arden-text-secondary); font-size: 14px; line-height: 1.55; }
-.arden-app-shell .workspace-page-header-row, .arden-app-shell .workspace-page-header.personal-title-row .workspace-page-header-row { flex-direction: row; align-items: flex-end; flex-wrap: wrap; gap: 12px 16px; width: 100%; }
-.arden-app-shell .workspace-page-header-row > h1 { flex: 1 1 auto; min-width: 0; }
+.arden-app-shell .workspace-page-header-row, .arden-app-shell .workspace-page-header.personal-title-row .workspace-page-header-row { flex-direction: row; align-items: center; flex-wrap: wrap; gap: 12px 16px; width: 100%; }
+.arden-app-shell .workspace-page-header-row > .workspace-page-header-text { display: grid; flex: 1 1 320px; gap: 4px; min-width: 0; }
 .arden-app-shell .workspace-scroll-content { padding: 4px 12px 40px; }
 
 /* ---------- Shared controls ---------- */
 .arden-app-shell .primary-button {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 0 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--arden-control-lg); padding: 0 14px;
   border: 1px solid var(--arden-violet); border-radius: 8px; color: var(--arden-on-accent); background: var(--arden-violet);
   font-size: 13px; font-weight: 650; box-shadow: none;
 }
 .arden-app-shell .primary-button:hover:not(:disabled) { border-color: var(--arden-violet-hover); color: var(--arden-on-accent); background: var(--arden-violet-hover); transform: none; }
 .arden-app-shell .primary-button:disabled { border-color: var(--arden-border); color: var(--arden-text-disabled); background: var(--arden-surface-raised); opacity: 1; }
 .arden-app-shell .secondary-button {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 32px; padding: 0 12px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--arden-control-md); padding: 0 12px;
   border: 1px solid var(--arden-border); border-radius: 8px; color: var(--arden-text-primary); background: var(--arden-surface-base);
   font-size: 13px; font-weight: 600;
 }
 .arden-app-shell .secondary-button:hover:not(:disabled) { border-color: var(--arden-border-strong); background: var(--arden-surface-raised); transform: none; }
 .arden-app-shell .secondary-button:disabled { color: var(--arden-text-disabled); opacity: 1; }
 .arden-app-shell .admin-danger-button {
-  min-height: 32px; padding: 0 12px; border: 1px solid var(--arden-danger); border-radius: 8px; color: var(--arden-on-accent);
+  min-height: var(--arden-control-md); padding: 0 12px; border: 1px solid var(--arden-danger); border-radius: 8px; color: var(--arden-on-accent);
   background: var(--arden-danger); font-size: 13px; font-weight: 600;
 }
-.arden-app-shell .admin-text-danger { min-height: 28px; border-radius: 8px; color: var(--arden-danger); font-weight: 600; }
+.arden-app-shell .admin-text-danger { min-height: var(--arden-control-sm); border-radius: 8px; color: var(--arden-danger); font-weight: 600; }
 .arden-app-shell .workspace-search {
-  height: 32px; padding: 0 10px; border: 1px solid var(--arden-border-strong); border-radius: 8px; background: var(--arden-bg-sidebar);
+  height: var(--arden-control-md); padding: 0 10px; border: 1px solid var(--arden-border-strong); border-radius: 8px; background: var(--arden-bg-sidebar);
 }
 .arden-app-shell .workspace-search:focus-within { border-color: var(--arden-violet-hover); box-shadow: 0 0 0 2px var(--arden-accent-subtle); }
 .arden-app-shell .workspace-search input { font-size: 13px; }
@@ -274,7 +287,7 @@
 .arden-app-shell .organization-field input, .arden-app-shell .organization-field select, .arden-app-shell .organization-field textarea,
 .arden-app-shell .knowledge-live-form input, .arden-app-shell .knowledge-live-form select, .arden-app-shell .knowledge-live-form textarea,
 .arden-app-shell .knowledge-panel label > textarea, .arden-app-shell .island-field input, .arden-app-shell .island-field select, .arden-app-shell .island-field textarea {
-  min-height: 32px; padding: 6px 10px; border: 1px solid var(--arden-border-strong); border-radius: 8px;
+  min-height: var(--arden-control-md); padding: 6px 10px; border: 1px solid var(--arden-border-strong); border-radius: 8px;
   color: var(--arden-text-primary); background: var(--arden-bg-sidebar); font-size: 13px;
 }
 .arden-app-shell .organization-field textarea, .arden-app-shell .island-field textarea { min-height: 84px; line-height: 1.5; }
@@ -295,7 +308,7 @@
 .island-side-header > div { flex: 1; min-width: 0; }
 .island-side-header p, .island-meta { margin: 0; color: var(--arden-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
 .island-icon-button {
-  display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 1px solid var(--arden-border);
+  display: inline-grid; place-items: center; flex: none; width: var(--arden-control-md); height: var(--arden-control-md); padding: 0; border: 1px solid var(--arden-border);
   border-radius: 8px; color: var(--arden-text-secondary); background: transparent; cursor: pointer;
 }
 .island-icon-button:hover { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
@@ -333,7 +346,7 @@
 /* Segmented control: section tabs and filters. */
 .island-seg { display: inline-flex; flex-wrap: wrap; align-self: flex-start; gap: 2px; padding: 4px; border: 1px solid var(--arden-border); border-radius: 12px; background: var(--arden-bg-sidebar); }
 .island-seg > button {
-  display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 0 12px; border: 0; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 8px; min-height: var(--arden-control-sm); padding: 0 12px; border: 0; border-radius: 8px;
   color: var(--arden-text-secondary); background: transparent; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .island-seg > button:hover { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
@@ -362,7 +375,7 @@
 .island-row-cell { display: grid; min-width: 0; color: var(--arden-text-secondary); line-height: 1.35; }
 .island-row-cell > .island-chip { justify-self: start; }
 .island-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.island-row-actions .secondary-button, .island-row-actions .admin-text-danger { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.island-row-actions .secondary-button, .island-row-actions .admin-text-danger { min-height: var(--arden-control-sm); padding: 0 10px; font-size: 12px; }
 .island-list-footer { display: flex; align-items: center; gap: 12px; padding: 10px 14px 8px; color: var(--arden-text-secondary); font-size: 12px; }
 .island-empty { display: grid; justify-items: center; gap: 8px; padding: 32px 14px; color: var(--arden-text-secondary); text-align: center; }
 .island-empty h3 { margin: 0; color: var(--arden-text-primary); font-size: 15px; }
@@ -404,14 +417,15 @@
   .arden-app-shell .app-sidebar .sidebar-nav-label, .arden-app-shell .app-sidebar .sidebar-planned,
   .arden-app-shell .app-sidebar .sidebar-member > div, .arden-app-shell .sidebar-collapse { display: none; }
   .arden-app-shell .app-sidebar .access-card { display: flex; justify-content: center; padding: 6px 0; }
-  .arden-app-shell .app-sidebar .navigation-label { display: block; height: 1px; margin: 10px 8px; overflow: hidden; color: transparent; background: var(--arden-border); }
+  .arden-app-shell .app-sidebar .navigation-label { display: block; height: 1px; margin: 10px 8px; padding: 0; overflow: hidden; color: transparent; background: var(--arden-border); }
   .arden-app-shell .app-sidebar .sidebar-nav-item { position: relative; justify-content: center; padding: 0; min-height: 36px; }
   .arden-app-shell .app-sidebar .sidebar-review-count { position: absolute; transform: translate(12px, -10px); min-width: 18px; height: 18px; padding: 0 4px; font-size: 10px; }
   .arden-app-shell .app-sidebar .sidebar-session { flex-direction: column; }
   .arden-app-shell .knowledge-pane-redesign:not(.is-collapsed) { top: var(--arden-shell-gap); right: var(--arden-shell-gap); bottom: auto; height: var(--arden-shell-height); }
 }
 @media (max-width: 639px) {
-  .arden-app-shell { --arden-shell-gap: 0px; padding: 0; }
+  /* Touch targets: the page's primary action reaches 44px; other controls step up to 36px (Mobile.dc.html). */
+  .arden-app-shell { --arden-shell-gap: 0px; --arden-control-md: 36px; --arden-control-lg: var(--arden-control-touch); padding: 0; }
   .arden-app-shell .workspace-page { height: calc(100dvh - 18px); }
   .arden-app-shell .workspace-topbar { position: relative; grid-template-columns: auto minmax(0, 1fr) auto; min-height: 64px; padding: 10px 12px 6px; }
   .arden-app-shell .topbar-menu-button {
@@ -503,7 +517,7 @@
   background: var(--arden-surface-base); font-size: 13px; font-weight: 500; cursor: pointer;
 }
 .island-filter select:hover { border-color: var(--arden-border-strong); color: var(--arden-text-primary); }
-.arden-app-shell .island-filter select { min-height: 32px; height: 32px; width: auto; }
+.arden-app-shell .island-filter select { min-height: var(--arden-control-md); height: var(--arden-control-md); width: auto; }
 .arden-app-shell .access-card:disabled { opacity: 1; cursor: default; }
 @container workspace (max-width: 640px) {
   .island-split > .island-side { position: static; max-width: none; }
@@ -516,4 +530,71 @@
   .island-row > .island-row-cell.is-name, .island-row > [role="cell"]:first-child { flex-basis: 100%; }
   .island-row > .island-row-cell { font-size: 13px; }
   .island-row > .island-row-actions { margin-left: auto; }
+}
+
+/* ---------- Status island: confirm and toast action ---------- */
+.status-island.is-confirm { width: 520px; height: 62px; border-radius: 14px; }
+.status-island-confirm { gap: 12px; padding: 0 10px 0 12px; }
+.status-island-confirm-mark {
+  display: inline-grid; place-items: center; flex: none; width: 38px; height: 38px; border-radius: 8px;
+  color: var(--arden-danger); background: var(--arden-danger-subtle);
+}
+.status-island-confirm-copy { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
+.status-island-confirm-copy > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-island-confirm-copy strong { font-size: 13px; font-weight: 600; }
+.status-island-confirm-copy > span { color: var(--arden-text-secondary); font-size: 12px; }
+.status-island-confirm-copy > span.is-error { color: var(--arden-danger); }
+.arden-app-shell .status-island-confirm .secondary-button,
+.arden-app-shell .status-island-confirm .admin-danger-button { flex: none; min-height: var(--arden-control-sm); padding: 0 12px; }
+.arden-toast-action {
+  flex: none; height: var(--arden-control-sm); padding: 0 12px; border: 0; border-radius: 8px;
+  color: var(--arden-violet-hover); background: var(--arden-surface-base); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.arden-toast-action:hover { color: var(--arden-text-primary); }
+@media (max-width: 639px) {
+  .status-island.is-confirm { width: 100%; height: auto; min-height: 62px; }
+  .status-island-confirm { flex-wrap: wrap; padding: 10px 12px; }
+  .status-island-confirm-copy > * { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) { .status-island-confirm { animation: none; } }
+
+/* ---------- Shared island helpers ---------- */
+.island-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.island-side-header p.island-truncate { overflow-wrap: normal; }
+.island-icon-button:disabled { color: var(--arden-text-disabled); background: transparent; cursor: default; }
+.island-icon-button.is-danger:not(:disabled) { color: var(--arden-danger); }
+.island-icon-button.is-danger:hover:not(:disabled) { border-color: var(--arden-danger-border); background: var(--arden-danger-subtle); }
+.island-row-actions .island-icon-button, .island-action-slot { flex: none; width: var(--arden-control-sm); height: var(--arden-control-sm); }
+.island-row-cell.is-status { justify-items: start; gap: 2px; }
+.island-property-actions { display: flex; flex: none; align-items: center; gap: 8px; }
+
+/* ---------- Status island: task panel (e.g. Contribute a copy) ---------- */
+/* The panel floats over the page from the island's position instead of pushing the content down. */
+.arden-app-shell .workspace-topbar { position: relative; }
+.status-island.is-panel {
+  position: absolute; top: 10px; left: 50%; z-index: 20; width: 480px; max-width: calc(100% - 24px); height: auto;
+  max-height: calc(100dvh - 48px); overflow-y: auto; border-radius: 16px; transform: translateX(-50%);
+}
+.status-island-panel { align-items: stretch; height: auto; padding: 18px; }
+.contribute-island { display: grid; gap: 14px; width: 100%; min-width: 0; }
+.contribute-island h2 { margin: 0 0 4px; font-size: 17px; line-height: 1.3; }
+.contribute-island h2:focus { outline: 0; }
+.contribute-island .island-meta { margin: 0; }
+.contribute-island .knowledge-source-preview { padding: 10px 12px; border: 1px solid var(--arden-border); border-radius: 10px; background: var(--arden-surface-base); }
+.contribute-island .knowledge-source-preview pre { max-height: 120px; margin: 0; font-size: 12px; }
+.contribute-island .knowledge-contribute-form small { color: var(--arden-text-secondary); font-size: 12px; }
+.contribute-island .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 639px) {
+  .status-island.is-panel { top: 64px; width: calc(100% - 24px); }
+}
+
+/* ---------- Reader top bar: the document fills the page ---------- */
+.arden-app-shell .workspace-topbar.is-reader { display: block; min-height: 0; padding: 0; }
+.arden-app-shell .workspace-topbar.is-reader .topbar-leading { display: none; }
+/* The island floats over the page while it shows a toast, confirmation or panel, and is collapsed otherwise. */
+.workspace-topbar.is-reader .status-island { position: absolute; top: 10px; left: 50%; z-index: 20; transform: translateX(-50%); }
+.workspace-topbar.is-reader .status-island.is-hidden { width: 0; height: 0; border: 0; opacity: 0; pointer-events: none; box-shadow: none; }
+@media (max-width: 639px) {
+  .arden-app-shell .workspace-topbar.is-reader { display: grid; min-height: 64px; padding: 10px 12px 6px; }
+  .arden-app-shell .workspace-topbar.is-reader .topbar-leading { display: block; }
 }

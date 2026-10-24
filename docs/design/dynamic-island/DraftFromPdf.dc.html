@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Arden — Draft from PDF</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Inter+Tight:wght@500;600&amp;display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg-app:#101014;--bg-sidebar:#15151a;--surface:#1c1c23;--surface-raised:#25252e;--surface-hover:rgb(255 255 255 / 4%);--border:#303039;--border-strong:#6a6976;--text-primary:#f2f1f7;--text-secondary:#a5a4b1;--text-muted:#8c8b98;--text-disabled:#777683;--accent:#8b82f6;--accent-hover:#a69eff;--accent-subtle:rgb(139 130 246 / 14%);--accent-border:rgb(139 130 246 / 38%);--text-on-accent:#101014;--focus-ring:#a69eff;--success:#7fcfa3;--success-subtle:rgb(127 207 163 / 12%);--success-border:rgb(127 207 163 / 30%);--info:#7eb0f0;--info-subtle:rgb(126 176 240 / 12%);--info-border:rgb(126 176 240 / 30%);--danger:#f2938a;--danger-subtle:rgb(242 147 138 / 12%);--danger-border:rgb(242 147 138 / 32%);--shadow-island:inset 0 1px 0 rgb(255 255 255 / 3%),0 16px 36px -20px rgb(0 0 0 / 75%)}
+body{margin:0;background:var(--bg-app);color:var(--text-primary);font-family:Inter,"Segoe UI",sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss03"}
+h1,h2,h3{font-family:"Inter Tight",Inter,"Segoe UI",sans-serif;font-weight:600;margin:0;letter-spacing:-.02em}
+a{color:var(--accent-hover)}a:hover{color:#c2bcff}
+button,select,input{font-family:inherit}
+:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.i{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.isl{background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-island)}
+.nav{width:256px;flex:none;min-height:956px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;padding:10px;box-sizing:border-box;display:flex;flex-direction:column;gap:2px}
+.org{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:6px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);text-align:left;cursor:pointer}
+.logo{width:30px;height:30px;flex:none;border-radius:7px;background:var(--text-primary);color:var(--bg-app);display:inline-flex;align-items:center;justify-content:center;font:600 11px/1 "Inter Tight",Inter,sans-serif}
+.ni{display:flex;align-items:center;gap:10px;min-height:32px;padding:0 10px;border-radius:8px;color:var(--text-secondary);text-decoration:none;font-size:14px;white-space:nowrap}
+.ni:hover{background:var(--surface-hover);color:var(--text-primary)}
+.ni.on{background:var(--accent-subtle);color:var(--text-primary)}
+.ni .i{color:var(--text-muted)}.ni.on .i{color:var(--accent-hover)}
+.gl{font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);padding:0 10px;margin:16px 0 4px}
+.badge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:6px;background:var(--surface-raised);color:var(--text-secondary);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums;box-sizing:border-box}
+.mn{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px;min-height:956px}
+.top{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:12px;min-height:64px}
+.di{display:flex;align-items:center;gap:10px;height:44px;max-width:calc(100vw - 48px);padding:0 6px 0 8px;border-radius:12px;background:var(--surface-raised);border:1px solid var(--border);box-sizing:border-box;box-shadow:0 18px 40px -20px rgb(0 0 0 / 80%);overflow:hidden;transition:width .5s cubic-bezier(.32,.72,0,1),height .5s cubic-bezier(.32,.72,0,1)}
+.mini{width:28px;height:28px;flex:none;border-radius:6px;background:var(--text-primary);color:var(--bg-app);display:inline-flex;align-items:center;justify-content:center;font:600 10px/1 "Inter Tight",Inter,sans-serif}
+.ck{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-secondary);font-size:12px;cursor:pointer;white-space:nowrap;text-decoration:none}
+.ic{width:32px;height:32px;flex:none;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--text-secondary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;position:relative}
+.ic:hover{background:var(--surface-hover);color:var(--text-primary)}
+.btn1{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--text-on-accent);font-weight:650;font-size:13px;white-space:nowrap;cursor:pointer}
+.btn1:hover{background:var(--accent-hover)}
+.btn1[disabled]{background:var(--surface-raised);border-color:var(--border);color:var(--text-disabled);cursor:not-allowed}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);font-weight:600;font-size:13px;white-space:nowrap;cursor:pointer}
+.btn2:hover{background:var(--surface-raised)}
+.sm{height:28px;padding:0 10px;font-size:12px}
+.chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 7px;border-radius:6px;font-size:11px;font-weight:600;border:1px solid var(--border);background:var(--surface-raised);color:var(--text-secondary);white-space:nowrap;box-sizing:border-box}
+.c-ai{color:var(--accent-hover);border-color:var(--accent-border);background:var(--accent-subtle)}
+.c-info{color:var(--info);border-color:var(--info-border);background:var(--info-subtle)}
+.c-ok{color:var(--success);border-color:var(--success-border);background:var(--success-subtle)}
+.meta{font-size:12px;color:var(--text-secondary)}
+.av{width:24px;height:24px;flex:none;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font:600 10px/1 "Inter Tight",Inter,sans-serif;color:var(--text-primary);background:var(--surface-raised)}
+.pdf{background:#e9e8ee;border-radius:6px;padding:18px 16px;display:flex;flex-direction:column;gap:7px;box-shadow:0 1px 0 rgb(0 0 0 / 30%)}
+.pl{height:6px;border-radius:2px;background:#bdbcc6}
+.sec{padding:16px 18px;border-radius:12px;border:1px solid transparent;display:flex;flex-direction:column;gap:8px}
+.sec:hover{background:var(--surface-hover)}
+.doc{font-size:15px;line-height:1.75;color:#dcdbe3}
+.doc p{margin:0}
+.doc ul{margin:0;padding-left:20px}
+.fl{display:flex;flex-direction:column;gap:6px}
+.fl>span{font-size:12px;font-weight:600;color:var(--text-secondary)}
+.sel{width:100%;box-sizing:border-box;height:32px;padding:0 10px;border-radius:8px;border:1px solid var(--border-strong);background:var(--bg-sidebar);color:var(--text-primary);font-size:13px}
+@media (prefers-reduced-motion:reduce){.di{transition:none}}
+</style>
+</helmet>
+
+<div style="display: flex; flex-wrap: wrap; gap: 12px; min-height: 980px; padding: 12px; box-sizing: border-box; background: var(--bg-app); align-items: flex-start">
+
+  <nav class="nav" aria-label="Northstar Studio">
+    <button type="button" class="org" aria-haspopup="menu" aria-expanded="false" aria-label="Switch organization — Northstar Studio"><span class="logo">NS</span><span style="display: flex; flex-direction: column; min-width: 0; flex: 1"><span style="font: 600 14px/1.3 'Inter Tight', Inter, sans-serif">Northstar Studio</span><span style="font-size: 12px; color: var(--text-secondary)">Organization Admin</span></span><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-muted); margin-right: 6px"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg></button>
+    <div class="gl">WORK</div>
+    <a class="ni" href="MyWork.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/></svg>My Work</a>
+    <a class="ni" href="PrivateNotes.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Private Notes</a>
+    <div class="gl">KNOWLEDGE</div>
+    <a class="ni" href="Library.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>Library</a>
+    <a class="ni on" href="Contributions.dc.html" aria-current="page"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5z"/><path d="m3 13 9 5 9-5"/></svg>Contributions</a>
+    <a class="ni" href="Reviews.dc.html" aria-label="Reviews, 3 assigned"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 13l2 2 4-4"/></svg>Reviews<span class="badge">3</span></a>
+    <div class="gl">MANAGE ORGANIZATION</div>
+    <a class="ni" href="Main.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg>Administration</a>
+    <div style="flex: 1"></div>
+    <a class="ni" href="#" style="padding-left: 6px"><span class="av">HN</span>Account</a>
+  </nav>
+
+  <main class="mn">
+    <header class="top">
+      <div></div>
+      <div class="di" role="region" aria-label="Status island" style="width: {{ islW }}; height: {{ islH }}">
+        <sc-if value="{{ idle }}" hint-placeholder-val="{{ true }}">
+          <span class="mini">NS</span>
+          <span style="font-size: 13px; color: var(--text-secondary); white-space: nowrap">Contributions</span><span style="color: var(--text-muted)" aria-hidden="true">/</span>
+          <span style="font-size: 13px; font-weight: 600; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Security baseline · v3 draft</span>
+          <span class="meta" style="white-space: nowrap; padding-right: 6px">{{ saved }}</span>
+        </sc-if>
+        <sc-if value="{{ toast }}" hint-placeholder-val="{{ false }}">
+          <span role="status" aria-live="polite" style="display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0">
+            <span style="width: 32px; height: 32px; flex: none; border-radius: 8px; background: var(--success-subtle); color: var(--success); display: inline-flex; align-items: center; justify-content: center"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.2"><path d="m5 12 5 5 9-10"/></svg></span>
+            <span style="flex: 1; min-width: 0; line-height: 1.3"><span style="display: block; font-weight: 600; font-size: 13px">{{ toastTitle }}</span><span class="meta">{{ toastSub }}</span></span>
+            <a class="ck" href="Contributions.dc.html" style="color: var(--accent-hover)">View</a>
+          </span>
+        </sc-if>
+      </div>
+      <div style="display: flex; justify-content: flex-end"><button type="button" class="ic" aria-label="Notifications, 2 new"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span aria-hidden="true" style="position: absolute; top: 6px; right: 7px; width: 7px; height: 7px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 2px var(--bg-app)"></span></button></div>
+    </header>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 12px; padding: 0 12px 24px; align-items: flex-start">
+
+      <!-- SOURCE PDF -->
+      <section aria-label="Source PDF" style="flex: 1 1 240px; max-width: 280px; min-width: 0; background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 14px; padding: 12px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; align-items: center; gap: 8px">
+          <svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-secondary)"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8z"/><path d="M14 3v5h5"/></svg>
+          <span style="font-weight: 600; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">security-baseline-v3.pdf</span>
+          <span class="meta">4 pages</span>
+        </div>
+        <sc-for list="{{ pages }}" as="pg" hint-placeholder-count="4">
+          <div style="display: flex; flex-direction: column; gap: 4px">
+            <div class="pdf" style="outline: {{ pg.ring }}; outline-offset: 2px">
+              <div class="pl" style="width: 60%; height: 8px; background: #8f8e99"></div>
+              <div class="pl" style="width: 100%"></div><div class="pl" style="width: 92%"></div><div class="pl" style="width: 96%"></div><div class="pl" style="width: 70%"></div>
+            </div>
+            <span class="meta" style="text-align: center">Page {{ pg.n }}</span>
+          </div>
+        </sc-for>
+      </section>
+
+      <!-- DRAFT -->
+      <article class="isl" aria-label="Draft" style="flex: 999 1 440px; min-width: 0; border-radius: 14px; display: flex; flex-direction: column">
+        <div style="display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap">
+          <span class="chip c-ai"><svg class="i" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2"><path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z"/></svg>Drafted from PDF</span>
+          <span class="meta" style="flex: 1 1 200px">Check each section before you submit.</span>
+          <span style="font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums">{{ checkedN }} of 4 checked</span>
+        </div>
+        <div style="padding: 24px 24px 32px; max-width: 760px; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px">
+          <h1 style="font-size: 28px; line-height: 1.25; padding: 0 18px 10px">Security baseline</h1>
+          <sc-for list="{{ secs }}" as="x" hint-placeholder-count="4">
+            <section class="sec" aria-label="{{ x.h }}" style="border-color: {{ x.bd }}">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap">
+                <h3 style="font-size: 16px; flex: 1 1 auto">{{ x.h }}</h3>
+                <sc-if value="{{ x.low }}" hint-placeholder-val="{{ false }}"><span class="chip c-info" title="A table on this page was hard to read">Low confidence</span></sc-if>
+                <span class="chip">From p.{{ x.p }}</span>
+                <sc-if value="{{ x.ok }}" hint-placeholder-val="{{ false }}"><span class="chip c-ok"><svg class="i" width="11" height="11" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.6"><path d="m5 12 5 5 9-10"/></svg>Checked</span></sc-if>
+                <button type="button" class="btn2 sm" onClick="{{ x.toggle }}" aria-pressed="{{ x.ok }}">{{ x.btn }}</button>
+              </div>
+              <div class="doc"><p>{{ x.body }}</p></div>
+            </section>
+          </sc-for>
+        </div>
+      </article>
+
+      <!-- METADATA -->
+      <aside class="isl" aria-labelledby="md-h" style="flex: 1 1 260px; max-width: 300px; min-width: 0; border-radius: 14px; padding: 16px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px">
+        <h2 id="md-h" style="font-size: 15px">Before you submit</h2>
+        <label class="fl"><span>Classification</span><select class="sel"><option>RESTRICTED</option><option>CONFIDENTIAL</option><option>INTERNAL</option></select></label>
+        <label class="fl"><span>Responsible department</span><select class="sel"><option>Engineering</option><option>Operations</option></select></label>
+        <label class="fl"><span>Publication scope</span><select class="sel"><option>Department · Engineering</option><option>Organization</option></select></label>
+        <div class="fl">
+          <span>Audience</span>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px">
+            <span class="chip" style="height: 26px; font-size: 12px; color: var(--text-primary)">Incident leads<button type="button" aria-label="Remove Incident leads" style="border: 0; background: transparent; color: var(--text-secondary); padding: 0; margin-left: 2px; cursor: pointer; display: inline-flex"><svg class="i" width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2.2"><path d="M6 6l12 12M18 6 6 18"/></svg></button></span>
+            <button type="button" class="btn2 sm">Add</button>
+          </div>
+          <span class="meta">Only audiences you belong to are listed.</span>
+        </div>
+        <div style="padding: 10px 12px; border-radius: 10px; background: var(--surface-raised); border: 1px solid var(--border); font-size: 12px; color: var(--text-secondary)">RESTRICTED needs a Specialist or Senior reviewer in Engineering. Approval publishes this exact version automatically.</div>
+        <div style="margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border)">
+          <button type="button" class="btn2" onClick="{{ save }}">Save version</button>
+          <button type="button" class="btn1" onClick="{{ submit }}" disabled="{{ cantSubmit }}">Submit for review</button>
+          <span class="meta">{{ submitHint }}</span>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  componentWillUnmount() { clearTimeout(this._t); }
+  renderVals() {
+    const s = this.state || {};
+    const ok = s.ok || [true, false, false, false];
+    const S = [
+      { h: 'Purpose', p: 1, body: 'This baseline sets the minimum security controls for every Northstar Studio service that stores customer data or runs in production.' },
+      { h: 'Access control', p: 2, body: 'Production access uses single sign-on with hardware keys. Standing admin access is removed; engineers request time-boxed elevation, which expires after four hours and is logged.' },
+      { h: 'Secrets handling', p: 3, body: 'Secrets live only in the managed vault. Rotate service credentials every 90 days and immediately after anyone with access leaves the team.' },
+      { h: 'Incident contact', p: 4, low: true, body: 'Report suspected incidents to the platform-primary on-call. Escalate to the security lead within 30 minutes if customer data may be involved.' }
+    ];
+    const n = ok.filter(Boolean).length;
+    const submitted = !!s.submitted;
+    const flash = (patch) => {
+      this.setState(Object.assign({ toast: true }, patch));
+      clearTimeout(this._t);
+      this._t = setTimeout(() => this.setState({ toast: false }), 4800);
+    };
+    return {
+      pages: [1, 2, 3, 4].map((p) => ({ n: p, ring: p === 4 && !ok[3] ? '2px solid var(--info-border)' : 'none' })),
+      secs: S.map((x, i) => Object.assign({}, x, {
+        ok: ok[i], low: !!x.low && !ok[i],
+        bd: ok[i] ? 'var(--success-border)' : 'var(--border)',
+        btn: ok[i] ? 'Undo' : 'Mark checked',
+        toggle: () => { if (submitted) return; const c = ok.slice(); c[i] = !c[i]; this.setState({ ok: c }); }
+      })),
+      checkedN: n,
+      cantSubmit: n < 4 || submitted,
+      submitHint: submitted ? 'Editing is locked while v3 is in review.' : n < 4 ? 'Check all 4 sections to submit.' : 'Submitting freezes this version, its classification and audience.',
+      saved: s.savedAt || 'Saved 10:58',
+      save: () => flash({ toastTitle: 'Saved as v3 draft', toastSub: 'Only you can see drafts', savedAt: 'Saved just now' }),
+      submit: () => { if (n === 4 && !submitted) flash({ submitted: true, toastTitle: 'v3 submitted for review', toastSub: 'An Engineering Specialist or Senior reviewer will decide' }); },
+      toast: !!s.toast, idle: !s.toast,
+      toastTitle: s.toastTitle || '', toastSub: s.toastSub || '',
+      islW: s.toast ? '480px' : '420px', islH: s.toast ? '54px' : '44px'
+    };
+  }
+}
+</script>
+</body>
+</html>

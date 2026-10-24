@@ -45,36 +45,107 @@
 .contribution-reason p { color: var(--arden-text-primary); }
 .contribution-actions { display: grid; gap: 8px; justify-items: start; }
 
-/* Review queue */
-.review-workspace { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; }
-.review-queue { display: flex; flex: 1 1 280px; flex-direction: column; gap: 8px; max-width: 340px; min-width: 0; }
-.review-queue-heading { display: flex; align-items: center; gap: 10px; }
-.review-queue-heading h1 { margin: 0; font-size: 26px !important; letter-spacing: -.03em; }
-.review-queue-heading .island-link-button { margin-left: auto; }
-.review-queue-list { display: grid; gap: 6px; }
-.review-queue-item {
-  display: grid; gap: 4px; width: 100%; padding: 12px 14px; border: 1px solid var(--arden-border); border-radius: 12px;
-  color: var(--arden-text-primary); background: var(--arden-surface-base); text-align: left; cursor: pointer;
+/* Reviews: three fixed-height panes (queue | document | decision). Only the queue list, the document
+   body and the decision middle scroll, so Approve and Reject stay in view for any document length. */
+.arden-app-shell .knowledge-feature-page.is-review { overflow: hidden; padding-bottom: 12px; }
+.review-workspace {
+  display: grid; flex: 1; grid-template-columns: 240px minmax(0, 1fr) 312px; gap: 12px; min-height: 0;
 }
-.review-queue-item:hover { border-color: var(--arden-border-strong); }
-.review-queue-item[aria-current="true"] { border-color: var(--arden-accent-border); background: var(--arden-accent-subtle); }
-.review-queue-item > strong { font-weight: 600; overflow-wrap: anywhere; }
-.review-queue-empty { justify-items: start; padding: 16px 0; text-align: left; }
-.review-submission { display: flex; flex: 999 1 520px; flex-direction: column; min-width: 0; min-height: 520px; }
-.review-submission-header { display: flex; align-items: flex-start; gap: 12px; padding: 16px 18px 12px; }
-.review-submission-header > div { flex: 1; min-width: 0; }
-.review-submission-header h2 { margin: 2px 0 0; font-size: 22px !important; line-height: 1.3; }
-.review-frozen { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0; margin: 0 18px; overflow: hidden; border: 1px solid var(--arden-border); border-radius: 12px; background: var(--arden-surface-raised); }
-.review-frozen > div { display: grid; gap: 4px; align-content: start; padding: 10px 12px; background: var(--arden-surface-raised); }
-.review-frozen dt { color: var(--arden-text-muted); font-size: 10px; font-weight: 600; letter-spacing: .08em; }
-.review-frozen dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
-.review-submission > .island-note { margin: 12px 18px 0; }
-.review-document { flex: 1; min-width: 0; padding: 20px 18px; }
-.review-decision-bar { display: grid; gap: 10px; padding: 14px 18px; border-top: 1px solid var(--arden-border); border-radius: 0 0 14px 14px; background: var(--arden-surface-raised); }
-.review-decision-bar textarea { min-height: 64px !important; }
-.review-decision-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.review-decision-actions > small { flex: 1 1 220px; }
+.review-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-radius: 14px; }
+
+/* 1. Queue */
+.review-queue { gap: 2px; padding: 12px 8px 8px; border: 1px solid var(--arden-border); background: var(--arden-bg-sidebar); }
+.review-queue-heading { display: flex; align-items: center; gap: 8px; padding: 0 6px; }
+.arden-app-shell .review-queue-heading h1 { margin: 0; font-size: 15px; line-height: 1.3; letter-spacing: -.01em; }
+.review-queue-heading .island-link-button { margin-left: auto; font-size: 12px; }
+.review-queue-note { margin: 2px 6px 8px !important; color: var(--arden-text-muted) !important; font-size: 12px; }
+.review-queue-list { display: grid; flex: 1; align-content: start; gap: 2px; min-height: 0; overflow-y: auto; }
+.review-queue-item {
+  position: relative; display: grid; gap: 1px; width: 100%; padding: 8px 10px 8px 12px; border: 0; border-radius: 10px;
+  color: var(--arden-text-primary); background: transparent; text-align: left; cursor: pointer;
+}
+.review-queue-item:hover { background: var(--arden-surface-hover); }
+.review-queue-item[aria-current="true"] { background: var(--arden-accent-subtle); }
+.review-queue-item[aria-current="true"]::before {
+  content: ""; position: absolute; top: 8px; bottom: 8px; left: 0; width: 2px; border-radius: 2px; background: var(--arden-violet);
+}
+.review-queue-code, .review-document-code { color: var(--arden-text-muted); font: 500 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.review-queue-item > strong { overflow: hidden; font-size: 13px; font-weight: 600; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.review-queue-meta { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--arden-text-muted); font-size: 12px; line-height: 1.3; }
+.review-queue-meta > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.island-chip.review-mini-chip { flex: none; gap: 3px; height: 18px; padding: 0 5px; font-size: 10px; }
+.review-blocked-dot { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 999px; background: var(--arden-warning); }
+.review-queue-empty { justify-items: start; padding: 12px 6px; text-align: left; }
+
+/* 2. Document (the focus) */
+.review-submission { border: 1px solid var(--arden-border); }
+.review-document-header { display: grid; flex: none; gap: 6px; padding: 18px 24px 16px; border-bottom: 1px solid var(--arden-border); }
+.review-document-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; color: var(--arden-text-secondary); }
+.review-document-tags .island-chip { height: 22px; font-size: 11px; }
+.arden-app-shell .review-document-header h2 { margin: 0; font: 600 24px/1.25 var(--arden-font-heading); letter-spacing: -.02em; overflow-wrap: anywhere; }
+.review-document-meta { margin: 0 !important; color: var(--arden-text-secondary) !important; font-size: 13px; }
+.review-document { flex: 1; min-height: 0; padding: 24px 32px 40px; overflow: auto; }
+.review-document:focus-visible { outline-offset: -2px; }
+.review-document-text { max-width: 640px; font-size: 15px; line-height: 1.75; }
+.review-document.is-pdf { padding: 0; }
+.review-document.is-pdf .knowledge-pdf-document { height: 100%; }
+.review-document.is-pdf .knowledge-pdf-document object { height: 100%; min-height: 420px; border: 0; }
 .review-submission-empty { flex: 1; align-content: center; }
+
+/* 3. Decision island with a pinned footer */
+.review-decision { border: 1px solid var(--arden-border); background: var(--arden-surface-base); }
+.review-decision-header { display: flex; flex: none; align-items: center; gap: 8px; padding: 12px 12px 10px 16px; border-bottom: 1px solid var(--arden-border); }
+.arden-app-shell .review-decision-header h2 { margin: 0; font-size: 14px; line-height: 1.3; }
+.review-decision-nav { display: flex; gap: 4px; margin-left: auto; }
+.review-decision-nav .island-icon-button { width: 28px; height: 28px; }
+.review-decision-nav .review-nav-previous svg { transform: scaleX(-1); }
+.review-decision-body { display: grid; flex: 1; align-content: start; gap: 16px; min-height: 0; padding: 14px 16px 16px; overflow-y: auto; }
+.arden-app-shell .review-section-label { margin: 0 0 6px; color: var(--arden-text-muted); font-size: 11px !important; font-weight: 600; letter-spacing: .08em; }
+.review-frozen { display: grid; gap: 6px; margin: 0; }
+.review-frozen > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; font-size: 12px; line-height: 1.45; }
+.review-frozen dt { color: var(--arden-text-muted); }
+.review-frozen dd { min-width: 0; margin: 0; overflow: hidden; color: var(--arden-text-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.review-frozen dd.knowledge-hash { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.island-note.review-blocked-note { margin: 0; padding: 10px 12px; font-size: 12px; }
+.review-note { display: grid; gap: 6px; }
+.review-note-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--arden-text-secondary); font-size: 12px; font-weight: 600; }
+.review-note-label small { color: var(--arden-text-muted); font-weight: 500; }
+.review-note-label small.is-required { color: var(--arden-danger); }
+.arden-app-shell .review-note textarea {
+  width: 100%; min-height: 104px; padding: 8px 10px; border: 1px solid var(--arden-border-strong); border-radius: 8px; resize: vertical;
+  color: var(--arden-text-primary); background: var(--arden-bg-sidebar); font: inherit; font-size: 13px; line-height: 1.5;
+}
+.arden-app-shell .review-note textarea[aria-invalid="true"] { border-color: var(--arden-danger); }
+.review-decision-footer {
+  display: grid; flex: none; gap: 8px; margin-top: auto; padding: 12px 16px 14px; border-top: 1px solid var(--arden-border); background: var(--arden-surface-raised);
+}
+.review-decision-actions { display: flex; gap: 8px; }
+.arden-app-shell .review-decision-actions > button { min-height: 36px; }
+.arden-app-shell .review-decision-actions .review-reject { flex: 1; border-color: var(--arden-danger-border); color: var(--arden-danger); background: transparent; }
+.arden-app-shell .review-decision-actions .review-reject:hover:not(:disabled) { border-color: var(--arden-danger); background: var(--arden-danger-subtle); }
+.arden-app-shell .review-decision-actions .review-approve, .arden-app-shell .review-decision-actions .review-confirm-action { flex: 1.6; }
+.review-decision-footer > small { color: var(--arden-text-muted); font-size: 12px; line-height: 1.45; }
+.review-confirm { display: grid; gap: 6px; }
+.review-confirm > strong { font-size: 13px; }
+.review-confirm > p { margin: 0; color: var(--arden-text-secondary); font-size: 12px; line-height: 1.5; }
+.review-confirm .review-decision-actions { margin-top: 4px; }
+
+/* Below 1180px the queue moves above the document; under 860px the document and decision stack. */
+@container knowledge-page (max-width: 1180px) {
+  .review-workspace { grid-template-columns: minmax(0, 1fr) 312px; grid-template-rows: auto minmax(0, 1fr); }
+  .review-queue { grid-column: 1 / -1; max-height: 168px; }
+}
+@container knowledge-page (max-width: 860px) {
+  .arden-app-shell .knowledge-feature-page.is-review { overflow-y: auto; }
+  .review-workspace { display: flex; flex-direction: column; flex: none; }
+  .review-pane { overflow: visible; }
+  .review-queue { max-height: none; }
+  .review-queue-list { overflow: visible; }
+  .review-document { overflow: visible; padding: 18px 16px 24px; }
+  .review-document.is-pdf .knowledge-pdf-document object { height: 70vh; }
+  .review-decision-body { overflow: visible; }
+  .review-decision-footer { position: sticky; bottom: 0; z-index: 2; border-radius: 0 0 14px 14px; }
+}
 
 /* Create, draft editor and published document */
 .knowledge-create-island { display: grid; gap: 16px; max-width: 880px; }
@@ -137,7 +208,6 @@
 .draft-actions > .island-meta { flex-basis: 100%; }
 
 @container workspace (max-width: 760px) {
-  .review-queue { max-width: none; }
   .draft-metadata { position: static; max-width: none; }
   .knowledge-create-fields { grid-template-columns: 1fr; }
   .draft-document-body { padding: 16px; }
@@ -145,10 +215,6 @@
 
 /* Published document reader */
 .knowledge-reader-page { display: grid; gap: 14px; min-width: 0; }
-.knowledge-reader-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; padding: 2px 2px 4px; }
-.knowledge-reader-heading > div:first-child { min-width: 0; }
-.knowledge-reader-heading h1 { max-width: 920px; margin: 3px 0 0; font-size: clamp(24px, 3vw, 34px); line-height: 1.2; letter-spacing: -.03em; overflow-wrap: anywhere; }
-.knowledge-reader-heading-status { display: flex; flex: none; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
 .knowledge-reader-status { border: 1px solid transparent; }
 .knowledge-reader-status.is-effective { color: var(--arden-success); border-color: color-mix(in srgb, var(--arden-success) 34%, transparent); background: color-mix(in srgb, var(--arden-success) 12%, transparent); }
 .knowledge-reader-status.is-upcoming { color: var(--arden-info); border-color: color-mix(in srgb, var(--arden-info) 34%, transparent); background: color-mix(in srgb, var(--arden-info) 12%, transparent); }
@@ -163,7 +229,7 @@
 .knowledge-citation-focus strong { font-size: 12px; }
 .knowledge-citation-focus mark { color: var(--arden-text-primary); background: transparent; font-size: 13px; line-height: 1.55; }
 .knowledge-citation-focus small { flex: none; color: var(--arden-text-muted); font-size: 11px; }
-.knowledge-reader-layout { display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 12px; min-width: 0; align-items: start; }
+.knowledge-reader-layout { display: grid; grid-template-columns: minmax(220px, 272px) minmax(0, 1fr); gap: 12px; min-width: 0; align-items: start; }
 .knowledge-reader-information { position: sticky; top: 0; display: grid; gap: 0; min-width: 0; padding: 0; overflow: hidden; }
 .knowledge-reader-section-title { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 0 16px; border-bottom: 1px solid var(--arden-border); background: var(--arden-surface-raised); }
 .knowledge-reader-section-title svg { color: var(--arden-violet); }
@@ -178,13 +244,19 @@
 .knowledge-reader-summary h3 { margin: 0; font-size: 12px !important; }
 .knowledge-reader-summary p { margin: 0; color: var(--arden-text-secondary); font-size: 12px; line-height: 1.6; }
 .knowledge-reader-surface { min-width: 0; padding: 0; overflow: hidden; }
-.knowledge-reader-surface-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 0 14px; border-bottom: 1px solid var(--arden-border); background: var(--arden-surface-raised); }
-.knowledge-reader-surface-bar > span { display: flex; min-width: 0; align-items: center; gap: 8px; color: var(--arden-text-primary); font-size: 12px; font-weight: 600; }
-.knowledge-reader-surface-bar > span svg { flex: none; color: var(--arden-text-secondary); }
+/* The viewer bar holds the only visible title (the page h1), the version and the download action. */
+.knowledge-reader-surface-bar { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--arden-border); background: var(--arden-surface-raised); }
+.knowledge-reader-surface-bar > svg { flex: none; color: var(--arden-text-secondary); }
+.arden-app-shell .knowledge-reader-surface-bar h1 { flex: 1; min-width: 0; margin: 0; overflow: hidden; font: 600 14px/1.3 var(--arden-font-heading); letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
 .knowledge-reader-surface-bar small { flex: none; color: var(--arden-text-muted); font-size: 11px; }
+.knowledge-reader-surface-actions { display: flex; flex: none; gap: 6px; }
+.knowledge-reader-surface-actions .secondary-button { min-height: var(--arden-control-sm); padding: 0 10px; font-size: 12px; }
 .knowledge-reader-content { min-width: 0; padding: 14px; background: #17171c; }
+.knowledge-reader-content:has(> object) { padding: 0; }
+.knowledge-reader-content > object { display: block; width: 100%; height: calc(var(--arden-shell-height) - 110px); min-height: 480px; border: 0; background: #2b2b31; }
 .knowledge-reader-content .knowledge-pdf-document > .knowledge-live-actions { border-radius: 8px 8px 0 0; }
 .knowledge-reader-content .knowledge-pdf-document object { height: min(76vh, 880px); }
+.knowledge-reader-information .knowledge-reader-status, .knowledge-reader-information .island-chip { justify-self: end; height: 22px; }
 .knowledge-reader-sample-page { width: min(720px, 100%); min-height: 760px; margin: 8px auto; padding: clamp(28px, 6vw, 64px); color: #202027; background: #f7f6f2; box-shadow: 0 18px 48px rgb(0 0 0 / 24%); }
 .knowledge-reader-sample-page header { padding-bottom: 18px; border-bottom: 2px solid #34343d; }
 .knowledge-reader-sample-page header span { color: #625bb8; font-size: 11px; font-weight: 700; letter-spacing: .08em; }
@@ -206,8 +278,6 @@
   .knowledge-reader-information { position: static; }
 }
 @container knowledge-page (max-width: 520px) {
-  .knowledge-reader-heading { align-items: flex-start; flex-direction: column; }
-  .knowledge-reader-heading-status { justify-content: flex-start; }
   .knowledge-reader-content { padding: 8px; }
   .knowledge-reader-sample-page { min-height: 620px; padding: 28px 22px; }
 }
@@ -215,3 +285,49 @@
 @media (prefers-reduced-motion: reduce) {
   .knowledge-reader-content .is-citation-source { animation: none; }
 }
+
+/* My Contributions keeps a wider detail island than administration (reviewer note and history). */
+.island-split > .island-side.contribution-side { flex: 1 1 360px; max-width: 400px; }
+
+/* Compact back link and a collapsible information panel so the document can take the full width. */
+.arden-app-shell .knowledge-reader-back {
+  display: inline-flex; align-items: center; justify-self: start; gap: 6px; height: 24px; padding: 0 8px 0 6px; border: 0; border-radius: 6px;
+  color: var(--arden-text-secondary); background: transparent; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.arden-app-shell .knowledge-reader-back:hover { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+.knowledge-reader-back svg { transform: scaleX(-1); }
+.knowledge-reader-page { gap: 10px; }
+.knowledge-reader-information[hidden] { display: none; }
+.knowledge-reader-layout.is-information-collapsed { grid-template-columns: minmax(0, 1fr); }
+.knowledge-reader-section-title h2 { flex: 1; min-width: 0; }
+.knowledge-reader-collapse, .knowledge-reader-expand { width: var(--arden-control-sm); height: var(--arden-control-sm); border-color: transparent; }
+
+/* Knowledge Library list: document names lead; owner, version, date and status stay secondary. */
+.island-row.library-row { min-height: 60px; align-items: center; }
+.island-row-name.library-row-name { gap: 12px; width: 100%; padding: 4px 0; }
+.library-row-icon { display: inline-grid; flex: none; place-items: center; color: var(--arden-text-muted); }
+.island-row-name > span.library-row-copy { display: grid; gap: 0; min-width: 0; }
+.library-row-code { color: var(--arden-text-muted); font: 500 12px/1.3 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0; }
+.island-row-name strong.library-row-title {
+  overflow: hidden; color: var(--arden-text-primary); font-size: 15px; font-weight: 600; line-height: 1.3;
+  text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal;
+}
+.island-row-name:hover strong.library-row-title { text-decoration: underline; text-underline-offset: 3px; }
+.library-row-meta { display: flex; align-items: center; gap: 6px; color: var(--arden-text-muted); font-size: 12px; line-height: 1.25; }
+.library-row-meta .island-chip { height: 18px; padding: 0 6px; font-size: 11px; }
+.island-row-cell.library-row-secondary { color: var(--arden-text-secondary); font-size: 13px; font-weight: 400; }
+.library-row-empty { color: var(--arden-text-muted); }
+.island-row-cell.library-row-date { color: var(--arden-text-muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+.library-row-effective { display: inline-flex; align-items: center; gap: 8px; color: var(--arden-text-secondary); font-size: 13px; }
+.library-row-effective::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--arden-success); }
+.island-row.library-row:not(.is-head):hover { background: var(--arden-surface-hover); }
+
+/* Keep a clear gap between a truncated title and the Owner column. */
+.island-row.library-row > .island-row-cell.is-name { padding-right: 32px; }
+
+/* My Contributions reuses the Library row hierarchy; the version follows the title in muted text. */
+.library-row-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.library-row-heading > .library-row-title { min-width: 0; }
+.library-row-version { flex: none; color: var(--arden-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.library-row-audience { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.island-row.library-row.is-selected .library-row-title { color: var(--arden-text-primary); }

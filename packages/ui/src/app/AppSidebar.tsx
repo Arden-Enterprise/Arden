@@ -41,7 +41,6 @@ export const workNavigation: NavigationItem[] = [
 export const knowledgeNavigation: NavigationItem[] = [
   { label: "Library", shortLabel: "Library", icon: "knowledge", view: "knowledge" },
   { label: "Reviews", shortLabel: "Reviews", icon: "review", view: "review-queue" },
-  { label: "Handover", shortLabel: "Handover", icon: "handover", view: "knowledge-handover" },
   { label: "Integrations", shortLabel: "Integrations", icon: "integrations", planned: true },
 ];
 
@@ -50,7 +49,7 @@ export const adminNavigation: NavigationItem = { label: "Administration", shortL
 /** Server-backed sessions also expose the honest, local-only Ask Arden interface preview. */
 export function navigationDisabled(item: NavigationItem, authenticated: boolean): boolean {
   if (item.planned) return true;
-  return authenticated && (item.view === "my-work" || item.view === "knowledge-handover");
+  return authenticated && item.view === "my-work";
 }
 
 export function initialsOf(label: string): string {
