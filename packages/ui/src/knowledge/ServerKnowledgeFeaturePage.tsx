@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { plainTextToSemanticDocument, serializeSemanticDocument } from "@arden/domain";
+import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument } from "@arden/domain";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { SearchField } from "../shared/SearchField";
 import { KnowledgeHeading, KnowledgeNotice } from "./KnowledgePrimitives";
@@ -20,6 +20,8 @@ import { PdfDocument } from "./PdfDocument";
 import { KnowledgeDialog } from "./KnowledgeDialog";
 import { ActionToast } from "../shared/ActionToast";
 import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
+import { KnowledgeDocumentDetail, readerDocumentStatusAt } from "./KnowledgeDocumentDetail";
+import type { KnowledgeNavigationTarget } from "./knowledgeCitation";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
   .then((module) => ({ default: module.ArdenRichTextEditor })));
@@ -37,6 +39,7 @@ type Props = ContextControlProps & {
   view: "knowledge" | "review-queue";
   active: boolean;
   createdDraftId: string | null;
+  citationTarget?: KnowledgeNavigationTarget | null;
   onAssignedReviewCount?: (count: number) => void;
 };
 
@@ -56,8 +59,31 @@ function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "The server request failed. Refresh and try again.";
 }
 
+function semanticSummary(body: string | undefined): string | null {
+  if (!body) return null;
+  const parsed = parseSemanticDocument(body);
+  if (!parsed.ok) return null;
+  const text: string[] = [];
+  const visit = (blocks: typeof parsed.document.blocks) => {
+    for (const block of blocks) {
+      if (block.type === "table") {
+        for (const row of block.content) for (const cell of row.cells) {
+          text.push(cell.flatMap((item) => item.type === "text" ? item.text : item.content.map((part) => part.text).join(" ")).join(" "));
+        }
+      } else if (block.type !== "asset") {
+        text.push(block.content.flatMap((item) => item.type === "text" ? item.text : item.content.map((part) => part.text).join(" ")).join(" "));
+      }
+      visit(block.children);
+    }
+  };
+  visit(parsed.document.blocks);
+  const summary = text.join(" ").replace(/\s+/g, " ").trim();
+  if (!summary) return null;
+  return summary.length <= 280 ? summary : `${summary.slice(0, 277).trimEnd()}...`;
+}
+
 export function ServerKnowledgeFeaturePage({ platform, organizationId, organizationName,
-  view, active, createdDraftId, onAssignedReviewCount, contextOpen, onToggleContext }: Props) {
+  view, active, createdDraftId, citationTarget, onAssignedReviewCount, contextOpen, onToggleContext }: Props) {
   const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
   const [submissions, setSubmissions] = useState<KnowledgeSubmission[]>([]);
   const [published, setPublished] = useState<PublishedKnowledge[]>([]);
@@ -67,6 +93,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [editor, setEditor] = useState<EditorValues | null>(null);
   const [review, setReview] = useState<KnowledgeReviewDetail | null>(null);
   const [document, setDocument] = useState<PublishedKnowledge | null>(null);
+  const [openedCitation, setOpenedCitation] = useState<KnowledgeNavigationTarget | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [newBody, setNewBody] = useState(() => serializeSemanticDocument(
     plainTextToSemanticDocument("", () => crypto.randomUUID()),
@@ -92,6 +119,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const submitRequestKey = useRef<string | null>(null);
   const decisionRequest = useRef<{ action: "APPROVE" | "REJECT"; key: string } | null>(null);
   const openedCreatedDraftId = useRef<string | null>(null);
+  const openedCitationId = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const chooseFileButton = useRef<HTMLButtonElement>(null);
   const decisionReason = useRef<HTMLTextAreaElement>(null);
@@ -222,8 +250,28 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
 
   const openPublished = (id: string) => void run(async () => {
     const loaded = await loadPublishedKnowledge(platform, organizationId, id);
-    setDocument(loaded); setScreen("document");
+    setOpenedCitation(null); setDocument(loaded); setScreen("document");
   });
+
+  useEffect(() => {
+    if (!active || view !== "knowledge" || !citationTarget || openedCitationId.current === citationTarget.navigationId) return;
+    openedCitationId.current = citationTarget.navigationId;
+    let present = true;
+    setBusy(true); setError("");
+    void loadPublishedKnowledge(platform, organizationId, citationTarget.versionId)
+      .then((loaded) => {
+        if (!present) return;
+        if (loaded.id !== citationTarget.versionId) throw new Error("citation-version-mismatch");
+        setLibraryTab("published"); setOpenedCitation(citationTarget); setDocument(loaded); setScreen("document");
+      })
+      .catch(() => {
+        if (!present) return;
+        setOpenedCitation(null);
+        setError("This citation source is unavailable in your current access scope.");
+      })
+      .finally(() => { if (present) setBusy(false); });
+    return () => { present = false; };
+  }, [active, citationTarget, organizationId, platform, view]);
 
   const latestByDraft = new Map<string, KnowledgeSubmission>();
   for (const submission of submissions) {
@@ -238,9 +286,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const snapshotAlreadySubmitted = Boolean(latest && draft && latest.snapshotVersionId === draft.currentVersion.id);
   const ready = Boolean(editor?.responsibleDepartmentId && editor.targetScopeType
     && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType));
-  const filteredDrafts = drafts.filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
-  const filteredPublished = published.filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredDrafts = drafts.filter((item) => item.title.toLocaleLowerCase().includes(normalizedQuery));
+  const filteredPublished = published.filter((item) => [item.title, item.documentCode ?? "", item.summary ?? "",
+    departmentName(item.responsibleDepartmentId), item.classification]
+    .some((value) => value.toLocaleLowerCase().includes(normalizedQuery)));
   const submitHint = draft?.hasPendingSubmission ? "This version is awaiting review."
     : dirty ? "Save your changes before submitting."
       : !ready ? "Complete the required governance metadata before submitting."
@@ -254,7 +305,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const activeReview = review ? reviews.find((item) => item.submissionId === review.id) : undefined;
   const openCreate = (mode: "text" | "pdf") => { setCreateMode(mode); createRequestKey.current = null; setScreen("create"); };
   const librarySearch = view === "knowledge" && screen === "library"
-    ? <SearchField value={query} onChange={setQuery} placeholder={libraryTab === "drafts" ? "Filter my contributions…" : "Filter publications…"} /> : undefined;
+    ? <SearchField value={query} onChange={setQuery} placeholder={libraryTab === "drafts" ? "Filter my contributions…" : "Search title, code, owner or summary…"} /> : undefined;
   const breadcrumb = view === "review-queue" ? `${organizationName} / Knowledge / Reviews`
     : screen === "library" ? `${organizationName} / Knowledge / ${libraryTab === "drafts" ? "My Contributions" : "Library"}`
       : screen === "create" ? `${organizationName} / Knowledge / New draft`
@@ -414,31 +465,24 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             </section>
           </aside>
         </div>
-      </> : screen === "document" && document ? <>
-        <button type="button" className="knowledge-back-button knowledge-live-back" onClick={() => setScreen("library")}>← Library</button>
-        <div className="draft-workspace">
-          <article className="island draft-document" aria-label={document.title}>
-            <div className="draft-document-toolbar"><span className="island-chip has-dot tone-success">Published</span><KnowledgeClassificationChip classification={document.classification} />
-              <span className="island-meta">Published {new Date(document.publishedAt).toLocaleString()}</span></div>
-            <div className="draft-document-body"><h1 className="draft-document-title">{document.title}</h1>
-              {document.mimeType === "application/pdf" && document.pdfBase64
-                ? <PdfDocument base64={document.pdfBase64} title={document.title} />
-                : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
-                  key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
-                  instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>}</div>
-          </article>
-          <aside className="island island-panel draft-metadata" aria-labelledby="publication-title"><h2 id="publication-title">Publication</h2>
-            <dl className="island-kv">
-              <dt>Published</dt><dd>{new Date(document.publishedAt).toLocaleString()}</dd>
-              <dt>Valid from</dt><dd>{new Date(document.validFrom).toLocaleString()}</dd>
-              <dt>Valid until</dt><dd>{document.validUntil ? new Date(document.validUntil).toLocaleString() : "No end date"}</dd>
-              <dt>Audience</dt><dd>{audienceNames(document.audienceIds)}</dd>
-              <dt>Content hash</dt><dd className="knowledge-hash">{document.contentHash}</dd>
-            </dl>
-            <p className="island-meta">This is the exact snapshot a reviewer approved. Shown only because your current audiences allow it.</p>
-          </aside>
-        </div>
-      </> : <>
+      </> : screen === "document" && document ? <KnowledgeDocumentDetail
+        focusTarget={openedCitation}
+        metadata={{
+          title: document.title,
+          documentCode: document.documentCode ?? "Not assigned",
+          ownerDepartment: departmentName(document.responsibleDepartmentId),
+          summary: document.summary ?? semanticSummary(document.body) ?? "No summary was supplied for this publication.",
+          activeVersionId: document.id,
+          versions: [{ id: document.id, label: document.versionLabel ?? "Current", status: readerDocumentStatusAt(document.validFrom, document.validUntil, new Date()), effectiveDate: document.validFrom }],
+          sensitiveLabel: document.classification === "INTERNAL" ? undefined : document.classification,
+        }}
+        onBack={() => { setOpenedCitation(null); setScreen("library"); }}
+        content={document.mimeType === "application/pdf" && document.pdfBase64
+          ? <PdfDocument base64={document.pdfBase64} title={document.title} page={openedCitation?.page} />
+          : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+            key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
+            instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>}
+      /> : <>
         <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : "Knowledge Library"}
           description={libraryTab === "drafts" ? "Shared drafts you author. Each submission freezes an exact version for review."
             : `${published.length} ${published.length === 1 ? "publication" : "publications"} you can read in ${organizationName}`}
@@ -449,14 +493,27 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <button type="button" role="tab" aria-selected={libraryTab === "published"} onClick={() => setLibraryTab("published")}>Library<span className="island-badge">{published.length}</span></button>
           <button type="button" role="tab" aria-selected={libraryTab === "drafts"} onClick={() => setLibraryTab("drafts")}>My Contributions<span className="island-badge">{drafts.length}</span></button>
         </div>
-        {query.trim() && <p className="island-meta" role="status">Filtering titles for “{query.trim()}”.</p>}
-        {libraryTab === "published" && (filteredPublished.length ? <div className="knowledge-card-grid" aria-label="Published for me">{filteredPublished.map((item) =>
-          <button type="button" className="island knowledge-card" key={item.id} onClick={() => openPublished(item.id)} aria-label={`Read ${item.title}`}>
-            <span className="island-chip-row"><KnowledgeClassificationChip classification={item.classification} /><span className="island-meta">{item.mimeType === "application/pdf" ? "PDF" : "Text"}</span></span>
-            <strong>{item.title}</strong>
-            <span className="knowledge-card-footer"><span className="island-meta">{audienceNames(item.audienceIds)}</span><span className="island-meta">{new Date(item.publishedAt).toLocaleDateString()}</span></span>
-          </button>)}</div>
-          : <div className="island island-empty"><h3>{published.length ? "No matching publications" : "No accessible publication"}</h3><p>{published.length ? "Try another title." : "Approved knowledge appears here when one of your audiences may read it."}</p></div>)}
+        {query.trim() && <p className="island-meta" role="status">Searching accessible publications for “{query.trim()}”.</p>}
+        {libraryTab === "published" && (filteredPublished.length ? <IslandTable label="Accessible published knowledge" minWidth={860}
+          columns="minmax(300px, 2fr) minmax(150px, 1fr) 90px 130px 110px"
+          headers={["DOCUMENT", "OWNER", "VERSION", "EFFECTIVE DATE", "STATUS"]}>
+          {filteredPublished.map((item) => {
+            const publicationStatus = readerDocumentStatusAt(item.validFrom, item.validUntil, new Date());
+            return <IslandRow key={item.id}>
+              <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name knowledge-result-name"
+                onClick={() => openPublished(item.id)} aria-label={`Read ${item.title}`}>
+                <span><strong>{item.title}</strong><small>{item.documentCode ?? "Code not assigned"} · {item.mimeType === "application/pdf" ? "PDF" : "Text"} · {item.classification}</small></span>
+              </button></IslandCell>
+              <IslandCell>{departmentName(item.responsibleDepartmentId)}</IslandCell>
+              <IslandCell className="island-row-cell is-number">{item.versionLabel ?? "Current"}</IslandCell>
+              <IslandCell className="island-row-cell is-number">{new Date(item.validFrom).toLocaleDateString()}</IslandCell>
+              <IslandCell><span className={`island-chip knowledge-reader-status is-${publicationStatus.toLowerCase()}`}>
+                {publicationStatus === "UPCOMING" ? "Upcoming" : publicationStatus === "EXPIRED" ? "Expired" : "Effective"}
+              </span></IslandCell>
+            </IslandRow>;
+          })}
+        </IslandTable>
+          : <div className="island island-empty"><h3>{published.length ? "No matching publications" : "No accessible publication"}</h3><p>{published.length ? "Try another title, document code or owner department." : "Approved knowledge appears here when one of your audiences may read it."}</p></div>)}
         {libraryTab === "drafts" && (filteredDrafts.length ? <div className="island-split">
           <div className="island-main"><IslandTable label="My contributions" minWidth={620} columns="minmax(240px, 1.8fr) minmax(110px, 1fr) 110px minmax(150px, auto)"
             headers={["DOCUMENT", "DEPARTMENT", "UPDATED", "STATUS"]}>

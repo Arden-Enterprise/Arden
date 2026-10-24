@@ -1098,7 +1098,9 @@ export function buildApp(dependencies: AppDependencies) {
         }
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
-          classification: publication.classification, ...content, mimeType, contentHash: publication.contentHash,
+          classification: publication.classification,
+          responsibleDepartmentId: publication.responsibleDepartmentId,
+          ...content, mimeType, contentHash: publication.contentHash,
           audienceIds: publication.audienceRoleIds,
           publishedAt: publication.publishedAt.toISOString(), validFrom: publication.validFrom.toISOString(),
           validUntil: publication.validUntil?.toISOString() ?? null };

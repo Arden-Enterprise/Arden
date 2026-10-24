@@ -112,6 +112,10 @@ export type PublishedKnowledge = {
   draftId: string;
   title: string;
   classification: KnowledgeClassification;
+  responsibleDepartmentId: string;
+  documentCode?: string;
+  versionLabel?: string;
+  summary?: string;
   audienceIds: string[];
   contentHash: string;
   publishedAt: string;

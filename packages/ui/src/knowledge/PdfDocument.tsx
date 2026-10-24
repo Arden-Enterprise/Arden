@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-export function PdfDocument({ base64, title }: { base64: string; title: string }) {
+export function PdfDocument({ base64, title, page, showToolbar = true }: { base64: string; title: string; page?: number; showToolbar?: boolean }) {
   const [url, setUrl] = useState<string | null>(null);
   const fileName = `${title.replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]/g, "-")}.pdf`;
   useEffect(() => {
@@ -13,11 +13,11 @@ export function PdfDocument({ base64, title }: { base64: string; title: string }
   }, [base64]);
   if (!url) return <p role="status">Preparing PDF preview…</p>;
   return <div className="knowledge-pdf-document">
-    <div className="knowledge-live-actions">
+    {showToolbar && <div className="knowledge-live-actions">
       <strong className="knowledge-pdf-title">{fileName}</strong>
       <a className="secondary-button" href={url} download={fileName}>Download PDF</a>
-    </div>
-    <object data={url} type="application/pdf" aria-label={`PDF preview: ${title}`}>
+    </div>}
+    <object data={page ? `${url}#page=${page}` : url} type="application/pdf" aria-label={`PDF preview: ${title}${page ? `, page ${page}` : ""}`}>
       <p>PDF preview is unavailable here. Use Download PDF to open the original file.</p>
     </object>
   </div>;

@@ -137,6 +137,7 @@ export type PublishedKnowledge = {
   draftId: string;
   title: string;
   classification: KnowledgeClassification;
+  responsibleDepartmentId: string;
   contentHash: string;
   sourceUri: string;
   audienceRoleIds: string[];
@@ -301,6 +302,7 @@ type PublishedKnowledgeRow = {
   shared_draft_id: string;
   title: string;
   classification: KnowledgeClassification;
+  responsible_department_id: string;
   content_hash: string;
   content_uri: string;
   audience_role_ids: string[];
@@ -310,7 +312,8 @@ type PublishedKnowledgeRow = {
 };
 const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
-         pv.content_hash, pv.content_uri, pv.audience_role_ids, pv.published_at,
+         pv.responsible_department_id, pv.content_hash, pv.content_uri,
+         pv.audience_role_ids, pv.published_at,
          cp.valid_from, cp.valid_until
     FROM knowledge_current_publication cp
     JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id`;
@@ -320,6 +323,7 @@ function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
     draftId: row.shared_draft_id,
     title: row.title,
     classification: row.classification,
+    responsibleDepartmentId: row.responsible_department_id,
     contentHash: row.content_hash,
     sourceUri: row.content_uri,
     audienceRoleIds: row.audience_role_ids,
