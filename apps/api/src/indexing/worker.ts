@@ -22,8 +22,11 @@ export class IndexingWorker {
     const job = await this.store.claim(this.workerId, this.leaseSeconds);
     if (!job) return false;
     try {
-      if (job.mimeType !== "text/plain") throw new WorkerFailure("UNSUPPORTED_SNAPSHOT_MIME_TYPE", false);
-      const snapshot = await this.storage.read(job.sourceUri, job.snapshotContentHash);
+      const snapshot = job.mimeType === "text/plain"
+        ? await this.storage.read(job.sourceUri, job.snapshotContentHash)
+        : job.mimeType === "application/pdf"
+          ? await this.storage.readPdf(job.sourceUri, job.snapshotContentHash)
+          : (() => { throw new WorkerFailure("UNSUPPORTED_SNAPSHOT_MIME_TYPE", false); })();
       const request = buildIndexGenerationRequest(job, snapshot);
       const manifest = await this.ai.index(request, job);
       const publishedVersionId = await this.store.complete(job, this.workerId, manifest);

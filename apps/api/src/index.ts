@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,9 @@ import { createSmtpMailer, smtpConfigurationFromEnvironment } from "./email/smtp
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
 import { isKietLocalFlow1TestTarget, kietLocalFlow1TestActor } from "./auth/remote-flow1-test.js";
 import { HttpAskArdenClient } from "./answers/ai-client.js";
+import { HttpArdenAiClient } from "./indexing/ai-client.js";
+import { PgIndexGenerationStore } from "./indexing/store.js";
+import { IndexingWorker } from "./indexing/worker.js";
 
 const databaseUrl = process.env.DATABASE_URL ??
   (process.env.NODE_ENV === "production"
@@ -72,6 +76,7 @@ if (Boolean(aiUrl) !== Boolean(aiServiceToken)) {
   throw new Error("ARDEN_AI_URL and ARDEN_AI_SERVICE_TOKEN must be configured together");
 }
 const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServiceToken) : null;
+const contentStorage = new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot);
 
 async function checkRuntimeDatabase(): Promise<void> {
   const client = await pool.connect();
@@ -106,7 +111,7 @@ const app = buildApp({
   authTrustedOrigins: flow1TestMode ? ["http://127.0.0.1:5180"] : trustedOrigins,
   secureCookies: process.env.NODE_ENV === "production",
   repository: new ArdenRepository(pool),
-  storage: new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot),
+  storage: contentStorage,
   invitationMailer,
   askArden,
   invitationDeliveryMode: smtpConfiguration ? "email" : "local-test-no-email",
@@ -134,8 +139,38 @@ const app = buildApp({
 
 const port = Number(process.env.ARDEN_API_PORT ?? 3001);
 const host = process.env.ARDEN_API_HOST ?? "127.0.0.1";
+const indexWorker = aiUrl && aiServiceToken
+  ? new IndexingWorker(
+    randomUUID(),
+    90,
+    new PgIndexGenerationStore(pool),
+    contentStorage,
+    new HttpArdenAiClient(aiUrl, aiServiceToken),
+    {
+      info: (fields, message) => app.log.info(fields, message),
+      error: (fields, message) => app.log.error(fields, message),
+    },
+  )
+  : null;
+let indexWorkerTimer: NodeJS.Timeout | undefined;
+let stopping = false;
+
+function scheduleIndexWorker(delayMs: number): void {
+  if (!indexWorker || stopping) return;
+  indexWorkerTimer = setTimeout(() => {
+    void indexWorker.runOnce()
+      .then((worked) => scheduleIndexWorker(worked ? 25 : 2_000))
+      .catch((error: unknown) => {
+        app.log.error({ error }, "Knowledge indexing worker poll failed");
+        scheduleIndexWorker(5_000);
+      });
+  }, delayMs);
+  indexWorkerTimer.unref();
+}
 
 async function shutdown() {
+  stopping = true;
+  if (indexWorkerTimer) clearTimeout(indexWorkerTimer);
   await app.close();
   invitationMailer?.close();
   await pool.end();
@@ -145,6 +180,7 @@ process.once("SIGINT", () => void shutdown());
 process.once("SIGTERM", () => void shutdown());
 
 await app.listen({ port, host });
+scheduleIndexWorker(250);
 
 function assertBooleanEnvironmentValue(name: string, value: string | undefined): void {
   if (value !== undefined && value !== "true" && value !== "false") throw new Error(`${name} must be true or false`);
