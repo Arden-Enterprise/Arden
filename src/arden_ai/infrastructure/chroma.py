@@ -5,11 +5,11 @@ from urllib.parse import urlsplit
 from langchain_chroma import Chroma
 from langchain_openai import OpenAIEmbeddings
 
-from arden_ai.config import Settings
+from arden_ai.application import PreparedGeneration
 from arden_ai.contracts import IndexGenerationRequest
+from arden_ai.domain.chunking import CHUNKING_VERSION, PreparedChunk
 from arden_ai.domain.compiler import COMPILER_VERSION
-from arden_ai.pipeline.chunking import CHUNKING_VERSION, PreparedChunk
-from arden_ai.pipeline.preparation import PreparedGeneration
+from arden_ai.infrastructure.settings import Settings
 
 
 def _chroma_endpoint(url: str) -> tuple[str, int, bool]:
@@ -96,9 +96,7 @@ class ChromaCandidateGenerationStore:
             if written != ids:
                 raise RuntimeError("Chroma did not acknowledge the complete candidate generation")
         except Exception:
-            # Chroma is not the activation authority. Best-effort cleanup prevents wasted storage;
-            # even if cleanup fails, Arden core never allow-lists a generation without a manifest.
+            # Arden core never activates a generation without a complete manifest.
             with suppress(Exception):
                 await self._store.adelete(where=generation_filter)
             raise
-

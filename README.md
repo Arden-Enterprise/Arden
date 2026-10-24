@@ -23,10 +23,33 @@ uv run uvicorn arden_ai.main:app --reload --port 8080
 
 Health endpoints are available at `/health/live` and `/health/ready`.
 
+## Architecture
+
+The service follows a layered dependency direction. Infrastructure implements application ports;
+domain code never imports FastAPI, ChromaDB, OpenAI or settings.
+
+```text
+src/arden_ai/
+├── presentation/    # HTTP routes, authentication and response mapping
+├── application/     # use cases, orchestration and provider ports
+├── domain/          # semantic document, deterministic compiler and chunking
+├── infrastructure/  # environment settings, OpenAI and Chroma adapters
+├── contracts/       # versioned cross-repository request/response models
+└── main.py          # composition root and ASGI entrypoint
+```
+
+Dependencies flow inward: `presentation -> application -> domain`. Infrastructure is selected only
+by the composition root and implements protocols declared by the application layer.
+
 Arden core submits approved immutable snapshots to `POST /v1/index-generations` using an
 `Authorization: Bearer <ARDEN_AI_SERVICE_TOKEN>` header. The endpoint returns a candidate index
 manifest only after every chunk has been embedded and acknowledged by ChromaDB. Arden core remains
 responsible for validating that manifest and atomically activating the generation.
+
+Arden core calls `POST /v1/answers` with the authenticated actor's current generation allow-list.
+The service applies both organization and generation filters in Chroma, generates a grounded
+answer with OpenAI structured output, and returns evidence identities for a final Core-side access
+recheck before anything reaches the UI.
 
 Versioned cross-repository schemas are checked into `schemas/`. Regenerate them after an intentional
 contract change with:

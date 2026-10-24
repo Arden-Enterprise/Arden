@@ -1,17 +1,43 @@
 import hashlib
 import json
+from dataclasses import dataclass
+from typing import Protocol
 
-from arden_ai.contracts import (
-    IndexGenerationManifest,
-    IndexGenerationRequest,
-)
-from arden_ai.domain.compiler import COMPILER_VERSION
-from arden_ai.pipeline.chunking import CHUNKING_VERSION
-from arden_ai.pipeline.ports import CandidateGenerationStore
-from arden_ai.pipeline.preparation import prepare_generation
+from arden_ai.contracts import IndexGenerationManifest, IndexGenerationRequest
+from arden_ai.domain.chunking import CHUNKING_VERSION, PreparedChunk, chunk_markdown
+from arden_ai.domain.compiler import COMPILER_VERSION, CompiledMarkdown, compile_markdown
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedGeneration:
+    request: IndexGenerationRequest
+    compiled: CompiledMarkdown
+    chunks: tuple[PreparedChunk, ...]
+
+
+class CandidateGenerationStore(Protocol):
+    @property
+    def embedding_model(self) -> str: ...
+
+    @property
+    def embedding_dimensions(self) -> int: ...
+
+    async def replace_candidate(
+        self, request: IndexGenerationRequest, prepared: PreparedGeneration
+    ) -> None: ...
+
+
+def prepare_generation(request: IndexGenerationRequest) -> PreparedGeneration:
+    compiled = compile_markdown(request.semantic_document())
+    chunks = chunk_markdown(compiled, str(request.generation_id))
+    if not chunks:
+        raise ValueError("approved snapshot produced no indexable chunks")
+    return PreparedGeneration(request=request, compiled=compiled, chunks=chunks)
 
 
 class GenerationIndexer:
+    """Application use case that prepares and persists one candidate generation."""
+
     def __init__(self, store: CandidateGenerationStore) -> None:
         self._store = store
 
@@ -51,4 +77,3 @@ class GenerationIndexer:
                 "chunks": chunks_payload,
             }
         )
-

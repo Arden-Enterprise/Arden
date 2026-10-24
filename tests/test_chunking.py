@@ -1,5 +1,4 @@
-from arden_ai.domain import SemanticDocument, compile_markdown
-from arden_ai.pipeline import CHUNKING_VERSION, chunk_markdown
+from arden_ai.domain import CHUNKING_VERSION, SemanticDocument, chunk_markdown, compile_markdown
 
 
 def test_langchain_chunking_preserves_offsets_and_parent_sections() -> None:

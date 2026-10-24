@@ -4,12 +4,11 @@ from dataclasses import dataclass
 
 from fastapi.testclient import TestClient
 
-from arden_ai.config import Settings
+from arden_ai.application import GenerationIndexer, PreparedGeneration
 from arden_ai.contracts import IndexGenerationRequest
 from arden_ai.domain import ARDEN_DOCUMENT_PREFIX
+from arden_ai.infrastructure import Settings
 from arden_ai.main import create_app
-from arden_ai.pipeline import GenerationIndexer
-from arden_ai.pipeline.preparation import PreparedGeneration
 
 
 @dataclass

@@ -103,8 +103,8 @@ def chunk_markdown(
             local_start = document.metadata.get("start_index")
             text = document.page_content
             if not isinstance(local_start, int) or local_start < 0:
-                # LangChain can report -1 when locating an overlapped repeated substring. Keep its
-                # split, but recover the exact next occurrence and fail closed if it is not present.
+                # Repeated overlapping substrings can make LangChain report -1. Recover the next
+                # exact occurrence and fail closed when it is no longer present.
                 local_start = section.find(text, previous_local_start + 1)
             if local_start < 0:
                 raise ValueError("LangChain chunk no longer maps to its source section")
@@ -141,4 +141,3 @@ def chunk_markdown(
             ordinal += 1
 
     return tuple(chunks)
-

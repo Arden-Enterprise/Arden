@@ -1,4 +1,4 @@
-from arden_ai.providers.chroma import _chroma_endpoint
+from arden_ai.infrastructure.chroma import _chroma_endpoint
 
 
 def test_chroma_endpoint_accepts_private_http_and_https_hosts() -> None:

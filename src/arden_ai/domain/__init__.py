@@ -1,3 +1,4 @@
+from arden_ai.domain.chunking import CHUNKING_VERSION, PreparedChunk, chunk_markdown
 from arden_ai.domain.compiler import CompiledMarkdown, SourceSpan, compile_markdown
 from arden_ai.domain.semantic_document import (
     ARDEN_DOCUMENT_PREFIX,
@@ -7,9 +8,12 @@ from arden_ai.domain.semantic_document import (
 
 __all__ = [
     "ARDEN_DOCUMENT_PREFIX",
+    "CHUNKING_VERSION",
     "CompiledMarkdown",
+    "PreparedChunk",
     "SemanticDocument",
     "SourceSpan",
+    "chunk_markdown",
     "compile_markdown",
     "parse_semantic_document",
 ]

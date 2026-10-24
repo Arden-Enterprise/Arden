@@ -12,4 +12,6 @@ dist/
 # Local demo corpus. Persist imported documents through the database/object store,
 # never through the source repository.
 data/
+output/
+tmp/
 

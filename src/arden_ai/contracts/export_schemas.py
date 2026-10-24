@@ -3,6 +3,7 @@ from pathlib import Path
 
 from pydantic.json_schema import models_json_schema
 
+from arden_ai.contracts.answering import AnswerRequest, AnswerResponse
 from arden_ai.contracts.indexing import IndexGenerationManifest, IndexGenerationRequest
 from arden_ai.domain.semantic_document import SemanticDocument
 
@@ -17,7 +18,13 @@ def build_schemas() -> dict[str, dict[str, object]]:
         by_alias=True,
         title="Arden indexing contract v1",
     )
+    _, answering_root = models_json_schema(
+        [(AnswerRequest, "validation"), (AnswerResponse, "validation")],
+        by_alias=True,
+        title="Arden answer contract v1",
+    )
     return {
+        "answer-v1.schema.json": answering_root,
         "semantic-document-v1.schema.json": semantic,
         "index-generation-v1.schema.json": indexing_root,
     }

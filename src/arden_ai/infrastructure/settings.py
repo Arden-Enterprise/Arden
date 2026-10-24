@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_embedding_model: str = "text-embedding-3-small"
     openai_embedding_dimensions: int = Field(default=1_536, gt=0)
+    openai_chat_model: str = "gpt-4.1-mini"
     chroma_url: str = "http://chroma:8000"
     chroma_collection: str = Field(default="arden_knowledge_v1", pattern=r"^[a-z0-9_-]{3,63}$")
     service_token: SecretStr | None = None
@@ -29,4 +30,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

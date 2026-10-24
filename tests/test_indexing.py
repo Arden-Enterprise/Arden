@@ -4,10 +4,9 @@ import json
 from dataclasses import dataclass
 from uuid import UUID
 
+from arden_ai.application import GenerationIndexer, PreparedGeneration
 from arden_ai.contracts import IndexGenerationRequest
 from arden_ai.domain import ARDEN_DOCUMENT_PREFIX
-from arden_ai.pipeline import GenerationIndexer
-from arden_ai.pipeline.preparation import PreparedGeneration
 
 
 def request() -> IndexGenerationRequest:
