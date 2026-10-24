@@ -227,7 +227,7 @@ To revoke this example's grant, use the retained administrator session to run:
 sudo visudo -f /etc/sudoers.d/90-project-automation
 ```
 
-Remove only the line added for that account, preserve other grants, and run `sudo visudo -c`. Recheck effective permissions in a fresh session with `sudo -k` followed by `sudo -n -u root id -u`. Other sudoers rules may still allow the command. Revocation does not stop already-running privileged processes; an administrator must handle active sessions/processes when required. Revoke the SSH key/account separately when remote login should also end.
+Remove only the line added for that account, preserve other grants, and run `sudo visudo -c`. Open a fresh SSH session as the affected contributor account, then run `sudo -k` followed by `sudo -n -u root id -u`. Passwordless execution should fail unless another sudoers rule still permits it. If the command still prints `0`, inspect the remaining grants before considering passwordless access revoked. Revocation does not stop already-running privileged processes; an administrator must handle active sessions/processes when required. Revoke the SSH key/account separately when remote login should also end.
 
 ## Troubleshooting
 

@@ -29,6 +29,8 @@ ci/windows-build
 
 PR titles use Conventional Commits: `type(optional-scope)!: summary`, where the summary is at least eight characters and the complete title is at most 100 characters. Allowed types are the branch work types above. Normal branch descriptions contain at least two kebab-case words, with a maximum of 80 characters for the complete branch name; `release/<semver>` is the version exception. The automated check accepts the documented optional `codex/` namespace. Dependabot pull requests from the actual `dependabot[bot]` account on `dependabot/` branches are exempt from naming checks.
 
+The naming check validates syntax, types and lengths. Reviewers must still enforce descriptive meaning, including the prohibited generic/date/person-only names above; passing the check is not approval of a name's meaning.
+
 ## Reviewable PR size
 
 Use these initial Arden review limits for the complete PR against its intended base:

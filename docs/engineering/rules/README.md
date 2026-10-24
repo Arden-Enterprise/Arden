@@ -16,7 +16,6 @@ This directory holds the canonical development rules for Arden. [AGENTS.md](../.
 | [Design](design.md) | Research, flows, components, screen states, accessibility, design handoff | Product/UI/UX |
 | [Verification](verification.md) | Evidence, appropriate checks, documentation and release acceptance | Changed behavior or docs |
 | [Server operations](server-operations.md) | Project-local access resolution and authorized remote operations | Requested server work |
-
 | [Knowledge maintenance](knowledge-maintenance.md) | Durable decisions, owning guides and synchronized implementation status | Lasting decisions or material implementation changes |
 
 ## Related references
