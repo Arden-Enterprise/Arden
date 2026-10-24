@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Guideline context only. Review triggers, billing, and approvals are maintainer settings.
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "AGENTS.md"
+      - "CONTRIBUTING.md"
+      - "docs/engineering/rules/**/*.md"
+      - "docs/engineering/quality-metrics.md"
+      - "docs/engineering/private-files.md"
+      - "docs/engineering/implementation-status.md"

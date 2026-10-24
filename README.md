@@ -10,6 +10,8 @@ Start with [AGENTS.md](AGENTS.md), which applies to agents and human contributor
 
 Accepted product, architecture, technology, security, and deployment decisions must update these documents in the same change; they must not live only in chat. Installed capabilities and future plans must remain clearly distinguished.
 
+The [modular rules index](docs/engineering/rules/README.md) gives each task, Git, security, PR, engineering, design, verification and server rule one home. [AI reviewer guidance](docs/engineering/ai-reviewers.md) distinguishes vendor limits and actual coverage from Arden's [review-size policy](docs/engineering/rules/git-workflow.md#reviewable-pr-size).
+
 ## Local development
 
 Prerequisites: Node.js 24+, pnpm 11+, and Docker Desktop or Docker Engine with Compose.

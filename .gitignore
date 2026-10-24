@@ -27,3 +27,9 @@ __pycache__/
 *.keystore
 !.env.example
 !.env.sample
+
+.venv/
+
+build/
+
+.cache/
