@@ -17,7 +17,8 @@ export function PdfDocument({ base64, title, page, showToolbar = true }: { base6
       <strong className="knowledge-pdf-title">{fileName}</strong>
       <a className="secondary-button" href={url} download={fileName}>Download PDF</a>
     </div>}
-    <object data={page ? `${url}#page=${page}` : url} type="application/pdf" aria-label={`PDF preview: ${title}${page ? `, page ${page}` : ""}`}>
+    <object key={`${url}:${page ?? 1}`} data={page ? `${url}#page=${page}` : url} type="application/pdf"
+      aria-label={`PDF preview: ${title}${page ? `, page ${page}` : ""}`}>
       <p>PDF preview is unavailable here. Use Download PDF to open the original file.</p>
     </object>
   </div>;
