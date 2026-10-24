@@ -9,3 +9,7 @@ htmlcov/
 dist/
 *.egg-info/
 
+# Local demo corpus. Persist imported documents through the database/object store,
+# never through the source repository.
+data/
+
