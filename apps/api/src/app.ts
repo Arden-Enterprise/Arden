@@ -213,10 +213,108 @@ export function buildApp(dependencies: AppDependencies) {
         message: "If account setup can proceed, check your email for confirmation. Then return to this invitation and sign in to accept it.",
       });
     } catch (error) {
+      if (error instanceof Error && error.message === "USER_ALREADY_EXISTS") {
+        return reply.code(409).send(safeError("ACCOUNT_ALREADY_EXISTS", "An account with this email address already exists. Please sign in instead.", request.id));
+      }
       if (error instanceof Error && error.message === "SIGNUP_REJECTED") {
         return reply.code(400).send(safeError("ACCOUNT_SETUP_UNAVAILABLE", "Account setup could not be completed. Check the password requirements or sign in.", request.id));
       }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Supabase sign-up failed");
+      return authUnavailable(reply, request);
+    }
+  });
+
+  app.post<{ Body: { email: string } }>("/api/v1/auth/forgot-password", {
+    schema: {
+      body: {
+        type: "object", additionalProperties: false, required: ["email"],
+        properties: {
+          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!dependencies.auth) return authUnavailable(reply, request);
+    try {
+      if (dependencies.auth.resetPasswordForEmail) {
+        const origin = request.headers.origin || dependencies.publicWebOrigin || "http://127.0.0.1:5180";
+        await dependencies.auth.resetPasswordForEmail(request.body.email.trim().toLowerCase(), `${origin}/reset-password`);
+      }
+      return reply.code(202).send({
+        status: "recovery_sent",
+        message: "If an account with this email exists, a password reset email has been sent.",
+      });
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password reset request failed");
+      return authUnavailable(reply, request);
+    }
+  });
+
+  const handleVerify = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!dependencies.auth || !dependencies.auth.verifyLink) {
+      return reply.redirect("/?error=verify_unavailable", 303);
+    }
+    const query = new URL(request.url, "http://localhost").search.slice(1);
+    try {
+      const location = await dependencies.auth.verifyLink(query);
+      if (location) {
+        return reply.redirect(location, 303);
+      }
+      return reply.redirect("/?error=verification_failed", 303);
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Auth verification failed");
+      return reply.redirect("/?error=verification_failed", 303);
+    }
+  };
+
+  app.get("/auth/v1/verify", handleVerify);
+  app.get("/api/v1/auth/verify", handleVerify);
+
+  app.post<{ Body: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string } }>("/api/v1/auth/reset-password", {
+    schema: {
+      body: {
+        type: "object", additionalProperties: false, required: ["newPassword"],
+        properties: {
+          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          token: { type: "string", minLength: 1, maxLength: 100 },
+          accessToken: { type: "string", minLength: 10 },
+          refreshToken: { type: "string", minLength: 10 },
+          newPassword: { type: "string", minLength: 6, maxLength: 1024 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!dependencies.auth || !dependencies.auth.updateUserPassword) return authUnavailable(reply, request);
+    try {
+      let tokens: AuthSessionTokens | null = null;
+      if (request.body.accessToken && request.body.refreshToken) {
+        tokens = { accessToken: request.body.accessToken, refreshToken: request.body.refreshToken, expiresIn: 3600 };
+      } else if (request.body.email && request.body.token && dependencies.auth.verifyOtp) {
+        const verified = await dependencies.auth.verifyOtp({
+          email: request.body.email.trim().toLowerCase(),
+          token: request.body.token.trim(),
+          type: "recovery",
+        });
+        tokens = verified.tokens;
+      } else {
+        tokens = readAuthCookies(request.headers.cookie, dependencies.secureCookies);
+      }
+
+      if (!tokens) {
+        return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid reset token or session is required.", request.id));
+      }
+
+      await dependencies.auth.updateUserPassword(tokens, request.body.newPassword);
+      setAuthCookies(reply, tokens, dependencies.secureCookies);
+      return reply.code(200).send({ status: "password_updated" });
+    } catch (error) {
+      if (error instanceof Error && (error.message === "INVALID_OTP" || error.message === "INVALID_SESSION")) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link or code is invalid or has expired.", request.id));
+      }
+      if (error instanceof Error && error.message === "PASSWORD_UPDATE_REJECTED") {
+        return reply.code(400).send(safeError("PASSWORD_REJECTED", "Password does not meet requirements.", request.id));
+      }
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password update failed");
       return authUnavailable(reply, request);
     }
   });
