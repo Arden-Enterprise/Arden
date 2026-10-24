@@ -110,13 +110,20 @@ function tokenFromInvitationPath(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
-function parseRecoveryHash(hash: string): { accessToken: string; refreshToken: string } | null {
-  if (!hash || !hash.includes("type=recovery")) return null;
-  const params = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
-  const accessToken = params.get("access_token");
-  const refreshToken = params.get("refresh_token");
-  if (accessToken && refreshToken) {
-    return { accessToken, refreshToken };
+function parseRecoveryHash(location: Location): { accessToken: string; refreshToken: string } | null {
+  const hash = location.hash;
+  if (hash && hash.includes("type=recovery")) {
+    const params = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (accessToken && refreshToken) return { accessToken, refreshToken };
+  }
+  const search = location.search;
+  if (search && search.includes("type=recovery")) {
+    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (accessToken && refreshToken) return { accessToken, refreshToken };
   }
   return null;
 }
@@ -138,7 +145,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
   const [invitationToken, setInvitationToken] = useState<string | null>(() => tokenFromInvitationPath(window.location.pathname));
   const [recoveryTokens, setRecoveryTokens] = useState<{ accessToken: string; refreshToken: string } | null>(() => {
-    const parsed = parseRecoveryHash(window.location.hash);
+    if (typeof window === "undefined") return null;
+    const parsed = parseRecoveryHash(window.location);
     if (parsed) {
       try { window.history.replaceState(null, "", window.location.pathname); } catch {}
     }

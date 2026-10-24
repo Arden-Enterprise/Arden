@@ -168,6 +168,12 @@ describe("API auth and private draft routes", () => {
     expect(verify.statusCode).toBe(303);
     expect(verify.headers.location).toContain("reset-password");
 
+    const rootVerify = await app.inject({
+      method: "GET", url: "/verify?token=valid-link&type=recovery",
+    });
+    expect(rootVerify.statusCode).toBe(303);
+    expect(rootVerify.headers.location).toContain("reset-password");
+
     const resetWithOtp = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
       headers: { origin: "http://localhost:5180" },

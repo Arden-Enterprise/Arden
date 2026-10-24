@@ -269,6 +269,7 @@ export function buildApp(dependencies: AppDependencies) {
 
   app.get("/auth/v1/verify", handleVerify);
   app.get("/api/v1/auth/verify", handleVerify);
+  app.get("/verify", handleVerify);
 
   app.post<{ Body: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string } }>("/api/v1/auth/reset-password", {
     schema: {
