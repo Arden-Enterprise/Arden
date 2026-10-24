@@ -137,6 +137,20 @@ export type ReviewerGrant = {
   validUntil: string | null;
   status: "ACTIVE" | "INACTIVE";
 };
+export type AskArdenAnswer = {
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
+  answer: string;
+  citations: Array<{
+    documentId: string;
+    versionId: string;
+    blockId?: string;
+    excerpt: string;
+    title: string;
+    version: string;
+    scope: string;
+    classification: KnowledgeClassification;
+  }>;
+};
 
 function knowledgePath(organizationId: string): string {
   return `/api/v1/organizations/${organizationId}/knowledge`;
@@ -222,6 +236,12 @@ export async function listPublishedKnowledge(platform: Platform, organizationId:
 
 export function loadPublishedKnowledge(platform: Platform, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge> {
   return request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}`);
+}
+
+export function askArden(platform: Platform, organizationId: string, query: string): Promise<AskArdenAnswer> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/answers`, {
+    method: "POST", body: JSON.stringify({ query }),
+  });
 }
 
 export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {

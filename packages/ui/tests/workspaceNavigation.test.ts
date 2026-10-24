@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { adminNavigation, AppSidebar, knowledgeNavigation, navigationDisabled, workNavigation } from "../src/app/AppSidebar";
 
-describe("workspace navigation with the Ask Arden interface preview", () => {
+describe("workspace navigation with Ask Arden", () => {
   it.each(["member", "admin"] as const)("shows Ask Arden and governance destinations for %s", (previewRole) => {
     const sidebar = AppSidebar({
       activeView: "my-work", platform: "web", previewRole, organization: null,

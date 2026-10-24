@@ -3,7 +3,7 @@
 Status: accepted
 Date: 2026-10-22
 Decision owner/approval: project lead, explicitly approved during Mainflow 3 Phase 1
-Implementation: partial — initial service scaffold and deterministic compiler live in [Arden-AI](https://github.com/Arden-Enterprise/Arden-AI); indexing and retrieval contracts remain in progress
+Implementation: partial — indexing and permission-aware answer contracts are implemented across Arden Core and [Arden-AI](https://github.com/Arden-Enterprise/Arden-AI); Langfuse operations and retrieval evaluation remain in progress
 Supersedes: the single-TypeScript-process, pgvector, pg-boss AI worker and local-Ollama portions of the proposed `ARDEN_BLUEPRINT.md`
 
 ## Context and requirement
