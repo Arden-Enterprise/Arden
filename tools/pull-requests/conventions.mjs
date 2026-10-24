@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 const types = "feat|fix|docs|refactor|perf|test|chore|build|ci|release|hotfix|security|revert";
 const branchPattern = new RegExp(`^(?:codex/)?(${types})/(.+)$`);
 const descriptionPattern = /^[a-z0-9]+(?:-[a-z0-9]+)+$/;
+const prohibitedDescription = /^(?:new-branch|changes|work|final|\d{4}-\d{2}-\d{2})$/;
 const versionNumber = "(?:0|[1-9][0-9]*)";
 const prereleaseIdentifier = "(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)";
 const versionPattern = new RegExp(`^${versionNumber}\\.${versionNumber}\\.${versionNumber}(?:-${prereleaseIdentifier}(?:\\.${prereleaseIdentifier})*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$`);
@@ -19,6 +20,7 @@ export function validatePullRequest(input) {
   const errors = [];
   const match = typeof branch === "string" ? branchPattern.exec(branch) : null;
   if (!match || branch.length > 80 || forbiddenCharacters.test(branch)
+    || (match[1] !== "release" && prohibitedDescription.test(match[2]))
     || !(match[1] === "release" ? versionPattern : descriptionPattern).test(match[2])) {
     errors.push("Use type/specific-kebab-description (optionally codex/type/description), or release/semver, with at most 80 characters.");
   }

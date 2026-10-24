@@ -73,3 +73,9 @@ test("CLI reports static messages and appropriate exit codes", () => {
   assert.equal(rejected.status, 1);
   assert.equal(rejected.stdout.includes("untrusted title"), false);
 });
+
+test("reject explicitly prohibited generic descriptions and bare dates", () => {
+  for (const branch of ["feat/new-branch", "codex/docs/new-branch", "fix/2026-10-24", "codex/chore/2026-10-24"]) {
+    assert.ok(validatePullRequest({ ...valid, branch }).errors.length, branch);
+  }
+});
