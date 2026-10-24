@@ -169,6 +169,66 @@ If a password is required, enter it directly in an interactive terminal. For app
 
 Open a Codex chat in this checkout and describe the server task. The public project instructions point to the local private profile. Codex should use that profile, inspect relevant state, stay within the requested scope, and report results without revealing connection metadata.
 
+### Permanent passwordless sudo
+
+Passwordless sudo lets the approved SSH account run permitted administrator commands without entering a password each time. It persists across SSH sessions and reboots until an administrator revokes it. No password needs to be stored in Codex or this repository.
+
+An administrator must choose the grant. On a shared server, a fixed command allowlist or a reviewed privileged helper provides stronger restrictions than full root access. The full-root example below grants all commands as root to the selected account and every process or person able to use it. Project rules guide agent behavior; they cannot enforce a limit on this operating-system grant. Follow the [safe unattended sudo policy](rules/server-operations.md#safe-use-of-unattended-sudo).
+
+Giving an account unrestricted Docker commands or access to the rootful Docker socket also grants root-level power; it is not an enforced restricted alternative. [Docker's privilege explanation](https://docs.docker.com/engine/install/linux-postinstall/)
+
+#### Enable full root access when approved
+
+1. Connect from your own terminal using the alias in your private project profile. Confirm the intended SSH account with `whoami`. If the administrator uses a different login to perform setup, grant access to the contributor account Codex actually uses, not the administrator's login or a Windows username. Keep a working administrator session open until a second-session check succeeds.
+2. As an authorized administrator, open a dedicated sudoers drop-in with `visudo`. Preserve existing lines if this file is already present:
+
+   ```sh
+   sudo visudo -f /etc/sudoers.d/90-project-automation
+   ```
+
+   Enter the administrator password directly at the terminal prompt if required. Never paste it into chat. `visudo` checks the edited syntax before accepting changes. [Ubuntu visudo reference](https://manpages.ubuntu.com/manpages/noble/man8/visudo.8.html)
+
+3. Add the following line, replacing `YOUR_APPROVED_SERVER_USER` with the exact approved remote account. Do not leave the placeholder unchanged:
+
+   ```sudoers
+   YOUR_APPROVED_SERVER_USER ALL=(root) NOPASSWD: ALL
+   ```
+
+   This grants every command as root without a sudo password. It does not enable root SSH login or remove the SSH account's password. [Ubuntu sudoers reference](https://manpages.ubuntu.com/manpages/noble/man5/sudoers.5.html)
+
+4. Save and close the editor. In nano, press **Ctrl+O**, **Enter**, then **Ctrl+X**. In vi, press **Esc**, type `:wq`, then press **Enter**. If `visudo` reports an error, edit the file again; do not force-save a syntax error. Then verify ownership, permissions, and the whole policy:
+
+   ```sh
+   sudo chown root:root /etc/sudoers.d/90-project-automation
+   sudo chmod 0440 /etc/sudoers.d/90-project-automation
+   sudo visudo -c
+   ```
+
+   Stop and repair any reported error before closing the administrator session.
+
+5. Open a second SSH session as the exact contributor account, then run:
+
+   ```sh
+   sudo -k
+   sudo -n -u root id -u
+   ```
+
+   `0` with no password prompt confirms that command ran as root without cached authentication. If it fails, the administrator should inspect the effective policy and included-file ordering; do not broaden unrelated users' permissions or disable SSH host checks.
+
+6. Record the verified grant, its administrator/owner, permitted operational scope, and revocation route in the local private server profile. Do not put the real account, host, key path, or operational details in public instructions. Verify a particular authorized operation with `sudo -n`; success for `id` alone is not proof that every operation is permitted under a restricted policy.
+
+#### Restrict or revoke the grant
+
+For an enforced smaller scope, the administrator replaces the full-root grant with specific reviewed commands or a root-owned helper that accepts no arbitrary command, path, or shell input. Protect the helper and its parent directories against writes by the unprivileged account. Avoid allowing unrestricted shells, interpreters, editors, package managers, or Docker commands as supposedly narrow permissions; review permitted arguments and relevant configuration inputs too.
+
+To revoke this example's grant, use the retained administrator session to run:
+
+```sh
+sudo visudo -f /etc/sudoers.d/90-project-automation
+```
+
+Remove only the line added for that account, preserve other grants, and run `sudo visudo -c`. Recheck effective permissions in a fresh session with `sudo -k` followed by `sudo -n -u root id -u`. Other sudoers rules may still allow the command. Revocation does not stop already-running privileged processes; an administrator must handle active sessions/processes when required. Revoke the SSH key/account separately when remote login should also end.
+
 ## Troubleshooting
 
 | Symptom | Next step |

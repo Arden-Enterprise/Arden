@@ -1,6 +1,6 @@
 # Contributing to Arden
 
-Read [AGENTS.md](AGENTS.md) first. It is the repository-wide rules entry point, not an optional agent-only note. Detailed guides cover [code quality/testability](docs/engineering/code-quality.md), [technologies](docs/engineering/technology-guide.md), [security/data](docs/engineering/security-and-data.md), and [operations](docs/engineering/operations.md).
+Read [AGENTS.md](AGENTS.md) first. It is the repository-wide rules entry point, not an optional agent-only note. The [rules index](docs/engineering/rules/README.md) routes task, Git, PR, security, design, verification and server rules. Detailed guides cover [code quality/testability](docs/engineering/code-quality.md), [technologies](docs/engineering/technology-guide.md), [security/data](docs/engineering/security-and-data.md), and [operations](docs/engineering/operations.md).
 
 ## Before every task
 
@@ -8,25 +8,7 @@ Follow [current main context](docs/engineering/rules/main-context.md) before pla
 
 ## Branch convention
 
-Use `<type>/<specific-kebab-case-description>`. The type must match the purpose:
-
-| Type | Purpose | Example |
-| --- | --- | --- |
-| `feat` | New user-facing capability | `feat/private-notes` |
-| `fix` | Correct a defect | `fix/graph-selection` |
-| `docs` | Documentation/rules only | `docs/developer-setup` |
-| `refactor` | Restructure without intended behavior change | `refactor/policy-functions` |
-| `perf` | Measurable performance improvement | `perf/authorized-search` |
-| `test` | Tests or fixtures | `test/publication-versions` |
-| `chore` | Maintenance not covered by another type | `chore/dependency-review` |
-| `build` | Build system/package tooling | `build/desktop-packaging` |
-| `ci` | CI automation | `ci/branch-validation` |
-| `release` | Prepare a specific release | `release/0.1.0` |
-| `hotfix` | Urgent production correction | `hotfix/session-revocation` |
-
-An issue number may lead the description (`fix/123-upload-limit`). Use plain `feat/` and `fix/` by default. If an execution tool explicitly requires a namespace, `codex/feat/private-notes` is allowed; the work type is still mandatory. Avoid generic names such as `updates`, `task`, `final`, or `new-branch`.
-
-Start a coherent change from current `main` after inspecting existing work. Do not switch/rename a user's branch or discard/stash changes automatically. For an initial repository with no commit, handle bootstrap explicitly rather than pretending a remote base exists. Do not push directly to `main` except for an explicitly authorized bootstrap/emergency procedure.
+Follow [Git workflow](docs/engineering/rules/git-workflow.md) for allowed types, descriptive names, the optional automation namespace and the release-version exception. Use a focused branch from inspected current main; preserve existing branches and work.
 
 ## Local development
 
@@ -71,7 +53,7 @@ pnpm test:remote
 pnpm build
 ```
 
-CI performs a frozen-lockfile install and these checks on Ubuntu and Windows. UI tests cover pure session-preview models for private drafts, organization invitations/access and knowledge review/publication. API tests cover health routes. Passing these checks does not prove server authorization, persistence, native installers or end-to-end coverage. Add the relevant evidence as features grow.
+CI performs a frozen-lockfile install and these checks on Ubuntu and Windows. UI tests cover pure session-preview models for private drafts, organization invitations/access and knowledge review/publication. API tests include health, authentication, private-note and knowledge request contracts; real database and external-provider checks have separate gates. Passing these checks does not prove server authorization, persistence, native installers or end-to-end coverage. Add the relevant evidence as features grow.
 
 UI changes also need actual web/desktop visual and interaction checks where applicable. Database changes need disposable PostgreSQL migration/constraint/authorization tests. Security and governance changes need denial/revocation/exact-version tests. Docs-only changes need links and consistency checks; do not imply application tests ran when they did not.
 
@@ -89,10 +71,14 @@ Review specifically for:
 - Version-matched APIs, dependency/license risks, config/secrets, migrations, reproducible deployment, and restoration.
 - Updated rules/docs and explicit unresolved decisions or unverified checks.
 
-Intended `main` protections are reviewed PRs, required CI checks on both OS jobs, resolved review conversations, and restricted force-push/deletion. Security-sensitive changes should receive a reviewer familiar with the affected boundary. These are policy requirements; a maintainer must separately configure/verify GitHub protections. This documentation does not configure remote settings or add mechanical branch-name enforcement.
+Intended `main` protections are reviewed PRs, required CI checks on both OS jobs, resolved review conversations, and restricted force-push/deletion. Security-sensitive changes should receive a reviewer familiar with the affected boundary. These are policy requirements; a maintainer must separately configure/verify GitHub protections. This documentation does not configure remote settings. The separate PR conventions workflow checks branch names and PR titles; it does not enforce GitHub branch protections.
 
 ## Private configuration and public documentation
 
 This repository is public. Follow the [private files guide](docs/engineering/private-files.md) before adding configuration, operational notes, or data files. Keep private or security-critical values in excluded local files or approved secret storage, and document setup with placeholders. Check exclusions and existing tracking before committing; never force-add private files. Share actual values through an approved private channel.
 
 For authorized server work, follow the [private server setup guide](docs/engineering/server-access.md). Keep connection profiles in local Git metadata and personal SSH configuration.
+
+## Review and task tracking
+
+Follow [task workflow](docs/engineering/rules/task-workflow.md) for scoped acceptance, existing Linear issue reuse, the workspace issue budget and the PR offer when publication is not already authorized. Use [pull requests](docs/engineering/rules/pull-requests.md) for reviewer capacity/coverage and authorized merge readiness; human review is optional. [Quality metrics](docs/engineering/quality-metrics.md) define written targets, not collected results. Preserve the [product contract](docs/engineering/rules/product-contract.md) and [knowledge maintenance](docs/engineering/rules/knowledge-maintenance.md).
