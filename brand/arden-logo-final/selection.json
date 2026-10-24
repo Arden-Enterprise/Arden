@@ -1,0 +1,11 @@
+{
+  "status": "approved final artwork",
+  "name": "Flux Circle — Equal rhythm spacing",
+  "selectedDate": "2026-10-15",
+  "edition": "v15",
+  "selectedOption": 2,
+  "symbol": "arden-logo.svg",
+  "lockup": "arden-lockup.svg",
+  "editableSymbol": "svg/arden-logo-current-color.svg",
+  "applicationIntegration": "Separate implementation decision; this package does not replace shipped UI assets."
+}

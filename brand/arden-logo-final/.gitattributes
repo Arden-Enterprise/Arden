@@ -1,0 +1,2 @@
+# Preserve delivered bytes so manifest hashes are portable across Git checkouts.
+* -text
