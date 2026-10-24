@@ -1,10 +1,10 @@
 # 0007: Publish automatically after final knowledge approval
 
-Status: accepted
+Status: superseded
 Date: 2026-10-07
 Decision owner/approval: project lead's Mainflow 2 clarification, reaffirmed by the branch owner on 2026-10-11
 Implementation: frontend preview implemented; authoritative server workflow not started
-Supersedes / superseded by: supersedes the separate human publication step for Mainflow 2 on this feature branch
+Supersedes / superseded by: superseded by [decision 0011](0011-permission-aware-publication-and-semantic-documents.md); the no-human-publisher rule remains
 
 ## Context and requirement
 

@@ -17,6 +17,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@arden/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@supabase/supabase-js':
         specifier: 2.117.2
         version: 2.117.2
@@ -108,8 +111,17 @@ importers:
         specifier: 7.3.6
         version: 7.3.6(@types/node@24.13.6)(tsx@4.23.15)
 
+  packages/domain:
+    devDependencies:
+      vitest:
+        specifier: 5.0.1
+        version: 5.0.1(@types/node@24.13.6)(vite@7.3.6(@types/node@24.13.6)(tsx@4.23.15))
+
   packages/ui:
     dependencies:
+      '@arden/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@blocknote/ariakit':
         specifier: 0.55.0
         version: 0.55.0(@floating-ui/dom@1.8.0)(@types/hast@3.0.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

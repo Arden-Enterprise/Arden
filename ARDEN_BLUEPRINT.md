@@ -27,7 +27,7 @@ Graph nodes include notes, published pages, external issues and pull requests, p
 ### Core journeys
 
 1. **Capture → understand:** write a private note or upload a file; Arden extracts text, records source/version, indexes it, suggests links, and answers questions with citations.
-2. **Contribute → govern:** copy selected private content into a shared draft; clean and preview it; submit an immutable snapshot; reviewer requests changes, rejects, or approves; final approval automatically publishes the approved snapshot; later revisions repeat this path.
+2. **Contribute → govern:** copy selected private content into a shared draft; clean and preview it; submit an immutable snapshot; reviewer approves or rejects; approval starts publication preparation and index-ready activation makes the snapshot current; later revisions repeat this path.
 3. **Work → context:** connect a Jira project and selected GitHub repositories; a task's Knowledge Pane shows relevant code changes, decisions, runbooks, and notes. A work brief records current context and sources without pretending to be official policy.
 4. **Ask → verify:** AI retrieves only authorized and current material, distinguishes official/shared/external/personal sources, cites exact versions, and states uncertainty or conflict.
 5. **Draft → act externally:** if authorized, Arden may prepare a Jira issue with a precise preview of text and destination. The user confirms. Arden records idempotency and reconciles uncertain outcomes before any retry.
@@ -38,23 +38,23 @@ AI is an assistant, not a publisher or autonomous administrator. It may propose 
 
 | Layer | Choice | Why |
 | --- | --- | --- |
-| Codebase | TypeScript monorepo with `pnpm` workspaces | One language and shared domain, UI, API types, and permission rules. |
+| Codebase | TypeScript core monorepo plus separate Python 3.11 `Arden-AI` repository | Keep product/domain authorization cohesive while allowing the AI pipeline to use the strongest supported ecosystem and deploy independently. |
 | Web | React + Vite + React Router + TanStack Query | The app is authenticated and highly interactive; server rendering/SEO bring little value. |
 | Desktop | Electron + electron-vite using the same React feature packages | Faster parity between web and desktop than separate UI stacks. Narrow, typed preload APIs only. |
 | Editor | BlockNote core, wrapped behind an Arden document interface | Good writing UX; keep stored document format versioned so the editor can be replaced. Check the license for any non-core components before adopting them. |
 | Graph | Sigma.js + Graphology | WebGL rendering and graph utilities suited to interactive neighborhoods. The graph is a projection of canonical relationships, not the primary database. |
 | API | Fastify + schema-validated HTTP API; Supabase Realtime for notifications | A long-running, self-hosted API with explicit security boundaries and simple client contracts. |
 | Identity | Supabase Auth for accounts/sessions; Arden-owned organization and content authorization | Avoid rebuilding login. The organization's structure and document ACL cannot be delegated to the identity provider. |
-| Database | PostgreSQL + `pgvector`; Drizzle migrations | Relational integrity for governance and permissions, full-text search, embeddings, and one database system of record. |
-| Jobs | `pg-boss` in a separate worker process | Durable ingestion, connector sync, embedding, and cleanup without Redis in the first installation. |
+| Database | PostgreSQL for canonical state; self-hosted ChromaDB for derived vectors | Keep governance and permissions transactional while scaling/rebuilding retrieval independently. |
+| Jobs | Durable generation/outbox state in Arden core; separate Python AI worker | Retries cannot bypass core authorization or activate partial generations. |
 | Files | Private Supabase Storage behind Arden's storage/authorization boundary | Supplied object APIs and scoped access; policies, revocation, and coordinated backups remain ours. |
-| Private AI | Ollama runtime through an Arden model gateway; pluggable compatible private endpoint | Simple customer-controlled install and replaceable model backend. Separate chat and embedding model profiles. |
+| AI | OpenAI embeddings and generation through the private `Arden-AI` service; self-hosted Langfuse | Use one supported API stack for the demo while keeping prompts, retrieval and observability behind an internal service boundary. |
 | Deployment | Versioned Docker Compose deployed by Coolify | Matches the Ubuntu 24.04 server and makes customer installation reproducible. |
 | Tests | Vitest, API/integration tests against PostgreSQL, Playwright end-to-end | Permissions and review transitions need executable evidence. |
 
 The accepted architecture uses Supabase PostgreSQL, Auth, Storage, and Realtime with Fastify domain APIs and reviewed Drizzle/SQL migrations. Supabase supplies identity and supporting data services; it does not replace Arden's organization authorization, privacy policy, governance, or reviewed domain migrations. Keep service-role keys server-side, and authorize direct database, Storage, and Realtime access with policies equivalent to Arden's API rules. Do not run Better Auth alongside Supabase Auth. See [decision 0001](docs/decisions/0001-supabase-and-hybrid-development.md) and the [technology guide](docs/engineering/technology-guide.md).
 
-Do not introduce a graph database, Elasticsearch, Kubernetes, Redis, or a separate vector service before measured needs justify them. PostgreSQL stores canonical entities and explicit edges; search indexes and graph views are derived projections. Start vector search with exact filtered queries. Consider HNSW only after corpus/latency measurements; approximate vector indexes can interact poorly with selective permission filters.
+Do not introduce a graph database, Elasticsearch, Kubernetes or Redis before measured needs justify them. PostgreSQL stores canonical entities, permissions and explicit edges. ChromaDB stores only derived retrieval records and receives a generation allow-list already computed from PostgreSQL AccessPolicy. Approximate ranking is never evidence of authorization; Arden core rechecks evidence before model context or output.
 
 ### Repository shape
 
@@ -63,7 +63,7 @@ apps/
   web/             authenticated React application
   desktop/         Electron main, preload, renderer shell
   api/             Fastify API, authentication, authorization
-  worker/          ingestion, sync, embeddings, maintenance
+  worker/          core durable orchestration and maintenance
 packages/
   ui/              shared components and themes
   domain/          types, workflow state machines, policies
@@ -71,11 +71,14 @@ packages/
   db/              Drizzle schema and reviewed SQL migrations
   editor/          Arden document model and BlockNote adapter
   graph/           graph queries, layout, shared UI
-  ai/              retrieval and model adapters
 deploy/
   compose/         customer, staging, and local templates
 docs/              install, backup, threat model, operations
 ```
+
+The sibling `Arden-AI` repository contains the Python compiler, chunking, OpenAI, ChromaDB and
+Langfuse adapters. It exposes versioned internal contracts and has no authority to activate a
+publication or broaden an AccessPolicy allow-list.
 
 The API is the only routine writer to Arden content; browser and desktop never connect directly to PostgreSQL. Worker operations use narrowly scoped service permissions and record their effects. Use one reviewed migration system, not schema push on production.
 
@@ -119,17 +122,17 @@ current publication ──revise─────▶ new shared draft
 current publication ──archive/revoke──▶ hidden/tombstone
 ```
 
-Approval is bound to a content hash/version and scope. Any edit after approval invalidates that approval. When the final required approval succeeds, the server automatically creates the publication for that exact snapshot; there is no publisher role or manual Publish action in Mainflow 2. The review decision and publication event remain distinct audit records. External source objects are not silently rewritten into official Arden knowledge. A contribution copy preserves provenance internally, but shared viewers must not gain a backdoor link to a private original.
+Approval is bound to a content hash/version and scope. The working draft may continue changing, but those edits never alter the reviewed snapshot. Final approval moves that exact snapshot to `PREPARING`; only a complete index generation followed by atomic activation makes it current. There is no publisher role or manual Publish action. Review, preparation and activation remain distinct audit events. External source objects are not silently rewritten into official Arden knowledge. A contribution copy preserves provenance internally, but shared viewers must not gain a backdoor link to a private original.
 
 ### Proposed governance review policy
 
 The organization defines a review policy before accepting submissions: who owns each knowledge area, which reviewer grants cover the responsible department and optional team/project attribute filters, the intended publication audience, how classification affects release, and when escalation or periodic re-review is needed. Department is the highest reviewer-authority scope; organization is the tenant boundary and may be the publication audience, but does not imply an organization-wide reviewer role. A reviewer responsible for department-wide documents does not automatically approve every narrower team/project category. Delegating a narrower grant is a separate permission. This is Arden's proposed operational interpretation of [ISO/IEC 38505-1:2026](https://www.iso.org/standard/87195.html) data-governance guidance, not a review sequence or reviewer count mandated by that standard.
 
-The accepted classification levels are `INTERNAL`, `CONFIDENTIAL` and `RESTRICTED` (see [decision 0008](docs/decisions/0008-three-level-knowledge-classification.md)). Classification measures content sensitivity, while intended audience and effective access grants determine who may read it. Internal and Confidential normally use one reviewer with the appropriate authority; Restricted requires an authorized specialist or senior reviewer. Additional review steps apply only under an explicit organization policy. No classification adds a human Publish action: final approval automatically publishes the exact snapshot. If the intended audience cannot be safely enforced, approval must be denied or returned for revision.
+The accepted classification levels are `INTERNAL`, `CONFIDENTIAL` and `RESTRICTED` (see [decision 0008](docs/decisions/0008-three-level-knowledge-classification.md)). Classification measures content sensitivity, while intended audience and effective access grants determine who may read it. Internal and Confidential normally use one reviewer with the appropriate authority; Restricted requires an authorized specialist or senior reviewer. Additional review steps apply only under an explicit organization policy. No classification adds a human Publish action. If the intended audience cannot be safely enforced, approval must be denied; the author may submit a new snapshot after rejection.
 
-Submission fixes the content, metadata, classification, owner, intended audience and version/hash for review. An eligible, assigned reviewer checks quality, evidence, currency, ownership and release scope; the submitter cannot approve their own version. Authority is checked again at decision time. The reviewer records approval, a reasoned rejection, or requested changes that lead to a new snapshot. One reviewer with all required authority may give final approval. Additional review steps apply only when the organization's policy explicitly requires them; all required decisions must cover the same snapshot and scope. Intermediate approvals do not publish.
+Submission fixes the content, metadata, classification, owner, intended audience and version/hash for review. An eligible assigned reviewer checks quality, evidence, currency, ownership and release scope; ordinary reviewers cannot approve their own version. Organization Admin is the final authority and may self-approve with explicit audit evidence. Authority is checked again at decision time. The reviewer records approval or a reasoned rejection. A rejected author may continue editing and submit a new snapshot. All required decisions cover the same snapshot and scope.
 
-The server automatically promotes exactly the finally approved snapshot to the current publication and records the decision, policy version and publication event. Approval and publication must commit consistently; a failed publication must not expose a partial or unapproved version. Indexing may finish later, and search/AI must wait until the current publication is indexed and authorized. The owner or responsible reviewer monitors review dates, feedback and changes in validity or access. A revised version repeats review while the existing publication remains current, and loss of current access or validity blocks search and AI use.
+The server moves exactly the finally approved snapshot into publication preparation and records the decision and policy version. A failed compiler/index generation must not expose a partial or unapproved version. Only a complete generation may atomically replace the current-publication pointer; search and AI therefore observe the same active authorized version. A revised version repeats review while the existing publication remains current, and loss of current access blocks search and AI use immediately.
 
 ## 6. Ingestion, search, and AI
 
@@ -144,11 +147,16 @@ note/file/Jira/GitHub → scope + source ID → raw revision → safe extraction
 
 Begin with Markdown, plain text, DOCX, and text-based PDF. Display a clear unsupported/needs-OCR state for scans instead of pretending they were indexed. Keep source ID, revision/hash, fetch time, extraction version, model/embedding version, and indexing status. Jobs are retryable and idempotent; unchanged sources do not get re-embedded. Connector setup allows selected Jira projects and GitHub repositories, minimal scopes, initial backfill limits, webhook where practical, and scheduled reconciliation. The Intake screen surfaces failures, staleness, conflicts, and promotion suggestions; it does not require a human to approve every synchronized object.
 
-Search uses PostgreSQL full-text plus vector similarity. Authorized candidates are selected *before* snippets/answers are returned, and a final authorization check runs before response emission. Model-generated citations are not trusted by themselves; the server maps citation IDs to retrieved, authorized versions. Results and answers label **official published**, **shared draft**, **external source**, and **private note** distinctly. Freshness and conflicting sources must be visible.
+Search uses PostgreSQL for canonical filters/full-text state and ChromaDB for vector retrieval. Authorized generation IDs are selected *before* vector retrieval, and a final core authorization check runs before model context or response emission. Model-generated citations are not trusted by themselves; the server maps citation IDs to retrieved, authorized versions. Results and answers label **official published**, **shared draft**, **external source**, and **private note** distinctly. Freshness and conflicting sources must be visible.
 
 For published Arden content, retrieval uses the current actor's verified active membership plus managed-audience eligibility or active audience-group membership; any one matching audience is sufficient. Private originals never enter shared-organization retrieval. Membership, department, or audience-group revocation must block subsequent retrieval and contribution actions before derivative cleanup completes.
 
-The model gateway receives only the query plus selected, authorized excerpts and source metadata. It holds no direct DB credential and no general connector token. Ollama is installed on the customer's private network with cloud features disabled for strict-private mode; a firewall/egress test is still required. The model/profile can be configured for CPU, local GPU, or a separate customer GPU host. A CPU-only server may support modest embeddings and slow/small chat models, but **does not guarantee acceptable multi-user AI performance**. The installer should run a benchmark and present supported capacity tiers rather than silently choosing a weak model. An external provider is opt-in with an exact data-flow warning and no automatic failover from private to cloud.
+The AI gateway receives only the query plus selected, authorized excerpts and source metadata. It
+holds no direct business-database credential and no general connector token. The demo uses OpenAI
+for embeddings and generation; this external data flow must be configured explicitly and must not
+silently receive unauthorized or unnecessary content. ChromaDB and Langfuse remain on the private
+network. Provider changes and any future local-model mode require a reviewed capability, privacy
+and quality decision; there is no automatic fallback.
 
 External documents are untrusted input: they can contain prompt-injection text. Retrieval must not grant the model tool authority; any outgoing action needs a server-side capability check, human preview/confirmation, and an audit event. Never use retrieved text as a system instruction.
 
@@ -162,11 +170,30 @@ Desktop binaries should be versioned and signed for supported operating systems.
 
 ## 8. Installation and environments
 
-Customer installation on Ubuntu 24.04/Coolify targets versioned Compose services for `web`, `api`, `worker`, Supabase PostgreSQL/Auth/Storage/Realtime, and optional `ollama` (or a configured private model host). Only the reverse proxy exposes approved application endpoints; database, worker, and model ports stay private. Protected persistent storage holds PostgreSQL, attachments, and model files. Coolify handles deployment/TLS; it does **not** replace coordinated application-data backup. The installer still needs domain, initial administrator, storage, private-AI, capacity, and backup setup. This full installation is not implemented by the development bootstrap.
+Customer installation on Ubuntu 24.04/Coolify targets versioned services for `web`, `api`,
+`Arden-AI`, ChromaDB, Langfuse and Supabase PostgreSQL/Auth/Storage/Realtime. Only the reverse
+proxy exposes approved application endpoints; database, worker, Chroma and observability ports
+stay private. Protected persistent storage holds PostgreSQL, Chroma indexes and attachments.
+Coolify handles deployment/TLS; it does **not** replace coordinated application-data backup.
+The installer still needs domain, initial administrator, storage, OpenAI, capacity and backup
+setup. This full installation is not implemented by the development bootstrap.
 
-The latest development layout uses local frontends and four hosted API/database slots. Development may share PostgreSQL compute with separate databases/login roles; staging and production require separate instances, volumes, and secrets. The previous 4 vCPU/12 GB pilot target is not a verified allocation. Measure resources and plan supported isolated Supabase services before expanding; four logical databases are not four Supabase projects. Private AI remains on a separate customer-controlled machine. See [the implementation guide](docs/engineering/remote-development.md).
+The latest development layout uses local frontends and four hosted API/database slots.
+Development may share PostgreSQL compute with separate databases/login roles; staging and
+production require separate instances, volumes, collections and secrets. The previous 4 vCPU/12
+GB pilot target is not a verified allocation. Measure CPU, memory, disk and realistic vector load
+before expanding; four logical databases are not four Supabase projects. See [the implementation
+guide](docs/engineering/remote-development.md).
 
-Each developer has a local Compose stack with isolated database, files, connector sandbox credentials, and seed data. A developer may run the web/API/worker on the host for hot reload while PostgreSQL and Ollama remain in containers. Tests use disposable databases. Staging and production are **separate Coolify projects/stacks with separate PostgreSQL volumes, secrets, connector credentials, model settings, and domains**. Do not copy real production content into staging without approved sanitization. Deploy an immutable image digest to staging, run migration/restore/security smoke tests, then promote the *same digest* to production. Run migrations once, forward-only with tested rollback/restore plan. Prefer expand/migrate/contract changes to keep desktop compatibility.
+Each developer has a local stack with isolated database, Chroma collection, files, connector
+sandbox credentials, and seed data. A developer may run the web/API/AI service on the host for hot
+reload while PostgreSQL and ChromaDB remain in containers. Tests use disposable databases and
+collections. Staging and production are **separate Coolify projects/stacks with separate
+PostgreSQL/Chroma volumes, secrets, connector credentials, model settings, and domains**. Do not
+copy real production content into staging without approved sanitization. Deploy immutable image
+digests to staging, run migration/restore/security smoke tests, then promote the same digests to
+production. Run migrations once, forward-only with tested rollback/restore plan. Prefer
+expand/migrate/contract changes to keep desktop compatibility.
 
 Backups cover database **and** attachments, connector configuration/secrets, and encryption-key recovery; model weights can usually be redownloaded unless air-gapped. Encrypt off-host backups, test restoration on staging, and define target RPO/RTO before selling production reliability. Add health checks, queue depth, connector sync lag, failed jobs, disk capacity, model latency, and audit/security alerts. A single Coolify host is a valid pilot, not high availability. For a company requiring HA, design separate database/storage/compute and operational support later.
 
@@ -213,7 +240,7 @@ Decisions to make with the team/customer before implementation locks them in:
 
 - [Vite guide](https://vite.dev/guide/), [Fastify TypeScript](https://fastify.dev/docs/latest/Reference/TypeScript/), [Electron security](https://www.electronjs.org/docs/latest/tutorial/security/)
 - [Supabase Auth](https://supabase.com/docs/guides/auth), [Supabase Storage access control](https://supabase.com/docs/guides/storage/security/access-control), [Supabase Realtime authorization](https://supabase.com/docs/guides/realtime/authorization), [Drizzle migrations](https://orm.drizzle.team/docs/drizzle-kit-generate)
-- [PostgreSQL row security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html), [pgvector](https://github.com/pgvector/pgvector), [pg-boss](https://github.com/timgit/pg-boss)
+- [PostgreSQL row security](https://www.postgresql.org/docs/current/ddl-rowsecurity.html), [Chroma architecture](https://docs.trychroma.com/docs/overview/architecture)
 - [BlockNote collaboration](https://www.blocknotejs.org/docs/features/collaboration), [Sigma.js documentation](https://www.sigmajs.org/docs/)
 - [Coolify Docker Compose deployment](https://coolify.io/docs/applications/builds/docker-compose)
-- [Ollama cloud/private mode](https://docs.ollama.com/cloud), [GitHub App permissions](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app), [Jira issue API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/)
+- [OpenAI API documentation](https://platform.openai.com/docs), [GitHub App permissions](https://docs.github.com/en/apps/creating-github-apps/registering-a-github-app/choosing-permissions-for-a-github-app), [Jira issue API](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-issues/)

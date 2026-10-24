@@ -100,7 +100,7 @@ Các file chính:
 4. Submission phải freeze audience UUID, target scope, responsible department, classification,
    source version ID, content URI và hash.
 5. Trước approve phải rehydrate và kiểm tra audience còn enforceable. Inactive/missing marker hoặc
-   invalid Department use phải block approve nhưng vẫn cho reviewer request revision/reject.
+   invalid Department use phải block approve nhưng vẫn cho reviewer reject.
 6. Publication read/list phải dùng current policy/RLS: active membership cho Organization
    `ALL_MEMBERS`; exact assignment + Department membership cho Department role audience.
 7. Không thêm Org Admin bypass và không đọc private source để phục vụ review/publication.

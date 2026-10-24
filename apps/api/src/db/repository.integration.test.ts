@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository } from "./repository.js";
+import { PgIndexGenerationStore } from "../indexing/store.js";
+import type { IndexGenerationManifest } from "../indexing/contracts.js";
 
 const databaseUrl = process.env.ARDEN_TEST_DATABASE_URL;
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null;
@@ -16,7 +18,8 @@ const ids = {
   managerMembership: randomUUID(),
   department: randomUUID(),
 };
-const roleCodes = [`ARDEN_TEST_OWNER_${ids.owner.replaceAll("-", "")}`, `ARDEN_TEST_MANAGER_${ids.manager.replaceAll("-", "")}`];
+const roleCodes = [`ARDEN_TEST_OWNER_${ids.owner.slice(0, 8).toUpperCase()}`,
+  `ARDEN_TEST_MANAGER_${ids.manager.slice(0, 8).toUpperCase()}`];
 const repository = pool ? new ArdenRepository(pool) : null;
 let fixtureReady = false;
 
@@ -34,8 +37,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       SELECT count(*)::text AS count FROM public.arden_schema_migrations
        WHERE migration_id IN ('0001_initial_schema', '0008_enable_private_shared_draft_creation',
          '0015_org_admin_member_profiles', '0016_fix_flow2_cross_actor_validation',
-         '0017_audience_and_instance_admin_foundation')`);
-    if (migration.rows[0]?.count !== "5") throw new Error("Apply the current schema migrations to the isolated test database first");
+         '0017_audience_and_instance_admin_foundation',
+         '0019_flow3_durable_index_generations')`);
+    if (migration.rows[0]?.count !== "6") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -47,6 +51,13 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Synthetic private-note owner'), ($4, $2, $5, 'Synthetic manager')`, [ids.ownerRole, ids.organization, roleCodes[0], ids.managerRole, roleCodes[1]]);
       await client.query(`INSERT INTO department (department_id, organization_id, code, name, default_role_id)
         VALUES ($1, $2, 'TEST', 'Synthetic department', $3)`, [ids.department, ids.organization, ids.ownerRole]);
+      await client.query(`INSERT INTO audience (audience_id, organization_id, kind, name, is_managed,
+        created_by_membership_id, legacy_role_id)
+        VALUES ($1, $2, 'GROUP', 'Synthetic readers', false, $3, $1)`,
+      [ids.ownerRole, ids.organization, ids.ownerMembership]);
+      await client.query(`INSERT INTO audience_group_membership
+        (audience_id, organization_id, membership_id, assigned_by_membership_id)
+        VALUES ($1, $2, $3, $3)`, [ids.ownerRole, ids.organization, ids.ownerMembership]);
       await client.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type) VALUES ($1, $2, 'ORGANIZATION')`, [ids.organizationScope, ids.organization]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id) VALUES ($1, $2, $3), ($4, $5, $3)`, [ids.ownerMembership, ids.ownerRole, ids.organizationScope, ids.managerMembership, ids.managerRole]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
@@ -85,6 +96,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = $1", [ids.organization]);
           await client.query(`DELETE FROM published_knowledge_version
             WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
+          await client.query(`DELETE FROM knowledge_index_job WHERE generation_id IN
+            (SELECT generation_id FROM knowledge_index_generation WHERE organization_id = $1)`, [ids.organization]);
+          await client.query("DELETE FROM knowledge_index_generation WHERE organization_id = $1", [ids.organization]);
           await client.query(`DELETE FROM review_decision
             WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
           await client.query("DELETE FROM shared_submission WHERE organization_id = $1", [ids.organization]);
@@ -95,6 +109,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM draft_document WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM private_workspace WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM audience_group_membership WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM audience WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
           await client.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
@@ -142,7 +158,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.getDraft(ids.owner, ids.organization, created.id)).resolves.toMatchObject({ title: "Private" });
     await expect(repository.getDraft(ids.manager, ids.organization, created.id)).resolves.toBeNull();
     await expect(repository.listDrafts(ids.manager, ids.organization, 10, null)).resolves.toMatchObject({ items: [] });
-    await expect(repository.canCreateDraft(ids.manager, ids.organization)).resolves.toBe(false);
+    await expect(repository.canCreateDraft(ids.manager, ids.organization)).resolves.toBe(true);
     await expect(repository.updateDraft(ids.owner, ids.organization, created.id, 0, { title: "Stale" }, null, "integration-stale"))
       .resolves.toEqual({ kind: "conflict", currentVersion: 1 });
 
@@ -257,7 +273,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     }
   });
 
-  it("approves and publishes a different member's exact snapshot under the runtime RLS role", async () => {
+  it("durably enqueues and atomically activates a different member's approved snapshot", async () => {
     if (!repository || !pool) throw new Error("Test database is unavailable");
 
     const contentHash = "c".repeat(64);
@@ -311,8 +327,38 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       null, decisionKey, "integration-flow2-approve");
     expect(decided).toMatchObject({
       kind: "decided",
-      submission: { status: "APPROVED", publishedVersionId: expect.any(String) },
+      submission: { status: "APPROVED", publicationState: "PREPARING", publishedVersionId: null },
     });
+
+    const beforeActivation = await repository.listPublishedKnowledge(ids.owner, ids.organization);
+    expect(beforeActivation).toEqual([]);
+    const workerId = randomUUID();
+    const generationStore = new PgIndexGenerationStore(pool);
+    const job = await generationStore.claim(workerId, 90);
+    expect(job).toMatchObject({
+      organizationId: ids.organization,
+      submissionId: submitted.submission.id,
+      snapshotVersionId: submitted.submission.snapshotVersionId,
+      snapshotContentHash: contentHash,
+      attemptCount: 1,
+    });
+    if (!job) return;
+    const manifest: IndexGenerationManifest = {
+      contractVersion: 1,
+      jobId: job.jobId,
+      generationId: job.generationId,
+      snapshotVersionId: job.snapshotVersionId,
+      snapshotContentHash: job.snapshotContentHash,
+      compilerVersion: "semantic-markdown-v1",
+      chunkingVersion: "langchain-section-token-v1",
+      embeddingModel: "text-embedding-3-small",
+      embeddingDimensions: 1536,
+      markdownContentHash: "d".repeat(64),
+      chunksDigest: "e".repeat(64),
+      chunks: [{ chunkId: "f".repeat(64), ordinal: 0, contentHash: "1".repeat(64),
+        startOffset: 0, endOffset: 10, sourceBlockIds: ["body"], parentSectionBlockId: null }],
+    };
+    await expect(generationStore.complete(job, workerId, manifest)).resolves.toMatch(/^[0-9a-f-]{36}$/);
 
     await expect(repository.decideReview(ids.manager, ids.organization, submitted.submission.id,
       "APPROVE", submitted.submission.snapshotVersionId, submitted.submission.contentHash,
@@ -331,11 +377,45 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const evidence = await pool.query<{ event_type: string; count: string }>(`
       SELECT event_type, count(*)::text AS count FROM arden.audit_event
-       WHERE organization_id = $1 AND event_type IN ('KNOWLEDGE_REVIEW_DECIDED', 'KNOWLEDGE_AUTO_PUBLISHED')
+       WHERE organization_id = $1 AND event_type IN ('KNOWLEDGE_REVIEW_DECIDED', 'KNOWLEDGE_INDEX_ACTIVATED')
        GROUP BY event_type ORDER BY event_type`, [ids.organization]);
     expect(evidence.rows).toEqual([
-      { event_type: "KNOWLEDGE_AUTO_PUBLISHED", count: "1" },
+      { event_type: "KNOWLEDGE_INDEX_ACTIVATED", count: "1" },
       { event_type: "KNOWLEDGE_REVIEW_DECIDED", count: "1" },
     ]);
+
+    const revised = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
+      created.draft.id, configured.draft.currentVersion, { title: "Replacement candidate" }, null,
+      "integration-flow3-revise");
+    expect(revised).toMatchObject({ kind: "updated", draft: { currentVersion: 3 } });
+    if (revised.kind !== "updated") return;
+    const replacement = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
+      created.draft.id, revised.draft.currentVersion, randomUUID(), "integration-flow3-resubmit");
+    expect(replacement.kind).toBe("submitted");
+    if (replacement.kind !== "submitted") return;
+    await expect(repository.decideReview(ids.manager, ids.organization, replacement.submission.id,
+      "APPROVE", replacement.submission.snapshotVersionId, replacement.submission.contentHash,
+      null, randomUUID(), "integration-flow3-reapprove"))
+      .resolves.toMatchObject({ kind: "decided", submission: { publicationState: "PREPARING" } });
+
+    const failedJob = await generationStore.claim(workerId, 90);
+    expect(failedJob).toMatchObject({ submissionId: replacement.submission.id, attemptCount: 1 });
+    if (!failedJob) return;
+    await expect(generationStore.fail(failedJob, workerId, "AI_SERVICE_UNAVAILABLE", true))
+      .resolves.toBe("PENDING");
+    await pool.query("UPDATE arden.knowledge_index_job SET available_at = now() WHERE job_id = $1", [failedJob.jobId]);
+    const retry = await generationStore.claim(workerId, 90);
+    expect(retry).toMatchObject({ jobId: failedJob.jobId, attemptCount: 2 });
+    if (!retry) return;
+    await expect(generationStore.fail(retry, workerId, "INVALID_INDEX_MANIFEST", false))
+      .resolves.toBe("FAILED");
+
+    const submissions = await repository.listKnowledgeSubmissions(ids.owner, ids.organization);
+    expect(submissions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: replacement.submission.id, publicationState: "FAILED" }),
+    ]));
+    const stillPublished = await repository.listPublishedKnowledge(ids.owner, ids.organization);
+    expect(stillPublished).toHaveLength(1);
+    expect(stillPublished?.[0]).toMatchObject({ title: "Cross-actor publication regression" });
   });
 });

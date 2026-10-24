@@ -8,7 +8,7 @@ export function KnowledgeReview({ state, dispatch, onOpenDraft }: { state: Knowl
   const checksRemaining = snapshot ? Number(!snapshot.draft.recoveryReady) + Number(!snapshot.draft.sourceReady) : 2;
   const published = Boolean(snapshot && state.publication?.version === snapshot.version);
   return <>
-    <KnowledgeHeading eyebrow="WORKSPACE / REVIEW QUEUE" title="Review & publish"  action={<KnowledgeBadge tone="amber">Assigned to me · Sample</KnowledgeBadge>} />
+    <KnowledgeHeading eyebrow="WORKSPACE / REVIEW QUEUE" title="Review & prepare"  action={<KnowledgeBadge tone="amber">Assigned to me · Sample</KnowledgeBadge>} />
     <KnowledgeSteps steps={["Capture", "Enrich", "Review", "Publish", "Handover"]} active={published ? 3 : 2} />
     <div className="knowledge-inline-meta"><KnowledgeBadge>1 sample request</KnowledgeBadge><KnowledgeBadge tone="blue">{snapshot?.draft.title || "No submitted snapshot"}</KnowledgeBadge><KnowledgeBadge tone={published ? "jade" : "amber"}>{published ? "Published" : snapshot ? formatSampleVersion(snapshot.version) : "Draft"}</KnowledgeBadge></div>
     {!snapshot ? <div className="knowledge-empty"><h2>No sample snapshot awaiting review</h2><button type="button" className="primary-button" onClick={onOpenDraft}>Open draft</button></div> : <div className="knowledge-two-column">
@@ -25,10 +25,11 @@ export function KnowledgeReview({ state, dispatch, onOpenDraft }: { state: Knowl
         <div className={`knowledge-review-check ${snapshot.draft.recoveryReady ? "" : "needs-attention"}`}><Icon name={snapshot.draft.recoveryReady ? "check" : "lock"} /><div><strong>Incident evidence</strong><small>{snapshot.draft.recoveryReady ? "Recovery checklist / INC-2841 confirmed." : "Link INC-2841 to the recovery procedure."}</small></div></div>
         <span className="meta-label">MINH TRAN · SAMPLE REVIEWER</span><p>“The safer restart condition is clear. Resolve evidence scope before publishing.”</p>
         {!ready && <KnowledgeNotice title="Permission check" tone="amber">Replace restricted evidence with a source available to the intended readers, then submit a new snapshot.</KnowledgeNotice>}
-        {snapshot.decision === "revision-requested" && <KnowledgeNotice title="Revision requested" tone="amber">The author can revise the draft and submit a new snapshot.</KnowledgeNotice>}
-        {published && <KnowledgeNotice title={`Sample ${formatSampleVersion(snapshot.version)} approved and published`} tone="jade">Final approval automatically published this exact snapshot in the preview. Real publication and audit history are not connected.</KnowledgeNotice>}
-        <div className="knowledge-review-actions"><button type="button" className="secondary-button" onClick={() => { dispatch({ type: "request-revision" }); onOpenDraft(); }} disabled={snapshot.decision !== "pending"}>Request changes</button>
-          <button type="button" className="primary-button" disabled={!ready || snapshot.decision !== "pending"} onClick={() => dispatch({ type: "approve", version: snapshot.version })}>Approve &amp; publish</button>
+        {snapshot.decision === "rejected" && <KnowledgeNotice title="Snapshot rejected" tone="amber">The author can revise the working draft and submit a new snapshot.</KnowledgeNotice>}
+        {snapshot.decision === "approved" && !published && <KnowledgeNotice title={`Sample ${formatSampleVersion(snapshot.version)} is preparing`} tone="blue">Approval accepted the exact snapshot. It remains unavailable to search until indexing completes and activation succeeds.</KnowledgeNotice>}
+        {published && <KnowledgeNotice title={`Sample ${formatSampleVersion(snapshot.version)} activated`} tone="jade">The prepared index was activated atomically in this preview. Real publication and audit history are not connected.</KnowledgeNotice>}
+        <div className="knowledge-review-actions"><button type="button" className="secondary-button" onClick={() => dispatch({ type: "reject" })} disabled={snapshot.decision !== "pending"}>Reject</button>
+          <button type="button" className="primary-button" disabled={!ready || snapshot.decision !== "pending"} onClick={() => dispatch({ type: "approve", version: snapshot.version })}>Approve</button>
           <button type="button" className="knowledge-back-button" onClick={onOpenDraft}>Open working draft →</button></div>
 
       </aside>
