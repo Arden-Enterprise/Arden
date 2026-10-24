@@ -114,9 +114,10 @@ class OpenAIGroundedAnswerGenerator:
         model = ChatOpenAI(
             model=settings.openai_chat_model,
             api_key=settings.openai_api_key,
-            temperature=0,
+            reasoning={"effort": settings.openai_reasoning_effort},
+            use_responses_api=True,
             max_retries=3,
-            timeout=60,
+            timeout=120,
             output_version="responses/v1",
         )
         self._structured = model.with_structured_output(
