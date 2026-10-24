@@ -1,5 +1,5 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
@@ -8,6 +8,7 @@ import type { InvitationMailer } from "./email/smtp-mailer.js";
 import type { KnowledgeClassification } from "./knowledge/policy.js";
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
+import type { AskArdenClient } from "./answers/ai-client.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -27,6 +28,7 @@ type AppDependencies = {
   publicWebOrigin?: string | null;
   publicApiOrigin?: string | null;
   invitationDeliveryMode?: "email" | "local-test-no-email";
+  askArden?: AskArdenClient | null;
   testActor?: SessionContext;
 };
 
@@ -1077,6 +1079,75 @@ export function buildApp(dependencies: AppDependencies) {
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
   });
+
+  app.post<{ Params: { organizationId: string }; Body: { query: string } }>(
+    "/api/v1/organizations/:organizationId/ai/answers", {
+      schema: {
+        params: { type: "object", required: ["organizationId"], additionalProperties: false, properties: {
+          organizationId: { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", required: ["query"], additionalProperties: false, properties: {
+          query: { type: "string", minLength: 1, maxLength: 4_000 },
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      const query = request.body.query.trim();
+      if (!query) return reply.code(400).send(safeError("INVALID_REQUEST", "The question is empty.", request.id));
+      if (!dependencies.askArden) {
+        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
+      }
+      try {
+        const { organizationId } = request.params;
+        const before = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId);
+        if (!before) return reply.code(404).send(resourceNotAvailable(request.id));
+        if (before.length === 0) {
+          reply.header("Cache-Control", "no-store");
+          return { status: "INSUFFICIENT_EVIDENCE", answer: "I could not find any indexed published knowledge you are allowed to read.", citations: [] };
+        }
+        const requestId = randomUUID();
+        const aiResponse = await dependencies.askArden.answer({
+          contractVersion: 1,
+          requestId,
+          organizationId,
+          query,
+          allowedGenerationIds: before.map((source) => source.generationId),
+        });
+        const after = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId);
+        if (!after) return reply.code(404).send(resourceNotAvailable(request.id));
+        const beforeByGeneration = new Map(before.map((source) => [source.generationId, source]));
+        const afterByGeneration = new Map(after.map((source) => [source.generationId, source]));
+        const citations = aiResponse.citations.map((citation) => {
+          const initial = beforeByGeneration.get(citation.generationId);
+          const current = afterByGeneration.get(citation.generationId);
+          if (!initial || !current || initial.publishedVersionId !== current.publishedVersionId
+            || current.snapshotVersionId !== citation.snapshotVersionId
+            || current.snapshotContentHash !== citation.snapshotContentHash) {
+            return null;
+          }
+          return {
+            documentId: current.draftId,
+            versionId: current.publishedVersionId,
+            blockId: citation.sourceBlockIds[0] ?? citation.parentSectionBlockId ?? undefined,
+            excerpt: citation.excerpt,
+            title: current.title,
+            version: `v${current.versionNo}`,
+            scope: current.targetScopeType === "ORGANIZATION" ? "Company-wide" : "Department",
+            classification: current.classification,
+          };
+        });
+        if (citations.some((citation) => citation === null)) {
+          return reply.code(409).send(safeError("KNOWLEDGE_ACCESS_CHANGED",
+            "Knowledge access changed while the answer was being prepared. Please ask again.", request.id));
+        }
+        reply.header("Cache-Control", "no-store");
+        return { status: aiResponse.status, answer: aiResponse.answer, citations };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Ask Arden answer failed");
+        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
+      }
+    });
 
   app.get<{ Params: { organizationId: string; publishedVersionId: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/published/:publishedVersionId", {

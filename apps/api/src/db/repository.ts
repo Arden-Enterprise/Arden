@@ -145,6 +145,17 @@ export type PublishedKnowledge = {
   validFrom: Date;
   validUntil: Date | null;
 };
+export type AuthorizedAiSource = {
+  generationId: string;
+  snapshotVersionId: string;
+  snapshotContentHash: string;
+  publishedVersionId: string;
+  draftId: string;
+  title: string;
+  versionNo: number;
+  classification: KnowledgeClassification;
+  targetScopeType: "ORGANIZATION" | "DEPARTMENT";
+};
 type SharedDraftRow = {
   shared_draft_id: string;
   title: string;
@@ -310,6 +321,17 @@ type PublishedKnowledgeRow = {
   valid_from: Date;
   valid_until: Date | null;
 };
+type AuthorizedAiSourceRow = {
+  generation_id: string;
+  snapshot_version_id: string;
+  snapshot_content_hash: string;
+  published_version_id: string;
+  shared_draft_id: string;
+  title: string;
+  version_no: number;
+  classification: KnowledgeClassification;
+  target_scope_type: "ORGANIZATION" | "DEPARTMENT";
+};
 const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
          pv.responsible_department_id, pv.content_hash, pv.content_uri,
@@ -402,6 +424,7 @@ export interface ArdenDataRepository {
     idempotencyKey: string, requestId: string): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
+  listAuthorizedAiSources(userId: string, organizationId: string): Promise<AuthorizedAiSource[] | null>;
 }
 
 function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): string {
@@ -1466,6 +1489,35 @@ export class ArdenRepository implements ArdenDataRepository {
       const result = await client.query<PublishedKnowledgeRow>(`${publishedKnowledgeSelect}
         WHERE cp.organization_id = $1 AND pv.published_version_id = $2`, [organizationId, publishedVersionId]);
       return result.rows[0] ? mapPublishedKnowledge(result.rows[0]) : null;
+    });
+  }
+
+  async listAuthorizedAiSources(userId: string, organizationId: string): Promise<AuthorizedAiSource[] | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      const result = await client.query<AuthorizedAiSourceRow>(`
+        SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
+               pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
+               pv.classification, cp.target_scope_type
+          FROM knowledge_current_publication cp
+          JOIN published_knowledge_version pv
+            ON pv.published_version_id = cp.published_version_id
+          JOIN knowledge_index_generation g
+            ON g.submission_id = pv.submission_id AND g.status = 'READY'
+         WHERE cp.organization_id = $1
+         ORDER BY pv.published_at DESC, pv.published_version_id DESC
+         LIMIT 500`, [organizationId]);
+      return result.rows.map((row) => ({
+        generationId: row.generation_id,
+        snapshotVersionId: row.snapshot_version_id,
+        snapshotContentHash: row.snapshot_content_hash,
+        publishedVersionId: row.published_version_id,
+        draftId: row.shared_draft_id,
+        title: row.title,
+        versionNo: row.version_no,
+        classification: row.classification,
+        targetScopeType: row.target_scope_type,
+      }));
     });
   }
 

@@ -9,6 +9,7 @@ import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
 import { createSmtpMailer, smtpConfigurationFromEnvironment } from "./email/smtp-mailer.js";
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
 import { isKietLocalFlow1TestTarget, kietLocalFlow1TestActor } from "./auth/remote-flow1-test.js";
+import { HttpAskArdenClient } from "./answers/ai-client.js";
 
 const databaseUrl = process.env.DATABASE_URL ??
   (process.env.NODE_ENV === "production"
@@ -65,6 +66,12 @@ const smtpConfiguration = localFlow1TestMode ? null : smtpConfigurationFromEnvir
 const invitationMailer = smtpConfiguration
   ? createSmtpMailer(smtpConfiguration)
   : flow1TestMode ? new LocalFlow1TestInvitationMailer() : null;
+const aiUrl = process.env.ARDEN_AI_URL?.trim();
+const aiServiceToken = process.env.ARDEN_AI_SERVICE_TOKEN?.trim();
+if (Boolean(aiUrl) !== Boolean(aiServiceToken)) {
+  throw new Error("ARDEN_AI_URL and ARDEN_AI_SERVICE_TOKEN must be configured together");
+}
+const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServiceToken) : null;
 
 async function checkRuntimeDatabase(): Promise<void> {
   const client = await pool.connect();
@@ -101,6 +108,7 @@ const app = buildApp({
   repository: new ArdenRepository(pool),
   storage: new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot),
   invitationMailer,
+  askArden,
   invitationDeliveryMode: smtpConfiguration ? "email" : "local-test-no-email",
   publicWebOrigin: (() => {
     if (flow1TestMode) return "http://127.0.0.1:5180";
