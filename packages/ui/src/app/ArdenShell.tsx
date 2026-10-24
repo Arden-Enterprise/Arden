@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AppSidebar } from "./AppSidebar";
+import { MobileTabIsland } from "./MobileTabIsland";
 import { KnowledgePane } from "./KnowledgePane";
 import { MyWorkPage } from "../my-work/MyWorkPage";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
@@ -17,6 +18,7 @@ import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
 import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
+import { StatusIslandContext, type StatusIslandToast } from "../shared/StatusIslandContext";
 import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
 import { membershipReadiness } from "../organization/organizationWorkflow";
 import type { PaneContent, Platform, PrivateNote, WorkspaceView } from "../shared/types";
@@ -153,6 +155,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const privateNotes = usePrivateNotes(initialNotes);
   const [contextOpen, setContextOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
+  const [islandToast, setIslandToast] = useState<StatusIslandToast | null>(null);
   const [contextOverlay, setContextOverlay] = useState(false);
   const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
   const shellRef = useRef<HTMLDivElement>(null);
@@ -418,7 +422,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
   return (
     <WorkspaceNavigationContext.Provider value={{ open: navOpen, setOpen: setNavOpen }}>
-    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${activeView === "my-work" ? " is-my-work" : ""}`}>
+    <StatusIslandContext.Provider value={{ toast: islandToast, setToast: setIslandToast }}>
+    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${navCollapsed ? " is-nav-collapsed" : ""}${activeView === "my-work" ? " is-my-work" : ""}`}>
       <a className="skip-link" href="#arden-main">Skip to content</a>
       <AppSidebar
         activeView={activeView}
@@ -428,18 +433,22 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         organizationLabel={serverOrganizationId ? serverSession?.memberships.find((item) => item.organization.id === serverOrganizationId)?.organization.name : undefined}
         authenticated={Boolean(serverSession)}
         showAdmin={liveAdmin}
-        memberName={serverSession ? "Signed-in member" : previewMember?.name}
-        memberRole={serverSession ? serverSession.memberships.find((item) => item.organization.id === serverOrganizationId)?.roleCodes.join(", ") || "Organization member" : previewMember?.role || "Awaiting assignment"}
+        memberName={serverSession ? serverSession.actor.email ?? "Signed-in member" : previewMember?.name}
+        memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
         memberDepartment={serverSession ? "Member" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined}
         canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
+        collapsed={navCollapsed}
+        onToggleCollapsed={() => setNavCollapsed((collapsed) => !collapsed)}
         onSwitchWorkspace={() => { setNavOpen(false); setContextOpen(false); setEntryView("workspace-select"); }}
         onCloseNavigation={() => setNavOpen(false)}
         onNavigate={navigate}
         onSignOut={signOut}
       />
       {navOpen && <button type="button" className="shell-nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
+      <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={(previewRole === "admin" && !serverSession) || liveAdmin}
+        assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined} onNavigate={navigate} />
 
       {activeView === "my-work" ? (
         <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
@@ -480,6 +489,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         />
       )}
     </div>
+    </StatusIslandContext.Provider>
     </WorkspaceNavigationContext.Provider>
   );
 }

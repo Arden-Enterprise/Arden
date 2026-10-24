@@ -39,7 +39,7 @@ Self-hosted first: a customer controls Arden Core, its data, backups, connectors
 ## Brand Commitments
 
 - Product name: Arden.
-- The user specified warm white `#F4F3EF`, mist `#D4D5D5`, stone grey `#929698` and charcoal `#242628`, then approved the more expressive Living Archive direction in Figma. Dark surfaces remain dominant, with amber actions, jade success/connections, blue source context and muted red errors. Headings use Sora and body text uses DM Sans, both bundled locally. Edges should feel square but soft. Semantic roles, responsive behavior and contrast rules live in [DESIGN.md](DESIGN.md).
+- The user specified warm white `#F4F3EF`, mist `#D4D5D5`, stone grey `#929698` and charcoal `#242628`, then approved the more expressive Living Archive direction in Figma. Dark surfaces remain dominant, with amber actions, jade success/connections, blue source context and muted red errors. Headings use Sora and body text uses DM Sans, both bundled locally. Edges should feel square but soft. On 23 October 2026 the user accepted the Island system for the signed-in workspace: graphite tones, one violet accent, Inter/Inter Tight and floating, morphing islands; authentication/onboarding keep the Living Archive look. Semantic roles, responsive behavior and contrast rules live in [DESIGN.md](DESIGN.md).
 - The monochrome wordmark files in `brand/wordmark-exploration/` are explorations, not an approved final logo.
 
 ## Evidence on Hand

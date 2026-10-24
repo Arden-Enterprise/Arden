@@ -1,0 +1,122 @@
+import { useEffect, useId, useRef } from "react";
+import { Icon } from "../shared/Icon";
+import type { OrganizationAdministration, ReviewerGrant } from "../shared/api-client";
+import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
+
+type Member = OrganizationAdministration["members"][number];
+type Department = OrganizationAdministration["departments"][number];
+
+export function memberInitials(name: string): string {
+  return name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+}
+
+export function memberStatus(status: string): { label: string; tone: string } {
+  return status === "ACTIVE" ? { label: "Active", tone: "tone-success" }
+    : status === "INVITED" ? { label: "Awaiting assignment", tone: "tone-info" }
+      : { label: "Inactive", tone: "" };
+}
+
+export function grantLevelLabel(level: ReviewerGrant["level"]): string {
+  return level === "STANDARD" ? "Standard" : level === "SPECIALIST" ? "Specialist" : "Senior";
+}
+
+/** Moves focus into a detail island when it opens and back to its opener when it closes. */
+function useDetailFocus() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement;
+    heading.current?.focus();
+    return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); };
+  }, []);
+  return heading;
+}
+
+export function MemberDetailIsland({ member, organizationName, isAdmin, departmentName, departments, grants, audienceGroups, groupsLoading,
+  busy, feedback, feedbackError, onClose, onDepartmentChange, onGrant, onManageAudiences, onRemoveFromAudience }: {
+  member: Member; organizationName: string; isAdmin: boolean; departmentName: (id: string | null) => string; departments: Department[];
+  grants: ReviewerGrant[]; audienceGroups: AudienceGroupRecord[]; groupsLoading: boolean; busy: boolean; feedback: string; feedbackError: string;
+  onClose: () => void; onDepartmentChange: (id: string) => void; onGrant: () => void; onManageAudiences: () => void;
+  onRemoveFromAudience: (group: AudienceGroupRecord, groupMembershipId: string) => void;
+}) {
+  const heading = useDetailFocus();
+  const titleId = useId();
+  const status = memberStatus(member.status);
+  const otherDepartments = (member.departmentIds ?? []).filter((id) => id !== member.departmentId);
+  const groupMemberships = audienceGroups.flatMap((group) => group.members
+    .filter((groupMember) => groupMember.membershipId === member.id && groupMember.status === "ACTIVE")
+    .map((groupMember) => ({ group, groupMember })));
+  return <aside className="island island-panel island-side" aria-labelledby={titleId}
+    onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+    <div className="island-side-header">
+      <span className="island-avatar is-large" aria-hidden="true">{memberInitials(member.name)}</span>
+      <div><h2 id={titleId} ref={heading} tabIndex={-1}>{member.name}</h2><p>{member.email}</p></div>
+      <button type="button" className="island-icon-button" onClick={onClose} aria-label="Close member details"><Icon name="close" size={16} /></button>
+    </div>
+    <div className="island-chip-row"><span className={`island-chip has-dot ${status.tone}`}>{status.label}</span>
+      <span className="island-chip tone-strong">{isAdmin ? "Organization Admin" : "Member"}</span></div>
+    {feedbackError && <p className="admin-feedback is-error" role="alert">{feedbackError}</p>}
+    {feedback && <p className="admin-feedback" role="status">{feedback}</p>}
+    <div className="island-property-box">
+      <div className="island-property"><span><small>Access</small><strong>{isAdmin ? "Organization Admin" : "Member"}</strong></span>
+        <small className="island-property-hint">{isAdmin ? "Administers members and access" : "Reads what their audiences allow"}</small></div>
+      <label className="island-property"><span><small>Primary department</small>
+        <select value={member.departmentId ?? ""} disabled={busy} onChange={(event) => onDepartmentChange(event.target.value)}>
+          {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></span>
+        <small className="island-property-hint" aria-live="polite">{busy ? "Saving…" : feedback === "Primary department updated." ? "Saved" : "Saves immediately"}</small></label>
+      <div className="island-property"><span><small>Reviewer authority</small>
+        <strong>{grants.length ? grants.map((grant) => `${departmentName(grant.departmentId)} · ${grantLevelLabel(grant.level)}`).join(", ") : "None"}</strong></span>
+        <button type="button" className="island-link-button" onClick={onGrant} disabled={member.status !== "ACTIVE"}>{grants.length ? "Add grant" : "Grant"}</button></div>
+    </div>
+    {otherDepartments.length > 0 && <p className="island-meta">Also in {otherDepartments.map(departmentName).join(", ")}</p>}
+    {grants.length > 0 && <ul className="island-grant-summary">{grants.map((grant) => <li key={grant.id}>
+      <strong>{departmentName(grant.departmentId)}</strong><span>{grant.classifications.join(", ")} · {grantLevelLabel(grant.level)}</span></li>)}</ul>}
+    <section className="island-detail-section" aria-label="Audiences">
+      <h3>Audiences</h3>
+      {groupsLoading ? <p className="island-meta" role="status">Loading audience groups…</p> : <div className="island-chip-row">
+        {member.status === "ACTIVE" && <span className="island-chip">Everyone in {organizationName}</span>}
+        {member.status === "ACTIVE" && member.departmentId && <span className="island-chip">Everyone in {departmentName(member.departmentId)}</span>}
+        {groupMemberships.map(({ group, groupMember }) => <span className="island-chip" key={groupMember.id}>{group.name}
+          <button type="button" className="island-chip-remove" disabled={busy} aria-label={`Remove ${member.name} from ${group.name}`}
+            onClick={() => onRemoveFromAudience(group, groupMember.id)}><Icon name="close" size={12} /></button></span>)}
+        {member.status !== "ACTIVE" && !groupMemberships.length && <span className="island-meta">No audiences until the membership is active.</span>}
+      </div>}
+      <button type="button" className="secondary-button" onClick={onManageAudiences}>Manage audience groups</button>
+    </section>
+    <p className="island-meta island-side-footer">Review authority does not grant reading access. Private notes stay owner-only, including for admins.</p>
+  </aside>;
+}
+
+export function DepartmentDetailIsland({ department, members, grants, onClose, onViewMembers }: {
+  department: Department; members: Member[]; grants: ReviewerGrant[]; onClose: () => void; onViewMembers: () => void;
+}) {
+  const heading = useDetailFocus();
+  const titleId = useId();
+  const inDepartment = members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
+  const primary = members.filter((member) => member.departmentId === department.id);
+  const reviewers = new Set(grants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId));
+  return <aside className="island island-panel island-side" aria-labelledby={titleId}
+    onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+    <div className="island-side-header">
+      <span className="island-tile" aria-hidden="true"><Icon name="building" size={18} /></span>
+      <div><h2 id={titleId} ref={heading} tabIndex={-1}>{department.name}</h2><p>Department</p></div>
+      <button type="button" className="island-icon-button" onClick={onClose} aria-label="Close department details"><Icon name="close" size={16} /></button>
+    </div>
+    <dl className="island-kv">
+      <dt>Members</dt><dd>{inDepartment.length} in department · {primary.length} primary</dd>
+      <dt>Reviewers</dt><dd>{reviewers.size} with active grants here</dd>
+    </dl>
+    <div className="island-box">
+      <div className="island-box-title"><Icon name="people" size={15} /><strong>Everyone in {department.name}</strong><span className="island-chip">Managed</span></div>
+      <p>Follows department membership automatically. It grants read access only — no administration, review or edit rights.</p>
+    </div>
+    <section className="island-detail-section" aria-label="People">
+      <h3>People</h3>
+      {inDepartment.length ? <div className="island-avatar-row">
+        {inDepartment.slice(0, 8).map((member) => <span key={member.id} className="island-avatar is-small" title={member.name}>
+          <span aria-hidden="true">{memberInitials(member.name)}</span><span className="sr-only">{member.name}</span></span>)}
+        {inDepartment.length > 8 && <span className="island-meta">+{inDepartment.length - 8}</span>}
+      </div> : <p className="island-meta">No members yet.</p>}
+      <button type="button" className="island-link-button" onClick={onViewMembers}>View in Members</button>
+    </section>
+  </aside>;
+}
