@@ -9,6 +9,7 @@ import type { KnowledgeClassification } from "./knowledge/policy.js";
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
 import type { AskArdenClient } from "./answers/ai-client.js";
+import { citationPage } from "./answers/citation-page.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -1130,6 +1131,7 @@ export function buildApp(dependencies: AppDependencies) {
             documentId: current.draftId,
             versionId: current.publishedVersionId,
             blockId: citation.sourceBlockIds[0] ?? citation.parentSectionBlockId ?? undefined,
+            page: citationPage(citation.sourceBlockIds, citation.parentSectionBlockId),
             excerpt: citation.excerpt,
             title: current.title,
             version: `v${current.versionNo}`,
@@ -1141,8 +1143,16 @@ export function buildApp(dependencies: AppDependencies) {
           return reply.code(409).send(safeError("KNOWLEDGE_ACCESS_CHANGED",
             "Knowledge access changed while the answer was being prepared. Please ask again.", request.id));
         }
+        const authorizedCitations = citations.filter((citation): citation is NonNullable<typeof citation> => citation !== null);
+        const uniqueCitations = authorizedCitations.filter((citation, index, all) => {
+          const location = citation.page === undefined ? citation.blockId ?? "source" : `page-${citation.page}`;
+          return all.findIndex((candidate) => {
+            const candidateLocation = candidate.page === undefined ? candidate.blockId ?? "source" : `page-${candidate.page}`;
+            return candidate.versionId === citation.versionId && candidateLocation === location;
+          }) === index;
+        });
         reply.header("Cache-Control", "no-store");
-        return { status: aiResponse.status, answer: aiResponse.answer, citations };
+        return { status: aiResponse.status, answer: aiResponse.answer, citations: uniqueCitations };
       } catch (error) {
         request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Ask Arden answer failed");
         return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));

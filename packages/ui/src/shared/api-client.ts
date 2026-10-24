@@ -144,6 +144,7 @@ export type AskArdenAnswer = {
     documentId: string;
     versionId: string;
     blockId?: string;
+    page?: number;
     excerpt: string;
     title: string;
     version: string;
