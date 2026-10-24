@@ -1,35 +1,57 @@
-## Purpose
+## Purpose and acceptance
 
-What requirement or defect does this change address? Link the issue/decision if applicable.
+Linked issue or decision:
 
-## Changes
+User/operator outcome and acceptance criteria:
 
-Describe actual behavior changes. Distinguish implemented features from sample data or planned work.
+## Approach, design, and risk
 
-## Verification
+What changed, and why? Link relevant designs or ADRs.
 
-List commands/checks actually run and their results. State any unavailable checks. Include screenshots for UI changes.
+Which permissions, publication states, private data, integrations, APIs, migrations, or supported platforms are affected?
 
-## Risks and operations
+Rollout/recovery, limitations, and follow-up owners:
 
-Describe applicable permission/data-flow changes, migrations/backfills, API/desktop compatibility, environment/secrets changes, rollout and recovery steps. Write "Not applicable" when appropriate.
+## Evidence
+
+List exact checks run and results. Identify checks not run and why. Add sanitized UI screenshots/recording and keyboard/focus evidence where relevant.
+
+## Scope and review coverage
+
+- Intended base:
+- Commits introduced against intended base:
+- Total changed files / authored files:
+- Added + deleted non-generated source lines:
+- Generated/lockfile changes and moved documentation:
+- Review-triggering push batches / completed AI runs per reviewer (or unknown):
+- Enabled reviewers and verified size/context limits; review-eligible versus excluded files per tool:
+- Diff bytes / applicable single-file or token/instruction limits (or unknown):
+- Approved capacity status and any wait/alternative coverage; keep private balances and billing details out:
+- Explanation above normal targets; named maintainer exception and coverage plan above routine ceilings, if applicable:
+
+Apply the canonical PR size policy in `docs/engineering/rules/git-workflow.md`. Recompute counts after review fixes.
+
+Record actual reviewer coverage; use not applicable for an integration that is not configured. A passing skipped/rate-limited check is not a review.
+
+| Reviewer | State | Last reviewed commit | Skipped/unreviewed files and remaining findings |
+| --- | --- | --- | --- |
+| CodeRabbit | Pending / not applicable | | |
+| Greptile | Pending / not applicable | | |
+| Qodo | Pending / not applicable | | |
+| Copilot / Bugbot / Gemini / other enabled reviewer (one row each) | Pending / not applicable | | |
+| Human reviewer (optional) | Not requested / pending / completed | | |
 
 ## Review checklist
 
-- [ ] Branch name uses a meaningful work type and description (`feat/`, `fix/`, `docs/`, etc.).
-- [ ] Scope is focused; unrelated work and private data are not included.
-- [ ] Changed code has clear responsibilities, readable names/types, and narrow testable dependencies; unnecessary abstraction and hidden state are avoided.
-- [ ] Tests are deterministic and clean up resources even on failure; relevant quality exceptions/debt have a reason and concrete follow-up (or are not applicable).
-- [ ] Applicable regression, negative authorization, and failure-path tests are covered, or gaps are explained.
-- [ ] Applicable web/desktop and accessibility behavior is verified, or gaps are explained.
-- [ ] Dependencies/APIs/configuration are compatible with the repository's versions.
-- [ ] Relevant rules, product/architecture/design docs, setup instructions, and decision records are updated (or explicitly not applicable).
-- [ ] Planned/unverified capabilities are not presented as shipped or production-ready.
-
-## Private configuration review
-
-- [ ] Private files are excluded and untracked; public examples, documentation, and PR artifacts contain no private values.
-
-## Commit scope review
-
-- [ ] Each commit contains one coherent unit of work with a descriptive Conventional Commit subject.
+- [ ] The PR is focused; branch/title match project conventions.
+- [ ] Authorized commits each contain a coherent unit of work.
+- [ ] Acceptance criteria and relevant allowed/denied/stale cases are addressed.
+- [ ] Authorization, private data, logging, and external confirmation were reviewed where relevant.
+- [ ] Public files, examples, designs, and review artifacts contain no private values.
+- [ ] Documentation, configuration, contracts, and migration notes match the change.
+- [ ] The current code-quality acceptance checklist is met, or justified exceptions and missing evidence are explicit.
+- [ ] Relevant UI states and accessibility were reviewed.
+- [ ] Exact executed checks and missing evidence are stated honestly.
+- [ ] AI findings were assessed and final-revision coverage/gaps recorded.
+- [ ] Each requested reviewer fits known size/context limits and approved capacity; unknowns and exclusions are explicit.
+- [ ] Before merge: required CI, conversations, actual GitHub protections, and merge authorization are satisfied; human PR review is optional.

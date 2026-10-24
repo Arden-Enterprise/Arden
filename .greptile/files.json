@@ -1,0 +1,68 @@
+{
+  "files": [
+    {
+      "path": "AGENTS.md",
+      "description": "Project instruction entry point and required module routing."
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "description": "Contributor workflow and rule index."
+    },
+    {
+      "path": "docs/engineering/rules/task-workflow.md",
+      "description": "Task scope, decisions, completion, and publishing consent."
+    },
+    {
+      "path": "docs/engineering/rules/git-workflow.md",
+      "description": "Branches, coherent commits, review size, and batched pushes."
+    },
+    {
+      "path": "docs/engineering/rules/security.md",
+      "description": "Server authorization, knowledge invariants, privacy, and external actions."
+    },
+    {
+      "path": "docs/engineering/rules/engineering.md",
+      "description": "Module boundaries, runtime validation, compatibility, and dependencies."
+    },
+    {
+      "path": "docs/engineering/rules/design.md",
+      "description": "Design handoff, shared behavior, states, and accessibility."
+    },
+    {
+      "path": "docs/engineering/rules/verification.md",
+      "description": "Meaningful verification and truthful completion evidence."
+    },
+    {
+      "path": "docs/engineering/rules/pull-requests.md",
+      "description": "Review preparation, revision coverage, findings, optional human review, and merge readiness."
+    },
+    {
+      "path": "docs/engineering/rules/server-operations.md",
+      "description": "Authorized server operations and private access handling."
+    },
+    {
+      "path": "docs/engineering/quality-metrics.md",
+      "description": "Definitions and initial review thresholds."
+    },
+    {
+      "path": "docs/engineering/private-files.md",
+      "description": "Canonical private-file exclusions and safe public examples."
+    },
+    {
+      "path": "docs/engineering/rules/product-contract.md",
+      "description": "Accepted product and trust-boundary invariants."
+    },
+    {
+      "path": "docs/engineering/rules/knowledge-maintenance.md",
+      "description": "Ownership of durable decisions and synchronized project guidance."
+    },
+    {
+      "path": "docs/engineering/implementation-status.md",
+      "description": "Implementation and deployment boundaries; verify with current source."
+    },
+    {
+      "path": "docs/engineering/rules/main-context.md",
+      "description": "Fetch/read current main safely and record the inspected revision."
+    }
+  ]
+}
