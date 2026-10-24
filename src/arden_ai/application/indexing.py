@@ -5,7 +5,8 @@ from typing import Protocol
 
 from arden_ai.contracts import IndexGenerationManifest, IndexGenerationRequest
 from arden_ai.domain.chunking import CHUNKING_VERSION, PreparedChunk, chunk_markdown
-from arden_ai.domain.compiler import COMPILER_VERSION, CompiledMarkdown, compile_markdown
+from arden_ai.domain.compiler import CompiledMarkdown, compile_markdown
+from arden_ai.domain.pdf import compile_pdf
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,7 +29,11 @@ class CandidateGenerationStore(Protocol):
 
 
 def prepare_generation(request: IndexGenerationRequest) -> PreparedGeneration:
-    compiled = compile_markdown(request.semantic_document())
+    compiled = (
+        compile_markdown(request.semantic_document())
+        if request.snapshot_mime_type == "text/plain"
+        else compile_pdf(request.pdf_bytes())
+    )
     chunks = chunk_markdown(compiled, str(request.generation_id))
     if not chunks:
         raise ValueError("approved snapshot produced no indexable chunks")
@@ -68,7 +73,7 @@ class GenerationIndexer:
                 "generationId": str(request.generation_id),
                 "snapshotVersionId": str(request.snapshot_version_id),
                 "snapshotContentHash": request.snapshot_content_hash,
-                "compilerVersion": COMPILER_VERSION,
+                "compilerVersion": prepared.compiled.compiler_version,
                 "chunkingVersion": CHUNKING_VERSION,
                 "embeddingModel": self._store.embedding_model,
                 "embeddingDimensions": self._store.embedding_dimensions,

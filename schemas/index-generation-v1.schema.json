@@ -166,14 +166,44 @@
           "type": "string"
         },
         "snapshotContent": {
-          "maxLength": 1500000,
-          "minLength": 1,
-          "title": "Snapshotcontent",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 1500000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshotcontent"
+        },
+        "snapshotContentBase64": {
+          "anyOf": [
+            {
+              "maxLength": 16000000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshotcontentbase64"
         },
         "snapshotContentHash": {
           "pattern": "^[0-9a-f]{64}$",
           "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotMimeType": {
+          "enum": [
+            "text/plain",
+            "application/pdf"
+          ],
+          "title": "Snapshotmimetype",
           "type": "string"
         },
         "snapshotVersionId": {
@@ -194,7 +224,7 @@
         "generationId",
         "snapshotVersionId",
         "snapshotContentHash",
-        "snapshotContent"
+        "snapshotMimeType"
       ],
       "title": "IndexGenerationRequest",
       "type": "object"

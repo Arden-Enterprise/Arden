@@ -34,6 +34,7 @@ def test_index_request_uses_strict_camel_case_contract() -> None:
             "generationId": "10000000-0000-4000-8000-000000000004",
             "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
             "snapshotContentHash": hashlib.sha256(content.encode()).hexdigest(),
+            "snapshotMimeType": "text/plain",
             "snapshotContent": content,
         }
     )
@@ -51,6 +52,7 @@ def test_index_request_rejects_unknown_fields() -> None:
         "generationId": "10000000-0000-4000-8000-000000000004",
         "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
         "snapshotContentHash": hashlib.sha256(content.encode()).hexdigest(),
+        "snapshotMimeType": "text/plain",
         "snapshotContent": content,
         "callbackUrl": "https://attacker.test/ssrf",
     }
@@ -72,6 +74,7 @@ def test_index_request_rejects_future_contract_versions() -> None:
         "generationId": "10000000-0000-4000-8000-000000000004",
         "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
         "snapshotContentHash": hashlib.sha256(content.encode()).hexdigest(),
+        "snapshotMimeType": "text/plain",
         "snapshotContent": content,
     }
     try:
@@ -92,6 +95,7 @@ def test_index_request_rejects_snapshot_hash_mismatch() -> None:
                 "generationId": "10000000-0000-4000-8000-000000000004",
                 "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
                 "snapshotContentHash": "a" * 64,
+                "snapshotMimeType": "text/plain",
                 "snapshotContent": snapshot(),
             }
         )
@@ -99,6 +103,26 @@ def test_index_request_rejects_snapshot_hash_mismatch() -> None:
         assert "does not match" in str(error)
     else:
         raise AssertionError("snapshot hash mismatch must be rejected")
+
+
+def test_index_request_accepts_integrity_checked_pdf_bytes() -> None:
+    import base64
+
+    content = b"%PDF-1.7\ncontract fixture\n%%EOF"
+    request = IndexGenerationRequest.model_validate(
+        {
+            "jobId": "10000000-0000-4000-8000-000000000001",
+            "organizationId": "10000000-0000-4000-8000-000000000002",
+            "submissionId": "10000000-0000-4000-8000-000000000003",
+            "generationId": "10000000-0000-4000-8000-000000000004",
+            "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
+            "snapshotContentHash": hashlib.sha256(content).hexdigest(),
+            "snapshotMimeType": "application/pdf",
+            "snapshotContentBase64": base64.b64encode(content).decode("ascii"),
+        }
+    )
+
+    assert request.pdf_bytes() == content
 
 
 def test_exported_indexing_schema_contains_concrete_contracts() -> None:

@@ -8,7 +8,6 @@ from langchain_openai import OpenAIEmbeddings
 from arden_ai.application import PreparedGeneration
 from arden_ai.contracts import IndexGenerationRequest
 from arden_ai.domain.chunking import CHUNKING_VERSION, PreparedChunk
-from arden_ai.domain.compiler import COMPILER_VERSION
 from arden_ai.infrastructure.settings import Settings
 
 
@@ -28,7 +27,7 @@ def _chroma_endpoint(url: str) -> tuple[str, int, bool]:
 
 
 def _chunk_metadata(
-    request: IndexGenerationRequest, chunk: PreparedChunk
+    request: IndexGenerationRequest, prepared: PreparedGeneration, chunk: PreparedChunk
 ) -> dict[str, str | int]:
     return {
         "organization_id": str(request.organization_id),
@@ -46,7 +45,7 @@ def _chunk_metadata(
         "heading_path_json": json.dumps(
             chunk.heading_path, ensure_ascii=False, separators=(",", ":")
         ),
-        "compiler_version": COMPILER_VERSION,
+        "compiler_version": prepared.compiled.compiler_version,
         "chunking_version": CHUNKING_VERSION,
     }
 
@@ -90,7 +89,7 @@ class ChromaCandidateGenerationStore:
             ids = [chunk.chunk_id for chunk in prepared.chunks]
             written = await self._store.aadd_texts(
                 texts=[chunk.embedding_text for chunk in prepared.chunks],
-                metadatas=[_chunk_metadata(request, chunk) for chunk in prepared.chunks],
+                metadatas=[_chunk_metadata(request, prepared, chunk) for chunk in prepared.chunks],
                 ids=ids,
             )
             if written != ids:
