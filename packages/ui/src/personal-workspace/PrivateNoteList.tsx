@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { PrivateNote } from "../shared/types";
 import type { NoteDraft } from "./noteDraftModel";
 import { Icon } from "../shared/Icon";
@@ -6,6 +7,8 @@ type PrivateNoteListProps = {
   notes: PrivateNote[];
   drafts: Record<string, NoteDraft>;
   selectedId: string;
+  search: ReactNode;
+  onCreate: () => void;
   onSelect: (note: PrivateNote) => void;
   onClearSearch: () => void;
   searching: boolean;
@@ -15,40 +18,42 @@ export function PrivateNoteList({
   notes,
   drafts,
   selectedId,
+  search,
+  onCreate,
   onSelect,
   onClearSearch,
   searching,
 }: PrivateNoteListProps) {
   return (
-    <section className="note-list-card" aria-label="Private notes">
-      <header>
-        <span className="meta-label">{notes.length} PRIVATE NOTES</span>
-        <span>Updated</span>
+    <section className="note-list-card" aria-label="Your private notes">
+      <header className="note-list-header">
+        {search}
+        <button type="button" className="island-icon-button" onClick={onCreate} aria-label="New private note" title="New private note"><Icon name="plus" size={16} /></button>
       </header>
+      <span className="meta-label note-list-count">{notes.length} PRIVATE NOTES</span>
       <div className="note-list">
-        {notes.map((note) => (
-          <button
-            type="button"
-            key={note.id}
-            className={note.id === selectedId ? "is-selected" : ""}
-            aria-current={note.id === selectedId ? "true" : undefined}
-            onClick={() => onSelect(note)}
-          >
-            <span className="note-row-icon"><Icon name="document" size={20} /></span>
-            <span className="note-row-content">
-              <span className="note-row-meta"><span><Icon name="lock" size={12} /> PRIVATE · ONLY YOU</span><span>{drafts[note.id] && (drafts[note.id].title !== note.title || drafts[note.id].body !== note.body) ? "Unsaved draft" : note.updatedLabel}</span></span>
-              <strong>{drafts[note.id] ? drafts[note.id].title.trim() || "Untitled private note" : note.title}</strong>
-              <span className="note-row-snippet">{(drafts[note.id]?.body ?? note.body) || "Empty private note"}</span>
-            </span>
-            <Icon name="arrow" size={18} />
-          </button>
-        ))}
+        {notes.map((note) => {
+          const draft = drafts[note.id];
+          const unsaved = Boolean(draft && (draft.title !== note.title || draft.body !== note.body));
+          return (
+            <button
+              type="button"
+              key={note.id}
+              className={note.id === selectedId ? "is-selected" : ""}
+              aria-current={note.id === selectedId ? "true" : undefined}
+              onClick={() => onSelect(note)}
+            >
+              <strong>{draft ? draft.title.trim() || "Untitled private note" : note.title}</strong>
+              <span className="note-row-snippet">{(draft?.body ?? note.body) || "Empty private note"}</span>
+              <span className={`note-row-meta${unsaved ? " is-unsaved" : ""}`}>{unsaved ? "Unsaved draft" : note.updatedLabel}</span>
+            </button>
+          );
+        })}
         {notes.length === 0 && (
-          <div className="empty-state note-empty-state">
-            <strong>{searching ? "No private notes match this search." : "Your private workspace is ready."}</strong>
-            {searching ? <button type="button" onClick={onClearSearch}>
-              Clear search
-            </button> : null}
+          <div className="island-empty note-empty-state">
+            <h3>{searching ? "No private notes match this search." : "Your private workspace is ready."}</h3>
+            {searching ? <button type="button" className="secondary-button" onClick={onClearSearch}>Clear search</button>
+              : <button type="button" className="secondary-button" onClick={onCreate}>New private note</button>}
           </div>
         )}
       </div>

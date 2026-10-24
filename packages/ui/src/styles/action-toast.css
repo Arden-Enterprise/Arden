@@ -1,5 +1,0 @@
-.arden-action-toast { position: fixed; right: 24px; bottom: 42px; z-index: 30; display: flex; align-items: flex-start; gap: 10px; width: min(440px, calc(100vw - 32px)); padding: 14px 16px; border: 1px solid var(--arden-line-strong); border-radius: 8px; color: var(--arden-text-primary); background: var(--arden-elevated); box-shadow: 0 12px 36px rgb(0 0 0 / 30%); font-size: 13px; line-height: 1.5; }
-.arden-toast-mark { color: var(--arden-success); font-weight: 700; }
-.arden-action-toast > span:nth-child(2) { flex: 1; }
-.arden-action-toast button { min-width: 24px; min-height: 24px; margin: -4px -6px 0 0; padding: 0; border: 0; color: var(--arden-text-secondary); background: transparent; font-size: 19px; cursor: pointer; }
-@media (max-width: 639px) { .arden-action-toast { right: 16px; bottom: 34px; left: 16px; width: auto; } }
