@@ -160,7 +160,7 @@
 .arden-app-shell .knowledge-create-source label:focus-within { outline: 2px solid var(--arden-focus-ring); outline-offset: 2px; }
 .arden-app-shell .knowledge-create-source label > span:last-child { display: grid; }
 .arden-app-shell .knowledge-create-source small { color: var(--arden-text-secondary); font-size: 12px; }
-.knowledge-create-fields { display: grid; grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr); gap: 12px; }
+.knowledge-create-fields { display: grid; grid-template-columns: minmax(0, 640px); gap: 12px; }
 .arden-app-shell .knowledge-pdf-choose { border-color: var(--arden-border-strong); border-radius: 12px; background: var(--arden-bg-sidebar); }
 .arden-app-shell .knowledge-pdf-choose.is-drag-active { border-color: var(--arden-violet-hover); background: var(--arden-accent-subtle); }
 .arden-app-shell .knowledge-selected-pdf { border-radius: 10px; }
@@ -192,12 +192,6 @@
 .island-option-group.is-inline legend { grid-column: 1 / -1; }
 .island-option-group.is-inline > label { align-items: center; padding: 8px; }
 .island-option-group.is-inline strong { font-size: 11px; letter-spacing: .04em; }
-.draft-audience-list { display: grid; gap: 2px; }
-.draft-audience { display: flex; align-items: flex-start; gap: 10px; min-height: 36px; padding: 6px 4px; border-radius: 8px; font-size: 13px; }
-.draft-audience:hover { background: var(--arden-surface-hover); }
-.draft-audience input { margin-top: 3px; }
-.draft-audience > span { display: grid; }
-.draft-audience small { color: var(--arden-text-secondary); font-size: 11px; }
 .draft-readiness { display: grid; gap: 4px; margin: 0; padding: 10px 12px; border: 1px solid var(--arden-border); border-radius: 12px; list-style: none; background: var(--arden-surface-raised); font-size: 13px; }
 .draft-readiness li { display: flex; align-items: center; gap: 8px; color: var(--arden-text-secondary); }
 .draft-readiness li svg { color: var(--arden-danger); }
@@ -331,3 +325,40 @@
 .library-row-version { flex: none; color: var(--arden-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .library-row-audience { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .island-row.library-row.is-selected .library-row-title { color: var(--arden-text-primary); }
+
+/* Draft sharing: one picker for readers; the scope follows from them. */
+.draft-readers { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.draft-readers legend { margin-bottom: 6px; color: var(--arden-text-secondary); font-size: 12px; font-weight: 600; }
+.reader-picker { position: relative; display: grid; gap: 8px; }
+.reader-picker-field {
+  display: flex; align-items: center; gap: 8px; height: var(--arden-control-md); padding: 0 10px; border: 1px solid var(--arden-border-strong);
+  border-radius: 8px; color: var(--arden-text-muted); background: var(--arden-bg-sidebar);
+}
+.reader-picker-field:focus-within { border-color: var(--arden-violet-hover); box-shadow: 0 0 0 2px var(--arden-accent-subtle); }
+.arden-app-shell .reader-picker-field input { flex: 1; min-width: 0; min-height: 0; padding: 0; border: 0; outline: 0; color: var(--arden-text-primary); background: transparent; font-size: 13px; }
+.reader-picker-list {
+  position: absolute; top: calc(var(--arden-control-md) + 4px); left: 0; right: 0; z-index: 10; display: grid; gap: 1px; max-height: 280px; padding: 6px;
+  overflow-y: auto; border: 1px solid var(--arden-border); border-radius: 12px; background: var(--arden-surface-raised); box-shadow: var(--arden-shadow-float);
+}
+.reader-picker-section { padding: 6px 8px 4px; color: var(--arden-text-muted); font-size: 11px; font-weight: 600; letter-spacing: .08em; }
+.reader-picker-option { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 8px; border-radius: 8px; color: var(--arden-text-secondary); cursor: pointer; }
+.reader-picker-option:hover, .reader-picker-option.is-active { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+.reader-picker-option.is-active { box-shadow: inset 0 0 0 1px var(--arden-border-strong); }
+.reader-picker-option > span, .reader-picker-selected li > span:nth-child(2) { display: grid; min-width: 0; line-height: 1.3; }
+.reader-picker-option strong, .reader-picker-selected strong { overflow: hidden; color: var(--arden-text-primary); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.reader-picker-option small, .reader-picker-selected small { color: var(--arden-text-muted); font-size: 11px; }
+.reader-picker-empty { margin: 0 !important; padding: 8px; color: var(--arden-text-muted) !important; font-size: 12px; }
+.reader-picker-selected { display: grid; gap: 2px; margin: 0; padding: 4px; list-style: none; border: 1px solid var(--arden-border); border-radius: 10px; background: var(--arden-surface-raised); }
+.reader-picker-selected li { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 2px 4px 2px 6px; border-radius: 8px; }
+.reader-picker-selected li .island-tile { width: 28px; height: 28px; }
+.reader-picker-selected li .island-icon-button { width: 26px; height: 26px; margin-left: auto; border-color: transparent; }
+.draft-readers-limit { display: flex; align-items: flex-start; gap: 8px; color: var(--arden-text-secondary); font-size: 12px; }
+.draft-readers-limit input { margin: 2px 0 0; }
+.draft-readers-scope { margin: 0 !important; color: var(--arden-text-muted) !important; font-size: 12px; }
+.draft-readers-scope strong { color: var(--arden-text-secondary); font-weight: 600; }
+.draft-advanced { border-top: 1px solid var(--arden-border); padding-top: 10px; }
+.draft-advanced summary { color: var(--arden-text-secondary); font-size: 12px; font-weight: 600; cursor: pointer; }
+.draft-advanced[open] summary { margin-bottom: 10px; }
+.draft-advanced > small { display: block; margin-top: 6px; }
+.draft-review-level { display: flex; align-items: flex-start; gap: 8px; margin: 0 !important; padding: 8px 10px; border: 1px solid var(--arden-border); border-radius: 10px; color: var(--arden-text-secondary) !important; background: var(--arden-surface-raised); font-size: 12px; line-height: 1.45; }
+.draft-review-level svg { flex: none; margin-top: 1px; color: var(--arden-text-muted); }

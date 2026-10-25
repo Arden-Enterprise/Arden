@@ -1,4 +1,13 @@
 export type KnowledgeClassification = "INTERNAL" | "CONFIDENTIAL" | "RESTRICTED";
+/**
+ * Decision 0013: authors and admins no longer supply a classification. New drafts default to INTERNAL
+ * and new grants to every level, so the legacy columns stay valid while review strictness comes from
+ * how widely the frozen snapshot is shared.
+ */
+export const defaultKnowledgeClassification: KnowledgeClassification = "INTERNAL";
+export const allKnowledgeClassifications: readonly KnowledgeClassification[] = ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"];
+/** How widely a frozen snapshot is shared. ORGANIZATION_WIDE means it targets the organization audience. */
+export type AudienceBreadth = "ORGANIZATION_WIDE" | "LIMITED";
 export type AudienceScope = { type: "ORGANIZATION"; departmentId: null }
   | { type: "DEPARTMENT"; departmentId: string };
 export type MembershipActor = { membershipId: string; organizationId: string;
@@ -81,7 +90,8 @@ export function canSubmitSnapshot(input: { actor: MembershipActor | null;
 export function canReviewSnapshot(input: { actor: MembershipActor | null;
   submission: { organizationId: string; submittedByMembershipId: string; departmentId: string;
     status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
-    classification: KnowledgeClassification; policyVersion: number; teamTag: string | null; projectTag: string | null };
+    classification: KnowledgeClassification; policyVersion: number; teamTag: string | null; projectTag: string | null;
+    audienceBreadth: AudienceBreadth };
   grant: { membershipId: string; organizationId: string; departmentId: string; status: "ACTIVE" | "INACTIVE";
     classifications: readonly KnowledgeClassification[]; level: "STANDARD" | "SPECIALIST" | "SENIOR";
     teamTag: string | null; projectTag: string | null; validFrom: Date; validUntil: Date | null } | null;
@@ -101,6 +111,9 @@ export function canRespondToSubmission(input: Omit<Parameters<typeof canReviewSn
     && grant.membershipId === actor.membershipId && grant.organizationId === submission.organizationId
     && grant.departmentId === submission.departmentId && grant.classifications.includes(submission.classification)
     && (submission.classification !== "RESTRICTED" || grant.level === "SPECIALIST" || grant.level === "SENIOR")
+    // Decision 0013: an organization-wide audience needs a Specialist or Senior grant. Anything other than an
+    // explicit LIMITED breadth is treated as organization-wide, so missing facts fail closed.
+    && (submission.audienceBreadth === "LIMITED" || grant.level === "SPECIALIST" || grant.level === "SENIOR")
     && Number.isFinite(input.now.getTime()) && Number.isFinite(grant.validFrom.getTime())
     && grant.validFrom <= input.now
     && (grant.validUntil === null || (Number.isFinite(grant.validUntil.getTime()) && grant.validUntil > input.now))

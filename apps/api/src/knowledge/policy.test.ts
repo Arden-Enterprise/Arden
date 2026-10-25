@@ -69,7 +69,7 @@ describe("audience and review policy", () => {
   it("uses ReviewerGrant, denies self-review, and requires specialist level for Restricted", () => {
     const submission = { organizationId: "org", submittedByMembershipId: "author", departmentId: "dept",
       status: "PENDING_REVIEW" as const, classification: "RESTRICTED" as const, policyVersion: 2,
-      teamTag: "alpha", projectTag: null };
+      teamTag: "alpha", projectTag: null, audienceBreadth: "LIMITED" as const };
     const grant = { membershipId: "reviewer", organizationId: "org", departmentId: "dept", status: "ACTIVE" as const,
       classifications: ["RESTRICTED" as const], level: "SPECIALIST" as const, teamTag: "alpha", projectTag: null,
       validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null };
@@ -85,8 +85,57 @@ describe("audience and review policy", () => {
   it("allows Organization Admin to review and self-approve without a reviewer grant", () => {
     const submission = { organizationId: "org", submittedByMembershipId: "author", departmentId: "dept",
       status: "PENDING_REVIEW" as const, classification: "RESTRICTED" as const, policyVersion: 2,
-      teamTag: null, projectTag: null };
+      teamTag: null, projectTag: null, audienceBreadth: "ORGANIZATION_WIDE" as const };
     expect(canRespondToSubmission({ actor: { ...actor, isOrganizationAdmin: true }, submission,
       grant: null, effectivePolicyVersion: 2, now })).toBe(true);
+  });
+
+  describe("review level derived from audience breadth (decision 0013)", () => {
+    const submission = { organizationId: "org", submittedByMembershipId: "author", departmentId: "dept",
+      status: "PENDING_REVIEW" as const, classification: "INTERNAL" as const, policyVersion: 1,
+      teamTag: null, projectTag: null, audienceBreadth: "LIMITED" as const };
+    const grant = { membershipId: "reviewer", organizationId: "org", departmentId: "dept", status: "ACTIVE" as const,
+      classifications: ["INTERNAL" as const, "CONFIDENTIAL" as const, "RESTRICTED" as const], level: "STANDARD" as const,
+      teamTag: null, projectTag: null, validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null };
+    const input = { actor: { ...actor, membershipId: "reviewer" }, submission, grant, effectivePolicyVersion: 1, now };
+    const organizationWide = { ...submission, audienceBreadth: "ORGANIZATION_WIDE" as const };
+
+    it("lets a Standard reviewer decide a department or group-limited snapshot", () => {
+      expect(canRespondToSubmission(input)).toBe(true);
+    });
+
+    it("requires a Specialist or Senior reviewer for an organization-wide snapshot", () => {
+      expect(canRespondToSubmission({ ...input, submission: organizationWide })).toBe(false);
+      expect(canRespondToSubmission({ ...input, submission: organizationWide, grant: { ...grant, level: "SPECIALIST" } })).toBe(true);
+      expect(canRespondToSubmission({ ...input, submission: organizationWide, grant: { ...grant, level: "SENIOR" } })).toBe(true);
+    });
+
+    it("fails closed when the breadth is not an explicit LIMITED value", () => {
+      const unknownBreadth = { ...submission, audienceBreadth: undefined as unknown as "LIMITED" };
+      expect(canRespondToSubmission({ ...input, submission: unknownBreadth })).toBe(false);
+      expect(canRespondToSubmission({ ...input, submission: unknownBreadth, grant: { ...grant, level: "SENIOR" } })).toBe(true);
+    });
+
+    it("keeps the legacy Restricted rule for a pending Restricted snapshot even when it is limited", () => {
+      const legacyRestricted = { ...submission, classification: "RESTRICTED" as const };
+      expect(canRespondToSubmission({ ...input, submission: legacyRestricted })).toBe(false);
+      expect(canRespondToSubmission({ ...input, submission: legacyRestricted, grant: { ...grant, level: "SPECIALIST" } })).toBe(true);
+    });
+
+    it("still requires the grant to cover a legacy classification, matching the database rule", () => {
+      const legacyConfidential = { ...submission, classification: "CONFIDENTIAL" as const };
+      expect(canRespondToSubmission({ ...input, submission: legacyConfidential,
+        grant: { ...grant, classifications: ["INTERNAL" as const] } })).toBe(false);
+    });
+
+    it("keeps Organization Admin final authority from decision 0011", () => {
+      expect(canRespondToSubmission({ ...input, actor: { ...actor, isOrganizationAdmin: true },
+        submission: organizationWide, grant: null })).toBe(true);
+    });
+
+    it("never lets an ordinary reviewer decide their own organization-wide snapshot", () => {
+      expect(canRespondToSubmission({ ...input, actor: { ...actor, membershipId: "author" },
+        submission: organizationWide, grant: { ...grant, membershipId: "author", level: "SENIOR" } })).toBe(false);
+    });
   });
 });

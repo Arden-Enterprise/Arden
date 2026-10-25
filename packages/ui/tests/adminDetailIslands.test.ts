@@ -16,3 +16,12 @@ describe("reviewer grant labels", () => {
     expect([grantLevelLabel("STANDARD"), grantLevelLabel("SPECIALIST"), grantLevelLabel("SENIOR")]).toEqual(["Standard", "Specialist", "Senior"]);
   });
 });
+
+describe("reviewer grant coverage (decision 0013)", () => {
+  it("states that only Specialist and Senior grants cover organization-wide readers", async () => {
+    const { grantCoverageLabel } = await import("../src/organization/AdminDetailIslands");
+    expect(grantCoverageLabel("STANDARD")).toBe("Department and group readers");
+    expect(grantCoverageLabel("SPECIALIST")).toBe("Includes organization-wide readers");
+    expect(grantCoverageLabel("SENIOR")).toBe("Includes organization-wide readers");
+  });
+});

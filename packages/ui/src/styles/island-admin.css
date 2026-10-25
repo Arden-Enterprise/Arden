@@ -30,12 +30,6 @@
 .admin-side-form .primary-button, .admin-form-island .admin-grant-actions .primary-button { justify-self: start; }
 .organization-live-admin .organization-field { display: grid; gap: 6px; }
 .organization-live-admin .organization-field small { color: var(--arden-text-secondary); font-size: 12px; font-weight: 400; }
-.admin-grant-classes { display: grid; gap: 2px; margin: 0; padding: 0; border: 0; }
-.admin-grant-classes legend { margin-bottom: 4px; color: var(--arden-text-secondary); font-size: 12px; font-weight: 600; }
-.admin-grant-classes label { display: flex; align-items: center; gap: 10px; min-height: 32px; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
-.admin-grant-classes input { width: 16px; height: 16px; margin: 0; }
-.admin-grant-classes small { color: var(--arden-text-secondary); font-size: 12px; }
-.admin-grant-classes[aria-invalid="true"] legend { color: var(--arden-danger); }
 .admin-grant-tags { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .organization-live-admin .admin-scope-preview { margin: 0; padding: 12px 14px; border: 1px solid var(--arden-border); border-radius: 12px; color: var(--arden-text-secondary); background: var(--arden-surface-raised); font-size: 13px; }
 .organization-live-admin .admin-grant-actions { display: flex; flex-wrap: wrap; gap: 8px; }

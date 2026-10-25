@@ -14,7 +14,7 @@ const facts: ReviewDecisionFacts = {
     submissionId: "submission", snapshotVersionId: "version-2", contentHash: hash,
     organizationId: "org", submittedByMembershipId: "author", departmentId: "engineering",
     status: "PENDING_REVIEW", classification: "INTERNAL", policyVersion: 1,
-    teamTag: null, projectTag: null,
+    teamTag: null, projectTag: null, audienceBreadth: "LIMITED",
   },
   reviewerGrants: [grant], effectivePolicyVersion: 1, audienceEnforceable: true,
   policy: { kind: "SINGLE_REVIEWER" }, now,

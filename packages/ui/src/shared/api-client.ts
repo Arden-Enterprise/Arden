@@ -159,14 +159,15 @@ export function loadKnowledgeDraft(platform: Platform, organizationId: string, d
 }
 
 export function createNewKnowledgeDraft(platform: Platform, organizationId: string,
-  input: { title: string; body: string; classification: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
+  // Decision 0013: classification is optional; the server defaults a new draft to INTERNAL.
+  input: { title: string; body: string; classification?: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/new`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
   });
 }
 
 export async function createPdfKnowledgeDraft(platform: Platform, organizationId: string,
-  input: { title: string; file: File; classification: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
+  input: { title: string; file: File; classification?: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
   if (!/\.pdf$/i.test(input.file.name) || input.file.size === 0 || input.file.size > 5 * 1024 * 1024) {
     throw new ApiError(0, "Choose a PDF file up to 5 MB.");
   }
@@ -233,7 +234,7 @@ export async function listReviewerGrants(platform: Platform, organizationId: str
 }
 
 export function createReviewerGrant(platform: Platform, organizationId: string,
-  input: Omit<ReviewerGrant, "id" | "status" | "validFrom">): Promise<ReviewerGrant> {
+  input: Omit<ReviewerGrant, "id" | "status" | "validFrom" | "classifications"> & { classifications?: KnowledgeClassification[] }): Promise<ReviewerGrant> {
   return request(platform, `${knowledgePath(organizationId)}/reviewer-grants`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -373,7 +374,8 @@ export async function revokeOrganizationInvitation(platform: Platform, organizat
   await request(platform, `/api/v1/organizations/${organizationId}/invitations/${invitationId}/revoke`, { method: "POST" });
 }
 
-export async function createKnowledgeDraft(platform: Platform, organizationId: string, sourcePrivateVersionId: string, classification: KnowledgeClassification, idempotencyKey: string): Promise<CreatedKnowledgeDraft> {
+/** `classification` may be omitted (decision 0013); the server then stores INTERNAL. */
+export async function createKnowledgeDraft(platform: Platform, organizationId: string, sourcePrivateVersionId: string, classification: KnowledgeClassification | undefined, idempotencyKey: string): Promise<CreatedKnowledgeDraft> {
   let response: unknown;
   try {
     response = await request<unknown>(platform, `/api/v1/organizations/${organizationId}/knowledge/drafts`, {
@@ -392,7 +394,7 @@ export async function createKnowledgeDraft(platform: Platform, organizationId: s
   const currentVersion = draft.currentVersion;
   if (typeof draft.id !== "string" || draft.organizationId !== organizationId ||
     typeof draft.title !== "string" || typeof draft.body !== "string" ||
-    !isKnowledgeClassification(draft.classification) || draft.classification !== classification ||
+    !isKnowledgeClassification(draft.classification) || (classification !== undefined && draft.classification !== classification) ||
     draft.status !== "ACTIVE" || typeof currentVersion !== "object" || currentVersion === null ||
     !("version" in currentVersion) || typeof currentVersion.version !== "number" ||
     !Number.isSafeInteger(currentVersion.version) || currentVersion.version < 1) {

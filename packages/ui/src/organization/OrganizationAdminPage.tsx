@@ -16,12 +16,11 @@ import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { countInvitations, invitationFilters, invitationState, visibleInvitations, type InvitationFilter, type InvitationState } from "./invitationStatus";
-import { DepartmentDetailIsland, grantLevelLabel, grantValidity, MemberDetailIsland, memberInitials, memberStatus as describeMemberStatus } from "./AdminDetailIslands";
+import { DepartmentDetailIsland, grantCoverageLabel, grantLevelLabel, grantValidity, MemberDetailIsland, memberInitials, memberStatus as describeMemberStatus } from "./AdminDetailIslands";
 
 type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void } & ContextControlProps;
 type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers";
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
-const classifications = ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] as const;
 const tabNames: Record<AdminTab, string> = {
   members: "Members", departments: "Departments", audiences: "Audiences", invitations: "Invitations", reviewers: "Reviewer access",
 };
@@ -31,10 +30,9 @@ const tabDescriptions: Record<AdminTab, (organizationName: string) => string> = 
   departments: () => "Each member has one primary department with its own managed audience.",
   audiences: () => "Who can read a publication. Audiences grant no other rights.",
   invitations: () => "People join after they sign in with the invited email and accept.",
-  reviewers: () => "Scoped review per department and classification. Final approval publishes.",
+  reviewers: () => "Scoped review per department and level. Final approval publishes.",
 };
 const invitationTone: Record<InvitationState, string> = { PENDING: "tone-info", ACCEPTED: "tone-success", EXPIRED: "", REVOKED: "" };
-const classificationTone: Record<(typeof classifications)[number], string> = { INTERNAL: "tone-strong", CONFIDENTIAL: "tone-info", RESTRICTED: "tone-danger" };
 function titleCase(value: string): string { return value[0] + value.slice(1).toLowerCase(); }
 
 export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext, onDirtyChange }: Props) {
@@ -52,7 +50,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [memberDepartment, setMemberDepartment] = useState("ALL");
   const [reviewerId, setReviewerId] = useState("");
   const [reviewDepartmentId, setReviewDepartmentId] = useState("");
-  const [reviewClassifications, setReviewClassifications] = useState<Array<(typeof classifications)[number]>>(["INTERNAL"]);
   const [reviewLevel, setReviewLevel] = useState<ReviewerGrant["level"]>("STANDARD");
   const [teamTag, setTeamTag] = useState("");
   const [projectTag, setProjectTag] = useState("");
@@ -129,8 +126,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       && (memberStatus === "ALL" || (memberStatus === "INACTIVE" ? member.status === "SUSPENDED" || member.status === "LEFT" : member.status === memberStatus))
       && (memberDepartment === "ALL" || (member.departmentIds ?? [member.departmentId]).includes(memberDepartment));
   }) ?? [];
-  const canGrant = Boolean(reviewerId && reviewDepartmentId && reviewClassifications.length
-    && !(reviewClassifications.includes("RESTRICTED") && reviewLevel === "STANDARD"));
+  const canGrant = Boolean(reviewerId && reviewDepartmentId);
   const submitDepartment = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const name = departmentNameInput.trim();
     if (!name) { setDepartmentError("Enter a department name."); document.getElementById("admin-department-name")?.focus(); return; }
@@ -160,11 +156,11 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const submitReviewerGrant = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setGrantSubmitted(true);
-    if (!canGrant) { document.querySelector<HTMLElement>(!reviewerId ? "#admin-reviewer-select" : !reviewDepartmentId ? "#admin-review-department" : "#admin-grant-classes")?.focus(); return; }
+    if (!canGrant) { document.querySelector<HTMLElement>(!reviewerId ? "#admin-reviewer-select" : "#admin-review-department")?.focus(); return; }
     void perform(async () => {
       const created = await createReviewerGrant(platform, organizationId, {
         reviewerMembershipId: reviewerId, departmentId: reviewDepartmentId,
-        classifications: reviewClassifications, level: reviewLevel,
+        level: reviewLevel,
         teamTag: teamTag.trim() || null, projectTag: projectTag.trim() || null, validUntil: null,
       }); setLastCreatedGrantId(created.id); setTeamTag(""); setProjectTag(""); setGrantFilter("ACTIVE"); setGrantSubmitted(false);
     }, `Reviewer authority granted to ${data?.members.find((item) => item.id === reviewerId)?.name ?? "member"}. This grants scoped review, not reading access.`);
@@ -184,11 +180,11 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     if (targetTab === tab || !(tab === "audiences" && audienceDirty)) window.setTimeout(() => document.querySelector<HTMLElement>(selector)?.focus(), 0);
   };
   const overlappingGrant = reviewerGrants.some((grant) => grant.status === "ACTIVE" && grant.reviewerMembershipId === reviewerId
-    && grant.departmentId === reviewDepartmentId && grant.classifications.some((item) => reviewClassifications.includes(item)));
+    && grant.departmentId === reviewDepartmentId);
   const reviewerName = data?.members.find((item) => item.id === reviewerId)?.name;
-  const scopePreview = canGrant ? `${reviewerName} will review ${reviewClassifications.join(" and ")} submissions owned by ${departmentName(reviewDepartmentId)}${teamTag.trim() || projectTag.trim()
+  const scopePreview = canGrant ? `${reviewerName} will review submissions owned by ${departmentName(reviewDepartmentId)}${reviewLevel === "STANDARD" ? " that are read within a department or group" : ", including organization-wide ones"}${teamTag.trim() || projectTag.trim()
     ? `, for ${teamTag.trim() ? `team “${teamTag.trim()}”` : "all teams"} in ${projectTag.trim() ? `project “${projectTag.trim()}”` : "all projects"}.`
-    : ", across all teams and projects."}` : "Choose a reviewer, a department and at least one classification to preview the scope.";
+    : ", across all teams and projects."}` : "Choose a reviewer and a department to preview the scope.";
 
   const isOrgAdmin = (member: { roleIds: string[] }) => Boolean(data?.roles.some((role) => role.code === "ORG_ADMIN" && member.roleIds.includes(role.id)));
   const now = Date.now();
@@ -315,7 +311,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           <div className="island-split">
           <div className="island-main">
             {reviewerGrants.filter((grant) => grant.status === grantFilter).length ? <IslandTable label="Reviewer grants" minWidth={680} columns="minmax(180px, 1.4fr) minmax(96px, .8fr) minmax(180px, 1.3fr) 124px 84px"
-              headers={["REVIEWER", "DEPARTMENT", "CLASSIFICATIONS", "STATUS", <span className="sr-only">Actions</span>]}>
+              headers={["REVIEWER", "DEPARTMENT", "COVERS", "STATUS", <span className="sr-only">Actions</span>]}>
               {reviewerGrants.filter((grant) => grant.status === grantFilter).map((grant) => {
                 const reviewer = data.members.find((member) => member.id === grant.reviewerMembershipId);
                 const tags = grant.teamTag || grant.projectTag ? [grant.teamTag && `Team: ${grant.teamTag}`, grant.projectTag && `Project: ${grant.projectTag}`].filter(Boolean).join(" · ") : "All teams and projects";
@@ -323,7 +319,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                   <IslandCell className="island-row-cell is-name"><span className="island-row-name is-static"><span className="island-avatar is-small" aria-hidden="true">{memberInitials(reviewer?.name ?? "Member")}</span>
                     <span><strong>{reviewer?.name ?? "Member"}{lastCreatedGrantId === grant.id && <span className="admin-new-tag"> New</span>}</strong><small title={tags}>{grantLevelLabel(grant.level)} · {tags}</small></span></span></IslandCell>
                   <IslandCell>{departmentName(grant.departmentId)}</IslandCell>
-                  <IslandCell className="island-row-cell is-chips">{grant.classifications.map((item) => <span key={item} className={`island-chip ${classificationTone[item]}`}>{item === "RESTRICTED" && <Icon name="lock" size={11} />}{item}</span>)}</IslandCell>
+                  <IslandCell>{grantCoverageLabel(grant.level)}</IslandCell>
                   <IslandCell className="island-row-cell is-status"><span className={`island-chip has-dot${grant.status === "ACTIVE" ? " tone-success" : ""}`}>{titleCase(grant.status)}</span><small>{grantValidity(grant)}</small></IslandCell>
                   <IslandCell className="island-row-actions">{grant.status === "ACTIVE" ? <button type="button" className="secondary-button" disabled={busy} onClick={() => setConfirmation({
                     title: `Deactivate ${reviewer?.name ?? "this member"}'s reviewer authority?`, description: "This grant will stop authorizing review decisions. Existing decisions remain recorded.", action: "Revoke", run: () => deactivateReviewerGrant(platform, organizationId, grant.id),
@@ -338,18 +334,15 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             <label className="organization-field"><span>Reviewer</span><select id="admin-reviewer-select" disabled={busy} value={reviewerId} aria-invalid={grantSubmitted && !reviewerId} aria-describedby="admin-reviewer-help" onChange={(event) => setReviewerId(event.target.value)}><option value="">Choose an active member</option>{data.members.filter((member) => member.status === "ACTIVE").map((member) => <option key={member.id} value={member.id}>{member.name} · {member.email}</option>)}</select><small id="admin-reviewer-help" className={grantSubmitted && !reviewerId ? "field-error" : ""}>{grantSubmitted && !reviewerId ? "Choose a reviewer." : "Only active members can review."}</small></label>
             <label className="organization-field"><span>Department</span><select id="admin-review-department" disabled={busy} value={reviewDepartmentId} aria-invalid={grantSubmitted && !reviewDepartmentId} aria-describedby="admin-review-department-help" onChange={(event) => setReviewDepartmentId(event.target.value)}><option value="">Choose department</option>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small id="admin-review-department-help" className={grantSubmitted && !reviewDepartmentId ? "field-error" : ""}>{grantSubmitted && !reviewDepartmentId ? "Choose a department." : "Submissions owned by this department."}</small></label>
             <label className="organization-field"><span>Level</span><select disabled={busy} value={reviewLevel} onChange={(event) => { const level = event.target.value; if (level !== "STANDARD" && level !== "SPECIALIST" && level !== "SENIOR") return;
-              setReviewLevel(level); if (level === "STANDARD") setReviewClassifications((current) => current.filter((item) => item !== "RESTRICTED")); }}>
-              {(["STANDARD", "SPECIALIST", "SENIOR"] as const).map((level) => <option key={level} value={level}>{grantLevelLabel(level)}</option>)}</select><small>Standard covers Internal and Confidential. Specialist and Senior add Restricted.</small></label>
-            <fieldset id="admin-grant-classes" tabIndex={-1} className="admin-grant-classes" aria-invalid={grantSubmitted && !reviewClassifications.length}><legend>Classifications</legend>{classifications.map((item) => <label key={item}><input type="checkbox" disabled={busy || (item === "RESTRICTED" && reviewLevel === "STANDARD")} checked={reviewClassifications.includes(item)} onChange={(event) => setReviewClassifications((current) => event.target.checked ? [...current, item] : current.filter((value) => value !== item))} /><span>{item}</span></label>)}
-              <small className={grantSubmitted && !reviewClassifications.length ? "field-error" : ""}>{grantSubmitted && !reviewClassifications.length ? "Select at least one classification." : reviewLevel === "STANDARD" ? "RESTRICTED needs a Specialist or Senior grant." : "Restricted knowledge is available at this level."}</small></fieldset>
+              setReviewLevel(level); }}>
+              {(["STANDARD", "SPECIALIST", "SENIOR"] as const).map((level) => <option key={level} value={level}>{grantLevelLabel(level)}</option>)}</select><small>Standard reviews department and group publications. Specialist and Senior also review organization-wide ones.</small></label>
             <div className="admin-grant-tags">
               <label className="organization-field"><span>Team tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={teamTag} onChange={(event) => setTeamTag(event.target.value)} /></label>
               <label className="organization-field"><span>Project tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={projectTag} onChange={(event) => setProjectTag(event.target.value)} /></label>
             </div>
             <p className="admin-scope-preview" aria-live="polite">{scopePreview}</p>
-            {overlappingGrant && <p className="admin-feedback is-warning">This reviewer already has an active grant overlapping this department and classification.</p>}
-            {reviewClassifications.includes("RESTRICTED") && reviewLevel === "STANDARD" && <p role="alert" className="admin-feedback is-error">Choose Specialist or Senior for Restricted knowledge.</p>}
-            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Granting…" : "Create grant"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewDepartmentId(""); setReviewClassifications([]); setReviewLevel("STANDARD"); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); }}>Reset</button></div>
+            {overlappingGrant && <p className="admin-feedback is-warning">This reviewer already has an active grant for this department.</p>}
+            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Granting…" : "Create grant"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewDepartmentId(""); setReviewLevel("STANDARD"); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); }}>Reset</button></div>
           </form>
           </div>
         </div>}

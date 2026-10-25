@@ -225,16 +225,24 @@ type SharedSubmissionRow = {
   team_tag: string | null;
   project_tag: string | null;
   policy_version: number;
+  organization_wide: boolean;
   published_version_id: string | null;
   decision_comment: string | null;
 };
+// organization_wide: the frozen audience includes the organization audience. That kind is valid only at
+// Organization scope (audience_snapshot_enforceable) and audience_member_read shows it to every active member,
+// so it is detected even when the reviewer cannot see the snapshot's group or department audiences.
 const submissionSelect = `
   SELECT s.submission_id, s.shared_draft_id, s.shared_draft_version_id,
          s.snapshot_version_no,
          s.title, s.classification, s.responsible_department_id, s.target_scope_type,
          s.target_department_id, s.audience_role_ids, s.content_hash, s.content_uri,
          s.mime_type, s.status, s.publication_state, s.submitted_at, s.submitted_by_membership_id,
-         s.team_tag, s.project_tag, s.policy_version, cp.published_version_id,
+         s.team_tag, s.project_tag, s.policy_version,
+         (s.target_scope_type = 'ORGANIZATION' AND EXISTS (
+           SELECT 1 FROM audience a WHERE a.organization_id = s.organization_id
+              AND a.audience_id = ANY(s.audience_role_ids) AND a.kind = 'ORGANIZATION_ALL')) AS organization_wide,
+         cp.published_version_id,
          rd.comment AS decision_comment
     FROM shared_submission s
     LEFT JOIN published_knowledge_version pv ON pv.submission_id = s.submission_id
@@ -295,6 +303,8 @@ function reviewAuthorizationFromRow(row: SharedSubmissionRow, organizationId: st
     policyVersion: row.policy_version,
     teamTag: row.team_tag,
     projectTag: row.project_tag,
+    // Anything but an explicit false fails closed to the stricter organization-wide requirement.
+    audienceBreadth: row.organization_wide === false ? "LIMITED" as const : "ORGANIZATION_WIDE" as const,
   };
 }
 type PublishedKnowledgeRow = {

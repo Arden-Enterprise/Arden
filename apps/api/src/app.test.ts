@@ -581,6 +581,25 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, title: "Other" } })).statusCode).toBe(409);
   });
 
+  it("accepts new drafts and reviewer grants without a classification (decision 0013)", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const headers = { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey };
+    const payload = { title: "Runbook", body: "Recovery steps" };
+    const created = await app.inject({ method: "POST", url: `${root}/drafts/new`, headers, payload });
+    expect(created.statusCode).toBe(201);
+    expect(repository.sharedDraft?.classification).toBe("INTERNAL");
+    expect((await app.inject({ method: "POST", url: `${root}/drafts/new`, headers, payload })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `${root}/drafts/new`, headers,
+      payload: { ...payload, classification: "SECRET" } })).statusCode).toBe(400);
+
+    const grant = await app.inject({ method: "POST", url: `${root}/reviewer-grants`,
+      headers: { cookie: session, origin: "http://localhost:5180" },
+      payload: { reviewerMembershipId: otherId, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", level: "STANDARD" } });
+    expect(grant.statusCode).toBe(201);
+    expect(repository.reviewerGrant?.classifications).toEqual(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"]);
+  });
+
   it("preserves an uploaded PDF through metadata, submission, review and preparation", async () => {
     const owner = await desktopSession(app, "owner@example.test");
     const reviewer = await desktopSession(app, "manager@example.test");

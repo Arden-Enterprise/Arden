@@ -139,6 +139,17 @@ describe("shared knowledge draft transport", () => {
     expect(JSON.parse(init.body as string)).toEqual({ sourcePrivateVersionId: sourceVersionId, classification: "CONFIDENTIAL" });
   });
 
+  it("omits the classification when none is chosen and accepts the server default (decision 0013)", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ ...createdDraft, classification: "INTERNAL" }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, undefined, idempotencyKey))
+      .resolves.toMatchObject({ id: createdDraft.id, classification: "INTERNAL" });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ sourcePrivateVersionId: sourceVersionId });
+  });
+
   it("passes the idempotency key through the narrow desktop bridge", async () => {
     const requestApi = vi.fn().mockResolvedValueOnce({ status: 200, body: JSON.stringify(createdDraft) });
     vi.stubGlobal("window", { location: { origin: "file://" }, ardenDesktop: { requestApi } });

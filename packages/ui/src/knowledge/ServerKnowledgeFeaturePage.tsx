@@ -5,7 +5,7 @@ import { SearchField } from "../shared/SearchField";
 import { KnowledgeHeading, KnowledgeNotice } from "./KnowledgePrimitives";
 import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
-import { availableAudienceOptions, normalizeAudienceSelection, validAudienceSelection } from "./audience-options";
+import { validAudienceSelection } from "./audience-options";
 import {
   ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listAssignedKnowledgeReviews,
   listKnowledgeDrafts, listKnowledgeSubmissions, listPublishedKnowledge, loadKnowledgeDraft,
@@ -18,6 +18,8 @@ import type { KnowledgeClassification } from "../shared/knowledge-classification
 import type { Platform } from "../shared/types";
 import { PdfDocument, PdfViewer, pdfFileName, usePdfObjectUrl } from "./PdfDocument";
 import { libraryDateLabel, libraryTitleParts } from "./libraryDisplay";
+import { ReaderPicker } from "./ReaderPicker";
+import { addReader, onlyGroupReaders, readerChoices, removeReader, scopeForReaders } from "./readerSelection";
 import { ActionToast } from "../shared/ActionToast";
 import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
 import { KnowledgeDocumentDetail, readerDocumentStatusAt } from "./KnowledgeDocumentDetail";
@@ -91,6 +93,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [options, setOptions] = useState<KnowledgeOptions | null>(null);
   const [draft, setDraft] = useState<KnowledgeDraftRecord | null>(null);
   const [editor, setEditor] = useState<EditorValues | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [review, setReview] = useState<KnowledgeReviewDetail | null>(null);
   const [document, setDocument] = useState<PublishedKnowledge | null>(null);
   const [openedCitation, setOpenedCitation] = useState<KnowledgeNavigationTarget | null>(null);
@@ -103,7 +106,6 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [newTitleError, setNewTitleError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [createMode, setCreateMode] = useState<"text" | "pdf">("text");
-  const [newClassification, setNewClassification] = useState<KnowledgeClassification>("INTERNAL");
   const [screen, setScreen] = useState<"library" | "create" | "editor" | "document">("library");
   const [libraryTab, setLibraryTab] = useState<"drafts" | "published">("published");
   const [selectedContributionId, setSelectedContributionId] = useState<string | null>(null);
@@ -193,9 +195,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     createRequestKey.current = key;
     const created = createMode === "pdf" && newFile
       ? await createPdfKnowledgeDraft(platform, organizationId,
-        { title: newTitle.trim(), file: newFile, classification: newClassification }, key)
+        { title: newTitle.trim(), file: newFile }, key)
       : await createNewKnowledgeDraft(platform, organizationId,
-        { title: newTitle.trim(), body: newBody, classification: newClassification }, key);
+        { title: newTitle.trim(), body: newBody }, key);
     createRequestKey.current = null;
     setDraft(created); setEditor(valuesFromDraft(created)); setScreen("editor");
     setNewTitle(""); setNewBody(serializeSemanticDocument(
@@ -268,6 +270,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     }).catch((cause: unknown) => { if (present) setError(errorMessage(cause)); });
     return () => { present = false; };
   }, [busy, review, reviews, platform, organizationId]);
+
+  // Advanced tags start open only for a draft that already uses them; afterwards the author controls it.
+  useEffect(() => { setAdvancedOpen(Boolean(draft?.teamTag || draft?.projectTag)); }, [draft?.id]);
 
   const openPublished = (id: string) => void run(async () => {
     const loaded = await loadPublishedKnowledge(platform, organizationId, id);
@@ -404,7 +409,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <section aria-labelledby="review-frozen-title">
               <h3 id="review-frozen-title" className="review-section-label">FROZEN AT SUBMISSION</h3>
               <dl className="review-frozen">
-                <div><dt>Classification</dt><dd>{review.classification}</dd></div>
+                <div><dt>Review level</dt><dd>{review.classification === "RESTRICTED" || review.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
+                  ? "Specialist or Senior" : "Any reviewer grant"}</dd></div>
                 <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
                 <div><dt>Access scope</dt><dd>{review.targetScopeType === "DEPARTMENT" ? "Responsible department" : "Organization"}</dd></div>
                 <div><dt>Audience</dt><dd title={audienceNames(review.audienceIds)}>{audienceNames(review.audienceIds)}</dd></div>
@@ -454,8 +460,6 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           </fieldset>
           <div className="knowledge-create-fields">
             <label className="island-field">Title<input id="knowledge-new-title" maxLength={160} value={newTitle} disabled={busy} aria-invalid={Boolean(newTitleError)} aria-describedby="knowledge-new-title-help" onChange={(event) => { setNewTitle(event.target.value); setNewTitleError(""); createRequestKey.current = null; }} /><small id="knowledge-new-title-help" className={newTitleError ? "field-error" : ""}>{newTitleError || "Up to 160 characters."}</small></label>
-            <label className="island-field">Classification<select value={newClassification} disabled={busy} onChange={(event) => { setNewClassification(event.target.value as KnowledgeClassification); createRequestKey.current = null; }}>
-              <option value="INTERNAL">Internal</option><option value="CONFIDENTIAL">Confidential</option><option value="RESTRICTED">Restricted</option></select><small>You can change it before submitting.</small></label>
           </div>
           {createMode === "pdf" ? <div className={`knowledge-pdf-choose${dragActive ? " is-drag-active" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragActive(true); }} onDragLeave={() => setDragActive(false)} onDrop={(event) => { event.preventDefault(); setDragActive(false); chooseFile(event.dataTransfer.files[0] ?? null); }}>
             <span className="island-tile" aria-hidden="true"><Icon name="pdf" size={18} /></span>
@@ -505,33 +509,44 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <h2 id="draft-metadata-title">Before you submit</h2>
             <label className="island-field">Responsible department<select disabled={busy} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => {
               const responsibleDepartmentId = event.target.value || null;
-              setEditor({ ...editor, responsibleDepartmentId, audienceIds: editor.audienceIds.filter((id) => {
+              const audienceIds = editor.audienceIds.filter((id) => {
                 const audience = options?.audiences.find((item) => item.id === id);
                 return audience?.kind === "ORGANIZATION_ALL" || !audience?.departmentId || audience.departmentId === responsibleDepartmentId;
-              }) });
+              });
+              setEditor({ ...editor, responsibleDepartmentId, audienceIds, targetScopeType: scopeForReaders(audienceIds, options?.audiences ?? [], editor.targetScopeType) });
             }}>
-              <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Reviewers are drawn from this department.</small></label>
-            <fieldset className="island-option-group" disabled={busy}><legend>Publication scope</legend>{(["DEPARTMENT", "ORGANIZATION"] as const).map((scope) => <label key={scope} className={editor.targetScopeType === scope ? "is-selected" : ""}><input type="radio" name="knowledge-scope" checked={editor.targetScopeType === scope} onChange={() => setEditor({ ...editor, targetScopeType: scope,
-              audienceIds: normalizeAudienceSelection(editor.audienceIds, options?.audiences ?? [], scope) })} /><span><strong>{scope === "DEPARTMENT" ? "Responsible department" : "Organization"}</strong><small>{scope === "DEPARTMENT" ? "Department and eligible group audiences" : "Organization and eligible group audiences"}</small></span></label>)}</fieldset>
-            <fieldset className="island-option-group is-inline" disabled={busy}><legend>Classification</legend>{(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] as const).map((classification) => <label key={classification} className={editor.classification === classification ? "is-selected" : ""}><input type="radio" name="knowledge-classification" checked={editor.classification === classification} onChange={() => setEditor({ ...editor, classification })} /><span><strong>{classification}</strong></span></label>)}</fieldset>
-            <fieldset className="island-option-group" disabled={busy}><legend>Audience</legend>
-              {!editor.targetScopeType ? <p className="island-meta">Choose a publication scope to see available audiences.</p> : <div className="draft-audience-list">{availableAudienceOptions(options?.audiences ?? [], editor.targetScopeType).map((audience) => <label key={audience.id} className="draft-audience">
-                <input type="checkbox" checked={editor.audienceIds.includes(audience.id)} onChange={(event) => setEditor({ ...editor,
-                  audienceIds: event.target.checked ? [...editor.audienceIds, audience.id] : editor.audienceIds.filter((id) => id !== audience.id) })} />
-                <span>{audience.name}<small>{audience.kind === "ORGANIZATION_ALL" ? "Organization default"
-                  : audience.kind === "DEPARTMENT_ALL" ? departmentName(audience.departmentId ?? "") : "Audience group"}</small></span></label>)}</div>}
-              <small className="island-meta">Only audiences available for the selected scope are listed.</small>
+              <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Owns the document. Reviewers are drawn from this department.</small></label>
+            <fieldset className="draft-readers" disabled={busy}><legend>Who can read it</legend>
+              <ReaderPicker choices={readerChoices(options?.audiences ?? [], editor.responsibleDepartmentId)} selectedIds={editor.audienceIds}
+                audiences={options?.audiences ?? []} disabled={busy}
+                departmentHint={editor.responsibleDepartmentId ? undefined : "Choose the responsible department to add its department audience."}
+                onAdd={(id) => { const audienceIds = addReader(editor.audienceIds, id, options?.audiences ?? []);
+                  setEditor({ ...editor, audienceIds, targetScopeType: scopeForReaders(audienceIds, options?.audiences ?? [], editor.targetScopeType) }); }}
+                onRemove={(id) => { const audienceIds = removeReader(editor.audienceIds, id);
+                  setEditor({ ...editor, audienceIds, targetScopeType: scopeForReaders(audienceIds, options?.audiences ?? [], editor.targetScopeType) }); }} />
+              {onlyGroupReaders(editor.audienceIds, options?.audiences ?? []) && editor.responsibleDepartmentId && <label className="draft-readers-limit">
+                <input type="checkbox" checked={editor.targetScopeType === "DEPARTMENT"} onChange={(event) => setEditor({ ...editor, targetScopeType: event.target.checked ? "DEPARTMENT" : "ORGANIZATION" })} />
+                <span>Only group members who are also in {departmentName(editor.responsibleDepartmentId)}</span></label>}
+              {editor.targetScopeType && editor.audienceIds.length > 0 && <p className="draft-readers-scope" aria-live="polite">
+                Scope: <strong>{editor.targetScopeType === "DEPARTMENT" ? `Department · ${departmentName(editor.responsibleDepartmentId)}` : "Organization"}</strong>, set by the readers above.</p>}
             </fieldset>
-            <div className="admin-grant-tags">
-              <label className="island-field">Team tag<input maxLength={100} placeholder="Optional" disabled={busy} value={editor.teamTag ?? ""} onChange={(event) => setEditor({ ...editor, teamTag: event.target.value || null })} /></label>
-              <label className="island-field">Project tag<input maxLength={100} placeholder="Optional" disabled={busy} value={editor.projectTag ?? ""} onChange={(event) => setEditor({ ...editor, projectTag: event.target.value || null })} /></label>
-            </div>
+            {editor.responsibleDepartmentId && editor.audienceIds.length > 0 && <p className="draft-review-level" aria-live="polite">
+              <Icon name="shield" size={14} /><span>{editor.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
+                ? `Everyone in the organization can read it, so a Specialist or Senior reviewer from ${departmentName(editor.responsibleDepartmentId)} decides.`
+                : `A reviewer from ${departmentName(editor.responsibleDepartmentId)} decides.`}</span></p>}
+            <details className="draft-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
+              <summary>Advanced · team and project tags</summary>
+              <div className="admin-grant-tags">
+                <label className="island-field">Team tag<input maxLength={100} placeholder="Optional" disabled={busy} value={editor.teamTag ?? ""} onChange={(event) => setEditor({ ...editor, teamTag: event.target.value || null })} /></label>
+                <label className="island-field">Project tag<input maxLength={100} placeholder="Optional" disabled={busy} value={editor.projectTag ?? ""} onChange={(event) => setEditor({ ...editor, projectTag: event.target.value || null })} /></label>
+              </div>
+              <small className="island-meta">Tags narrow which reviewer grants apply.</small>
+            </details>
             <ul className="draft-readiness" aria-label="Submission readiness">
-              {([["Title", Boolean(editor.title.trim())], ["Responsible department", Boolean(editor.responsibleDepartmentId)], ["Publication scope", Boolean(editor.targetScopeType)],
-                ["Audience", validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType)]] as const).map(([label, done]) =>
+              {([["Title", Boolean(editor.title.trim())], ["Responsible department", Boolean(editor.responsibleDepartmentId)],
+                ["Readers", Boolean(editor.targetScopeType) && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType)]] as const).map(([label, done]) =>
                 <li key={label} className={done ? "is-done" : ""}><Icon name={done ? "check" : "close"} size={12} />{label}<small>{done ? "Done" : "Missing"}</small></li>)}
             </ul>
-            {editor.classification === "RESTRICTED" && <p className="island-box">RESTRICTED needs a Specialist or Senior reviewer in the responsible department. Approval prepares this exact version for indexing and atomic activation.</p>}
             <div className="draft-actions" role="group" aria-label="Draft actions">
               <button type="button" className="secondary-button" disabled={busy || !dirty} onClick={saveDraft}>{busy ? "Working…" : "Save version"}</button>
               <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit v{draft.currentVersion.version} for review</button>

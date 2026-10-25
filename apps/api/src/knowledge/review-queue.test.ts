@@ -15,7 +15,7 @@ const candidate: ReviewQueueCandidate = {
   submission: {
     organizationId: "org", submittedByMembershipId: "author", departmentId: "engineering",
     status: "PENDING_REVIEW", classification: "INTERNAL", policyVersion: 1,
-    teamTag: null, projectTag: null,
+    teamTag: null, projectTag: null, audienceBreadth: "LIMITED",
   },
   reviewerGrants: [grant], effectivePolicyVersion: 1, audienceEnforceable: true,
 };

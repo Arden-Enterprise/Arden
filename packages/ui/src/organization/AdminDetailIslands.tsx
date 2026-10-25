@@ -20,6 +20,11 @@ export function grantLevelLabel(level: ReviewerGrant["level"]): string {
   return level === "STANDARD" ? "Standard" : level === "SPECIALIST" ? "Specialist" : "Senior";
 }
 
+/** What a grant may review under decision 0013: organization-wide readers need Specialist or Senior. */
+export function grantCoverageLabel(level: ReviewerGrant["level"]): string {
+  return level === "STANDARD" ? "Department and group readers" : "Includes organization-wide readers";
+}
+
 /** A grant with an end date shows when it ends; an open-ended grant shows when it started. */
 export function grantValidity(grant: Pick<ReviewerGrant, "validFrom" | "validUntil">, formatDate: (iso: string) => string = (iso) => new Date(iso).toLocaleDateString()): string {
   return grant.validUntil ? `Until ${formatDate(grant.validUntil)}` : `Since ${formatDate(grant.validFrom)}`;
@@ -80,7 +85,7 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
     </div>
     {otherDepartments.length > 0 && <p className="island-meta">Also in {otherDepartments.map(departmentName).join(", ")}</p>}
     {grants.length > 0 && <ul className="island-grant-summary">{grants.map((grant) => <li key={grant.id}>
-      <strong>{departmentName(grant.departmentId)}</strong><span>{grant.classifications.join(", ")} · {grantLevelLabel(grant.level)}</span></li>)}</ul>}
+      <strong>{departmentName(grant.departmentId)}</strong><span>{grantLevelLabel(grant.level)} · {grantCoverageLabel(grant.level)}</span></li>)}</ul>}
     <section className="island-detail-section" aria-label="Audiences">
       <h3>Audiences</h3>
       {groupsLoading ? <p className="island-meta" role="status">Loading audience groups…</p> : <div className="island-chip-row">
