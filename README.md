@@ -1,6 +1,10 @@
 # Arden AI
 
+Read [AGENTS.md](AGENTS.md) before contributing. Code changes use the shared [three-repository workflow](https://github.com/Arden-Enterprise/Arden/blob/main/docs/engineering/team-knowledge.md): current Knowledge context, paired contract inspection, a private handoff for the latest PR heads, and finalization after merge. This is a contributor/agent rule with no new automated Knowledge checks.
+
 Python service for Arden's permission-aware retrieval and generation pipeline.
+
+Feature scope and Core/service dependencies are mapped in Arden's [feature index](https://github.com/Arden-Enterprise/Arden/blob/main/docs/product/README.md). Use the shared [specification rule](https://github.com/Arden-Enterprise/Arden/blob/main/docs/engineering/rules/specifications.md) for accepted brainstorm records, conflicting decisions and per-criterion completion. Verify the actual integrated revision; branch-only or locally prepared documentation is not automatically available on main.
 
 ## Ownership boundary
 
