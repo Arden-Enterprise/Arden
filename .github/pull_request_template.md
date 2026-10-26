@@ -61,4 +61,8 @@ Record actual reviewer coverage; use not applicable for an integration that is n
 - [ ] AI findings were assessed and final-revision coverage/gaps recorded.
 - [ ] Each requested reviewer fits known size/context limits and approved capacity; unknowns and exclusions are explicit.
 - [ ] Before merge: required CI, conversations, actual GitHub protections, and merge authorization are satisfied; human PR review is optional.
-- [ ] Integration reporting identifies the actual intended base/merge and verifies branch reachability; Knowledge finalization uses actual merged revisions.
+- [ ] Before merge: record the intended integration base and merge target.
+
+## Post-merge handoff
+
+- [ ] After merge: verify branch reachability from the intended integration branch and finalize Knowledge using actual merged revisions.
