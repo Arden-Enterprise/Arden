@@ -10,11 +10,9 @@ const valid = {
   author: "contributor",
 };
 
-test("accept documented work types and the optional Codex namespace", () => {
+test("accept documented work types without a tool or agent namespace", () => {
   for (const type of ["feat", "fix", "docs", "refactor", "perf", "test", "chore", "build", "ci", "hotfix", "security", "revert"]) {
-    for (const prefix of ["", "codex/"]) {
-      assert.deepEqual(validatePullRequest({ ...valid, branch: `${prefix}${type}/scoped-document-change`, title: `${type}: preserve current behavior` }).errors, []);
-    }
+    assert.deepEqual(validatePullRequest({ ...valid, branch: `${type}/scoped-document-change`, title: `${type}: preserve current behavior` }).errors, []);
   }
 });
 
@@ -28,7 +26,7 @@ test("accept semantic release versions including prerelease/build suffixes", () 
 });
 
 test("reject malformed names, control characters and unknown work types", () => {
-  for (const branch of ["main", "feature/private-notes", "feat/notes", "feat/Private-Notes", "codex/private-notes", "codex/feat/too/many-segments", "feat/private-notes\n", "feat/private--notes", "feat/private notes"]) {
+  for (const branch of ["main", "feature/private-notes", "feat/notes", "feat/Private-Notes", "codex/private-notes", "codex/feat/scoped-document-change", "codex/docs/too/many/segments", "feat/private-notes\n", "feat/private--notes", "feat/private notes"]) {
     assert.ok(validatePullRequest({ ...valid, branch }).errors.length, branch);
   }
 });
@@ -75,7 +73,7 @@ test("CLI reports static messages and appropriate exit codes", () => {
 });
 
 test("reject explicitly prohibited generic descriptions and bare dates", () => {
-  for (const branch of ["feat/new-branch", "codex/docs/new-branch", "fix/2026-10-24", "codex/chore/2026-10-24"]) {
+  for (const branch of ["feat/new-branch", "docs/new-branch", "fix/2026-10-24"]) {
     assert.ok(validatePullRequest({ ...valid, branch }).errors.length, branch);
   }
 });

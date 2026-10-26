@@ -16,7 +16,7 @@ ci/windows-build
 - Allowed types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `chore`, `build`, `ci`, `release`, `hotfix`, `security`, `revert`.
 - Default format: `<type>/<short-kebab-case-description>`; optional issue number belongs in the description, e.g. `fix/123-upload-limit`.
 - Use lowercase, meaningful, bounded names. Do not use `new-branch`, `changes`, `work`, `final`, a bare date, or a person's name as the whole description.
-- An explicitly required automation namespace may use `codex/<type>/<description>`. Do not add `codex/` just to hide a missing work type. The user's explicit `feat/` / `fix/` convention is the normal repository default.
+- Do not prefix a branch with a tool, agent, or person's name (including `codex/`). The branch identifies the kind and subject of work, not who or what created it.
 - `release/<semver>` is the version-only exception. `hotfix/` is for urgent production defects, not ordinary feature work.
 - One branch per coherent change, normally based on current `main`. Do not create a permanent `develop` or use branch names as security/deployment isolation.
 - Do not rename or switch away from someone else's working branch merely to satisfy naming. Inspect status and ask if their work would be disturbed. An unborn/initial repository may need explicit bootstrap handling.
@@ -27,7 +27,7 @@ ci/windows-build
 - Commit, push, PR creation, merge, and deployment are distinct actions. Do not infer authorization for publication from a request to edit, explain, diagnose, or review.
 - `main` is the integration/release source; normal changes go through reviewed PRs. Bootstrap/emergency exceptions require explicit authorization. Remote protection settings and branch-name checks are not created merely by this document.
 
-PR titles use Conventional Commits: `type(optional-scope)!: summary`, where the summary is at least eight characters and the complete title is at most 100 characters. Allowed types are the branch work types above. Normal branch descriptions contain at least two kebab-case words, with a maximum of 80 characters for the complete branch name; `release/<semver>` is the version exception. The automated check accepts the documented optional `codex/` namespace. Dependabot pull requests from the actual `dependabot[bot]` account on `dependabot/` branches are exempt from naming checks.
+PR titles use Conventional Commits: `type(optional-scope)!: summary`, where the summary is at least eight characters and the complete title is at most 100 characters. Allowed types are the branch work types above. Normal branch descriptions contain at least two kebab-case words, with a maximum of 80 characters for the complete branch name; `release/<semver>` is the version exception. The automated check accepts only `type/description` and `release/semver` for contributor branches; it rejects tool/agent prefixes. Dependabot pull requests from the actual `dependabot[bot]` account on `dependabot/` branches remain exempt from naming checks.
 
 The naming check validates syntax, types, lengths, the listed generic descriptions and bare ISO dates. Agent reviewers and optional human reviewers must still enforce descriptive meaning, including person-only names; passing the check is not approval of a name's meaning.
 

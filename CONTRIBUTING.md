@@ -8,7 +8,7 @@ Follow [current main context](docs/engineering/rules/main-context.md) before pla
 
 ## Branch convention
 
-Follow [Git workflow](docs/engineering/rules/git-workflow.md) for allowed types, descriptive names, the optional automation namespace and the release-version exception. Use a focused branch from inspected current main; preserve existing branches and work.
+Follow [Git workflow](docs/engineering/rules/git-workflow.md) for allowed types and meaningful `<type>/<short-kebab-description>` names, or the `release/<semver>` exception. Do not prepend `codex/`, a tool/agent name, or an individual's name. Use a focused branch from inspected current main; preserve existing branches and work.
 
 ## Local development
 

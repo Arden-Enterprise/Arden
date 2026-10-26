@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const types = "feat|fix|docs|refactor|perf|test|chore|build|ci|release|hotfix|security|revert";
-const branchPattern = new RegExp(`^(?:codex/)?(${types})/(.+)$`);
+const branchPattern = new RegExp(`^(${types})/(.+)$`);
 const descriptionPattern = /^[a-z0-9]+(?:-[a-z0-9]+)+$/;
 const prohibitedDescription = /^(?:new-branch|changes|work|final|\d{4}-\d{2}-\d{2})$/;
 const versionNumber = "(?:0|[1-9][0-9]*)";
@@ -22,7 +22,7 @@ export function validatePullRequest(input) {
   if (!match || branch.length > 80 || forbiddenCharacters.test(branch)
     || (match[1] !== "release" && prohibitedDescription.test(match[2]))
     || !(match[1] === "release" ? versionPattern : descriptionPattern).test(match[2])) {
-    errors.push("Use type/specific-kebab-description (optionally codex/type/description), or release/semver, with at most 80 characters.");
+    errors.push("Use type/specific-kebab-description or release/semver, with at most 80 characters; do not add a tool/agent prefix.");
   }
   const titleMatch = typeof title === "string" ? titlePattern.exec(title) : null;
   if (!titleMatch || forbiddenCharacters.test(title) || title !== title.trim()
