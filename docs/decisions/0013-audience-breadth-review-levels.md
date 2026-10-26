@@ -5,6 +5,7 @@ Date: 2026-10-25
 Decision owner/approval: implementation of the API change was requested by the repository user in the working session on 2026-10-25. Record the project lead's confirmation in the pull request.
 Implementation: partial — interim phase 1a (server-side breadth rule, optional classification in the API, classification inputs removed from the UI). Phase 1b (database rule) and phase 2 (schema contraction) are not started.
 Supersedes: [0008](0008-three-level-knowledge-classification.md); the classification parts of [0010](0010-audiences-and-system-administration.md) (reviewer grants scoped by classification; the author selecting a classification at Share/Prepare Submission)
+Superseded in part by: [0015](0015-organization-wide-reviewer-grants.md), which replaces the Specialist/Senior responsible-department rule for organization-wide snapshots with a disjoint Organization grant and removes reviewer levels from the product UI. The old level and classification rules remain only for `LEGACY` submissions until schema contraction.
 
 ## Context and requirement
 

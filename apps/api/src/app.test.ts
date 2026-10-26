@@ -598,6 +598,22 @@ describe("API auth and private draft routes", () => {
       payload: { reviewerMembershipId: otherId, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", level: "STANDARD" } });
     expect(grant.statusCode).toBe(201);
     expect(repository.reviewerGrant?.classifications).toEqual(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"]);
+    expect(repository.reviewerGrant).toMatchObject({ scope: "DEPARTMENT", level: "STANDARD" });
+  });
+
+  it("creates whole-organization grants and rejects mismatched scope metadata (decision 0015)", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const url = `/api/v1/organizations/${organizationId}/knowledge/reviewer-grants`;
+    const headers = { cookie: session, origin: "http://localhost:5180" };
+    const created = await app.inject({ method: "POST", url, headers,
+      payload: { reviewerMembershipId: otherId, scope: "ORGANIZATION" } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ scope: "ORGANIZATION", departmentId: null, level: "STANDARD" });
+    expect((await app.inject({ method: "POST", url, headers,
+      payload: { reviewerMembershipId: otherId, scope: "ORGANIZATION",
+        departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url, headers,
+      payload: { reviewerMembershipId: otherId, scope: "DEPARTMENT" } })).statusCode).toBe(400);
   });
 
   it("preserves an uploaded PDF through metadata, submission, review and preparation", async () => {
@@ -668,7 +684,8 @@ describe("API auth and private draft routes", () => {
       url: `/api/v1/organizations/${organizationId}/knowledge/options`, headers: { cookie: session } });
     expect(options.statusCode).toBe(200);
     expect(options.json()).toMatchObject({ departments: [{ name: "Product" }],
-      audiences: [{ name: "Product members" }] });
+      primaryDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      organizationReviewerAvailable: false, audiences: [{ name: "Product members" }] });
     expect(options.headers["cache-control"]).toBe("no-store");
     const otherOrganization = await app.inject({ method: "GET",
       url: `/api/v1/organizations/${otherOrganizationId}/knowledge/options`, headers: { cookie: session } });
@@ -1021,6 +1038,8 @@ class MemoryRepository implements ArdenDataRepository {
     if ((userId !== ownerId && userId !== otherId) || requestedOrganization !== organizationId) return null;
     return {
       departments: [{ id: "ffffffff-ffff-4fff-8fff-ffffffffffff", name: "Product" }],
+      primaryDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      organizationReviewerAvailable: false,
       audiences: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product members",
         departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", kind: "DEPARTMENT_ALL" }],
     };
@@ -1187,7 +1206,8 @@ class MemoryRepository implements ArdenDataRepository {
 
   async createReviewerGrant(userId: string, requestedOrganization: string, input: ReviewerGrantInput): Promise<ReviewerGrantRecord | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId || input.reviewerMembershipId !== otherId) return null;
-    this.reviewerGrant = { ...input, id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", status: "ACTIVE",
+    this.reviewerGrant = { ...input, level: input.level ?? "STANDARD",
+      id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", status: "ACTIVE",
       validFrom: new Date("2026-10-10T09:00:00.000Z") };
     return this.reviewerGrant;
   }

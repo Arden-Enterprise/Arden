@@ -4,7 +4,8 @@ import { planReviewDecision, type ReviewDecisionFacts, type ReviewDecisionReques
 const now = new Date("2026-10-11T10:00:00Z");
 const hash = "a".repeat(64);
 const grant = {
-  membershipId: "reviewer", organizationId: "org", departmentId: "engineering", status: "ACTIVE" as const,
+  membershipId: "reviewer", organizationId: "org", scope: "DEPARTMENT" as const,
+  departmentId: "engineering", status: "ACTIVE" as const,
   classifications: ["INTERNAL" as const], level: "STANDARD" as const,
   teamTag: null, projectTag: null, validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null,
 };
@@ -14,7 +15,7 @@ const facts: ReviewDecisionFacts = {
     submissionId: "submission", snapshotVersionId: "version-2", contentHash: hash,
     organizationId: "org", submittedByMembershipId: "author", departmentId: "engineering",
     status: "PENDING_REVIEW", classification: "INTERNAL", policyVersion: 1,
-    teamTag: null, projectTag: null, audienceBreadth: "LIMITED",
+    teamTag: null, projectTag: null, audienceBreadth: "LIMITED", reviewRule: "GRANT_SCOPE",
   },
   reviewerGrants: [grant], effectivePolicyVersion: 1, audienceEnforceable: true,
   policy: { kind: "SINGLE_REVIEWER" }, now,

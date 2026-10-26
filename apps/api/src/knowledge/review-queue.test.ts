@@ -5,7 +5,8 @@ import type { MembershipActor } from "./policy.js";
 const now = new Date("2026-10-11T10:00:00Z");
 const reviewer: MembershipActor = { membershipId: "reviewer", organizationId: "org", status: "ACTIVE" };
 const grant = {
-  membershipId: "reviewer", organizationId: "org", departmentId: "engineering", status: "ACTIVE" as const,
+  membershipId: "reviewer", organizationId: "org", scope: "DEPARTMENT" as const,
+  departmentId: "engineering", status: "ACTIVE" as const,
   classifications: ["INTERNAL" as const], level: "STANDARD" as const,
   teamTag: null, projectTag: null, validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null,
 };
@@ -15,7 +16,7 @@ const candidate: ReviewQueueCandidate = {
   submission: {
     organizationId: "org", submittedByMembershipId: "author", departmentId: "engineering",
     status: "PENDING_REVIEW", classification: "INTERNAL", policyVersion: 1,
-    teamTag: null, projectTag: null, audienceBreadth: "LIMITED",
+    teamTag: null, projectTag: null, audienceBreadth: "LIMITED", reviewRule: "GRANT_SCOPE",
   },
   reviewerGrants: [grant], effectivePolicyVersion: 1, audienceEnforceable: true,
 };
@@ -75,6 +76,16 @@ describe("listAssignedReviews", () => {
     expect(listAssignedReviews({ actor: reviewer, now, candidates: [item] })).toEqual([]);
     expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...item,
       reviewerGrants: [{ ...grant, classifications: ["RESTRICTED"], level: "SPECIALIST" }],
+    }] })).toHaveLength(1);
+  });
+
+  it("shows an organization-wide submission only to an organization reviewer", () => {
+    const organizationWide = { ...candidate,
+      submission: { ...candidate.submission, audienceBreadth: "ORGANIZATION_WIDE" as const },
+    };
+    expect(listAssignedReviews({ actor: reviewer, now, candidates: [organizationWide] })).toEqual([]);
+    expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...organizationWide,
+      reviewerGrants: [{ ...grant, scope: "ORGANIZATION", departmentId: null }],
     }] })).toHaveLength(1);
   });
 

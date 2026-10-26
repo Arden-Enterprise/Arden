@@ -16,13 +16,9 @@ export function memberStatus(status: string): { label: string; tone: string } {
       : { label: "Inactive", tone: "" };
 }
 
-export function grantLevelLabel(level: ReviewerGrant["level"]): string {
-  return level === "STANDARD" ? "Standard" : level === "SPECIALIST" ? "Specialist" : "Senior";
-}
-
-/** What a grant may review under decision 0013: organization-wide readers need Specialist or Senior. */
-export function grantCoverageLabel(level: ReviewerGrant["level"]): string {
-  return level === "STANDARD" ? "Department and group readers" : "Includes organization-wide readers";
+/** What a grant may review under decision 0015. */
+export function grantCoverageLabel(scope: ReviewerGrant["scope"]): string {
+  return scope === "ORGANIZATION" ? "Organization-wide snapshots" : "Department and group snapshots";
 }
 
 /** A grant with an end date shows when it ends; an open-ended grant shows when it started. */
@@ -80,12 +76,14 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
           <span className="island-property-actions"><small className="island-property-hint" aria-live="polite">{busy ? "Saving…" : feedback === "Primary department updated." ? "Saved" : ""}</small>
             <button type="button" className="island-link-button" disabled={busy || !departments.length} onClick={() => setMoving(true)}>Move</button></span></div>}
       <div className="island-property"><span><small>Reviewer grant</small>
-        <strong>{grants.length ? grants.map((grant) => `${departmentName(grant.departmentId)} · ${grantLevelLabel(grant.level)}`).join(", ") : "None"}</strong></span>
+        <strong>{grants.length ? grants.map((grant) => grant.scope === "ORGANIZATION"
+          ? "Whole organization" : departmentName(grant.departmentId)).join(", ") : "None"}</strong></span>
         <button type="button" className="island-link-button" onClick={onGrant} disabled={member.status !== "ACTIVE"}>Manage</button></div>
     </div>
     {otherDepartments.length > 0 && <p className="island-meta">Also in {otherDepartments.map(departmentName).join(", ")}</p>}
     {grants.length > 0 && <ul className="island-grant-summary">{grants.map((grant) => <li key={grant.id}>
-      <strong>{departmentName(grant.departmentId)}</strong><span>{grantLevelLabel(grant.level)} · {grantCoverageLabel(grant.level)}</span></li>)}</ul>}
+      <strong>{grant.scope === "ORGANIZATION" ? "Whole organization" : departmentName(grant.departmentId)}</strong>
+      <span>{grantCoverageLabel(grant.scope)}</span></li>)}</ul>}
     <section className="island-detail-section" aria-label="Audiences">
       <h3>Audiences</h3>
       {groupsLoading ? <p className="island-meta" role="status">Loading audience groups…</p> : <div className="island-chip-row">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { validAudienceSelection } from "../src/knowledge/audience-options";
-import { addReader, onlyGroupReaders, readerChoices, removeReader, scopeForReaders } from "../src/knowledge/readerSelection";
+import { addReader, onlyGroupReaders, ownerDepartment, readerChoices, removeReader, scopeForReaders } from "../src/knowledge/readerSelection";
 
 const audiences = [
   { id: "everyone", name: "Everyone in organization", departmentId: null, kind: "ORGANIZATION_ALL" as const },
@@ -59,5 +59,19 @@ describe("derived publication scope", () => {
     expect(onlyGroupReaders(["incident-leads"], audiences)).toBe(true);
     expect(onlyGroupReaders(["incident-leads", "everyone"], audiences)).toBe(false);
     expect(onlyGroupReaders([], audiences)).toBe(false);
+  });
+});
+
+describe("draft owner department (decision 0014)", () => {
+  it("uses the member primary department when the server reports one, ignoring the stored choice", () => {
+    expect(ownerDepartment("dept-engineering", "dept-operations")).toEqual({ derived: true, departmentId: "dept-engineering" });
+  });
+
+  it("reports a missing primary department so submission stays blocked", () => {
+    expect(ownerDepartment(null, "dept-operations")).toEqual({ derived: true, departmentId: null });
+  });
+
+  it("falls back to the stored choice for a server without the rule", () => {
+    expect(ownerDepartment(undefined, "dept-operations")).toEqual({ derived: false, departmentId: "dept-operations" });
   });
 });

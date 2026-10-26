@@ -34,6 +34,13 @@ export type CreatedKnowledgeDraft = {
 
 export type KnowledgeOptions = {
   departments: Array<{ id: string; name: string }>;
+  /**
+   * The member's primary department, which owns and reviews their drafts (decision 0014). Undefined means the
+   * server predates that rule and still expects the author to choose a responsible department.
+   */
+  primaryDepartmentId?: string | null;
+  /** Undefined means the server predates organization-scoped reviewer grants. */
+  organizationReviewerAvailable?: boolean;
   audiences: Array<{ id: string; name: string; departmentId: string | null;
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
 };
@@ -128,7 +135,8 @@ export type PublishedKnowledge = {
 export type ReviewerGrant = {
   id: string;
   reviewerMembershipId: string;
-  departmentId: string;
+  scope: "DEPARTMENT" | "ORGANIZATION";
+  departmentId: string | null;
   classifications: KnowledgeClassification[];
   level: "STANDARD" | "SPECIALIST" | "SENIOR";
   teamTag: string | null;
@@ -234,7 +242,7 @@ export async function listReviewerGrants(platform: Platform, organizationId: str
 }
 
 export function createReviewerGrant(platform: Platform, organizationId: string,
-  input: Omit<ReviewerGrant, "id" | "status" | "validFrom" | "classifications"> & { classifications?: KnowledgeClassification[] }): Promise<ReviewerGrant> {
+  input: Pick<ReviewerGrant, "reviewerMembershipId" | "scope" | "departmentId" | "teamTag" | "projectTag" | "validUntil">): Promise<ReviewerGrant> {
   return request(platform, `${knowledgePath(organizationId)}/reviewer-grants`, { method: "POST", body: JSON.stringify(input) });
 }
 

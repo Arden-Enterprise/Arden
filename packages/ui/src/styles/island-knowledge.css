@@ -362,3 +362,9 @@
 .draft-advanced > small { display: block; margin-top: 6px; }
 .draft-review-level { display: flex; align-items: flex-start; gap: 8px; margin: 0 !important; padding: 8px 10px; border: 1px solid var(--arden-border); border-radius: 10px; color: var(--arden-text-secondary) !important; background: var(--arden-surface-raised); font-size: 12px; line-height: 1.45; }
 .draft-review-level svg { flex: none; margin-top: 1px; color: var(--arden-text-muted); }
+/* Decision 0014: the author owns the draft; their primary department reviews it. */
+.draft-owner { display: flex; align-items: flex-start; gap: 8px; margin: 0 !important; color: var(--arden-text-secondary) !important; font-size: 13px; line-height: 1.45; }
+.draft-owner svg { flex: none; margin-top: 2px; color: var(--arden-text-muted); }
+.draft-owner strong { color: var(--arden-text-primary); font-weight: 600; }
+.draft-owner.is-missing { padding: 8px 10px; border: 1px solid var(--arden-warning-border); border-radius: 10px; color: var(--arden-warning) !important; background: var(--arden-warning-subtle); }
+.draft-owner.is-missing svg { color: var(--arden-warning); }

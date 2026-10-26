@@ -902,14 +902,19 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: Omit<ReviewerGrantInput, "validUntil" | "classifications"> & { validUntil: string | null; classifications?: ReviewerGrantInput["classifications"] } }>(
+  app.post<{ Params: { organizationId: string }; Body: {
+    reviewerMembershipId: string; scope?: ReviewerGrantInput["scope"]; departmentId?: string | null;
+    classifications?: ReviewerGrantInput["classifications"]; level?: ReviewerGrantInput["level"];
+    teamTag?: string | null; projectTag?: string | null; validUntil: string | null;
+  } }>(
     "/api/v1/organizations/:organizationId/knowledge/reviewer-grants", {
       schema: {
         params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
         body: { type: "object", additionalProperties: false,
-          required: ["reviewerMembershipId", "departmentId", "level"], properties: {
+          required: ["reviewerMembershipId"], properties: {
             reviewerMembershipId: { type: "string", pattern: uuidPattern },
-            departmentId: { type: "string", pattern: uuidPattern },
+            scope: { type: "string", enum: ["DEPARTMENT", "ORGANIZATION"], default: "DEPARTMENT" },
+            departmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
             classifications: { type: "array", minItems: 1, maxItems: 3, uniqueItems: true,
               items: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] } },
             level: { type: "string", enum: ["STANDARD", "SPECIALIST", "SENIOR"] },
@@ -922,15 +927,20 @@ export function buildApp(dependencies: AppDependencies) {
       const context = await requestActor(request, reply);
       if (!context) return;
       const { validUntil, ...rest } = request.body;
+      const scope = rest.scope ?? "DEPARTMENT";
+      const departmentId = rest.departmentId ?? null;
       const expiry = validUntil ? new Date(validUntil) : null;
       if ((expiry && (!Number.isFinite(expiry.getTime()) || expiry <= new Date()))
+        || (scope === "DEPARTMENT" && departmentId === null)
+        || (scope === "ORGANIZATION" && departmentId !== null)
         || (rest.teamTag !== undefined && rest.teamTag !== null && !rest.teamTag.trim())
         || (rest.projectTag !== undefined && rest.projectTag !== null && !rest.projectTag.trim())) {
         return reply.code(400).send(safeError("INVALID_REQUEST", "The reviewer grant is invalid.", request.id));
       }
       try {
         const grant = await dependencies.repository.createReviewerGrant(context.userId, request.params.organizationId, {
-          ...rest, teamTag: rest.teamTag?.trim() ?? null,
+          reviewerMembershipId: rest.reviewerMembershipId, scope, departmentId,
+          level: rest.level, teamTag: rest.teamTag?.trim() ?? null,
           // Decision 0013: a grant no longer narrows by classification; legacy pending submissions still match a level.
           classifications: rest.classifications ?? [...allKnowledgeClassifications],
           projectTag: rest.projectTag?.trim() ?? null, validUntil: expiry,

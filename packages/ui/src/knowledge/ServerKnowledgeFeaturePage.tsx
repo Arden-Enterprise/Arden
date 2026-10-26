@@ -19,7 +19,7 @@ import type { Platform } from "../shared/types";
 import { PdfDocument, PdfViewer, pdfFileName, usePdfObjectUrl } from "./PdfDocument";
 import { libraryDateLabel, libraryTitleParts } from "./libraryDisplay";
 import { ReaderPicker } from "./ReaderPicker";
-import { addReader, onlyGroupReaders, readerChoices, removeReader, scopeForReaders } from "./readerSelection";
+import { addReader, onlyGroupReaders, ownerDepartment, readerChoices, removeReader, scopeForReaders } from "./readerSelection";
 import { ActionToast } from "../shared/ActionToast";
 import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
 import { KnowledgeDocumentDetail, readerDocumentStatusAt } from "./KnowledgeDocumentDetail";
@@ -209,9 +209,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const saveDraft = () => void run(async () => {
     if (!draft || !editor) return;
     if (!editor.title.trim()) { setError("The title cannot be empty."); return; }
-    const { body: _body, ...metadata } = editor;
+    // With a derived owner the client sends no department; the server applies the author's primary department.
+    const values = options?.primaryDepartmentId !== undefined ? { ...editor, responsibleDepartmentId: null } : editor;
+    const { body: _body, ...metadata } = values;
     const saved = await saveKnowledgeDraft(platform, organizationId, draft.id, draft.currentVersion.version,
-      draft.currentVersion.mimeType === "application/pdf" ? metadata : editor);
+      draft.currentVersion.mimeType === "application/pdf" ? metadata : values);
     submitRequestKey.current = null;
     setDraft(saved); setEditor(valuesFromDraft(saved));
     await refresh(); setMessage(`Draft v${saved.currentVersion.version} saved on the server.`);
@@ -310,7 +312,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     responsibleDepartmentId: draft.responsibleDepartmentId, targetScopeType: draft.targetScopeType,
     audienceIds: draft.audienceIds, versionId: draft.currentVersion.id }, latest) : null;
   const snapshotAlreadySubmitted = Boolean(latest && draft && latest.snapshotVersionId === draft.currentVersion.id);
-  const ready = Boolean(editor?.responsibleDepartmentId && editor.targetScopeType
+  // Decision 0014: a server that reports the member's primary department derives the responsible department itself.
+  const { derived: ownerDerived, departmentId: ownerDepartmentId } = ownerDepartment(options?.primaryDepartmentId, editor?.responsibleDepartmentId ?? null);
+  // A draft saved before decision 0014 (or before the author changed department) must be saved once to adopt it.
+  const ownerOutOfSync = Boolean(ownerDerived && ownerDepartmentId && draft && draft.responsibleDepartmentId !== ownerDepartmentId);
+  const ready = Boolean(ownerDepartmentId && editor?.targetScopeType
     && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType));
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
   const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -409,8 +415,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <section aria-labelledby="review-frozen-title">
               <h3 id="review-frozen-title" className="review-section-label">FROZEN AT SUBMISSION</h3>
               <dl className="review-frozen">
-                <div><dt>Review level</dt><dd>{review.classification === "RESTRICTED" || review.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
-                  ? "Specialist or Senior" : "Any reviewer grant"}</dd></div>
+                <div><dt>Reviewed by</dt><dd>{review.classification === "RESTRICTED"
+                  ? "Specialist or Senior reviewer"
+                  : review.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
+                    ? "Organization reviewer" : `${departmentName(review.responsibleDepartmentId)} reviewer`}</dd></div>
                 <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
                 <div><dt>Access scope</dt><dd>{review.targetScopeType === "DEPARTMENT" ? "Responsible department" : "Organization"}</dd></div>
                 <div><dt>Audience</dt><dd title={audienceNames(review.audienceIds)}>{audienceNames(review.audienceIds)}</dd></div>
@@ -507,6 +515,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           </article>
           <aside className="island island-panel draft-metadata knowledge-live-form" aria-labelledby="draft-metadata-title">
             <h2 id="draft-metadata-title">Before you submit</h2>
+            {ownerDerived ? <p className={`draft-owner${ownerDepartmentId ? "" : " is-missing"}`}>
+              <Icon name={ownerDepartmentId ? "people" : "warning"} size={14} />
+              <span>{ownerDepartmentId ? <>Owned by you · reviewed by <strong>{departmentName(ownerDepartmentId)}</strong></>
+                : "You have no primary department yet. Ask an Org Admin to assign one before submitting."}</span></p> : <>
             <label className="island-field">Responsible department<select disabled={busy} value={editor.responsibleDepartmentId ?? ""} onChange={(event) => {
               const responsibleDepartmentId = event.target.value || null;
               const audienceIds = editor.audienceIds.filter((id) => {
@@ -516,24 +528,29 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               setEditor({ ...editor, responsibleDepartmentId, audienceIds, targetScopeType: scopeForReaders(audienceIds, options?.audiences ?? [], editor.targetScopeType) });
             }}>
               <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small>Owns the document. Reviewers are drawn from this department.</small></label>
+            </>}
             <fieldset className="draft-readers" disabled={busy}><legend>Who can read it</legend>
-              <ReaderPicker choices={readerChoices(options?.audiences ?? [], editor.responsibleDepartmentId)} selectedIds={editor.audienceIds}
+              <ReaderPicker choices={readerChoices(options?.audiences ?? [], ownerDepartmentId)} selectedIds={editor.audienceIds}
                 audiences={options?.audiences ?? []} disabled={busy}
-                departmentHint={editor.responsibleDepartmentId ? undefined : "Choose the responsible department to add its department audience."}
+                departmentHint={ownerDepartmentId ? undefined : ownerDerived ? "Your department audience appears once an Org Admin assigns your primary department." : "Choose the responsible department to add its department audience."}
                 onAdd={(id) => { const audienceIds = addReader(editor.audienceIds, id, options?.audiences ?? []);
                   setEditor({ ...editor, audienceIds, targetScopeType: scopeForReaders(audienceIds, options?.audiences ?? [], editor.targetScopeType) }); }}
                 onRemove={(id) => { const audienceIds = removeReader(editor.audienceIds, id);
                   setEditor({ ...editor, audienceIds, targetScopeType: scopeForReaders(audienceIds, options?.audiences ?? [], editor.targetScopeType) }); }} />
-              {onlyGroupReaders(editor.audienceIds, options?.audiences ?? []) && editor.responsibleDepartmentId && <label className="draft-readers-limit">
+              {onlyGroupReaders(editor.audienceIds, options?.audiences ?? []) && ownerDepartmentId && <label className="draft-readers-limit">
                 <input type="checkbox" checked={editor.targetScopeType === "DEPARTMENT"} onChange={(event) => setEditor({ ...editor, targetScopeType: event.target.checked ? "DEPARTMENT" : "ORGANIZATION" })} />
-                <span>Only group members who are also in {departmentName(editor.responsibleDepartmentId)}</span></label>}
+                <span>Only group members who are also in {departmentName(ownerDepartmentId)}</span></label>}
               {editor.targetScopeType && editor.audienceIds.length > 0 && <p className="draft-readers-scope" aria-live="polite">
-                Scope: <strong>{editor.targetScopeType === "DEPARTMENT" ? `Department · ${departmentName(editor.responsibleDepartmentId)}` : "Organization"}</strong>, set by the readers above.</p>}
+                Scope: <strong>{editor.targetScopeType === "DEPARTMENT" ? `Department · ${departmentName(ownerDepartmentId)}` : "Organization"}</strong>, set by the readers above.</p>}
             </fieldset>
-            {editor.responsibleDepartmentId && editor.audienceIds.length > 0 && <p className="draft-review-level" aria-live="polite">
+            {ownerDepartmentId && editor.audienceIds.length > 0 && <p className="draft-review-level" aria-live="polite">
               <Icon name="shield" size={14} /><span>{editor.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
-                ? `Everyone in the organization can read it, so a Specialist or Senior reviewer from ${departmentName(editor.responsibleDepartmentId)} decides.`
-                : `A reviewer from ${departmentName(editor.responsibleDepartmentId)} decides.`}</span></p>}
+                ? "Everyone in the organization can read it, so an organization reviewer decides."
+                : `A reviewer from ${departmentName(ownerDepartmentId)} decides.`}</span></p>}
+            {editor.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
+              && options?.organizationReviewerAvailable === false
+              && <p className="island-note is-warning" role="note"><Icon name="warning" size={14} />
+                <span>No organization reviewer yet. Ask an Org Admin to grant one.</span></p>}
             <details className="draft-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
               <summary>Advanced · team and project tags</summary>
               <div className="admin-grant-tags">
@@ -543,14 +560,14 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <small className="island-meta">Tags narrow which reviewer grants apply.</small>
             </details>
             <ul className="draft-readiness" aria-label="Submission readiness">
-              {([["Title", Boolean(editor.title.trim())], ["Responsible department", Boolean(editor.responsibleDepartmentId)],
+              {([["Title", Boolean(editor.title.trim())], [ownerDerived ? "Your department" : "Responsible department", Boolean(ownerDepartmentId)],
                 ["Readers", Boolean(editor.targetScopeType) && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType)]] as const).map(([label, done]) =>
                 <li key={label} className={done ? "is-done" : ""}><Icon name={done ? "check" : "close"} size={12} />{label}<small>{done ? "Done" : "Missing"}</small></li>)}
             </ul>
             <div className="draft-actions" role="group" aria-label="Draft actions">
-              <button type="button" className="secondary-button" disabled={busy || !dirty} onClick={saveDraft}>{busy ? "Working…" : "Save version"}</button>
-              <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit v{draft.currentVersion.version} for review</button>
-              <span className="island-meta" aria-live="polite">{dirty ? "Unsaved changes · " : ""}{submitHint}</span>
+              <button type="button" className="secondary-button" disabled={busy || !(dirty || ownerOutOfSync)} onClick={saveDraft}>{busy ? "Working…" : "Save version"}</button>
+              <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || ownerOutOfSync || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit v{draft.currentVersion.version} for review</button>
+              <span className="island-meta" aria-live="polite">{dirty ? "Unsaved changes · " : ""}{ownerOutOfSync && !dirty ? "Save a version to apply your department before submitting." : submitHint}</span>
             </div>
             <section className="island-detail-section" aria-label="Review history"><h3>History</h3>
               <ol className="island-timeline"><li><strong>v{draft.currentVersion.version} · {draft.hasPendingSubmission ? "awaiting review" : "working draft"}</strong><small>Updated {new Date(draft.updatedAt).toLocaleDateString()}</small></li>

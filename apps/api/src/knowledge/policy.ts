@@ -73,13 +73,29 @@ export function canCreateSharedDraft(input: { actor: MembershipActor | null;
     audience: input.source.audience, now: input.now });
 }
 
+/**
+ * Decision 0014: the author owns a shared draft and its responsible department is the author's primary department,
+ * derived on the server. A client may omit the department or repeat that value; any other department is rejected,
+ * so an author cannot route review to a department they do not belong to.
+ */
+export function resolveResponsibleDepartment(requested: string | null | undefined, authorPrimaryDepartmentId: string | null):
+  { ok: true; departmentId: string | null } | { ok: false } {
+  if (requested === undefined || requested === null || requested === authorPrimaryDepartmentId) {
+    return { ok: true, departmentId: authorPrimaryDepartmentId };
+  }
+  return { ok: false };
+}
+
 export function canSubmitSnapshot(input: { actor: MembershipActor | null;
   draft: { organizationId: string; authorMembershipId: string; status: "ACTIVE" | "SUBMITTED" | "ARCHIVED"; currentVersionId: string };
   snapshot: { versionId: string; contentHash: string; classification: KnowledgeClassification;
     audienceIds: readonly string[]; scope: AudienceScope };
-  audiences: readonly AudienceDefinition[]; audienceEnforceable: boolean }): boolean {
+  audiences: readonly AudienceDefinition[]; audienceEnforceable: boolean;
+  /** The draft's stored responsible department and the author's current primary department (decision 0014). */
+  responsibleDepartmentId: string | null; authorPrimaryDepartmentId: string | null }): boolean {
   const { actor, draft, snapshot } = input;
   return activeInOrganization(actor, draft.organizationId) && actor.membershipId === draft.authorMembershipId
+    && input.authorPrimaryDepartmentId !== null && input.responsibleDepartmentId === input.authorPrimaryDepartmentId
     && draft.status === "ACTIVE" && Boolean(snapshot.versionId) && draft.currentVersionId === snapshot.versionId
     && /^[0-9a-f]{64}$/.test(snapshot.contentHash)
     && ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"].includes(snapshot.classification)
@@ -91,12 +107,41 @@ export function canReviewSnapshot(input: { actor: MembershipActor | null;
   submission: { organizationId: string; submittedByMembershipId: string; departmentId: string;
     status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
     classification: KnowledgeClassification; policyVersion: number; teamTag: string | null; projectTag: string | null;
-    audienceBreadth: AudienceBreadth };
-  grant: { membershipId: string; organizationId: string; departmentId: string; status: "ACTIVE" | "INACTIVE";
+    audienceBreadth: AudienceBreadth; reviewRule: "LEGACY" | "GRANT_SCOPE" };
+  grant: { membershipId: string; organizationId: string; scope: "DEPARTMENT" | "ORGANIZATION";
+    departmentId: string | null; status: "ACTIVE" | "INACTIVE";
     classifications: readonly KnowledgeClassification[]; level: "STANDARD" | "SPECIALIST" | "SENIOR";
     teamTag: string | null; projectTag: string | null; validFrom: Date; validUntil: Date | null } | null;
   now: Date; effectivePolicyVersion: number; audienceEnforceable: boolean }): boolean {
   return input.audienceEnforceable && canRespondToSubmission(input);
+}
+
+function elevatedReviewerLevel(level: "STANDARD" | "SPECIALIST" | "SENIOR"): boolean {
+  return level === "SPECIALIST" || level === "SENIOR";
+}
+
+function grantMatchesFrozenSubmission(input: Parameters<typeof canRespondToSubmission>[0],
+  grant: NonNullable<Parameters<typeof canReviewSnapshot>[0]["grant"]>): boolean {
+  const { submission } = input;
+  return grant.classifications.includes(submission.classification)
+    && (submission.classification !== "RESTRICTED" || elevatedReviewerLevel(grant.level))
+    && Number.isFinite(input.now.getTime()) && Number.isFinite(grant.validFrom.getTime())
+    && grant.validFrom <= input.now
+    && (grant.validUntil === null || (Number.isFinite(grant.validUntil.getTime()) && grant.validUntil > input.now))
+    && (grant.teamTag === null || grant.teamTag === submission.teamTag)
+    && (grant.projectTag === null || grant.projectTag === submission.projectTag);
+}
+
+function grantScopeCoversSubmission(submission: Parameters<typeof canReviewSnapshot>[0]["submission"],
+  grant: NonNullable<Parameters<typeof canReviewSnapshot>[0]["grant"]>): boolean {
+  if (submission.audienceBreadth === "LIMITED") {
+    return grant.scope === "DEPARTMENT" && grant.departmentId === submission.departmentId;
+  }
+  if (grant.scope === "ORGANIZATION") return true;
+  return submission.reviewRule === "LEGACY"
+    && grant.scope === "DEPARTMENT"
+    && grant.departmentId === submission.departmentId
+    && elevatedReviewerLevel(grant.level);
 }
 
 // Rejection remains possible for an invalid audience; approval does not.
@@ -109,14 +154,8 @@ export function canRespondToSubmission(input: Omit<Parameters<typeof canReviewSn
   return actor.membershipId !== submission.submittedByMembershipId
     && grant !== null && grant.status === "ACTIVE"
     && grant.membershipId === actor.membershipId && grant.organizationId === submission.organizationId
-    && grant.departmentId === submission.departmentId && grant.classifications.includes(submission.classification)
-    && (submission.classification !== "RESTRICTED" || grant.level === "SPECIALIST" || grant.level === "SENIOR")
-    // Decision 0013: an organization-wide audience needs a Specialist or Senior grant. Anything other than an
-    // explicit LIMITED breadth is treated as organization-wide, so missing facts fail closed.
-    && (submission.audienceBreadth === "LIMITED" || grant.level === "SPECIALIST" || grant.level === "SENIOR")
-    && Number.isFinite(input.now.getTime()) && Number.isFinite(grant.validFrom.getTime())
-    && grant.validFrom <= input.now
-    && (grant.validUntil === null || (Number.isFinite(grant.validUntil.getTime()) && grant.validUntil > input.now))
-    && (grant.teamTag === null || grant.teamTag === submission.teamTag)
-    && (grant.projectTag === null || grant.projectTag === submission.projectTag);
+    && grantMatchesFrozenSubmission(input, grant)
+    // Decision 0015: scopes are disjoint for new submissions. Anything other than an explicit LIMITED breadth
+    // follows the organization-wide branch, so incomplete authorization facts fail closed.
+    && grantScopeCoversSubmission(submission, grant);
 }
