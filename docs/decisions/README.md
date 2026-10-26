@@ -12,7 +12,7 @@ Routine fixes and patch-level upgrades need appropriate rules/docs and regressio
 
 Create `NNNN-short-kebab-case-title.md` here with the next available four-digit number. Check existing records before allocating a number. Never reuse a number or silently rewrite an accepted decision to hide history; add a superseding record when the underlying decision changes.
 
-There are no numbered records at this guide's creation. Existing direction lives in `ARDEN_BLUEPRINT.md`, `PRODUCT.md`, and `DESIGN.md`; do not manufacture past approval dates or claim that a proposed blueprint is a completed implementation.
+Existing direction and numbered records must be inspected on the actual baseline, including referenced in-flight records before allocating a conflicting number. Do not manufacture past approval dates or claim that a proposed blueprint is a completed implementation. The [specification rule](../engineering/rules/specifications.md) owns agreed-brainstorm capture and the comparison/confirmation boundary for replacing accepted decisions.
 
 ## Template
 
@@ -22,6 +22,8 @@ There are no numbered records at this guide's creation. Existing direction lives
 Status: proposed | accepted | deprecated | superseded
 Date: YYYY-MM-DD
 Decision owner/approval: person or role; do not invent approval
+Brainstorm originator / record author: distinguish actual attribution; unknown stays explicit
+Approval evidence and exact source/spec revision: reference or not approved
 Implementation: not started | partial | implemented (link evidence)
 Supersedes / superseded by: record link, if applicable
 
@@ -64,6 +66,7 @@ Version-matched official docs, repository code/tests, and authorized decisions.
 - Follow [current main context](../engineering/rules/main-context.md) at task start. Check each relevant decision's status and superseding record on fetched main before relying on older chats or branch documents. A later accepted replacement governs the default intended architecture; verify its actual implementation separately.
 - **Proposed** is an option, not authority to replace the accepted stack or promise a feature.
 - **Accepted** requires an actual authorized decision. It may still be unimplemented; track implementation/evidence separately.
+- Replacing a conflicting accepted decision requires the specification rule's current/proposed comparison, consequences, original-owner/team consultation recommendation and explicit informed resolution. Record the actual approver/authority and supersession; reuse sufficient existing approval rather than requesting it again.
 - **Implemented** describes code/config/test evidence, not just a merged plan. Claims of release readiness still require the applicable gates.
 - **Deprecated/superseded** retains history and links the replacement. Remove or update stale live instructions at the same time.
 - Update cross-repository rules in `AGENTS.md`; detailed technology, security, operations, product, and design decisions belong in their owning guides. Link rather than duplicating extensive rules.

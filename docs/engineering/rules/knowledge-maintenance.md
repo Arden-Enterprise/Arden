@@ -2,6 +2,8 @@
 
 **Every accepted lasting decision and every material implementation change MUST update the relevant repository knowledge in the same change.** Do not leave it only in chat, a commit message, or someone's memory.
 
+Follow [specifications](specifications.md) for recording agreed brainstorm outcomes, originator/decision-owner provenance, conflicting accepted decisions, requirement coverage and resume checkpoints. Update the relevant [feature index](../../product/README.md) entry and owning specification; keep one authoritative contract instead of separate contradictory summaries.
+
 - Update `AGENTS.md` for cross-repository workflow, safety, architecture boundaries, or required reading.
 - Update the technology guide for adopted/removed libraries, versions/support changes, interfaces, package locations, and technology-specific pitfalls.
 - Update the code-quality guide for accepted implementation/test conventions, recurring maintainability mistakes, quality tooling, or documented quality debt and its resolution.

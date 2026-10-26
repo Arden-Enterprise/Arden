@@ -28,6 +28,10 @@ Use synthetic seed data and separate local credentials/volumes. Follow [operatio
 
 For local frontend development against a hosted API/database, follow the beginner [teammate setup walkthrough](docs/engineering/teammate-setup.md), including the administrator handoff, then use `pnpm dev:remote`. Choose your assigned slot; do not overwrite an active writer or connect development code to a release database. The [hosted development reference](docs/engineering/remote-development.md) covers implementation and operator details.
 
+## Specifications and decision changes
+
+Read the [feature/flow index](docs/product/README.md) and [specification rule](docs/engineering/rules/specifications.md). Record explicitly agreed brainstorm outcomes in the owning spec with originator, decision owner, approval evidence and exact source revision. Link complete acceptance paths and save a usable resume checkpoint. Before replacing a conflicting accepted requirement, present the current/proposed comparison and consequences, recommend original-owner/team input, and obtain an explicit informed decision. Unknown attribution stays explicit; do not infer approval from another chat or a newer branch.
+
 ## Changes and commits
 
 Commit in units of work when committing is authorized. Each completed, independently reviewable change gets its own descriptive Conventional Commit. Keep related code, documentation, and verification together, and make the commit coherent and reversible. Do not combine unrelated fixes, features, or cleanup, or split tightly coupled changes into broken intermediate commits. Inspect the proposed diff and stage only the intended paths or hunks; preserve other contributors' work.

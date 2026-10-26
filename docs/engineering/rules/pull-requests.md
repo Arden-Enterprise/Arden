@@ -6,7 +6,7 @@ A completed coherent change should have a PR so configured AI reviewers can insp
 
 Before publication:
 
-1. Check acceptance criteria, relevant evidence, privacy, task-owned filenames, and the diff against the intended base.
+1. Check specification/acceptance IDs, exact revisions, relevant evidence, privacy, task-owned filenames, and the diff against the intended base. Apply the [specification rule](specifications.md) to unresolved conflicts and changed requirements; preserve actual informed approvals and outstanding criteria.
 2. Identify any unrelated local changes/deletions and keep them out of commits/PRs. Use coherent [commits and review batches](git-workflow.md).
 3. Prepare the title/body using the PR template. Include purpose, linked issue/decision, behavior, designs/screenshots where relevant, risk, exact checks, configuration/migration/recovery, commit count, authored/total file counts, source-line changes, review batches/runs, and coverage. Apply the [size targets and ceilings](git-workflow.md#reviewable-pr-size); recompute after review fixes.
 4. Prefer updating an existing PR for the same coherent work instead of opening duplicates. A separate task gets a separate focused PR; stacked dependencies must name their base and merge order.
@@ -45,5 +45,6 @@ If AI coverage is partial/unavailable, identify the affected files and coverage 
 - Human PR review is optional. Once merge is authorized and readiness requirements are satisfied, agents may merge without independent human approval or a human-review waiver. Do not add a mandatory human-review gate because an AI reviewer is unavailable.
 - Bot auto-approval or a high score does not establish correctness or replace executed verification.
 - Merge only when separately authorized; use the approved integration method. Maintain [repository settings](../repository-settings.md) rather than relying on a document to enforce GitHub protection.
+- Report the actual merge base/commit and verify reachability from the intended integration branch before claiming delivery there. A merge into a feature branch leaves main integration pending. Finalize the linked specification/Knowledge handoff against actual merged revisions.
 
 Report the PR link, actual checks/reviewer coverage, remaining risks, and next required decision. A completed implementation can await review; it is not automatically ready to merge.
