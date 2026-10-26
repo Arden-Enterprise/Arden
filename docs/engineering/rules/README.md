@@ -8,6 +8,7 @@ This directory holds the canonical development rules for Arden. [AGENTS.md](../.
 | --- | --- | --- |
 | [Current main context](main-context.md) | Main freshness, required current documentation, changes since the last inspection, checkout comparison and conflict handling | Before planning/acting on every task; resumed tasks with a changed baseline |
 | [Product contract](product-contract.md) | Accepted product/trust boundaries and unresolved decisions | Every task |
+| [Specifications](specifications.md) | Agreed brainstorm capture, originator/owner provenance, conflicting-spec decisions, coverage and resume checkpoints | Every task; planning or changing requirements |
 | [Task workflow](task-workflow.md) | Scope, acceptance, decisions, Linear tracking and issue budget, task completion, PR offer | Every task |
 | [Git workflow](git-workflow.md) | Branch/commit names, preservation, PR size, push batches | Every task; publishing |
 | [Security and knowledge](security.md) | Content authority, access, private-data and external-action boundaries | Every task |
@@ -20,6 +21,7 @@ This directory holds the canonical development rules for Arden. [AGENTS.md](../.
 
 ## Related references
 
+- [Feature and flow index](../../product/README.md) maps visible scope to owning contracts, acceptance paths and unresolved integration gaps; it does not certify completeness.
 - [Implementation status](../implementation-status.md) records current code/rollout boundaries; verify against source and operational evidence.
 - [Quality metrics](../quality-metrics.md) owns metric definitions and thresholds.
 - [AI reviewers](../ai-reviewers.md) owns dated vendor facts and limits.

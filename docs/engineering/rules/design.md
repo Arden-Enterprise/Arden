@@ -4,6 +4,8 @@
 
 Tie the change to a user need and acceptance criteria. Review available product/design sources and record unresolved assumptions. Research and design can progress in slices alongside engineering once the applicable contracts are stable.
 
+Link feature/acceptance IDs and the approved design/spec revision from the [feature index](../../product/README.md). A brainstormed design becomes governing scope only through the [specification rule](specifications.md); apply its comparison/decision boundary before replacing accepted user paths or another contributor's design contract.
+
 A feature's design handoff includes:
 
 - User goal, actor/capability, task flow, navigation, and requirement references.

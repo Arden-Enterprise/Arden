@@ -4,6 +4,10 @@ Linked issue or decision:
 
 User/operator outcome and acceptance criteria:
 
+Feature/specification and acceptance IDs, exact approved revisions (or reason not applicable):
+
+Changed accepted decisions: current/proposed comparison, original decision owner/provenance, consultation status and actual informed resolution (or none). Follow `docs/engineering/rules/specifications.md`; do not copy private discussion/attribution into a public PR.
+
 ## Approach, design, and risk
 
 What changed, and why? Link relevant designs or ADRs.
@@ -46,6 +50,8 @@ Record actual reviewer coverage; use not applicable for an integration that is n
 - [ ] The PR is focused; branch/title match project conventions.
 - [ ] Authorized commits each contain a coherent unit of work.
 - [ ] Acceptance criteria and relevant allowed/denied/stale cases are addressed.
+- [ ] Every in-scope acceptance ID has evidence or an explicit remaining owner/blocker; the resume checkpoint and owning specs are current.
+- [ ] Conflicting accepted-spec changes have a recorded informed decision; unresolved proposals have not silently replaced accepted behavior.
 - [ ] Authorization, private data, logging, and external confirmation were reviewed where relevant.
 - [ ] Public files, examples, designs, and review artifacts contain no private values.
 - [ ] Documentation, configuration, contracts, and migration notes match the change.
@@ -55,3 +61,8 @@ Record actual reviewer coverage; use not applicable for an integration that is n
 - [ ] AI findings were assessed and final-revision coverage/gaps recorded.
 - [ ] Each requested reviewer fits known size/context limits and approved capacity; unknowns and exclusions are explicit.
 - [ ] Before merge: required CI, conversations, actual GitHub protections, and merge authorization are satisfied; human PR review is optional.
+- [ ] Before merge: record the intended integration base and merge target.
+
+## Post-merge handoff
+
+- [ ] After merge: verify branch reachability from the intended integration branch and finalize Knowledge using actual merged revisions.
