@@ -17,7 +17,7 @@ export type CurrentSession = {
   testMode?: boolean;
 };
 export type OrganizationAdministration = {
-  departments: Array<{ id: string; name: string; defaultRoleId: string; defaultRoleName: string }>;
+  departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
   members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; departmentIds?: string[]; roleIds: string[]; roleNames: string[] }>;
   invitations: Array<{ id: string; email: string; departmentId: string; status: string; expiresAt: string }>;
@@ -344,9 +344,9 @@ export async function currentSession(platform: Platform): Promise<CurrentSession
   };
 }
 
-export async function createOrganization(platform: Platform, name: string, departmentName: string): Promise<void> {
+export async function createOrganization(platform: Platform, name: string, departmentName?: string): Promise<void> {
   await request(platform, "/api/v1/organizations", {
-    method: "POST", body: JSON.stringify({ name, departmentName }),
+    method: "POST", body: JSON.stringify({ name, ...(departmentName ? { departmentName } : {}) }),
   });
 }
 

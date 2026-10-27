@@ -9,10 +9,9 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
   testMode?: boolean;
   onContinue: (organizationId?: string) => void;
   onBack: () => void;
-  onCreateOrganization?: (name: string, departmentName: string) => Promise<void>;
+  onCreateOrganization?: (name: string, departmentName?: string) => Promise<void>;
 }) {
   const [organizationInput, setOrganizationInput] = useState("");
-  const [departmentInput, setDepartmentInput] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const isLive = memberships !== undefined;
@@ -39,16 +38,14 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
             {onCreateOrganization && <form className="organization-create-form" onSubmit={(event) => {
               event.preventDefault();
               setCreating(true); setCreateError("");
-              void onCreateOrganization(organizationInput.trim(), departmentInput.trim())
+              void onCreateOrganization(organizationInput.trim())
                 .catch((error: unknown) => setCreateError(error instanceof Error ? error.message : "Organization setup could not be completed."))
                 .finally(() => setCreating(false));
             }}>
               <h3>Create an organization</h3>
               <label><span>Organization name</span><input required maxLength={120} value={organizationInput} onChange={(event) => setOrganizationInput(event.target.value)} /></label>
-              <label><span>Your primary department</span><input required maxLength={80} value={departmentInput} onChange={(event) => setDepartmentInput(event.target.value)} /></label>
               {createError && <p role="alert">{createError}</p>}
               <button type="submit" className="primary-button" disabled={creating}>{creating ? "Creating…" : "Create organization"}</button>
-
             </form>}
           </div> : <div className="workspace-memberships">
             <div className="workspace-membership is-selected" aria-label={`${organizationName}, selected sample workspace`}>

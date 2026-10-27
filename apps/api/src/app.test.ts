@@ -352,21 +352,21 @@ describe("API auth and private draft routes", () => {
       departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
     });
 
-    const notEmptyDelete = await app.inject({
+    const baseDelete = await app.inject({
       method: "POST",
       url: `/api/v1/organizations/${organizationId}/departments/ffffffff-ffff-4fff-8fff-ffffffffffff/delete`,
       headers: { cookie: adminSession, origin: "http://localhost:5180" },
     });
-    expect(notEmptyDelete.statusCode).toBe(409);
-    expect(notEmptyDelete.json().error.code).toBe("DEPARTMENT_NOT_EMPTY");
+    expect(baseDelete.statusCode).toBe(409);
+    expect(baseDelete.json().error.code).toBe("CANNOT_DELETE_BASE_DEPARTMENT");
 
-    const emptyDelete = await app.inject({
+    const customDelete = await app.inject({
       method: "POST",
       url: `/api/v1/organizations/${organizationId}/departments/44444444-4444-4444-8444-444444444444/delete`,
       headers: { cookie: adminSession, origin: "http://localhost:5180" },
     });
-    expect(emptyDelete.statusCode).toBe(200);
-    expect(emptyDelete.json()).toEqual({ departmentId: "44444444-4444-4444-8444-444444444444", status: "archived" });
+    expect(customDelete.statusCode).toBe(200);
+    expect(customDelete.json()).toEqual({ departmentId: "44444444-4444-4444-8444-444444444444", status: "archived", reassignedCount: 0 });
 
     const memberSession = await desktopSession(app, "member@example.test");
     const denied = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/administration`, headers: { cookie: memberSession } });
@@ -1305,15 +1305,9 @@ class MemoryRepository implements ArdenDataRepository {
   async deleteDepartment(userId: string, requestedOrganization: string, departmentId: string): Promise<DeleteDepartmentResult> {
     if (userId !== ownerId || requestedOrganization !== organizationId) return { success: false, errorReason: "NOT_FOUND" };
     if (departmentId === "ffffffff-ffff-4fff-8fff-ffffffffffff") {
-      return { success: false, errorReason: "NOT_EMPTY" };
+      return { success: false, errorReason: "BASE_DEPARTMENT" };
     }
-    if (departmentId === "22222222-2222-4222-8222-222222222222") {
-      return { success: false, errorReason: "HAS_INVITATIONS" };
-    }
-    if (departmentId === "33333333-3333-4333-8333-333333333333") {
-      return { success: false, errorReason: "LAST_DEPARTMENT" };
-    }
-    return { success: true };
+    return { success: true, reassignedCount: 0 };
   }
   async changePrimaryDepartment(userId: string, requestedOrganization: string, _membershipId: string, _departmentId: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
 

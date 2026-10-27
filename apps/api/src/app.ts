@@ -366,10 +366,10 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Body: { name: string; departmentName: string } }>("/api/v1/organizations", {
+  app.post<{ Body: { name: string; departmentName?: string } }>("/api/v1/organizations", {
     schema: {
       body: {
-        type: "object", additionalProperties: false, required: ["name", "departmentName"],
+        type: "object", additionalProperties: false, required: ["name"],
         properties: {
           name: { type: "string", minLength: 1, maxLength: 120 },
           departmentName: { type: "string", minLength: 1, maxLength: 80 },
@@ -380,7 +380,7 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     const name = request.body.name.trim();
-    const departmentName = request.body.departmentName.trim();
+    const departmentName = request.body.departmentName?.trim() || "General";
     if (!isValidLabel(name, 120) || !isValidLabel(departmentName, 80) || !context.emailVerified || !isNormalizedEmail(context.email)) {
       return reply.code(400).send(safeError("INVALID_ORGANIZATION", "Verified account details and non-empty names are required.", request.id));
     }
@@ -447,18 +447,12 @@ export function buildApp(dependencies: AppDependencies) {
     try {
       const result = await dependencies.repository.deleteDepartment(context.userId, request.params.organizationId, request.params.departmentId, request.id);
       if (!result.success) {
-        if (result.errorReason === "NOT_EMPTY") {
-          return reply.code(409).send(safeError("DEPARTMENT_NOT_EMPTY", "This department cannot be deleted because it still has active members. Move all members to another department first.", request.id));
-        }
-        if (result.errorReason === "HAS_INVITATIONS") {
-          return reply.code(409).send(safeError("DEPARTMENT_HAS_INVITATIONS", "This department cannot be deleted because it has pending invitations. Revoke them before deleting.", request.id));
-        }
-        if (result.errorReason === "LAST_DEPARTMENT") {
-          return reply.code(409).send(safeError("LAST_DEPARTMENT", "Cannot delete the only active department in this organization.", request.id));
+        if (result.errorReason === "BASE_DEPARTMENT") {
+          return reply.code(409).send(safeError("CANNOT_DELETE_BASE_DEPARTMENT", "The base department of the organization cannot be deleted.", request.id));
         }
         return reply.code(404).send(resourceNotAvailable(request.id));
       }
-      return reply.code(200).send({ departmentId: request.params.departmentId, status: "archived" });
+      return reply.code(200).send({ departmentId: request.params.departmentId, status: "archived", reassignedCount: result.reassignedCount ?? 0 });
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Department deletion failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
