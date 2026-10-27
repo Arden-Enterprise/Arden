@@ -27,6 +27,7 @@ describe("redesigned knowledge states", () => {
 
   it("distinguishes a published snapshot from a later working version", () => {
     expect(draftStatus(draft).label).toBe("Draft · metadata incomplete");
+    expect(draftStatus({ ...draft, audienceIds: undefined as unknown as string[] }).label).toBe("Draft · metadata incomplete");
     expect(draftStatus({ ...draft, responsibleDepartmentId: "dept" }).label).toBe("Draft · metadata incomplete");
     expect(draftStatus({ ...draft, responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT", audienceIds: ["audience"] }).label).toBe("Draft");
     expect(draftStatus({ ...draft, hasPendingSubmission: true }, submission).label).toBe("Awaiting review");
