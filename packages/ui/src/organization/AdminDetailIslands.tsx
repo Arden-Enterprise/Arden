@@ -10,7 +10,10 @@ export function memberInitials(name: string): string {
   return name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 }
 
-export function memberStatus(status: string): { label: string; tone: string } {
+export function memberStatus(status: string, departmentId?: string | null): { label: string; tone: string } {
+  if (status === "ACTIVE" && !departmentId) {
+    return { label: "Awaiting assignment", tone: "tone-info" };
+  }
   return status === "ACTIVE" ? { label: "Active", tone: "tone-success" }
     : status === "INVITED" ? { label: "Awaiting assignment", tone: "tone-info" }
       : { label: "Inactive", tone: "" };
@@ -47,7 +50,7 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
   const heading = useDetailFocus();
   const titleId = useId();
   const [moving, setMoving] = useState(false);
-  const status = memberStatus(member.status);
+  const status = memberStatus(member.status, member.departmentId);
   const otherDepartments = (member.departmentIds ?? []).filter((id) => id !== member.departmentId);
   const groupMemberships = audienceGroups.flatMap((group) => group.members
     .filter((groupMember) => groupMember.membershipId === member.id && groupMember.status === "ACTIVE")
@@ -70,6 +73,7 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
       {moving ? <label className="island-property"><span><small>Primary department</small>
         <select value={member.departmentId ?? ""} disabled={busy} autoFocus onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setMoving(false); } }}
           onChange={(event) => { onDepartmentChange(event.target.value); setMoving(false); }}>
+          {!member.departmentId && <option value="">Choose department…</option>}
           {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></span>
         <button type="button" className="island-link-button" onClick={() => setMoving(false)}>Cancel</button></label>
         : <div className="island-property"><span><small>Department</small><strong>{departmentName(member.departmentId)}</strong></span>

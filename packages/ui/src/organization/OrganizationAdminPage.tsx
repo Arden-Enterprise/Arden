@@ -57,7 +57,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [grantFilter, setGrantFilter] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
   const [departmentNameInput, setDepartmentNameInput] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteDepartmentId, setInviteDepartmentId] = useState("");
   const [inviteError, setInviteError] = useState("");
   const [departmentError, setDepartmentError] = useState("");
   const [grantSubmitted, setGrantSubmitted] = useState(false);
@@ -80,7 +79,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       loadOrganizationAdministration(platform, organizationId), listReviewerGrants(platform, organizationId),
     ]);
     setData(administration); setReviewerGrants(grants);
-    setInviteDepartmentId((current) => current || administration.departments[0]?.id || "");
   }, [platform, organizationId]);
 
   useEffect(() => {
@@ -88,7 +86,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     void Promise.all([loadOrganizationAdministration(platform, organizationId), listReviewerGrants(platform, organizationId)])
       .then(([administration, grants]) => { if (!active) return;
         setData(administration); setReviewerGrants(grants);
-        setInviteDepartmentId(administration.departments[0]?.id ?? "");
       }).catch(() => { if (active) setError("Organization administration is unavailable for this account."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -136,7 +133,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const matchingMembers = data?.members.filter((member) => {
     const query = memberQuery.trim().toLowerCase();
     return (!query || `${member.name} ${member.email}`.toLowerCase().includes(query))
-      && (memberStatus === "ALL" || (memberStatus === "INACTIVE" ? member.status === "SUSPENDED" || member.status === "LEFT" : member.status === memberStatus))
+      && (memberStatus === "ALL" || (memberStatus === "INVITED" ? !member.departmentId || member.status === "INVITED" : memberStatus === "INACTIVE" ? member.status === "SUSPENDED" || member.status === "LEFT" : member.status === memberStatus))
       && (memberDepartment === "ALL" || (member.departmentIds ?? [member.departmentId]).includes(memberDepartment));
   }) ?? [];
   const canGrant = Boolean(reviewerId && (reviewScope === "ORGANIZATION" || reviewDepartmentId));
@@ -184,7 +181,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     if (validation) { setInviteError(validation); document.getElementById("admin-invite-email")?.focus(); return; }
     setInviteError(""); setInviteSuccess("");
     void perform(async () => {
-      const result = await inviteOrganizationMember(platform, organizationId, inviteDepartmentId, email);
+      const result = await inviteOrganizationMember(platform, organizationId, null, email);
       setInviteEmail("");
       const success = result.deliveryMode === "local-test-no-email" ? `Invitation for ${email} saved locally. No email was sent.` : `Invitation email sent to ${email}.`;
       setInviteSuccess(success);
@@ -260,7 +257,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               footer={<span aria-live="polite">Showing {matchingMembers.length} of {data.members.length} members</span>}>
               {matchingMembers.map((member) => {
                 const grants = reviewerGrants.filter((grant) => grant.reviewerMembershipId === member.id && grant.status === "ACTIVE");
-                const status = describeMemberStatus(member.status);
+                const status = describeMemberStatus(member.status, member.departmentId);
                 const otherDepartments = (member.departmentIds ?? []).filter((id) => id !== member.departmentId);
                 return <IslandRow key={member.id} selected={selectedMemberId === member.id}>
                   <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedMemberId(member.id)} aria-label={`Open details for ${member.name}`}>
@@ -346,13 +343,12 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           </div>
           <aside className="island island-panel island-side admin-form-island" aria-labelledby="admin-invite-title">
             <h2 id="admin-invite-title">Invite people</h2>
-            {data.departments.length ? <form className="admin-side-form" noValidate onSubmit={submitInvite}>
+            <form className="admin-side-form" noValidate onSubmit={submitInvite}>
               <label className="organization-field"><span>Work email</span><input id="admin-invite-email" type="email" maxLength={320} placeholder="name@company.com" value={inviteEmail} disabled={busy} aria-invalid={Boolean(inviteError)} aria-describedby="admin-invite-help" onChange={(event) => { setInviteEmail(event.target.value); setInviteError(""); setInviteSuccess(""); }} /><small id="admin-invite-help" className={inviteError ? "field-error" : ""}>{inviteError || `They’ll receive a link to join ${organizationName}.`}</small></label>
-              <label className="organization-field"><span>Primary department</span><select required value={inviteDepartmentId} disabled={busy} onChange={(event) => setInviteDepartmentId(event.target.value)}>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
               <button className="primary-button" type="submit" disabled={busy}>{busy ? "Sending…" : "Send invitation"}</button>
               {inviteSuccess && <p className="admin-inline-success" role="status">{inviteSuccess}</p>}
-            </form> : <div className="island-box"><strong>Create a department first</strong><p>Invitations need a primary department.</p><button type="button" className="secondary-button" onClick={() => selectTab("departments")}>Go to Departments</button></div>}
-            <p className="island-meta">Each link is single-use and expires. New members join as Members; access changes happen after they accept.</p>
+            </form>
+            <p className="island-meta">Each link is single-use and expires. Invited members join the organization waiting room until assigned to a department.</p>
           </aside>
           </div>
         </div>}

@@ -7,6 +7,8 @@ import { isKnowledgeClassification, type KnowledgeClassification } from "./knowl
 export type OrganizationMembership = {
   organization: { id: string; name: string };
   status: string;
+  departmentId?: string | null;
+  departmentName?: string | null;
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
 };
@@ -20,7 +22,7 @@ export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
   members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; departmentIds?: string[]; roleIds: string[]; roleNames: string[] }>;
-  invitations: Array<{ id: string; email: string; departmentId: string; status: string; expiresAt: string }>;
+  invitations: Array<{ id: string; email: string; departmentId: string | null; status: string; expiresAt: string }>;
 };
 
 export type CreatedKnowledgeDraft = {
@@ -423,8 +425,11 @@ export async function changePrimaryDepartment(platform: Platform, organizationId
   await request(platform, `/api/v1/organizations/${organizationId}/members/${membershipId}/department`, { method: "POST", body: JSON.stringify({ departmentId }) });
 }
 
-export async function inviteOrganizationMember(platform: Platform, organizationId: string, departmentId: string, email: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
-  return request(platform, `/api/v1/organizations/${organizationId}/invitations`, { method: "POST", body: JSON.stringify({ departmentId, email }) });
+export async function inviteOrganizationMember(platform: Platform, organizationId: string, departmentId: string | null | undefined, email: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
+  return request(platform, `/api/v1/organizations/${organizationId}/invitations`, {
+    method: "POST",
+    body: JSON.stringify({ email, ...(departmentId ? { departmentId } : {}) }),
+  });
 }
 
 export async function resendOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {

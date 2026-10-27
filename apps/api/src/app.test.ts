@@ -179,7 +179,7 @@ describe("API auth and private draft routes", () => {
       account: { passwordSetupRequired: false },
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
-        status: "active", roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
+        status: "active", departmentId: null, departmentName: null, roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
       }],
     });
   });
@@ -437,7 +437,7 @@ describe("API auth and private draft routes", () => {
     const created = await app.inject({
       method: "POST", url: `/api/v1/organizations/${organizationId}/invitations`,
       headers: { cookie: adminSession, origin: "http://localhost:5180" },
-      payload: { departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", email: "New.Member@Example.Test" },
+      payload: { email: "New.Member@Example.Test" },
     });
     expect(created.statusCode).toBe(202);
     expect(JSON.stringify(created.json())).not.toContain("token");
@@ -1311,8 +1311,8 @@ class MemoryRepository implements ArdenDataRepository {
   }
   async changePrimaryDepartment(userId: string, requestedOrganization: string, _membershipId: string, _departmentId: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
 
-  async createInvitation(userId: string, requestedOrganization: string, departmentId: string, email: string, tokenHash: string, expiresAt: Date): Promise<{ invitationId: string; email: string; organizationName: string; expiresAt: Date } | null> {
-    if (userId !== ownerId || requestedOrganization !== organizationId || departmentId !== "ffffffff-ffff-4fff-8fff-ffffffffffff") return null;
+  async createInvitation(userId: string, requestedOrganization: string, _departmentId: string | null | undefined, email: string, tokenHash: string, expiresAt: Date): Promise<{ invitationId: string; email: string; organizationName: string; expiresAt: Date } | null> {
+    if (userId !== ownerId || requestedOrganization !== organizationId) return null;
     this.pendingInvitation = { invitationId: "99999999-9999-4999-8999-999999999999", email, tokenHash, expiresAt, accepted: false };
     return { invitationId: this.pendingInvitation.invitationId, email, organizationName: "Arden Test Org", expiresAt };
   }

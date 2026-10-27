@@ -356,6 +356,8 @@ export function buildApp(dependencies: AppDependencies) {
         memberships: memberships.map((membership) => ({
           organization: { id: membership.organizationId, name: membership.organizationName },
           status: membership.status.toLowerCase(),
+          departmentId: membership.departmentId ?? null,
+          departmentName: membership.departmentName ?? null,
           roleCodes: membership.roleCodes,
           canUsePrivateWorkspace: membership.canUsePrivateWorkspace,
         })),
@@ -480,11 +482,11 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: { departmentId: string; email: string } }>("/api/v1/organizations/:organizationId/invitations", {
+  app.post<{ Params: { organizationId: string }; Body: { departmentId?: string | null; email: string } }>("/api/v1/organizations/:organizationId/invitations", {
     schema: {
       params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
       body: {
-        type: "object", additionalProperties: false, required: ["departmentId", "email"],
+        type: "object", additionalProperties: false, required: ["email"],
         properties: {
           departmentId: { type: "string", pattern: uuidPattern },
           email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
@@ -501,10 +503,11 @@ export function buildApp(dependencies: AppDependencies) {
     const token = randomBytes(32).toString("base64url");
     const tokenHash = hashInvitationToken(token);
     const email = request.body.email.trim().toLowerCase();
+    const departmentId = request.body.departmentId ? request.body.departmentId.trim() : null;
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     try {
       const invitation = await dependencies.repository.createInvitation(
-        context.userId, request.params.organizationId, request.body.departmentId, email, tokenHash, expiresAt, request.id,
+        context.userId, request.params.organizationId, departmentId, email, tokenHash, expiresAt, request.id,
       );
       if (!invitation) return reply.code(404).send(resourceNotAvailable(request.id));
       try {

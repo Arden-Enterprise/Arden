@@ -15,7 +15,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const isLive = memberships !== undefined;
-  const choices = memberships?.filter((item) => item.status === "active" && item.canUsePrivateWorkspace) ?? [];
+  const choices = memberships?.filter((item) => item.status === "active") ?? [];
   return (
     <main className="sign-in-page workspace-select-page">
       <WelcomePanel mode="workspace" />
@@ -26,13 +26,26 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
           {testMode && <p className="preview-disclaimer" role="status">Kiet Local test session · no login · changes are saved to the development database; invitation emails are not sent.</p>}
 
           {isLive ? <div className="workspace-memberships">
-            {choices.map((membership) => <button type="button" key={membership.organization.id} className="workspace-membership" onClick={() => onContinue(membership.organization.id)}>
-              <span className="workspace-membership-heading"><img src={entryAssets.selectedWorkspace} alt="" width={26} height={26} /><strong>{membership.organization.name}</strong><span className="workspace-membership-status">AVAILABLE</span></span>
-              <span>{membership.roleCodes.length ? membership.roleCodes.join(", ") : "Active membership"} · Private workspace access</span>
-            </button>)}
+            {choices.map((membership) => {
+              const isAwaiting = !membership.departmentId && !membership.canUsePrivateWorkspace;
+              return (
+                <button type="button" key={membership.organization.id} className="workspace-membership" onClick={() => onContinue(membership.organization.id)}>
+                  <span className="workspace-membership-heading">
+                    <img src={entryAssets.selectedWorkspace} alt="" width={26} height={26} />
+                    <strong>{membership.organization.name}</strong>
+                    <span className="workspace-membership-status">{isAwaiting ? "AWAITING ASSIGNMENT" : "AVAILABLE"}</span>
+                  </span>
+                  <span>
+                    {isAwaiting
+                      ? "Organization joined · Awaiting department assignment"
+                      : `${membership.departmentName ? `${membership.departmentName} · ` : ""}${membership.roleCodes.length ? membership.roleCodes.join(", ") : "Active membership"} · Private workspace access`}
+                  </span>
+                </button>
+              );
+            })}
             {memberships.filter((item) => !choices.includes(item)).map((membership) => <div key={membership.organization.id} className="workspace-membership is-unavailable">
               <span className="workspace-membership-heading"><img src={entryAssets.unavailableWorkspace} alt="" width={26} height={26} /><strong>{membership.organization.name}</strong><span className="workspace-membership-status">{membership.status.toUpperCase()}</span></span>
-              <span>{membership.status === "active" ? "This membership has no private workspace permission." : "An active membership is required."}</span>
+              <span>An active membership is required.</span>
             </div>)}
             {choices.length === 0 && <p role="status">You do not have an active organization workspace yet. You can create an organization or ask an administrator for membership.</p>}
             {onCreateOrganization && <form className="organization-create-form" onSubmit={(event) => {
