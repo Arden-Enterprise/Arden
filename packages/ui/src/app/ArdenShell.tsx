@@ -19,6 +19,7 @@ import { OrganizationAccessPage } from "../organization/OrganizationAccessPage";
 import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
 import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
+import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
 import { StatusIslandContext, type StatusIslandConfirm, type StatusIslandToast } from "../shared/StatusIslandContext";
 import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
@@ -158,7 +159,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (typeof window === "undefined") return null;
     const parsed = parseRecoveryHash(window.location);
     if (parsed) {
-      try { window.history.replaceState(null, "", window.location.pathname); } catch {}
+      try { window.history.replaceState(null, "", "/"); } catch {}
     }
     return parsed;
   });
@@ -189,6 +190,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
   const enterServerOrganization = (membership: OrganizationMembership) => {
     if (membership.status !== "active" || !membership.canUsePrivateWorkspace) return;
+    if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
+      try { window.history.replaceState(null, "", "/"); } catch {}
+    }
     setServerOrganizationId(membership.organization.id);
     setCreatedKnowledgeDraft(null);
     setAssignedReviewCount(undefined);
@@ -202,8 +206,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   };
 
   const acceptServerSession = async (current: CurrentSession) => {
-    if (new URLSearchParams(window.location.search).has("auth")) {
-      window.history.replaceState(null, "", window.location.pathname);
+    if (new URLSearchParams(window.location.search).has("auth") || (typeof window !== "undefined" && window.location.pathname === "/reset-password")) {
+      try { window.history.replaceState(null, "", "/"); } catch {}
     }
     setServerSession(current);
     if (current.account?.passwordSetupRequired === true) {
@@ -216,6 +220,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     }
     if (recoveryTokens) {
       setRecoveryTokens(null);
+    }
+    if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
+      try { window.history.replaceState(null, "", "/"); } catch {}
     }
     const allowed = current.memberships.filter((membership) => membership.status === "active" && membership.canUsePrivateWorkspace);
     if (allowed.length === 1) enterServerOrganization(allowed[0]);
@@ -480,6 +487,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={(previewRole === "admin" && !serverSession) || liveAdmin}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined} onNavigate={navigate} />
 
+      <ErrorBoundary>
       <div className="workspace-feature-slot" hidden={activeView !== "ask-arden"}>
         <AskArdenPage key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`}
           active={activeView === "ask-arden"} platform={platform} organizationId={serverOrganizationId} onOpenCitation={openKnowledgeCitation} />
@@ -504,6 +512,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           onAssignedReviewCount={setAssignedReviewCount}
           onNavigate={navigate} {...contextControl} />
       </div>
+      </ErrorBoundary>
 
       {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close context" onClick={contextControl.onToggleContext} />}
       <KnowledgePane content={activeContext} open={contextOpen} onToggle={contextControl.onToggleContext} />
