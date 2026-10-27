@@ -390,6 +390,10 @@ export type KnowledgeOptions = {
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
 };
 
+export type DeleteDepartmentResult =
+  | { success: true }
+  | { success: false; errorReason: "NOT_FOUND" | "NOT_EMPTY" | "HAS_INVITATIONS" | "LAST_DEPARTMENT" };
+
 export interface ArdenDataRepository {
   readonly audienceGroups?: AudienceGroupStore;
   readonly systemAdministration?: SystemAdministrationStore;
@@ -399,10 +403,12 @@ export interface ArdenDataRepository {
   createInvitation(userId: string, organizationId: string, departmentId: string, email: string, tokenHash: string, expiresAt: Date, requestId: string): Promise<CreatedInvitation | null>;
   rotateInvitation(userId: string, organizationId: string, invitationId: string, tokenHash: string, requestId: string): Promise<CreatedInvitation | null>;
   revokeInvitation(userId: string, organizationId: string, invitationId: string, requestId: string): Promise<boolean>;
+  getInvitationByToken(tokenHash: string): Promise<{ invitationId: string; organizationName: string; email: string; expiresAt: Date } | null>;
   acceptInvitation(userId: string, email: string, fullName: string | null, emailVerified: boolean, tokenHash: string, requestId: string): Promise<boolean>;
   getOrganizationAdministration(userId: string, organizationId: string): Promise<OrganizationAdminData | null>;
   getKnowledgeOptions(userId: string, organizationId: string): Promise<KnowledgeOptions | null>;
   createDepartment(userId: string, organizationId: string, name: string, requestId: string): Promise<boolean>;
+  deleteDepartment(userId: string, organizationId: string, departmentId: string, requestId: string): Promise<DeleteDepartmentResult>;
   changePrimaryDepartment(userId: string, organizationId: string, membershipId: string, departmentId: string, requestId: string): Promise<boolean>;
   listDrafts(userId: string, organizationId: string, limit: number, cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null>;
   getDraft(userId: string, organizationId: string, draftId: string): Promise<PrivateDraft | null>;
@@ -799,6 +805,56 @@ export class ArdenRepository implements ArdenDataRepository {
     })) ?? false;
   }
 
+  async deleteDepartment(userId: string, organizationId: string, departmentId: string, requestId: string): Promise<DeleteDepartmentResult> {
+    return (await this.withOrganizationAdmin(userId, organizationId, async (client, actorMembershipId) => {
+      const dept = await client.query<{ department_id: string; default_role_id: string; name: string }>(`
+        SELECT department_id, default_role_id, name
+          FROM department
+         WHERE department_id = $1 AND organization_id = $2 AND status = 'ACTIVE'
+         FOR UPDATE`, [departmentId, organizationId]);
+      const department = dept.rows[0];
+      if (!department) return { success: false, errorReason: "NOT_FOUND" };
+
+      const totalDepts = await client.query<{ count: string }>(`
+        SELECT count(*)::text AS count
+          FROM department
+         WHERE organization_id = $1 AND status = 'ACTIVE'`, [organizationId]);
+      if (parseInt(totalDepts.rows[0]?.count ?? "0", 10) <= 1) {
+        return { success: false, errorReason: "LAST_DEPARTMENT" };
+      }
+
+      const memberCount = await client.query<{ count: string }>(`
+        SELECT count(*)::text AS count
+          FROM department_membership
+         WHERE department_id = $1 AND status = 'ACTIVE'`, [departmentId]);
+      if (parseInt(memberCount.rows[0]?.count ?? "0", 10) > 0) {
+        return { success: false, errorReason: "NOT_EMPTY" };
+      }
+
+      const inviteCount = await client.query<{ count: string }>(`
+        SELECT count(*)::text AS count
+          FROM organization_invitation
+         WHERE department_id = $1 AND organization_id = $2 AND status = 'PENDING' AND expires_at > now()`,
+        [departmentId, organizationId]);
+      if (parseInt(inviteCount.rows[0]?.count ?? "0", 10) > 0) {
+        return { success: false, errorReason: "HAS_INVITATIONS" };
+      }
+
+      await client.query(`UPDATE department SET status = 'ARCHIVED', updated_at = now() WHERE department_id = $1`, [departmentId]);
+      await client.query(`UPDATE audience SET status = 'INACTIVE', updated_at = now() WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId]);
+      await client.query(`UPDATE access_scope SET status = 'INACTIVE' WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId]);
+      await client.query(`UPDATE reviewer_grant SET status = 'INACTIVE' WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId]);
+      await client.query(`UPDATE role SET status = 'INACTIVE' WHERE role_id = $1`, [department.default_role_id]);
+
+      await client.query(`
+        INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
+        VALUES ($1, $2, 'DEPARTMENT_DELETED', 'SUCCESS', $3::jsonb)`,
+        [organizationId, actorMembershipId, JSON.stringify({ departmentId, name: department.name, requestId })]);
+
+      return { success: true };
+    })) ?? { success: false, errorReason: "NOT_FOUND" };
+  }
+
   async changePrimaryDepartment(userId: string, organizationId: string, membershipId: string, departmentId: string, requestId: string): Promise<boolean> {
     return (await this.withOrganizationAdmin(userId, organizationId, async (client, actorMembershipId) => {
       const member = await client.query<{ current_department_id: string | null }>(`
@@ -830,11 +886,15 @@ export class ArdenRepository implements ArdenDataRepository {
              WHERE agm.membership_id = $1 AND agm.status = 'ACTIVE'
                AND a.organization_id = $3 AND a.kind = 'GROUP'
                AND a.legacy_role_id = ra.role_id)`, [membershipId, currentDepartmentId, organizationId]);
-        await client.query(`UPDATE department_membership SET status = 'REMOVED', removed_at = now()
+        await client.query(`UPDATE department_membership SET is_primary = false, status = 'REMOVED', removed_at = now()
           WHERE membership_id = $1 AND department_id = $2 AND is_primary AND status = 'ACTIVE'`, [membershipId, currentDepartmentId]);
       }
-      await client.query(`INSERT INTO department_membership (membership_id, department_id, is_primary, status)
-        VALUES ($1, $2, true, 'ACTIVE')`, [membershipId, departmentId]);
+      await client.query(`
+        INSERT INTO department_membership (membership_id, department_id, is_primary, status, assigned_at, removed_at)
+        VALUES ($1, $2, true, 'ACTIVE', now(), null)
+        ON CONFLICT (membership_id, department_id)
+        DO UPDATE SET is_primary = true, status = 'ACTIVE', assigned_at = now(), removed_at = null`,
+        [membershipId, departmentId]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [membershipId, assignment.default_role_id, assignment.access_scope_id]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
@@ -852,6 +912,43 @@ export class ArdenRepository implements ArdenDataRepository {
       [organizationId, actorMembershipId, JSON.stringify({ membershipId, departmentId, requestId })]);
       return true;
     })) ?? false;
+  }
+
+  async getInvitationByToken(tokenHash: string): Promise<{ invitationId: string; organizationName: string; email: string; expiresAt: Date } | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE arden_runtime");
+      await client.query("SET LOCAL search_path TO arden, public");
+      await client.query(`SELECT set_config('arden.actor_id', '', true),
+                                 set_config('arden.organization_id', '', true),
+                                 set_config('arden.invitation_token_hash', $1, true)`, [tokenHash]);
+      const found = await client.query<{ invitation_id: string; organization_id: string; email: string; expires_at: Date }>(`
+        SELECT invitation_id, organization_id, email, expires_at
+          FROM organization_invitation
+         WHERE token_hash = $1 AND status = 'PENDING' AND expires_at > now()`, [tokenHash]);
+      const invitation = found.rows[0];
+      if (!invitation) {
+        await client.query("ROLLBACK");
+        return null;
+      }
+      await client.query("SELECT set_config('arden.organization_id', $1, true)", [invitation.organization_id]);
+      const orgResult = await client.query<{ name: string }>(`
+        SELECT name FROM organization WHERE organization_id = $1 AND status = 'ACTIVE'`, [invitation.organization_id]);
+      const organizationName = orgResult.rows[0]?.name ?? "Arden Organization";
+      await client.query("COMMIT");
+      return {
+        invitationId: invitation.invitation_id,
+        organizationName,
+        email: invitation.email,
+        expiresAt: invitation.expires_at,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async acceptInvitation(userId: string, email: string, fullName: string | null, emailVerified: boolean, tokenHash: string, requestId: string): Promise<boolean> {

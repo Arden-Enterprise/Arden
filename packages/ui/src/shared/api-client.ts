@@ -356,6 +356,16 @@ export async function signUp(platform: Platform, email: string, password: string
   });
 }
 
+export type InvitationPreview = {
+  organizationName: string;
+  email: string;
+  expiresAt: string;
+};
+
+export async function getInvitationPreview(platform: Platform, token: string): Promise<InvitationPreview> {
+  return request<InvitationPreview>(platform, `/api/v1/invitations/${encodeURIComponent(token)}`);
+}
+
 export async function acceptInvitation(platform: Platform, token: string): Promise<void> {
   await request(platform, "/api/v1/invitations/accept", {
     method: "POST", body: JSON.stringify({ token }),
@@ -368,6 +378,13 @@ export async function loadOrganizationAdministration(platform: Platform, organiz
 
 export async function createDepartment(platform: Platform, organizationId: string, name: string): Promise<void> {
   await request(platform, `/api/v1/organizations/${organizationId}/departments`, { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export async function deleteDepartment(platform: Platform, organizationId: string, departmentId: string): Promise<void> {
+  await request(platform, `/api/v1/organizations/${organizationId}/departments/${departmentId}/delete`, {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export async function loadAudienceGroups(platform: Platform, organizationId: string): Promise<AudienceGroupRecord[]> {

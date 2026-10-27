@@ -25,6 +25,7 @@ const administrationPath = new RegExp(`^/api/v1/organizations/${uuid}/administra
 const adminCreatePath = new RegExp(`^/api/v1/organizations/${uuid}/(departments|invitations)$`);
 const adminMemberDepartmentPath = new RegExp(`^/api/v1/organizations/${uuid}/members/${uuid}/department$`);
 const adminInvitationActionPath = new RegExp(`^/api/v1/organizations/${uuid}/invitations/${uuid}/(resend|revoke)$`);
+const adminDepartmentActionPath = new RegExp(`^/api/v1/organizations/${uuid}/departments/${uuid}/delete$`);
 const audienceGroupReadPath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups(?:/${uuid})?$`);
 const audienceGroupItemPath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}$`);
 const audienceGroupMemberPath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/members$`);
@@ -32,6 +33,7 @@ const audienceGroupRemovePath = new RegExp(`^/api/v1/organizations/${uuid}/audie
 const audienceGroupDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/deactivate$`);
 const systemAdministratorCollection = /^\/api\/v1\/system\/administrators$/;
 const systemAdministratorRevoke = new RegExp(`^/api/v1/system/administrators/${uuid}/revoke$`);
+const invitationPreview = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}$/;
 
 export function validateDesktopApiRequest(value: unknown): value is DesktopApiRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -110,11 +112,14 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && request.body === "{}" && !request.ifMatch && !request.idempotencyKey;
   const adminPost = (adminCreatePath.test(url.pathname) || adminMemberDepartmentPath.test(url.pathname))
     && request.method === "POST" && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
-  const adminAction = adminInvitationActionPath.test(url.pathname) && request.method === "POST"
-    && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const adminAction = ((adminInvitationActionPath.test(url.pathname) && !request.body)
+    || (adminDepartmentActionPath.test(url.pathname) && (!request.body || request.body === "{}")))
+    && request.method === "POST" && !request.ifMatch && !request.idempotencyKey;
   const accountPost = (url.pathname === "/api/v1/auth/sign-up" || url.pathname === "/api/v1/organizations"
     || url.pathname === "/api/v1/invitations/accept" || url.pathname === "/api/v1/auth/password") && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
+  const invitationGet = invitationPreview.test(url.pathname) && request.method === "GET"
+    && !request.body && !request.ifMatch && !request.idempotencyKey;
   const otherRequest = (
     (url.pathname === "/api/v1/auth/sign-in" && request.method === "POST") ||
     (url.pathname === "/api/v1/auth/sign-out" && request.method === "POST") ||
@@ -124,7 +129,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
   return (otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
     || knowledgeSubmit || knowledgeDecision || grantCreate || grantDeactivate || aiAnswer || adminGet
-    || adminPost || adminAction || accountPost || audienceGroupGet || audienceGroupPatch
+    || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke) && (!url.search || queryAllowed);
 }

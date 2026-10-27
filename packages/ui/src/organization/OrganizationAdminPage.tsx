@@ -5,6 +5,7 @@ import { ActionToast } from "../shared/ActionToast";
 import { IslandConfirm } from "../shared/IslandConfirm";
 import {
   ApiError, changePrimaryDepartment, createDepartment, createReviewerGrant, deactivateReviewerGrant,
+  deleteDepartment,
   inviteOrganizationMember, listReviewerGrants, loadAudienceGroups, loadOrganizationAdministration,
   removeAudienceGroupMember, resendOrganizationInvitation, revokeOrganizationInvitation,
   type OrganizationAdministration, type ReviewerGrant,
@@ -148,6 +149,35 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     setDepartmentError("");
     void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentNameInput(""); }, "Department created with its managed audience.");
   };
+  const handleDeleteDepartment = (department: OrganizationAdministration["departments"][number]) => {
+    if (!data) return;
+    const inDepartment = data.members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
+    if (inDepartment.length > 0) {
+      setError(`Cannot delete department “${department.name}”: ${inDepartment.length} active member${inDepartment.length > 1 ? "s" : ""} still belong to this department. Reassign them before deleting.`);
+      return;
+    }
+    const pendingInvites = data.invitations.filter((inv) => inv.departmentId === department.id && inv.status === "PENDING" && new Date(inv.expiresAt).getTime() > Date.now());
+    if (pendingInvites.length > 0) {
+      setError(`Cannot delete department “${department.name}”: ${pendingInvites.length} pending invitation${pendingInvites.length > 1 ? "s" : ""} exist for this department. Revoke invitations before deleting.`);
+      return;
+    }
+    if (data.departments.length <= 1) {
+      setError("Cannot delete the only department in the organization.");
+      return;
+    }
+    setError("");
+    setConfirmation({
+      title: `Delete department “${department.name}”?`,
+      description: `This archives the department and deactivates its managed audience “Everyone in ${department.name}”. Existing records remain preserved.`,
+      action: "Delete department",
+      run: async () => {
+        await deleteDepartment(platform, organizationId, department.id);
+        if (selectedDepartmentId === department.id) {
+          setSelectedDepartmentId(null);
+        }
+      },
+    });
+  };
   const submitInvite = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const email = inviteEmail.trim();
@@ -265,19 +295,29 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         {tab === "departments" && <div role="tabpanel" aria-label="Departments" className="island-split">
           <div className="island-main">
             <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || "Arden also creates its managed “Everyone in …” audience."}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
-            {data.departments.length ? <IslandTable label="Departments" minWidth={560} columns="minmax(220px, 1.6fr) 120px 120px 110px"
-              headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS"]}>
-              {data.departments.map((department) => <IslandRow key={department.id} selected={selectedDepartmentId === department.id}>
-                <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedDepartmentId(department.id)} aria-label={`Open ${department.name}`}>
-                  <span><strong>{department.name}</strong><small>Everyone in {department.name}</small></span></button></IslandCell>
-                <IslandCell className="island-row-cell is-number">{data.members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id)).length}</IslandCell>
-                <IslandCell className="island-row-cell is-number">{data.members.filter((member) => member.departmentId === department.id).length}</IslandCell>
-                <IslandCell className="island-row-cell is-number">{new Set(reviewerGrants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId)).size}</IslandCell>
-              </IslandRow>)}
+            {data.departments.length ? <IslandTable label="Departments" minWidth={660} columns="minmax(200px, 1.6fr) 90px 90px 90px minmax(130px, auto)"
+              headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS", <span className="sr-only">Actions</span>]}>
+              {data.departments.map((department) => {
+                const inDepartment = data.members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
+                return <IslandRow key={department.id} selected={selectedDepartmentId === department.id}>
+                  <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedDepartmentId(department.id)} aria-label={`Open ${department.name}`}>
+                    <span><strong>{department.name}</strong><small>Everyone in {department.name}</small></span></button></IslandCell>
+                  <IslandCell className="island-row-cell is-number">{inDepartment.length}</IslandCell>
+                  <IslandCell className="island-row-cell is-number">{data.members.filter((member) => member.departmentId === department.id).length}</IslandCell>
+                  <IslandCell className="island-row-cell is-number">{new Set(reviewerGrants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId)).size}</IslandCell>
+                  <IslandCell className="island-row-actions">
+                    <button type="button" className="secondary-button" onClick={() => setSelectedDepartmentId(department.id)} aria-label={`Manage ${department.name}`}>Manage</button>
+                    <button type="button" className="secondary-button is-danger" disabled={busy} onClick={() => handleDeleteDepartment(department)} aria-label={`Delete ${department.name}`}>Delete…</button>
+                  </IslandCell>
+                </IslandRow>;
+              })}
             </IslandTable> : <div className="island island-empty"><h3>No departments yet</h3><p>Create one before inviting members. Every member needs a primary department.</p></div>}
           </div>
           {selectedDepartment && <DepartmentDetailIsland key={selectedDepartment.id} department={selectedDepartment} members={data.members} grants={reviewerGrants}
-            onClose={() => setSelectedDepartmentId(null)} onViewMembers={() => { setMemberDepartment(selectedDepartment.id); setSelectedDepartmentId(null); selectTab("members"); }} />}
+            busy={busy} deleteError={error}
+            onClose={() => setSelectedDepartmentId(null)}
+            onViewMembers={() => { setMemberDepartment(selectedDepartment.id); setSelectedDepartmentId(null); selectTab("members"); }}
+            onDelete={() => handleDeleteDepartment(selectedDepartment)} />}
         </div>}
         {tab === "audiences" && <div role="tabpanel" aria-label="Audiences" className="admin-roles"><ServerAudienceGroupPanel platform={platform} organizationId={organizationId} organizationName={organizationName}
           members={data.members} departments={data.departments}
