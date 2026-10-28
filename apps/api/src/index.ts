@@ -77,9 +77,6 @@ if (Boolean(aiUrl) !== Boolean(aiServiceToken)) {
   throw new Error("ARDEN_AI_URL and ARDEN_AI_SERVICE_TOKEN must be configured together");
 }
 const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServiceToken) : null;
-if (askArden && !indexDatabaseUrl) {
-  throw new Error("ARDEN_INDEX_DATABASE_URL is required for the embedded worker; provision a separate arden_indexer login");
-}
 const indexPool = askArden && indexDatabaseUrl
   ? new Pool({ connectionString: indexDatabaseUrl, max: 2, connectionTimeoutMillis: 10_000 }) : null;
 const contentStorage = new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot);
@@ -145,6 +142,9 @@ const app = buildApp({
 
 const port = Number(process.env.ARDEN_API_PORT ?? 3001);
 const host = process.env.ARDEN_API_HOST ?? "127.0.0.1";
+if (askArden && !indexPool) {
+  app.log.warn("Embedded indexing is disabled until a separate worker database login is configured");
+}
 const indexWorker = aiUrl && aiServiceToken && indexPool
   ? new IndexingWorker(
     randomUUID(),

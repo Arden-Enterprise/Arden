@@ -190,7 +190,7 @@ of the embedded worker. No worker/database credentials belong in GitHub build jo
 Both entry points default to a 300-second lease; `ARDEN_INDEX_LEASE_SECONDS` accepts 180–600
 seconds, longer than the 120-second bounded AI call with a completion margin. Monitor local storage
 and database latency; an unhealthy filesystem is not a latency guarantee. No AI configuration means
-Core indexing is disabled and answers unavailable; partial configuration fails explicitly.
+Core indexing is disabled and answers unavailable. A partial AI origin/token pair fails explicitly. If AI is enabled but the separate worker connection is missing, the API remains available and logs that embedded indexing is disabled; provision the worker before expecting new publications to activate.
 
 Migration 0021 preserves earlier migration history, serializes activation per draft and prevents a
 delayed older job from replacing any newer published snapshot, including after unpublication.
