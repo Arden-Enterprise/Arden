@@ -52,8 +52,14 @@ export function promotionRequest(env, tree) {
 export async function checkReadiness(env, request) {
   const { environment } = releaseContext(env);
   const status = await request({ op: "status", environment });
-  if (status?.pending !== null || status?.active?.manifest?.schema !== 1
-    || !sha.test(status.active.manifest.commit ?? "")) {
+  const manifest = status?.active?.manifest;
+  // Operator baselines predate uploads and intentionally have no upload schema.
+  const baseline = manifest != null && !Object.hasOwn(manifest, "schema")
+    && status.active.eligible_for_promotion === false && sha.test(manifest.tree ?? "")
+    && /^[0-9a-f]{64}$/.test(manifest.migrations ?? "")
+    && ["api", "web"].every(component => imageId.test(manifest.images?.[component]?.id ?? ""));
+  if (status?.pending !== null || (manifest?.schema !== 1 && !baseline)
+    || !sha.test(manifest?.commit ?? "")) {
     throw new Error("Release state needs operator inspection before building or deploying");
   }
 }

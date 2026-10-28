@@ -77,3 +77,19 @@ test("preflight refuses unavailable, incomplete or unresolved release state", as
   await assert.rejects(() => release.checkReadiness({ ...environment, GITHUB_EVENT_NAME: "pull_request" }, async () => { called = true; }));
   assert.equal(called, false);
 });
+
+test("preflight accepts the operator's non-promotable manual baseline format", async () => {
+  const status = {
+    active: { eligible_for_promotion: false, manifest: {
+      commit: "b".repeat(40), tree: "c".repeat(40), migrations: "d".repeat(64),
+      images: { api: { id: "sha256:" + "e".repeat(64) }, web: { id: "sha256:" + "f".repeat(64) } },
+    } },
+    pending: null,
+  };
+  await release.checkReadiness(environment, async () => status);
+  status.active.eligible_for_promotion = true;
+  await assert.rejects(() => release.checkReadiness(environment, async () => status));
+  status.active.eligible_for_promotion = false;
+  status.active.manifest.images.api.id = "unverified";
+  await assert.rejects(() => release.checkReadiness(environment, async () => status));
+});
