@@ -454,7 +454,7 @@ export function buildApp(dependencies: AppDependencies) {
         }
         return reply.code(404).send(resourceNotAvailable(request.id));
       }
-      return reply.code(200).send({ departmentId: request.params.departmentId, status: "archived", reassignedCount: result.reassignedCount ?? 0 });
+      return reply.code(200).send({ departmentId: request.params.departmentId, status: "archived", unassignedCount: result.unassignedCount ?? 0, reassignedCount: result.reassignedCount ?? 0 });
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Department deletion failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));

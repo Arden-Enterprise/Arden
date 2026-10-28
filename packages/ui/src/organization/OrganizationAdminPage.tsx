@@ -148,20 +148,14 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const handleDeleteDepartment = (department: OrganizationAdministration["departments"][number]) => {
     if (!data) return;
-    const isBase = department.isBase || department.code === "GENERAL";
-    if (isBase) {
-      setError(`Cannot delete the base department “${department.name}”.`);
-      return;
-    }
     const inDepartment = data.members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
-    const baseDept = data.departments.find((d) => d.isBase || d.code === "GENERAL") ?? data.departments[0];
     setError("");
     setConfirmation({
       title: `Delete department “${department.name}”?`,
       description: inDepartment.length > 0
-        ? `This department currently has ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}. Deleting it will automatically move them to the base department “${baseDept.name}” and revoke their access to “Everyone in ${department.name}”.`
+        ? `This department currently has ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}. Deleting it will move them to the waiting room until assigned to another department, and revoke their access to “Everyone in ${department.name}”.`
         : `This archives the department and deactivates its managed audience “Everyone in ${department.name}”.`,
-      action: inDepartment.length > 0 ? `Delete and move ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}` : "Delete department",
+      action: inDepartment.length > 0 ? `Delete and unassign ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}` : "Delete department",
       run: async () => {
         await deleteDepartment(platform, organizationId, department.id);
         if (selectedDepartmentId === department.id) {
@@ -287,20 +281,18 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         {tab === "departments" && <div role="tabpanel" aria-label="Departments" className="island-split">
           <div className="island-main">
             <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || "Arden also creates its managed “Everyone in …” audience."}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
-            {data.departments.length ? <IslandTable label="Departments" minWidth={680} columns="minmax(220px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) 150px"
+            {data.departments.length ? <IslandTable label="Departments" minWidth={600} columns="minmax(220px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) 96px"
               headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS", <span className="sr-only">Actions</span>]}>
               {data.departments.map((department) => {
-                const isBase = department.isBase || department.code === "GENERAL";
                 const inDepartment = data.members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
-                return <IslandRow key={department.id} selected={selectedDepartmentId === department.id}>
+                return <IslandRow key={department.id} selected={selectedDepartmentId === department.id} className="is-clickable" onClick={() => setSelectedDepartmentId(department.id)}>
                   <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedDepartmentId(department.id)} aria-label={`Open ${department.name}`}>
-                    <span><strong>{department.name}</strong>{isBase && <span className="island-chip tone-strong" style={{ marginLeft: 6 }}>Base</span>}<small>Everyone in {department.name}{isBase ? " · Default organization department" : ""}</small></span></button></IslandCell>
+                    <span><strong>{department.name}</strong><small>Everyone in {department.name}</small></span></button></IslandCell>
                   <IslandCell className="island-row-cell is-number">{inDepartment.length}</IslandCell>
                   <IslandCell className="island-row-cell is-number">{data.members.filter((member) => member.departmentId === department.id).length}</IslandCell>
                   <IslandCell className="island-row-cell is-number">{new Set(reviewerGrants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId)).size}</IslandCell>
-                  <IslandCell className="island-row-actions department-actions">
-                    <button type="button" className="secondary-button" onClick={() => setSelectedDepartmentId(department.id)} aria-label={`Manage ${department.name}`}>Manage</button>
-                    {!isBase ? <button type="button" className="secondary-button is-danger" disabled={busy} onClick={() => handleDeleteDepartment(department)} aria-label={`Delete ${department.name}`}>Delete</button> : <span className="department-action-spacer" aria-hidden="true" />}
+                  <IslandCell className="island-row-actions">
+                    <button type="button" className="secondary-button is-danger" disabled={busy} onClick={(event) => { event.stopPropagation(); handleDeleteDepartment(department); }} aria-label={`Delete ${department.name}`}>Delete</button>
                   </IslandCell>
                 </IslandRow>;
               })}

@@ -114,7 +114,6 @@ export function DepartmentDetailIsland({ department, members, grants, busy, dele
 }) {
   const heading = useDetailFocus();
   const titleId = useId();
-  const isBase = department.isBase || department.code === "GENERAL";
   const inDepartment = members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
   const primary = members.filter((member) => member.departmentId === department.id);
   const reviewers = new Set(grants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId));
@@ -122,7 +121,7 @@ export function DepartmentDetailIsland({ department, members, grants, busy, dele
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <div className="island-side-header">
       <span className="island-tile" aria-hidden="true"><Icon name="building" size={18} /></span>
-      <div><h2 id={titleId} ref={heading} tabIndex={-1}>{department.name}</h2><p>{isBase ? "Base department" : "Department"}</p></div>
+      <div><h2 id={titleId} ref={heading} tabIndex={-1}>{department.name}</h2><p>Department</p></div>
       <button type="button" className="island-icon-button" disabled aria-label="Rename department (not available yet)" title="Renaming is not available yet"><Icon name="edit" size={16} /></button>
       <button type="button" className="island-icon-button" onClick={onClose} aria-label="Close department details"><Icon name="close" size={16} /></button>
     </div>
@@ -144,16 +143,11 @@ export function DepartmentDetailIsland({ department, members, grants, busy, dele
       </div> : <p className="island-meta">No members yet.</p>}
       <button type="button" className="island-link-button" onClick={onViewMembers}>View all</button>
     </section>
-    {isBase ? (
-      <section className="island-detail-section" aria-label="Department lifecycle">
-        <h3>Department lifecycle</h3>
-        <p className="island-meta">This is the base department for the organization and cannot be deleted.</p>
-      </section>
-    ) : onDelete ? (
+    {onDelete ? (
       <section className="island-detail-section" aria-label="Department lifecycle">
         <h3>Department lifecycle</h3>
         {inDepartment.length > 0 ? (
-          <p className="island-meta">Deleting this department will automatically move {inDepartment.length} member{inDepartment.length > 1 ? "s" : ""} to the base department.</p>
+          <p className="island-meta">Deleting this department will move {inDepartment.length} member{inDepartment.length > 1 ? "s" : ""} to the waiting room until reassigned.</p>
         ) : (
           <p className="island-meta">This department has no members and can be deleted safely.</p>
         )}

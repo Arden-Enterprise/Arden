@@ -27,8 +27,8 @@ export function IslandTable({ label, columns, minWidth, headers, children, foote
   </section>;
 }
 
-export function IslandRow({ selected = false, children, className = "" }: { selected?: boolean; children: ReactNode; className?: string }) {
-  return <div role="row" className={`island-row${selected ? " is-selected" : ""}${className ? ` ${className}` : ""}`}>{children}</div>;
+export function IslandRow({ selected = false, children, className = "", onClick }: { selected?: boolean; children: ReactNode; className?: string; onClick?: (event: React.MouseEvent<HTMLDivElement>) => void }) {
+  return <div role="row" className={`island-row${selected ? " is-selected" : ""}${className ? ` ${className}` : ""}`} onClick={onClick}>{children}</div>;
 }
 
 export function IslandCell({ children, className = "island-row-cell" }: { children?: ReactNode; className?: string }) {

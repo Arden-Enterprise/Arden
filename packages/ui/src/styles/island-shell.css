@@ -363,6 +363,7 @@
 }
 .island-row.is-head { min-height: 36px; color: var(--arden-text-muted); font-size: 11px; font-weight: 600; letter-spacing: .08em; }
 .island-row:not(.is-head):hover { background: var(--arden-surface-hover); }
+.island-row.is-clickable { cursor: pointer; }
 .island-row.is-selected, .island-row.is-selected:hover { background: var(--arden-accent-subtle); }
 .island-row-name {
   display: flex; align-items: center; gap: 12px; min-width: 0; padding: 6px 0; border: 0; border-radius: 8px;
@@ -375,10 +376,7 @@
 .island-row-cell { display: grid; min-width: 0; color: var(--arden-text-secondary); line-height: 1.35; }
 .island-row-cell > .island-chip { justify-self: start; }
 .island-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.island-row-actions .secondary-button, .island-row-actions .admin-text-danger { min-height: var(--arden-control-sm); padding: 0 10px; font-size: 12px; }
-.island-row-actions.department-actions .secondary-button,
-.island-row-actions.department-actions .department-action-spacer { min-width: 68px; justify-content: center; text-align: center; }
-.island-row-actions .department-action-spacer { display: inline-block; min-width: 68px; height: var(--arden-control-sm); visibility: hidden; }
+.island-row-actions .secondary-button, .island-row-actions .admin-text-danger { min-height: var(--arden-control-sm); min-width: 68px; padding: 0 10px; font-size: 12px; justify-content: center; text-align: center; }
 .island-list-footer { display: flex; align-items: center; gap: 12px; padding: 10px 14px 8px; color: var(--arden-text-secondary); font-size: 12px; }
 .island-empty { display: grid; justify-items: center; gap: 8px; padding: 32px 14px; color: var(--arden-text-secondary); text-align: center; }
 .island-empty h3 { margin: 0; color: var(--arden-text-primary); font-size: 15px; }
@@ -533,7 +531,6 @@
   .island-row > .island-row-cell.is-name, .island-row > [role="cell"]:first-child { flex-basis: 100%; }
   .island-row > .island-row-cell { font-size: 13px; }
   .island-row > .island-row-actions { margin-left: auto; }
-  .island-row-actions .department-action-spacer { display: none; }
 }
 
 /* ---------- Status island: confirm and toast action ---------- */

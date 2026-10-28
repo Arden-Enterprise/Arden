@@ -393,7 +393,7 @@ export type KnowledgeOptions = {
 };
 
 export type DeleteDepartmentResult =
-  | { success: true; reassignedCount?: number }
+  | { success: true; unassignedCount?: number; reassignedCount?: number }
   | { success: false; errorReason: "NOT_FOUND" | "BASE_DEPARTMENT" };
 
 export interface ArdenDataRepository {
@@ -724,7 +724,7 @@ export class ArdenRepository implements ArdenDataRepository {
                r.role_id AS default_role_id, r.name AS default_role_name
           FROM department d JOIN role r ON r.role_id = d.default_role_id
          WHERE d.organization_id = $1 AND d.status = 'ACTIVE'
-         ORDER BY (d.code = 'GENERAL') DESC, d.name`, [organizationId]);
+         ORDER BY d.name`, [organizationId]);
       const roles = await client.query<{ id: string; name: string; code: string; is_default: boolean }>(`
         SELECT r.role_id AS id, r.name, r.code,
                EXISTS (SELECT 1 FROM department d WHERE d.default_role_id = r.role_id) AS is_default
@@ -875,35 +875,6 @@ export class ArdenRepository implements ArdenDataRepository {
       const department = dept.rows[0];
       if (!department) return { success: false, errorReason: "NOT_FOUND" };
 
-      if (department.code === "GENERAL") {
-        return { success: false, errorReason: "BASE_DEPARTMENT" };
-      }
-
-      const baseDept = await client.query<{ department_id: string; default_role_id: string; name: string }>(`
-        SELECT d.department_id, d.default_role_id, d.name
-          FROM department d
-         WHERE d.organization_id = $1 AND d.code = 'GENERAL' AND d.status = 'ACTIVE'
-         LIMIT 1`, [organizationId]);
-      let targetBase = baseDept.rows[0];
-      if (!targetBase) {
-        const fallback = await client.query<{ department_id: string; default_role_id: string; name: string }>(`
-          SELECT d.department_id, d.default_role_id, d.name
-            FROM department d
-           WHERE d.organization_id = $1 AND d.department_id != $2 AND d.status = 'ACTIVE'
-           ORDER BY d.created_at ASC
-           LIMIT 1`, [organizationId, departmentId]);
-        targetBase = fallback.rows[0];
-        if (!targetBase) {
-          return { success: false, errorReason: "BASE_DEPARTMENT" };
-        }
-      }
-
-      const baseScope = await client.query<{ access_scope_id: string }>(`
-        SELECT access_scope_id FROM access_scope
-         WHERE organization_id = $1 AND department_id = $2 AND scope_type = 'DEPARTMENT' AND status = 'ACTIVE'
-         LIMIT 1`, [organizationId, targetBase.department_id]);
-      const baseAccessScopeId = baseScope.rows[0]?.access_scope_id;
-
       const primaryMembers = await client.query<{ membership_id: string }>(`
         SELECT membership_id FROM department_membership
          WHERE department_id = $1 AND is_primary = true AND status = 'ACTIVE'`, [departmentId]);
@@ -923,28 +894,11 @@ export class ArdenRepository implements ArdenDataRepository {
          WHERE access_scope_id = (SELECT access_scope_id FROM access_scope WHERE department_id = $1 AND organization_id = $2 AND scope_type = 'DEPARTMENT')
            AND status = 'ACTIVE'`, [departmentId, organizationId]);
 
-      for (const row of primaryMembers.rows) {
-        await client.query(`
-          INSERT INTO department_membership (membership_id, department_id, is_primary, status, assigned_at, removed_at)
-          VALUES ($1, $2, true, 'ACTIVE', now(), null)
-          ON CONFLICT (membership_id, department_id)
-          DO UPDATE SET is_primary = true, status = 'ACTIVE', assigned_at = now(), removed_at = null`,
-          [row.membership_id, targetBase.department_id]);
-
-        if (baseAccessScopeId) {
-          await client.query(`
-            INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-            VALUES ($1, $2, $3)
-            ON CONFLICT DO NOTHING`,
-            [row.membership_id, targetBase.default_role_id, baseAccessScopeId]);
-        }
-      }
-
       await client.query(`
         UPDATE organization_invitation
-           SET department_id = $1
-         WHERE department_id = $2 AND organization_id = $3 AND status = 'PENDING'`,
-        [targetBase.department_id, departmentId, organizationId]);
+           SET department_id = null
+         WHERE department_id = $1 AND organization_id = $2 AND status = 'PENDING'`,
+        [departmentId, organizationId]);
 
       await client.query(`UPDATE department SET status = 'ARCHIVED', updated_at = now() WHERE department_id = $1`, [departmentId]);
       await client.query(`UPDATE audience SET status = 'INACTIVE', updated_at = now() WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId]);
@@ -958,12 +912,11 @@ export class ArdenRepository implements ArdenDataRepository {
         [organizationId, actorMembershipId, JSON.stringify({
           departmentId,
           name: department.name,
-          reassignedCount: primaryMembers.rows.length,
-          reassignedToDepartmentId: targetBase.department_id,
+          unassignedCount: primaryMembers.rows.length,
           requestId,
         })]);
 
-      return { success: true, reassignedCount: primaryMembers.rows.length };
+      return { success: true, unassignedCount: primaryMembers.rows.length, reassignedCount: primaryMembers.rows.length };
     })) ?? { success: false, errorReason: "NOT_FOUND" };
   }
 
