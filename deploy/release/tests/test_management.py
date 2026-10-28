@@ -138,8 +138,10 @@ class ManagementTests(unittest.TestCase):
                 kind = next(kind for kind in local if target in {manifest["images"][kind]["tag"], local[kind]})
                 if arguments[3] == "{{.Id}}":
                     return local[kind]
+                inspect_config = {**proof[kind]["config"], "ArgsEscaped": False,
+                                  "Hostname": "", "AttachStdin": False}
                 return json.dumps({"Id": local[kind], "Architecture": "amd64", "Os": "linux",
-                                   "Config": proof[kind]["config"], "RootFS": {"Layers": []}})
+                                   "Config": inspect_config, "RootFS": {"Layers": []}})
             manager = CoolifyManager(config, command=command)
             manager.load(Path(temporary) / "synthetic.tar.gz", manifest, proof)
             manager.ensure_images(manifest)

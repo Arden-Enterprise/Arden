@@ -175,12 +175,23 @@ class CoolifyManager:
             image = manifest["images"][component]
             actual = strict_json(self.command(["image", "inspect", "--format", "{{json .}}", image["tag"]]))
             expected = proof[component]
-            normalize = lambda value: {key: data for key, data in value.items() if data is not None}
+            def normalize(value):
+                # Docker's container.Config API adds inert defaults omitted from OCI
+                # image config JSON. Non-default values and all image settings remain strict.
+                defaults = {"ArgsEscaped": False, "Hostname": "", "Domainname": "", "Image": "",
+                            "AttachStdin": False, "AttachStdout": False, "AttachStderr": False,
+                            "Tty": False, "OpenStdin": False, "StdinOnce": False,
+                            "NetworkDisabled": False, "MacAddress": ""}
+                return {key: data for key, data in value.items()
+                        if data is not None and not (key in defaults and type(data) is type(defaults[key]) and data == defaults[key])}
             if (not IMAGE_ID.fullmatch(actual.get("Id", "")) or actual.get("Architecture") != "amd64"
                     or actual.get("Os") != "linux"
                     or normalize(actual.get("Config", {})) != normalize(expected["config"])
                     or (actual.get("RootFS", {}).get("Layers") or []) != expected.get("rootfs", {}).get("diff_ids", [])):
-                raise ValueError("Loaded local image differs from validated portable content")
+                expected_config, actual_config = normalize(expected["config"]), normalize(actual.get("Config", {}))
+                keys = sorted(key for key in set(expected_config) | set(actual_config)
+                              if expected_config.get(key) != actual_config.get(key))
+                raise ValueError("Loaded local image differs from validated content; config fields: " + ",".join(keys))
             previous = bindings.get(image["id"])
             if previous is not None and previous != actual["Id"]:
                 raise ValueError("An existing immutable content binding changed")
