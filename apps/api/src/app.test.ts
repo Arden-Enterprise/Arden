@@ -96,6 +96,7 @@ describe("API auth and private draft routes", () => {
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
       classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
     }];
     askArden.sourceBlockIds = ["pdf-page-2", "pdf-page-2-heading"];
     const session = await desktopSession(app, "owner@example.test");
@@ -116,6 +117,7 @@ describe("API auth and private draft routes", () => {
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
       classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
     }];
     askArden.onAnswer = () => { repository.authorizedAiSources = []; };
     const session = await desktopSession(app, "owner@example.test");
@@ -125,6 +127,37 @@ describe("API auth and private draft routes", () => {
     });
     expect(response.statusCode).toBe(409);
     expect(response.json().error.code).toBe("KNOWLEDGE_ACCESS_CHANGED");
+  });
+
+  it.each([
+    { name: "unlisted chunk", patch: { chunkId: "c".repeat(64) } },
+    { name: "invented block", patch: { sourceBlockIds: ["other-block"] } },
+    { name: "wrong parent section", patch: { parentSectionBlockId: "actual-heading" } },
+  ])("rejects an AI citation with $name even when snapshot permission is valid", async ({ patch }) => {
+    repository.authorizedAiSources = [{
+      generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
+      publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null, ...patch }],
+    }];
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({ method: "POST",
+      url: `/api/v1/organizations/${organizationId}/ai/answers`,
+      headers: { cookie: session, origin: "http://localhost:5180" }, payload: { query: "MFA policy?" } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().answer).toBeUndefined();
+  });
+
+  it("rejects bounded plaintext that exceeds the semantic block limit without a server error", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({ method: "POST",
+      url: `/api/v1/organizations/${organizationId}/knowledge/drafts/new`,
+      headers: { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey },
+      payload: { title: "Too many paragraphs", classification: "INTERNAL", body: "x\n".repeat(2001) },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("INVALID_DOCUMENT");
+    expect(repository.sharedCreates).toBe(0);
   });
 
   it("signs in through the Supabase adapter and returns only the caller's membership context", async () => {

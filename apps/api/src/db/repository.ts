@@ -146,6 +146,7 @@ export type PublishedKnowledge = {
   validUntil: Date | null;
 };
 export type AuthorizedAiSource = {
+  chunks: unknown;
   generationId: string;
   snapshotVersionId: string;
   snapshotContentHash: string;
@@ -322,6 +323,7 @@ type PublishedKnowledgeRow = {
   valid_until: Date | null;
 };
 type AuthorizedAiSourceRow = {
+  chunks: unknown;
   generation_id: string;
   snapshot_version_id: string;
   snapshot_content_hash: string;
@@ -424,7 +426,7 @@ export interface ArdenDataRepository {
     idempotencyKey: string, requestId: string): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
-  listAuthorizedAiSources(userId: string, organizationId: string): Promise<AuthorizedAiSource[] | null>;
+  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[]): Promise<AuthorizedAiSource[] | null>;
 }
 
 function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): string {
@@ -1492,23 +1494,27 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async listAuthorizedAiSources(userId: string, organizationId: string): Promise<AuthorizedAiSource[] | null> {
+  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[]): Promise<AuthorizedAiSource[] | null> {
+    if (generationIds && generationIds.length > 12) throw new Error("Too many citation generations");
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
       const result = await client.query<AuthorizedAiSourceRow>(`
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
-               pv.classification, cp.target_scope_type
+               pv.classification, cp.target_scope_type,
+               CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE g.manifest_json->'chunks' END AS chunks
           FROM knowledge_current_publication cp
           JOIN published_knowledge_version pv
             ON pv.published_version_id = cp.published_version_id
           JOIN knowledge_index_generation g
             ON g.submission_id = pv.submission_id AND g.status = 'READY'
          WHERE cp.organization_id = $1
+           AND ($2::uuid[] IS NULL OR g.generation_id = ANY($2::uuid[]))
          ORDER BY pv.published_at DESC, pv.published_version_id DESC
-         LIMIT 500`, [organizationId]);
+         LIMIT 500`, [organizationId, generationIds ?? null]);
       return result.rows.map((row) => ({
         generationId: row.generation_id,
+        chunks: row.chunks,
         snapshotVersionId: row.snapshot_version_id,
         snapshotContentHash: row.snapshot_content_hash,
         publishedVersionId: row.published_version_id,
