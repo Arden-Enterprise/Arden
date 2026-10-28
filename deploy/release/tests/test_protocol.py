@@ -98,6 +98,11 @@ class ProtocolTests(unittest.TestCase):
     def test_valid_saved_image_archive_is_accepted(self):
         protocol.validate_archive(io.BytesIO(self.payload), self.manifest)
 
+    def test_mutating_header_requires_a_separate_job_identity_envelope(self):
+        request = {"op": "upload", "environment": "staging", "manifest": self.manifest}
+        with self.assertRaises(ValueError):
+            protocol.read_header(io.BytesIO(json.dumps(request).encode() + b"\n"), "staging")
+
     def test_alternate_loader_metadata_is_rejected(self):
         for name in ["index.json", "oci-layout", "repositories"]:
             target = io.BytesIO()
@@ -122,11 +127,12 @@ class ProtocolTests(unittest.TestCase):
 
     def test_header_is_bounded_and_does_not_consume_upload_bytes(self):
         self.assertTrue(hasattr(protocol, "read_header"), "Bounded request reader is not implemented")
-        header = json.dumps({"op": "upload", "environment": "staging", "manifest": self.manifest}).encode() + b"\n"
+        header = json.dumps({"request": {"op": "upload", "environment": "staging", "manifest": self.manifest},
+                             "identity_token": "header.payload.signature"}).encode() + b"\n"
         stream = io.BytesIO(header + self.payload)
-        self.assertEqual(protocol.read_header(stream, "staging")["op"], "upload")
+        self.assertEqual(protocol.read_header(stream, "staging")[0]["op"], "upload")
         self.assertEqual(stream.read(), self.payload)
-        for raw in [b"x" * 8193 + b"\n", b'{"op":"status","environment":"staging"}']:
+        for raw in [b"x" * (protocol.MAX_HEADER + 1) + b"\n", b'{"op":"status","environment":"staging"}']:
             with self.subTest(raw=raw[:20]), self.assertRaises(ValueError):
                 protocol.read_header(io.BytesIO(raw), "staging")
 

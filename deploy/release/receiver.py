@@ -12,6 +12,7 @@ import time
 from protocol import validate_archive, validate_manifest, validate_request, run_identity, MAX_EXPANDED
 from retention import collect_releases
 from state import read_json, write_json, release_lock
+from identity import trusted_provenance
 
 
 class ReleaseEngine:
@@ -44,7 +45,7 @@ class ReleaseEngine:
                                              separators=(",", ":")).encode()).hexdigest()
         return self.root / "uploads" / f"{identity}.json"
 
-    def upload(self, manifest, stream):
+    def upload(self, manifest, stream, provenance=None):
         if self.environment != "staging":
             raise ValueError("Production does not accept image uploads")
         validate_manifest(manifest)
@@ -74,24 +75,28 @@ class ReleaseEngine:
                     proof = validate_archive(archive, manifest)
                 self.manager.load(temporary, manifest, proof)
                 self.manager.ensure_images(manifest)
-                write_json(self._receipt(manifest), manifest)
+                write_json(self._receipt(manifest), {"manifest": manifest, "provenance": provenance})
                 collect_releases(self.root.parent, self.manager)
             finally:
                 if temporary is not None and temporary.exists():
                     temporary.unlink()
             return {"status": "uploaded", "commit": manifest["commit"]}
 
-    def deploy(self, manifest):
+    def deploy(self, manifest, provenance=None):
         if self.environment != "staging":
             raise ValueError("Production requires verified staging promotion")
         validate_manifest(manifest)
         with release_lock(self.root.parent):
             receipt = self._receipt(manifest)
-            if not receipt.exists() or read_json(receipt) != manifest:
+            uploaded = read_json(receipt) if receipt.exists() else {}
+            if uploaded.get("manifest") != manifest:
                 raise ValueError("No matching validated upload")
-            return self._activate(manifest, manifest["commit"], manifest["run_id"], manifest["attempt"])
+            upload_request = {"op": "upload", "environment": "staging", "manifest": manifest}
+            if not trusted_provenance(uploaded.get("provenance"), upload_request):
+                provenance = None
+            return self._activate(manifest, manifest["commit"], manifest["run_id"], manifest["attempt"], provenance)
 
-    def promote(self, request):
+    def promote(self, request, provenance=None):
         validate_request(request, self.environment)
         if request["op"] != "promote" or self.staging_dir is None:
             raise ValueError("Promotion source is not configured")
@@ -104,12 +109,13 @@ class ReleaseEngine:
                 raise ValueError("Staging has an unresolved rollout")
             candidates = [stage.get("active"), stage.get("previous")]
             chosen = next((item for item in candidates if item and item.get("eligible_for_promotion")
+                           and trusted_provenance(item.get("provenance"), {"op": "deploy", "environment": "staging", "manifest": item["manifest"]})
                            and item["manifest"]["tree"] == request["tree"]
                            and time.time() - 86400 <= item.get("verified_at", 0) <= time.time()), None)
             if chosen is None:
                 raise ValueError("Main does not match a verified retained staging source tree")
             return self._activate(chosen["manifest"], request["commit"],
-                                  request["run_id"], request["attempt"])
+                                  request["run_id"], request["attempt"], provenance)
 
     def _recover(self, state):
         pending = state.get("pending")
@@ -126,7 +132,7 @@ class ReleaseEngine:
         state["last_failure"] = "previous release recovered"
         write_json(self.path, state)
 
-    def _activate(self, manifest, deployment_commit, run_id, attempt):
+    def _activate(self, manifest, deployment_commit, run_id, attempt, provenance=None):
         state = self._state()
         if state.get("pending"):
             self._recover(state)
@@ -135,13 +141,16 @@ class ReleaseEngine:
         if key < highest:
             raise ValueError("Obsolete workflow run")
         active = state["active"]
+        promotable = self.environment == "staging" and trusted_provenance(provenance,
+            {"op": "deploy", "environment": "staging", "manifest": manifest})
         same = (active["manifest"]["images"] == manifest["images"]
                 and active["manifest"]["tree"] == manifest["tree"]
                 and active["deployment_commit"] == deployment_commit)
         if same:
             self.manager.ensure_images(manifest)
             self.manager.verify(manifest)
-            active.update(verified_at=time.time(), run_id=run_id, attempt=attempt)
+            active.update(verified_at=time.time(), run_id=run_id, attempt=attempt,
+                          manifest=copy.deepcopy(manifest), provenance=provenance, eligible_for_promotion=promotable)
             state["highest"] = list(max(key, highest))
             write_json(self.path, state)
             collect_releases(self.root.parent, self.manager)
@@ -164,7 +173,8 @@ class ReleaseEngine:
             raise RuntimeError("Deployment failed; previous release recovered") from error
         state["previous"] = active
         state["active"] = {"manifest": copy.deepcopy(manifest), "deployment_commit": deployment_commit,
-                           "run_id": run_id, "attempt": attempt, "eligible_for_promotion": True,
+                           "run_id": run_id, "attempt": attempt, "eligible_for_promotion": promotable,
+                           "provenance": copy.deepcopy(provenance),
                            "verified_at": time.time()}
         state["pending"] = None
         state.pop("last_failure", None)

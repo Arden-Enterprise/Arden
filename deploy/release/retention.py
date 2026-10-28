@@ -35,7 +35,8 @@ def collect_releases(parent, manager, now=None):
             for receipt in directory.glob("*.json"):
                 if receipt.is_symlink() or not receipt.is_file():
                     raise ValueError("Unexpected release receipt")
-                manifest = validate_manifest(read_json(receipt))
+                value = read_json(receipt)
+                manifest = validate_manifest(value.get("manifest", value))
                 uploads.append((receipt, manifest))
     if uploads:
         recent = max(uploads, key=lambda item: item[0].stat().st_mtime_ns)

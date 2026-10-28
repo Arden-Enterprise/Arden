@@ -63,7 +63,7 @@ class PrivilegeTests(unittest.TestCase):
         import bootstrap_operator as operator
         from receiver import ReleaseEngine
         from state import read_json
-        from test_receiver import MemoryManager
+        from test_receiver import MemoryManager, verified_proof
         from test_protocol import fixture
         import io, json
         rollback = getattr(operator, "rollback", None)
@@ -76,8 +76,9 @@ class PrivilegeTests(unittest.TestCase):
             state_dir = root / "state" / "staging"
             engine = ReleaseEngine("staging", state_dir, manager)
             manifest, archive = fixture()
-            engine.upload(manifest, io.BytesIO(archive))
-            engine.deploy(manifest)
+            engine.upload(manifest, io.BytesIO(archive), verified_proof("upload", manifest))
+            engine.deploy(manifest, verified_proof("deploy", manifest))
+            self.assertTrue(engine.status()["active"]["eligible_for_promotion"])
             original_verify = manager.verify
             def verify(manifest_to_check):
                 if manifest_to_check["commit"] == manifest["commit"]:

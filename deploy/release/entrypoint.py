@@ -13,6 +13,7 @@ from management import CoolifyManager, validate_config
 from protocol import read_header
 from receiver import ReleaseEngine
 from state import read_json
+from identity import verify_identity
 
 
 def secure_directory(path, private=False):
@@ -57,20 +58,21 @@ def main():
     for target in [Path(config["state_dir"]) / "state.json", Path(config["state_dir"]).parent / "release.lock"]:
         if target.exists() or target.is_symlink():
             secure_file(target)
-    request = read_header(sys.stdin.buffer, environment)
+    request, identity_token = read_header(sys.stdin.buffer, environment)
+    provenance = None if request["op"] == "status" else verify_identity(identity_token, request)
     engine = ReleaseEngine(environment, config["state_dir"], CoolifyManager(config), config["staging_dir"])
     op = request["op"]
     if op == "upload":
-        result = engine.upload(request["manifest"], sys.stdin.buffer)
+        result = engine.upload(request["manifest"], sys.stdin.buffer, provenance)
     else:
         if sys.stdin.buffer.read(1):
             raise ValueError("Unexpected data after request")
         if op == "status":
             result = engine.status()
         elif op == "deploy":
-            result = engine.deploy(request["manifest"])
+            result = engine.deploy(request["manifest"], provenance)
         else:
-            result = engine.promote(request)
+            result = engine.promote(request, provenance)
     print(json.dumps({"ok": True, "result": result}, separators=(",", ":")), flush=True)
 
 

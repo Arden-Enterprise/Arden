@@ -7,6 +7,7 @@ import { pipeline } from "node:stream/promises";
 import { createGzip } from "node:zlib";
 import { pathToFileURL } from "node:url";
 import { exchange } from "./transport.mjs";
+import { requestIdentity } from "./identity.mjs";
 
 const sha = /^[0-9a-f]{40}$/;
 const imageId = /^sha256:[0-9a-f]{64}$/;
@@ -84,8 +85,9 @@ function prepareSsh(env, root) {
 }
 
 async function rpc(env, root, request, archive) {
+  const message = request.op === "status" ? request : { request, identity_token: await requestIdentity(env, request) };
   const child = spawn("ssh", sshArguments(sshSettings(env, root)), { stdio: ["pipe", "pipe", "pipe"] });
-  return exchange(child, request, archive);
+  return exchange(child, message, archive);
 }
 
 async function bundle(env, root, context = releaseContext(env)) {

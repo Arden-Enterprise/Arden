@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_protocol import fixture
+from identity import request_digest
 try:
     from receiver import ReleaseEngine
 except ModuleNotFoundError:
@@ -60,6 +61,13 @@ class MemoryManager:
             raise RuntimeError("Running images do not match")
 
 
+def verified_proof(op, manifest):
+    """Injected root-verifier output for state-machine tests; crypto has its own real RSA tests."""
+    request = {"op": op, "environment": "staging", "manifest": manifest}
+    return {"provider": "github-actions-oidc", "repository_id": "1372698702", "owner_id": "329889661",
+            "environment": "staging", "sha": manifest["commit"], "request_digest": request_digest(request)}
+
+
 class ReceiverTests(unittest.TestCase):
     def setUp(self):
         self.assertIsNotNone(ReleaseEngine, "Release receiver is not implemented")
@@ -73,7 +81,7 @@ class ReceiverTests(unittest.TestCase):
         self.manifest, self.payload = fixture()
 
     def upload(self):
-        return self.engine.upload(self.manifest, io.BytesIO(self.payload))
+        return self.engine.upload(self.manifest, io.BytesIO(self.payload), verified_proof("upload", self.manifest))
 
     def test_upload_validates_and_loads_without_activating(self):
         self.upload()
@@ -109,16 +117,18 @@ class ReceiverTests(unittest.TestCase):
     def test_successful_same_image_rerun_refreshes_verified_time_and_attempt(self):
         self.upload()
         with patch("receiver.time.time", return_value=100):
-            self.engine.deploy(self.manifest)
+            self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
         rerun = copy.deepcopy(self.manifest)
         rerun["attempt"] = 2
-        self.engine.upload(rerun, io.BytesIO(self.payload))
+        self.engine.upload(rerun, io.BytesIO(self.payload), verified_proof("upload", rerun))
         with patch("receiver.time.time", return_value=100000):
-            result = self.engine.deploy(rerun)
+            result = self.engine.deploy(rerun, verified_proof("deploy", rerun))
         self.assertEqual(result["status"], "already-current")
         state = self.engine.status()
         self.assertEqual(state["active"]["verified_at"], 100000)
         self.assertEqual(state["active"]["attempt"], 2)
+        self.assertEqual(state["active"]["provenance"]["request_digest"],
+                         verified_proof("deploy", state["active"]["manifest"])["request_digest"])
 
     def test_older_run_cannot_activate_after_a_newer_success(self):
         self.upload()
@@ -154,7 +164,7 @@ class ReceiverTests(unittest.TestCase):
 
     def test_production_promotes_same_verified_images_for_a_different_merge_commit(self):
         self.upload()
-        self.engine.deploy(self.manifest)
+        self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
         production = MemoryManager()
         production.loaded.update(self.manager.loaded)
         target = ReleaseEngine("production", self.root / "production", production,
@@ -166,6 +176,21 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(active["deployment_commit"], "d" * 40)
         self.assertEqual(active["manifest"]["commit"], "a" * 40)
 
+    def test_legacy_or_forged_eligible_state_without_authenticated_build_cannot_promote(self):
+        self.upload()
+        self.engine.deploy(self.manifest)
+        path = self.root / "staging" / "state.json"
+        state = json.loads(path.read_text())
+        state["active"]["eligible_for_promotion"] = True
+        state["active"].pop("provenance", None)
+        path.write_text(json.dumps(state))
+        manager = MemoryManager()
+        manager.loaded.update(self.manager.loaded)
+        target = ReleaseEngine("production", self.root / "production", manager, staging_dir=self.root / "staging")
+        with self.assertRaises(ValueError):
+            target.promote({"op": "promote", "environment": "production", "commit": "d" * 40,
+                            "tree": "b" * 40, "run_id": "12346", "attempt": 1})
+
     def test_wrong_tree_or_unverified_baseline_cannot_be_promoted(self):
         target = ReleaseEngine("production", self.root / "production", MemoryManager(),
                                staging_dir=self.root / "staging")
@@ -176,7 +201,7 @@ class ReceiverTests(unittest.TestCase):
 
     def test_older_than_one_day_staging_verification_requires_a_fresh_stage_run(self):
         self.upload()
-        self.engine.deploy(self.manifest)
+        self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
         path = self.root / "staging" / "state.json"
         state = json.loads(path.read_text())
         state["active"]["verified_at"] = 1

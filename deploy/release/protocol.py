@@ -11,6 +11,7 @@ MAX_ARCHIVE = 512 * 1024 * 1024
 MAX_EXPANDED = 1536 * 1024 * 1024
 MAX_MEMBERS = 4096
 MAX_JSON = 1024 * 1024
+MAX_HEADER = 16384
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
@@ -105,10 +106,17 @@ def validate_request(value, forced_environment):
 
 
 def read_header(stream, environment):
-    raw = stream.readline(8193)
-    if len(raw) > 8192 or not raw.endswith(b"\n"):
+    raw = stream.readline(MAX_HEADER + 1)
+    if len(raw) > MAX_HEADER or not raw.endswith(b"\n"):
         raise ValueError("Missing or oversized request header")
-    return validate_request(strict_json(raw), environment)
+    value = strict_json(raw)
+    if isinstance(value, dict) and value.get("op") == "status":
+        return validate_request(value, environment), None
+    exact(value, {"request", "identity_token"})
+    request = validate_request(value["request"], environment)
+    if request["op"] == "status" or not isinstance(value["identity_token"], str) or not 1 <= len(value["identity_token"]) <= 12288:
+        raise ValueError("Missing mutating-operation identity proof")
+    return request, value["identity_token"]
 
 
 def validate_image_config(raw, component, manifest):
