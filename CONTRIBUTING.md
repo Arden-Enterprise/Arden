@@ -8,7 +8,7 @@ Follow [current main context](docs/engineering/rules/main-context.md) before pla
 
 ## Branch convention
 
-Follow [Git workflow](docs/engineering/rules/git-workflow.md) for allowed types and meaningful `<type>/<short-kebab-description>` names, or the `release/<semver>` exception. Do not prepend `codex/`, a tool/agent name, or an individual's name. Use a focused branch from inspected current main; preserve existing branches and work.
+Follow [Git workflow](docs/engineering/rules/git-workflow.md) for allowed types and meaningful `<type>/<short-kebab-description>` names, or the `release/<semver>` exception. Do not prepend `codex/`, a tool/agent name, or an individual's name. Read inspected current main's contract, then create ordinary delivery branches from safely refreshed `staging` and compare its pending changes; preserve existing branches and work.
 
 The exact reserved deployment branches `staging` and `main` are additional owner-approved exceptions. Feature PRs normally enter staging; main promotes the matching staging-tested source tree to production. Do not infer that release automation is active from these names alone; consult the [release design](docs/engineering/release-pipeline-design.md) and current operator evidence.
 
