@@ -376,6 +376,9 @@
 .island-row-cell > .island-chip { justify-self: start; }
 .island-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .island-row-actions .secondary-button, .island-row-actions .admin-text-danger { min-height: var(--arden-control-sm); padding: 0 10px; font-size: 12px; }
+.island-row-actions.department-actions .secondary-button,
+.island-row-actions.department-actions .department-action-spacer { min-width: 68px; justify-content: center; text-align: center; }
+.island-row-actions .department-action-spacer { display: inline-block; min-width: 68px; height: var(--arden-control-sm); visibility: hidden; }
 .island-list-footer { display: flex; align-items: center; gap: 12px; padding: 10px 14px 8px; color: var(--arden-text-secondary); font-size: 12px; }
 .island-empty { display: grid; justify-items: center; gap: 8px; padding: 32px 14px; color: var(--arden-text-secondary); text-align: center; }
 .island-empty h3 { margin: 0; color: var(--arden-text-primary); font-size: 15px; }
@@ -530,6 +533,7 @@
   .island-row > .island-row-cell.is-name, .island-row > [role="cell"]:first-child { flex-basis: 100%; }
   .island-row > .island-row-cell { font-size: 13px; }
   .island-row > .island-row-actions { margin-left: auto; }
+  .island-row-actions .department-action-spacer { display: none; }
 }
 
 /* ---------- Status island: confirm and toast action ---------- */

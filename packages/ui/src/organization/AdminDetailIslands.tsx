@@ -157,7 +157,7 @@ export function DepartmentDetailIsland({ department, members, grants, busy, dele
         ) : (
           <p className="island-meta">This department has no members and can be deleted safely.</p>
         )}
-        <button type="button" className="secondary-button is-danger" disabled={busy} onClick={onDelete}>Delete department…</button>
+        <button type="button" className="secondary-button is-danger" disabled={busy} onClick={onDelete}>Delete department</button>
       </section>
     ) : null}
   </aside>;}

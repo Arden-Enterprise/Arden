@@ -287,7 +287,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         {tab === "departments" && <div role="tabpanel" aria-label="Departments" className="island-split">
           <div className="island-main">
             <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || "Arden also creates its managed “Everyone in …” audience."}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
-            {data.departments.length ? <IslandTable label="Departments" minWidth={660} columns="minmax(200px, 1.6fr) 90px 90px 90px minmax(130px, auto)"
+            {data.departments.length ? <IslandTable label="Departments" minWidth={680} columns="minmax(220px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) 150px"
               headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS", <span className="sr-only">Actions</span>]}>
               {data.departments.map((department) => {
                 const isBase = department.isBase || department.code === "GENERAL";
@@ -298,9 +298,9 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                   <IslandCell className="island-row-cell is-number">{inDepartment.length}</IslandCell>
                   <IslandCell className="island-row-cell is-number">{data.members.filter((member) => member.departmentId === department.id).length}</IslandCell>
                   <IslandCell className="island-row-cell is-number">{new Set(reviewerGrants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId)).size}</IslandCell>
-                  <IslandCell className="island-row-actions">
+                  <IslandCell className="island-row-actions department-actions">
                     <button type="button" className="secondary-button" onClick={() => setSelectedDepartmentId(department.id)} aria-label={`Manage ${department.name}`}>Manage</button>
-                    {!isBase && <button type="button" className="secondary-button is-danger" disabled={busy} onClick={() => handleDeleteDepartment(department)} aria-label={`Delete ${department.name}`}>Delete…</button>}
+                    {!isBase ? <button type="button" className="secondary-button is-danger" disabled={busy} onClick={() => handleDeleteDepartment(department)} aria-label={`Delete ${department.name}`}>Delete</button> : <span className="department-action-spacer" aria-hidden="true" />}
                   </IslandCell>
                 </IslandRow>;
               })}
