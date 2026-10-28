@@ -21,6 +21,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation }: AskAr
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const requestGeneration = useRef(0);
   const navigation = useWorkspaceNavigation();
   const empty = messages.length === 0;
   const threadTitle = messages.find((message) => message.role === "member")?.body ?? "New conversation";
@@ -29,6 +30,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation }: AskAr
     event?.preventDefault();
     const query = draft.trim();
     if (!query || pending || !organizationId) return;
+    const generation = ++requestGeneration.current;
     const questionId = crypto.randomUUID();
     setMessages((current) => [...current, { id: questionId, role: "member", body: query }]);
     setDraft("");
@@ -36,11 +38,14 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation }: AskAr
     setPending(true);
     try {
       const answer = await askArden(platform, organizationId, query);
+      if (generation !== requestGeneration.current) return;
       setMessages((current) => [...current, answerMessage(answer, crypto.randomUUID())]);
     } catch (cause) {
-      setError(cause instanceof ApiError ? cause.message : "Ask Arden could not prepare an answer.");
+      if (generation === requestGeneration.current) {
+        setError(cause instanceof ApiError ? cause.message : "Ask Arden could not prepare an answer.");
+      }
     } finally {
-      setPending(false);
+      if (generation === requestGeneration.current) setPending(false);
     }
   };
 
@@ -50,6 +55,8 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation }: AskAr
   };
 
   const reset = () => {
+    requestGeneration.current++;
+    setPending(false);
     setDraft("");
     setMessages([]);
     setError(null);
@@ -72,6 +79,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation }: AskAr
   </form>;
 
   return <main id="arden-main" className="workspace-page ask-arden-page" aria-labelledby="ask-arden-title" tabIndex={-1}>
+    <h1 id="ask-arden-title" className="sr-only">Ask Arden</h1>
     <div className={`ask-arden-stage${empty ? " is-empty" : " is-thread"}`}>
       <header className="ask-thread-header">
         {navigation && <button type="button" className="ask-menu-button" aria-label={navigation.open ? "Close navigation" : "Open navigation"}
@@ -85,7 +93,6 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation }: AskAr
 
       <div className="ask-thread-scroll" aria-live="polite">
         {empty ? <section className="ask-empty-state" aria-labelledby="ask-arden-title">
-          <h1 id="ask-arden-title" className="sr-only">Ask Arden</h1>
           <img className="ask-brand-watermark" src={ardenOrbSource} alt="" aria-hidden="true" />
           {composer("center")}
           <span className="ask-index-state"><Icon name="knowledge" size={12} />Indexed published knowledge</span>
