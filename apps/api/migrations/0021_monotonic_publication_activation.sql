@@ -57,3 +57,65 @@ END;
 $$;
 REVOKE ALL ON FUNCTION complete_knowledge_index_job(uuid, uuid, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION complete_knowledge_index_job(uuid, uuid, jsonb) TO arden_indexer;
+
+-- This forward migration has not been applied to either release database.
+-- Keep terminal job failure distinct from a replaced author-facing snapshot.
+CREATE OR REPLACE FUNCTION fail_knowledge_index_job(
+    p_job_id uuid,
+    p_worker_id uuid,
+    p_error_code text,
+    p_retryable boolean DEFAULT true
+)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = arden, pg_temp
+AS $$
+DECLARE
+    job_row knowledge_index_job%ROWTYPE;
+    terminal boolean;
+BEGIN
+    IF p_error_code IS NULL OR p_error_code !~ '^[A-Z][A-Z0-9_]{0,63}$' THEN
+        RAISE EXCEPTION 'Invalid indexing failure code' USING ERRCODE = '22023';
+    END IF;
+    SELECT * INTO STRICT job_row FROM knowledge_index_job
+     WHERE knowledge_index_job.job_id = p_job_id FOR UPDATE;
+    IF job_row.status <> 'RUNNING' OR job_row.lease_owner IS DISTINCT FROM p_worker_id THEN
+        RAISE EXCEPTION 'Index job lease is no longer valid' USING ERRCODE = '40001';
+    END IF;
+
+    terminal := NOT p_retryable OR job_row.attempt_count >= job_row.max_attempts;
+    IF terminal THEN
+        UPDATE knowledge_index_job
+           SET status = 'FAILED', lease_owner = NULL, lease_expires_at = NULL,
+               last_error_code = p_error_code, completed_at = now()
+         WHERE knowledge_index_job.job_id = p_job_id;
+        UPDATE knowledge_index_generation
+           SET status = 'FAILED', failure_code = p_error_code, completed_at = now()
+         WHERE generation_id = job_row.generation_id;
+        UPDATE shared_submission s SET publication_state = CASE
+            WHEN p_error_code = 'INDEX_GENERATION_SUPERSEDED' THEN 'SUPERSEDED'
+            ELSE 'FAILED' END
+          FROM knowledge_index_generation g
+         WHERE g.generation_id = job_row.generation_id
+           AND s.submission_id = g.submission_id
+           AND s.status = 'APPROVED' AND s.publication_state = 'PREPARING';
+        RETURN 'FAILED';
+    END IF;
+
+    UPDATE knowledge_index_job
+       SET status = 'PENDING', lease_owner = NULL, lease_expires_at = NULL,
+           last_error_code = p_error_code,
+           available_at = now() + make_interval(secs => LEAST(60, 5 * (2 ^ (job_row.attempt_count - 1))))
+     WHERE knowledge_index_job.job_id = p_job_id;
+    UPDATE knowledge_index_generation
+       SET status = 'PENDING', started_at = NULL
+     WHERE generation_id = job_row.generation_id;
+    RETURN 'PENDING';
+END;
+$$;
+
+UPDATE shared_submission s SET publication_state = 'SUPERSEDED'
+  FROM knowledge_index_generation g
+ WHERE s.submission_id = g.submission_id AND s.publication_state = 'FAILED'
+   AND g.failure_code = 'INDEX_GENERATION_SUPERSEDED';

@@ -495,6 +495,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       .rejects.toMatchObject({ code: "INDEX_GENERATION_SUPERSEDED" });
     await expect(generationStore.fail(older, workerId, "INDEX_GENERATION_SUPERSEDED", false)).resolves.toBe("FAILED");
     const completedSubmissions = await repository.listKnowledgeSubmissions(ids.owner, ids.organization);
+    expect(completedSubmissions?.find((item) => item.id === older.submissionId)?.publicationState)
+      .toBe("SUPERSEDED");
     expect(completedSubmissions?.filter((item) => item.publicationState === "ACTIVE").map((item) => item.id))
       .toEqual([newer.submissionId]);
     const legacyAccess = await pool.query("SELECT has_function_privilege('arden_indexer', 'arden.complete_knowledge_index_job_unordered_v1(uuid, uuid, jsonb)', 'EXECUTE') AS allowed");
