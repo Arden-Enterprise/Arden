@@ -65,13 +65,16 @@ def build_app_template(environment, source_uuid, api, web):
         volumes.append({"type": "bind", "source": mount["Source"],
                         "target": mount["Destination"], "read_only": True})
     values = {}
-    base_keys = {"PATH", "NODE_VERSION", "YARN_VERSION"}
+    base_keys = {"PATH", "NODE_VERSION", "YARN_VERSION", "COOLIFY_RESOURCE_UUID", "COOLIFY_PROJECT_NAME",
+                 "COOLIFY_APP_NAME", "COOLIFY_ENVIRONMENT_NAME", "COOLIFY_SERVER_IP", "COOLIFY_CONTAINER_NAME"}
     app_keys = {"NODE_ENV", "DATABASE_URL", "NODE_EXTRA_CA_CERTS", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "TZ"}
     for entry in api.get("Config", {}).get("Env", []):
         key, separator, value = entry.partition("=")
         if not separator or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) or key in values:
             raise ValueError("Invalid or duplicate runtime setting")
-        if key in base_keys:
+        # Coolify's old combined Service injects deployment-substitution/Auth-only
+        # inputs into every container. They are not application runtime settings.
+        if key in base_keys or key.startswith(("SERVICE_NAME_ARDEN_", "ARDEN_STAGING_", "ARDEN_PRODUCTION_")):
             continue
         if key not in app_keys and not key.startswith(("ARDEN_", "SUPABASE_", "SMTP_")):
             raise ValueError("Review the additional runtime setting before cutover")

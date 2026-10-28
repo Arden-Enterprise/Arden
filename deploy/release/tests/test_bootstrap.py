@@ -48,6 +48,15 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(compose["services"]["arden-api"]["user"], "1000:1000")
         self.assertEqual(compose["services"]["arden-web"]["user"], "101:101")
 
+    def test_provider_metadata_and_infrastructure_only_secrets_are_not_copied_into_the_app(self):
+        self.api["Config"]["Env"] += ["COOLIFY_RESOURCE_UUID=source123456",
+            "SERVICE_NAME_ARDEN_STAGING_AUTH=auth", "ARDEN_STAGING_JWT_SECRET=synthetic-auth-only-secret"]
+        result = build_app_template("staging", "source123456", self.api, self.web)
+        self.assertNotIn("COOLIFY_RESOURCE_UUID", result["values"])
+        self.assertNotIn("SERVICE_NAME_ARDEN_STAGING_AUTH", result["values"])
+        self.assertNotIn("ARDEN_STAGING_JWT_SECRET", result["values"])
+        self.assertIn("DATABASE_URL", result["values"])
+
     def test_routing_aliases_and_auth_database_networks_are_preserved_without_sharing_web(self):
         compose = build_app_template("staging", "source123456", self.api, self.web)["compose"]
         networks = compose["networks"]
