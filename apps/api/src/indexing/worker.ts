@@ -1,6 +1,6 @@
 import type { PrivateContentStorage } from "../private-notes/content-storage.js";
 import { ArdenAiRequestError, type IndexGenerationClient } from "./ai-client.js";
-import { buildIndexGenerationRequest, IndexContractError, type IndexGenerationJob } from "./contracts.js";
+import { buildIndexGenerationRequest, IndexContractError, IndexGenerationSupersededError, type IndexGenerationJob } from "./contracts.js";
 import type { IndexGenerationStore } from "./store.js";
 
 export type IndexingWorkerLogger = {
@@ -50,6 +50,7 @@ function classifyFailure(error: unknown): WorkerFailure {
   if (error instanceof WorkerFailure) return error;
   if (error instanceof ArdenAiRequestError) return new WorkerFailure(error.code, error.retryable);
   if (error instanceof IndexContractError) return new WorkerFailure(error.code, false);
+  if (error instanceof IndexGenerationSupersededError) return new WorkerFailure(error.code, false);
   if (error instanceof Error && error.message === "Private content integrity check failed") {
     return new WorkerFailure("SNAPSHOT_INTEGRITY_FAILURE", false);
   }
@@ -58,4 +59,12 @@ function classifyFailure(error: unknown): WorkerFailure {
 
 export function workerJobFields(job: IndexGenerationJob): Record<string, unknown> {
   return { jobId: job.jobId, generationId: job.generationId, attemptCount: job.attemptCount };
+}
+
+export function indexWorkerLeaseSeconds(value: string | undefined): number {
+  const seconds = Number(value ?? 300);
+  if (!Number.isInteger(seconds) || seconds < 180 || seconds > 600) {
+    throw new Error("ARDEN_INDEX_LEASE_SECONDS must be an integer from 180 to 600");
+  }
+  return seconds;
 }

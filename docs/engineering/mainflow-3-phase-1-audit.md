@@ -43,3 +43,8 @@ This regression injects a synthetic session and API responses, verifies that a d
 cannot enter a reset conversation, and checks desktop/mobile rendering and page errors. Screenshots
 stay in ignored `.private/qa`. It does not sign in to a real server, invoke a model or establish
 live AI/authorization acceptance. The browser dependency is optional and is not installed on the server.
+
+
+The [sanitized keyboard/layout capture](assets/ask-arden-keyboard-qa.png) uses the regression's
+synthetic session and API fixtures. It shows the visible composer focus indicator. Live identity,
+indexing and model-service acceptance remain separate from this UI fixture.

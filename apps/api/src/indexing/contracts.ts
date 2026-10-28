@@ -64,6 +64,10 @@ export class IndexContractError extends Error {
   readonly code = "INVALID_INDEX_MANIFEST";
 }
 
+export class IndexGenerationSupersededError extends Error {
+  readonly code = "INDEX_GENERATION_SUPERSEDED";
+}
+
 export function buildIndexGenerationRequest(
   job: IndexGenerationJob,
   snapshot: string | Buffer,

@@ -33,6 +33,8 @@ describe("redesigned knowledge states", () => {
     expect(draftStatus(draft, submission).label).toBe("Published");
     expect(draftStatus({ ...draft, versionId: "version-3" }, submission).label).toBe("Edited after publication");
     expect(draftStatus(draft, { ...submission, publicationState: "PREPARING", publishedVersionId: null }).label).toBe("Preparing publication");
+    expect(draftStatus(draft, { ...submission, publicationState: "SUPERSEDED" }).label).toBe("Replaced by a newer publication");
+    expect(draftStatus(draft, { ...submission, publicationState: "FAILED", publishedVersionId: null })).toEqual({ label: "Publication failed", tone: "is-danger" });
     expect(draftStatus(draft, { ...submission, status: "REJECTED" }).tone).toBe("is-danger");
   });
 });

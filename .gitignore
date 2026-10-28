@@ -34,5 +34,5 @@ build/
 
 .cache/
 
-# Personal remote-development setup; use the shared placeholder templates instead.
-/kiet-local/
+# Private per-developer setup packets; shared templates live under deploy/hosted.
+/*-local/

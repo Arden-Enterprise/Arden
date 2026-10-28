@@ -13,7 +13,7 @@ import { isKietLocalFlow1TestTarget, kietLocalFlow1TestActor } from "./auth/remo
 import { HttpAskArdenClient } from "./answers/ai-client.js";
 import { HttpArdenAiClient } from "./indexing/ai-client.js";
 import { PgIndexGenerationStore } from "./indexing/store.js";
-import { IndexingWorker } from "./indexing/worker.js";
+import { IndexingWorker, indexWorkerLeaseSeconds } from "./indexing/worker.js";
 
 const databaseUrl = process.env.DATABASE_URL ??
   (process.env.NODE_ENV === "production"
@@ -72,10 +72,13 @@ const invitationMailer = smtpConfiguration
   : flow1TestMode ? new LocalFlow1TestInvitationMailer() : null;
 const aiUrl = process.env.ARDEN_AI_URL?.trim();
 const aiServiceToken = process.env.ARDEN_AI_SERVICE_TOKEN?.trim();
+const indexDatabaseUrl = process.env.ARDEN_INDEX_DATABASE_URL?.trim();
 if (Boolean(aiUrl) !== Boolean(aiServiceToken)) {
   throw new Error("ARDEN_AI_URL and ARDEN_AI_SERVICE_TOKEN must be configured together");
 }
 const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServiceToken) : null;
+const indexPool = askArden && indexDatabaseUrl
+  ? new Pool({ connectionString: indexDatabaseUrl, max: 2, connectionTimeoutMillis: 10_000 }) : null;
 const contentStorage = new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot);
 
 async function checkRuntimeDatabase(): Promise<void> {
@@ -139,11 +142,14 @@ const app = buildApp({
 
 const port = Number(process.env.ARDEN_API_PORT ?? 3001);
 const host = process.env.ARDEN_API_HOST ?? "127.0.0.1";
-const indexWorker = aiUrl && aiServiceToken
+if (askArden && !indexPool) {
+  app.log.warn("Embedded indexing is disabled until a separate worker database login is configured");
+}
+const indexWorker = aiUrl && aiServiceToken && indexPool
   ? new IndexingWorker(
     randomUUID(),
-    90,
-    new PgIndexGenerationStore(pool),
+    indexWorkerLeaseSeconds(process.env.ARDEN_INDEX_LEASE_SECONDS),
+    new PgIndexGenerationStore(indexPool),
     contentStorage,
     new HttpArdenAiClient(aiUrl, aiServiceToken),
     {
@@ -174,6 +180,7 @@ async function shutdown() {
   await app.close();
   invitationMailer?.close();
   await pool.end();
+  await indexPool?.end();
 }
 
 process.once("SIGINT", () => void shutdown());

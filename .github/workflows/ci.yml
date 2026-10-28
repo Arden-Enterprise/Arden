@@ -98,6 +98,12 @@ jobs:
         run: pnpm --filter @arden/api test
         env:
           ARDEN_TEST_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci
+      - name: Build API for real startup isolation regression
+        run: pnpm --filter @arden/api build
+      - name: API remains available without optional indexing credentials
+        run: node tools/verification/api-optional-indexer.mjs
+        env:
+          ARDEN_TEST_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci
 
   image-check:
     name: Image build and security checks

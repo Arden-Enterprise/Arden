@@ -31,6 +31,19 @@ export class AiAnswerContractError extends Error {
   readonly code = "AI_ANSWER_INVALID";
 }
 
+export function citationMatchesManifest(citation: AiAnswerCitation, chunks: unknown): boolean {
+  if (!Array.isArray(chunks) || chunks.length > 20_000) return false;
+  const matches = chunks.filter((chunk: unknown) => typeof chunk === "object" && chunk !== null
+    && "chunkId" in chunk && chunk.chunkId === citation.chunkId);
+  if (matches.length !== 1) return false;
+  const chunk = matches[0] as Record<string, unknown>;
+  const blockIds = chunk.sourceBlockIds;
+  return Array.isArray(blockIds) && blockIds.every((id: unknown) => typeof id === "string")
+    && citation.sourceBlockIds.length > 0
+    && citation.sourceBlockIds.every((id) => blockIds.includes(id))
+    && citation.parentSectionBlockId === chunk.parentSectionBlockId;
+}
+
 export function parseAiAnswerResponse(value: unknown, request: AiAnswerRequest): AiAnswerResponse {
   const response = objectValue(value);
   exactKeys(response, ["contractVersion", "requestId", "status", "answer", "citations"]);

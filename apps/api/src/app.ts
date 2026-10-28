@@ -1,6 +1,6 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument } from "@arden/domain";
+import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
@@ -10,6 +10,7 @@ import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { citationPage } from "./answers/citation-page.js";
+import { citationMatchesManifest } from "./answers/contracts.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -1214,7 +1215,9 @@ export function buildApp(dependencies: AppDependencies) {
           query,
           allowedGenerationIds: before.map((source) => source.generationId),
         });
-        const after = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId);
+        const after = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId,
+          [...new Set(aiResponse.citations.map((citation) => citation.generationId))],
+          [...new Set(aiResponse.citations.map((citation) => citation.chunkId))]);
         if (!after) return reply.code(404).send(resourceNotAvailable(request.id));
         const beforeByGeneration = new Map(before.map((source) => [source.generationId, source]));
         const afterByGeneration = new Map(after.map((source) => [source.generationId, source]));
@@ -1223,7 +1226,8 @@ export function buildApp(dependencies: AppDependencies) {
           const current = afterByGeneration.get(citation.generationId);
           if (!initial || !current || initial.publishedVersionId !== current.publishedVersionId
             || current.snapshotVersionId !== citation.snapshotVersionId
-            || current.snapshotContentHash !== citation.snapshotContentHash) {
+            || current.snapshotContentHash !== citation.snapshotContentHash
+            || !citationMatchesManifest(citation, current.chunks)) {
             return null;
           }
           return {
@@ -1638,10 +1642,13 @@ function etag(version: number): string { return `"${version}"`; }
 
 function normalizeSharedDraftBody(body: string): string | null {
   const parsed = parseSemanticDocument(body);
-  if (parsed.ok) return serializeSemanticDocument(parsed.document);
-  if (body.startsWith("arden-document:")) return null;
+  if (!parsed.ok && body.startsWith("arden-document:")) return null;
   const digest = createHash("sha256").update(body).digest("hex").slice(0, 16);
-  return serializeSemanticDocument(plainTextToSemanticDocument(body, (index) => `import-${digest}-${index}`));
+  const converted = parsed.ok ? parsed.document : plainTextToSemanticDocument(body, (index) => `import-${digest}-${index}`);
+  const validated = validateSemanticDocument(converted);
+  if (!validated) return null;
+  const serialized = serializeSemanticDocument(validated);
+  return isValidText(serialized, maxBodyBytes, maxBodyBytes) ? serialized : null;
 }
 
 function encodeCursor(cursor: DraftCursor): string {

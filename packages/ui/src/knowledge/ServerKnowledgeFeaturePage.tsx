@@ -257,6 +257,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     if (!active || view !== "knowledge" || !citationTarget || openedCitationId.current === citationTarget.navigationId) return;
     openedCitationId.current = citationTarget.navigationId;
     let present = true;
+    let loading = true;
     setBusy(true); setError("");
     void loadPublishedKnowledge(platform, organizationId, citationTarget.versionId)
       .then((loaded) => {
@@ -269,8 +270,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         setOpenedCitation(null);
         setError("This citation source is unavailable in your current access scope.");
       })
-      .finally(() => { if (present) setBusy(false); });
-    return () => { present = false; };
+      .finally(() => { loading = false; if (present) setBusy(false); });
+    return () => {
+      present = false;
+      if (loading) { openedCitationId.current = null; setBusy(false); }
+    };
   }, [active, citationTarget, organizationId, platform, view]);
 
   const latestByDraft = new Map<string, KnowledgeSubmission>();
@@ -410,7 +414,13 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               {latest.decisionComment && <>Reviewer: {latest.decisionComment}<br /></>}
               This version was not published. You may revise the draft and submit a new version.
             </KnowledgeNotice>}
-            {latest?.status === "APPROVED" && <KnowledgeNotice title="Approved · preparing publication" tone="jade">The reviewed snapshot is waiting for indexing and atomic activation. It is not searchable yet.</KnowledgeNotice>}
+            {latest?.status === "APPROVED" && (latest.publicationState === "ACTIVE"
+              ? <KnowledgeNotice title="Published" tone="jade">The reviewed snapshot is active. Access follows its current audience permissions.</KnowledgeNotice>
+              : latest.publicationState === "SUPERSEDED"
+                ? <KnowledgeNotice title="Replaced by a newer publication" tone="amber">This historical snapshot is not the current publication.</KnowledgeNotice>
+                : latest.publicationState === "FAILED"
+                ? <KnowledgeNotice title="Publication failed" tone="danger">Indexing failed. This snapshot is not active; contact an administrator to inspect the failed job.</KnowledgeNotice>
+                : <KnowledgeNotice title="Approved · preparing publication" tone="amber">The reviewed snapshot is waiting for indexing and atomic activation. It is not searchable yet.</KnowledgeNotice>)}
             <div className="draft-document-body knowledge-live-form">
               <label className="draft-title-field"><span className="sr-only">Title</span><input maxLength={160} disabled={busy} value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
               {draft.currentVersion.mimeType === "application/pdf" && draft.pdfBase64

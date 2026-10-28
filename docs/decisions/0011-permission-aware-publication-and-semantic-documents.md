@@ -43,3 +43,13 @@ Semantic Document v1 defines paragraph, heading, list item, quote, code, table a
 - [Mainflow 3 Phase 1 audit](../engineering/mainflow-3-phase-1-audit.md)
 - [Technology guide](../engineering/technology-guide.md)
 - [Security and data rules](../engineering/security-and-data.md)
+
+
+## Review safety clarification — 29 October 2026
+
+The owner's authorized review/fix release adds migration 0021 without rewriting applied migrations.
+Activation is serialized per draft and cannot replace a newer published snapshot with an older
+delayed job, including after unpublication. Replaced historical approved snapshots are marked
+`SUPERSEDED`; indexing failure remains `FAILED`. Only the current successfully activated snapshot
+is `ACTIVE`. The UI/Core state extension must ship together. Existing stale pointers are not
+automatically republished or repaired. Live data reset/migration consent is still separate.

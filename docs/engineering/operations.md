@@ -164,3 +164,39 @@ Reference: [Coolify Compose deployments](https://coolify.io/docs/applications/bu
 - Diagnose with read-only checks first. Never delete user data, reset production, rotate customer credentials, upgrade infrastructure, or send external notifications as an assumed debugging step.
 - For destructive maintenance, resolve exact targets, verify scope/environment/backups, obtain applicable authorization, prefer recoverable operations, and report what was removed and recovery options.
 - Maintain customer-facing install/upgrade/backup/restore/troubleshooting runbooks as implementation matures. Do not label planned procedures as tested; record the actual release/environment used for rehearsal.
+
+
+## Core indexing database capability
+
+Provision a distinct non-superuser login for each environment's Core indexing worker after the
+reviewed schema migrations, using an administrator session and a privately generated password.
+The API request login keeps only its existing `arden_runtime` membership; do not grant it the
+indexing capability. The indexer role can execute only the reviewed claim/complete/fail functions,
+not read private document tables directly. For example, with placeholders replaced:
+
+```sql
+CREATE ROLE arden_index_worker LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT;
+-- Set the password privately through the administrator's secure credential workflow.
+GRANT arden_indexer TO arden_index_worker;
+GRANT CONNECT ON DATABASE app_database TO arden_index_worker;
+```
+
+For the embedded Core worker, set the private `ARDEN_INDEX_DATABASE_URL` to that login's app
+database connection alongside `ARDEN_AI_URL` and `ARDEN_AI_SERVICE_TOKEN`. Its separate pool
+has a bounded connection wait; transactions bound SQL/lock waits. The standalone worker uses its
+own `DATABASE_URL` with the same indexer login and must not run concurrently merely as a duplicate
+of the embedded worker. No worker/database credentials belong in GitHub build jobs or client bundles.
+
+Both entry points default to a 300-second lease; `ARDEN_INDEX_LEASE_SECONDS` accepts 180–600
+seconds, longer than the 120-second bounded AI call with a completion margin. Monitor local storage
+and database latency; an unhealthy filesystem is not a latency guarantee. No AI configuration means
+Core indexing is disabled and answers unavailable. A partial AI origin/token pair fails explicitly. If AI is enabled but the separate worker connection is missing, the API remains available and logs that embedded indexing is disabled; provision the worker before expecting new publications to activate.
+
+Migration 0021 preserves earlier migration history, serializes activation per draft and prevents a
+delayed older job from replacing any newer published snapshot, including after unpublication.
+`SUPERSEDED` denotes historical approved snapshots replaced by a newer publication; it is distinct
+from indexing failure. Superseded jobs fail terminally without retrying model work. The legacy
+unordered function is no longer executable by the worker. Existing publications are not automatically
+republished or repaired; review any pre-existing stale pointer separately. Core and web must be
+released together for the expanded state contract. A live schema upgrade still requires a separate
+reviewed backup, compatibility/recovery plan and explicit authorization; this guide is not consent.
