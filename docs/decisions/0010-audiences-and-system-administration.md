@@ -1,6 +1,6 @@
 # 0010: Audience access and Arden system administration
 
-Status: accepted
+Status: partially superseded for Organization Admin review authority and review outcomes by [decision 0011](0011-permission-aware-publication-and-semantic-documents.md)
 Date: 2026-10-20
 Decision owner/approval: task owner explicitly approved the audience and Arden System Admin boundaries
 Implementation: partial — canonical APIs and migration foundation implemented; database rehearsal and System Admin UI remain
@@ -55,7 +55,7 @@ is outside every customer organization and must not become a content superuser.
   target department when applicable, classification and one or more audiences.
 - An author may target only audiences they can currently read. Hidden audience groups are not listed.
 - Submit freezes the audience identifiers with the immutable version/hash and policy metadata.
-  Reviewers approve or reject that exact snapshot; they do not silently edit its audience.
+  Reviewers approve that exact snapshot or request revision; they do not silently edit its audience.
 - Approval is blocked if the author is no longer eligible to target the audience or the audience is
   no longer enforceable.
 - Read, search, graph, citation, AI/RAG and contribution-copy operations recheck the current audience.
