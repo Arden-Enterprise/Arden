@@ -75,6 +75,11 @@ Keep the private operational handoff current with installed source hash, Coolify
 
 ## Failure and recovery
 
+For the publication feature's initial 0017 → 0021 upgrade, use the separately
+approved [schema cutover and recovery plan](release-schema-cutover.md). Its
+disposable database rehearsal does not authorize a live content reset or replace
+the protected migration fingerprint gate.
+
 | Failure | Expected response |
 | --- | --- |
 | Source tests, dependency install, image build, scan or image smoke fails | No release is uploaded/activated. Fix the actual failure; do not disable the check or add blanket scanner exclusions. |
