@@ -25,6 +25,9 @@ const roleCodes = [
 ];
 const repository = pool ? new ArdenRepository(pool) : null;
 let fixtureReady = false;
+let indexPool: Pool | null = null;
+const indexLogin = `arden_test_indexer_${ids.owner.replaceAll("-", "")}`;
+const indexPassword = randomUUID();
 
 describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => {
   beforeAll(async () => {
@@ -85,8 +88,16 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       [ids.readerAudience, ids.organization, ids.ownerMembership]);
       await client.query(`INSERT INTO role_assignment(membership_id, role_id, access_scope_id) VALUES ($1, $2, $3)`,
         [ids.ownerMembership, ids.readerAudience, ids.organizationScope]);
+      // Identifiers/password are generated UUIDs, never caller input. This role
+      // belongs only to this already verified disposable test target.
+      await client.query(`CREATE ROLE ${indexLogin} LOGIN PASSWORD '${indexPassword}' NOSUPERUSER NOBYPASSRLS NOINHERIT`);
+      await client.query(`GRANT arden_indexer TO ${indexLogin}`);
       await client.query("COMMIT");
       fixtureReady = true;
+      const workerUrl = new URL(databaseUrl!);
+      workerUrl.username = indexLogin;
+      workerUrl.password = indexPassword;
+      indexPool = new Pool({ connectionString: workerUrl.href, max: 2, connectionTimeoutMillis: 5000 });
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -98,6 +109,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
   afterAll(async () => {
     if (!pool) return;
     try {
+      await indexPool?.end();
       if (fixtureReady) {
         const client = await pool.connect();
         try {
@@ -137,6 +149,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM access_scope WHERE access_scope_id = $1", [ids.organizationScope]);
           await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])", [[ids.owner, ids.manager]]);
           await client.query("DELETE FROM organization WHERE organization_id = $1", [ids.organization]);
+          await client.query(`DROP ROLE ${indexLogin}`);
           await client.query("ALTER TABLE draft_version ENABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_draft_version ENABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_submission ENABLE TRIGGER USER");
@@ -155,6 +168,14 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     } finally {
       await pool.end();
     }
+  });
+
+  it("uses a non-superuser worker login without API private-content access", async () => {
+    if (!indexPool) throw new Error("Worker fixture is unavailable");
+    const identity = await indexPool.query("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user");
+    expect(identity.rows).toEqual([{ rolsuper: false, rolbypassrls: false }]);
+    await expect(indexPool.query("SELECT * FROM arden.draft_document LIMIT 1")).rejects.toMatchObject({ code: "42501" });
+    await expect(new PgIndexGenerationStore(indexPool).claim(randomUUID(), 300)).resolves.toBeNull();
   });
 
   it("enforces owner-only drafts, member creation, conflicts, and audit records through RLS", async () => {
@@ -361,7 +382,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const beforeActivation = await repository.listPublishedKnowledge(ids.owner, ids.organization);
     expect(beforeActivation).toEqual([]);
     const workerId = randomUUID();
-    const generationStore = new PgIndexGenerationStore(pool);
+    if (!indexPool) throw new Error("Worker fixture is unavailable");
+    const generationStore = new PgIndexGenerationStore(indexPool);
     const job = await generationStore.claim(workerId, 90);
     expect(job).toMatchObject({
       organizationId: ids.organization,
@@ -445,5 +467,38 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const stillPublished = await repository.listPublishedKnowledge(ids.owner, ids.organization);
     expect(stillPublished).toHaveLength(1);
     expect(stillPublished?.[0]).toMatchObject({ title: "Cross-actor publication regression" });
+
+    let draftVersion = revised.draft.currentVersion;
+    const candidate = async (title: string) => {
+      const update = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
+        created.draft.id, draftVersion, { title }, null, "ordering-update");
+      if (update.kind !== "updated") throw new Error("Expected candidate edit");
+      draftVersion = update.draft.currentVersion;
+      const submission = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
+        created.draft.id, draftVersion, randomUUID(), "ordering-submit");
+      if (submission.kind !== "submitted") throw new Error("Expected candidate submission");
+      const decision = await repository.decideReview(ids.manager, ids.organization, submission.submission.id,
+        "APPROVE", submission.submission.snapshotVersionId, submission.submission.contentHash,
+        null, randomUUID(), "ordering-approve");
+      expect(decision.kind).toBe("decided");
+      const claimed = await generationStore.claim(workerId, 300);
+      if (!claimed || claimed.submissionId !== submission.submission.id) throw new Error("Expected exact candidate job");
+      return claimed;
+    };
+    const older = await candidate("Older approved candidate");
+    const newer = await candidate("Newest active publication");
+    const completedManifest = (job: typeof older): IndexGenerationManifest => ({ ...manifest,
+      jobId: job.jobId, generationId: job.generationId, snapshotVersionId: job.snapshotVersionId,
+      snapshotContentHash: job.snapshotContentHash });
+    await generationStore.complete(newer, workerId, completedManifest(newer));
+    await expect(generationStore.complete(older, workerId, completedManifest(older)))
+      .rejects.toMatchObject({ code: "INDEX_GENERATION_SUPERSEDED" });
+    await expect(repository.listPublishedKnowledge(ids.owner, ids.organization)).resolves.toEqual([
+      expect.objectContaining({ title: "Newest active publication" }),
+    ]);
+    const sources = await repository.listAuthorizedAiSources(ids.owner, ids.organization, [newer.generationId]);
+    expect(sources).toEqual([expect.objectContaining({ generationId: newer.generationId, chunks: manifest.chunks })]);
+    await expect(repository.listAuthorizedAiSources(ids.owner, ids.organization, [older.generationId])).resolves.toEqual([]);
+
   });
 });
