@@ -18,7 +18,7 @@ ci/windows-build
 - Use lowercase, meaningful, bounded names. Do not use `new-branch`, `changes`, `work`, `final`, a bare date, or a person's name as the whole description.
 - Do not prefix a branch with a tool, agent, or person's name (including `codex/`). The branch identifies the kind and subject of work, not who or what created it.
 - `release/<semver>` is the version-only exception. `hotfix/` is for urgent production defects, not ordinary feature work.
-- One branch per coherent change, normally based on current `main`. Do not create a permanent `develop` or use branch names as security/deployment isolation.
+- One branch per coherent change. For normal app delivery, branch from safely refreshed `staging` after reading current main's contract and comparing pending staging changes; see the [release guide](../release-pipeline.md). Explicitly scoped maintenance may use another approved base. Do not create a permanent `develop` or use branch names as security/deployment isolation.
 - Do not rename or switch away from someone else's working branch merely to satisfy naming. Inspect status and ask if their work would be disturbed. An unborn/initial repository may need explicit bootstrap handling.
 - Commit each completed, independently reviewable unit of work separately when committing is authorized. Keep related code, documentation, and verification together; preserve unrelated changes and avoid broken intermediate commits. Inspect the proposed diff before committing.
 - Use conventional commit subjects: `<type>(optional-scope): concise summary`. A breaking change must explain compatibility and migration consequences.
