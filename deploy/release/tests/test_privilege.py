@@ -11,6 +11,22 @@ import entrypoint
 
 @unittest.skipUnless(os.name == "posix" and os.geteuid() == 0, "Requires isolated Linux root fixtures")
 class PrivilegeTests(unittest.TestCase):
+    def test_public_key_directories_remain_searchable_under_private_operator_umask(self):
+        import bootstrap_operator as operator
+        import stat
+        create = getattr(operator, "account_directories", None)
+        self.assertTrue(callable(create), "Protected public-key directory setup is missing")
+        with tempfile.TemporaryDirectory(dir="/root") as temporary:
+            home = Path(temporary) / "accounts" / "staging"
+            previous = os.umask(0o077)
+            try:
+                create(home)
+                create(home)  # Reconcile only these root-owned dedicated directories.
+            finally:
+                os.umask(previous)
+            for path in [home.parent, home, home / ".ssh"]:
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o755)
+
     def test_partial_original_stop_enters_recovery_and_verifies_it(self):
         import bootstrap_operator as operator
         from test_bootstrap import source_components

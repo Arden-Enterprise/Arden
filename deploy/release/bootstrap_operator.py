@@ -382,25 +382,34 @@ def retire_original(environment, record):
     write_json(STATE / "bootstrap" / f"{environment}.json", record)
 
 
-def install_account(environment, settings):
-    config_path = CONFIG / f"{environment}.json"
-    secure_file(config_path)
-    line = deployment_key_line(environment, settings["public_keys"][environment])
-    username = f"arden-ci-{environment}"
-    home = Path("/var/lib/arden-ci") / environment
+def account_directories(home):
     for directory in [home.parent, home, home / ".ssh"]:
         if directory.exists() or directory.is_symlink():
             secure_directory(directory)
         else:
             secure_directory(directory.parent)
             directory.mkdir(mode=0o755)
+        # The operator's private umask is correct for tokens/state, but sshd must
+        # traverse these root-owned public-key directories as the login account.
+        os.chmod(directory, 0o755)
+
+
+def install_account(environment, settings):
+    config_path = CONFIG / f"{environment}.json"
+    secure_file(config_path)
+    line = deployment_key_line(environment, settings["public_keys"][environment])
+    username = f"arden-ci-{environment}"
+    home = Path("/var/lib/arden-ci") / environment
     try:
         account = pwd.getpwnam(username)
         if account.pw_gecos != "Arden release capability" or account.pw_dir != str(home) or account.pw_uid < 1000:
             raise ValueError("Preserve the existing unrelated account")
     except KeyError:
+        if home.exists() and any(home.iterdir()):
+            raise ValueError("Preserve unexpected existing deployment-account files")
         run(["/usr/sbin/useradd", "--user-group", "--no-create-home", "--home-dir", str(home),
              "--shell", "/bin/sh", "--comment", "Arden release capability", username])
+    account_directories(home)
     ssh = home / ".ssh"
     authorized = ssh / "authorized_keys"
     if authorized.is_symlink():
