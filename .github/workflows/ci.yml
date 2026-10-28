@@ -90,6 +90,10 @@ jobs:
           node-version: 24.22.1
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile
+      - name: Rehearse scoped schema backup, upgrade failure and restoration
+        run: python3 tools/verification/schema-recovery.py
+        env:
+          ARDEN_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
       - name: Apply all migrations only to the disposable runner database
         run: pnpm --filter @arden/api db:migrate
         env:
