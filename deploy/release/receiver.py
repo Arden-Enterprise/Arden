@@ -73,9 +73,14 @@ class ReleaseEngine:
                     output.flush()
                 with temporary.open("rb") as archive:
                     proof = validate_archive(archive, manifest)
+                # Import can outlive a disconnected receiver. Journal validated
+                # content before any Docker effect; this is never a deploy receipt.
+                intent = self.root / "upload-intents" / self._receipt(manifest).name
+                write_json(intent, {"manifest": manifest, "proof": proof, "started_at": time.time()})
                 self.manager.load(temporary, manifest, proof)
                 self.manager.ensure_images(manifest)
                 write_json(self._receipt(manifest), {"manifest": manifest, "provenance": provenance})
+                intent.unlink()
                 collect_releases(self.root.parent, self.manager)
             finally:
                 if temporary is not None and temporary.exists():

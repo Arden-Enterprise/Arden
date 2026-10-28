@@ -88,6 +88,35 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(self.manager.current["commit"], "f" * 40)
         self.assertIn(self.manifest["images"]["api"]["id"], self.manager.loaded)
 
+    def test_interrupted_load_has_durable_intent_but_no_deploy_receipt(self):
+        def interrupted(path, manifest, proof):
+            intents = list((self.engine.root / "upload-intents").glob("*.json"))
+            self.assertEqual(len(intents), 1)
+            intent = json.loads(intents[0].read_text())
+            self.assertEqual(intent["manifest"], manifest)
+            self.assertEqual(intent["proof"], proof)
+            raise RuntimeError("interrupted image import")
+        self.manager.load = interrupted
+        with self.assertRaisesRegex(RuntimeError, "interrupted"):
+            self.upload()
+        self.assertFalse(self.engine._receipt(self.manifest).exists())
+        with self.assertRaisesRegex(ValueError, "No matching"):
+            self.engine.deploy(self.manifest)
+
+    def test_receipt_write_failure_keeps_recoverable_upload_intent(self):
+        from state import write_json
+        def fail_receipt(path, value):
+            if path.parent.name == "uploads":
+                raise OSError("receipt disk failure")
+            write_json(path, value)
+        with patch("receiver.write_json", side_effect=fail_receipt):
+            with self.assertRaisesRegex(OSError, "receipt disk failure"):
+                self.upload()
+        self.assertEqual(len(list((self.engine.root / "upload-intents").glob("*.json"))), 1)
+        self.assertFalse(self.engine._receipt(self.manifest).exists())
+        self.upload()
+        self.assertEqual(list((self.engine.root / "upload-intents").glob("*.json")), [])
+
     def test_tampered_upload_never_loads_images_or_changes_active_release(self):
         with self.assertRaises(ValueError):
             self.engine.upload(self.manifest, io.BytesIO(b"tampered"))

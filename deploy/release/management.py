@@ -168,6 +168,23 @@ class CoolifyManager:
                 raise ValueError("Review the Coolify adapter after its image changes")
         self._check_protected()
 
+    @staticmethod
+    def _normalized_config(value):
+        # Docker adds inert defaults omitted from OCI image configs.
+        defaults = {"ArgsEscaped": False, "Hostname": "", "Domainname": "", "Image": "",
+                    "AttachStdin": False, "AttachStdout": False, "AttachStderr": False,
+                    "Tty": False, "OpenStdin": False, "StdinOnce": False,
+                    "NetworkDisabled": False, "MacAddress": ""}
+        return {key: data for key, data in value.items()
+                if data is not None and not (key in defaults and type(data) is type(defaults[key]) and data == defaults[key])}
+
+    @classmethod
+    def _matches_content(cls, actual, expected):
+        return (bool(IMAGE_ID.fullmatch(actual.get("Id", "")))
+                and actual.get("Architecture") == "amd64" and actual.get("Os") == "linux"
+                and cls._normalized_config(actual.get("Config", {})) == cls._normalized_config(expected["config"])
+                and (actual.get("RootFS", {}).get("Layers") or []) == expected.get("rootfs", {}).get("diff_ids", []))
+
     def load(self, path, manifest, proof):
         self.command(["image", "load", "--input", str(path)])
         bindings = read_json(self.binding_path()) if self.binding_path().exists() else {}
@@ -175,20 +192,9 @@ class CoolifyManager:
             image = manifest["images"][component]
             actual = strict_json(self.command(["image", "inspect", "--format", "{{json .}}", image["tag"]]))
             expected = proof[component]
-            def normalize(value):
-                # Docker's container.Config API adds inert defaults omitted from OCI
-                # image config JSON. Non-default values and all image settings remain strict.
-                defaults = {"ArgsEscaped": False, "Hostname": "", "Domainname": "", "Image": "",
-                            "AttachStdin": False, "AttachStdout": False, "AttachStderr": False,
-                            "Tty": False, "OpenStdin": False, "StdinOnce": False,
-                            "NetworkDisabled": False, "MacAddress": ""}
-                return {key: data for key, data in value.items()
-                        if data is not None and not (key in defaults and type(data) is type(defaults[key]) and data == defaults[key])}
-            if (not IMAGE_ID.fullmatch(actual.get("Id", "")) or actual.get("Architecture") != "amd64"
-                    or actual.get("Os") != "linux"
-                    or normalize(actual.get("Config", {})) != normalize(expected["config"])
-                    or (actual.get("RootFS", {}).get("Layers") or []) != expected.get("rootfs", {}).get("diff_ids", [])):
-                expected_config, actual_config = normalize(expected["config"]), normalize(actual.get("Config", {}))
+            if not self._matches_content(actual, expected):
+                expected_config = self._normalized_config(expected["config"])
+                actual_config = self._normalized_config(actual.get("Config", {}))
                 keys = sorted(key for key in set(expected_config) | set(actual_config)
                               if expected_config.get(key) != actual_config.get(key))
                 raise ValueError("Loaded local image differs from validated content; config fields: " + ",".join(keys))
@@ -211,7 +217,25 @@ class CoolifyManager:
         local = bindings.get(identifier)
         if local is None:
             return False
-        identifier = local
+        return self._remove_local_image(local, commit)
+
+    def remove_incomplete_upload(self, manifest, proof, retained):
+        # Include dangling images: a later retry can move the original tag.
+        candidates = self.command(["image", "ls", "--all", "--quiet", "--no-trunc",
+                                   "--filter", "label=io.arden.release.managed=1",
+                                   "--filter", "label=org.opencontainers.image.revision=" + manifest["commit"]]).split()
+        for identifier in sorted(set(candidates)):
+            if not IMAGE_ID.fullmatch(identifier):
+                raise ValueError("Unexpected incomplete image identity")
+            if identifier in retained:
+                continue
+            actual = strict_json(self.command(["image", "inspect", "--format", "{{json .}}", identifier]))
+            if actual.get("Id") != identifier:
+                raise ValueError("Incomplete image identity changed")
+            if any(self._matches_content(actual, proof[kind]) for kind in ["api", "web"]):
+                self._remove_local_image(identifier, manifest["commit"])
+
+    def _remove_local_image(self, identifier, commit):
         template = '{"labels":{{json .Config.Labels}},"tags":{{json .RepoTags}}}'
         result = subprocess.run(["/usr/bin/docker", "image", "inspect", "--format", template, identifier],
                                 capture_output=True, text=True, timeout=30)

@@ -77,6 +77,33 @@ class RetentionTests(unittest.TestCase):
         collect_releases(self.root, store, now=time.time() + 7200)
         self.assertTrue(path.exists())
 
+    def test_portable_alias_of_production_previous_is_not_removed(self):
+        value, previous = self.manifest("a"), self.manifest("b")
+        (self.root / "staging" / "uploads" / "0.json").write_text(json.dumps(value))
+        (self.root / "production" / "state.json").write_text(json.dumps(
+            {"active": None, "previous": {"manifest": previous}, "pending": None}))
+        bindings = {value["images"][kind]["id"]: previous["images"][kind]["id"] for kind in ["api", "web"]}
+        (self.root / "image-bindings.json").write_text(json.dumps(bindings))
+        store = ImageStore(bindings)
+        collect_releases(self.root, store, now=time.time() + 7200)
+        self.assertEqual(store.available, set(bindings))
+
+    def test_incomplete_load_is_reconciled_after_grace_and_journal_survives_missing_images(self):
+        value = self.manifest("a")
+        directory = self.root / "staging" / "upload-intents"
+        directory.mkdir()
+        intent = directory / "0.json"
+        proof = {"api": {"config": {}}, "web": {"config": {}}}
+        intent.write_text(json.dumps({"manifest": value, "proof": proof, "started_at": 100}))
+        store = ImageStore([])
+        calls = []
+        store.remove_incomplete_upload = lambda *args: calls.append(args)
+        collect_releases(self.root, store, now=200)
+        self.assertEqual(calls, [])
+        collect_releases(self.root, store, now=4000)
+        self.assertEqual(calls, [(value, proof, set())])
+        self.assertTrue(intent.exists(), "An interrupted daemon import can appear after the first scan")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -153,6 +153,28 @@ class ManagementTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 manager.load(Path(temporary) / "synthetic.tar.gz", manifest, proof)
 
+    def test_incomplete_import_cleanup_checks_content_and_preserves_retained_local_ids(self):
+        from protocol import validate_archive
+        manifest, payload = fixture()
+        proof = validate_archive(io.BytesIO(payload), manifest)
+        ids = ["sha256:" + digit * 64 for digit in ["7", "8", "9"]]
+        removed = []
+        def command(args):
+            if args[:2] == ["image", "ls"]:
+                self.assertIn("label=io.arden.release.managed=1", args)
+                self.assertIn("label=org.opencontainers.image.revision=" + manifest["commit"], args)
+                return "\n".join(ids)
+            candidate = args[-1]
+            config = copy.deepcopy(proof["api"]["config"])
+            if candidate == ids[2]:
+                config["User"] = "0:0"
+            return json.dumps({"Id": candidate, "Os": "linux", "Architecture": "amd64",
+                               "Config": config, "RootFS": {"Layers": []}})
+        manager = CoolifyManager(self.config, command=command)
+        with patch.object(manager, "_remove_local_image", side_effect=lambda *args: removed.append(args)):
+            manager.remove_incomplete_upload(manifest, proof, {ids[0]})
+        self.assertEqual(removed, [(ids[1], manifest["commit"])])
+
 
 if __name__ == "__main__":
     unittest.main()
