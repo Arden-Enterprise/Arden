@@ -131,6 +131,7 @@ class ManagementTests(unittest.TestCase):
             config["state_dir"] = str(Path(temporary) / "staging")
             config["baseline"]["images"] = {kind: {"id": "sha256:" + digit * 64}
                                             for kind, digit in [("api", "1"), ("web", "2")]}
+            mutations = {}
             def command(arguments):
                 if arguments[:2] == ["image", "load"]:
                     return ""
@@ -140,6 +141,7 @@ class ManagementTests(unittest.TestCase):
                     return local[kind]
                 inspect_config = {**proof[kind]["config"], "ArgsEscaped": False,
                                   "Hostname": "", "AttachStdin": False}
+                inspect_config.update(mutations)
                 return json.dumps({"Id": local[kind], "Architecture": "amd64", "Os": "linux",
                                    "Config": inspect_config, "RootFS": {"Layers": []}})
             manager = CoolifyManager(config, command=command)
@@ -147,6 +149,9 @@ class ManagementTests(unittest.TestCase):
             manager.ensure_images(manifest)
             self.assertEqual(manager.compose_for(manifest)["services"]["arden-api"]["image"], local["api"])
             self.assertNotEqual(local["api"], manifest["images"]["api"]["id"])
+            mutations["User"] = "0:0"
+            with self.assertRaises(ValueError):
+                manager.load(Path(temporary) / "synthetic.tar.gz", manifest, proof)
 
 
 if __name__ == "__main__":
