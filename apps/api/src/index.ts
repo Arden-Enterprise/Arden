@@ -142,6 +142,11 @@ const app = buildApp({
 
 const port = Number(process.env.ARDEN_API_PORT ?? 3001);
 const host = process.env.ARDEN_API_HOST ?? "127.0.0.1";
+indexPool?.on("error", () => {
+  // pg emits idle-connection failures outside the worker's rejected promise.
+  // The pool discards that client; a later poll obtains a new connection.
+  app.log.warn("Indexing database connection interrupted; polling will retry");
+});
 if (askArden && !indexPool) {
   app.log.warn("Embedded indexing is disabled until a separate worker database login is configured");
 }
