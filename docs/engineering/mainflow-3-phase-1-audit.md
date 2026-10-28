@@ -29,3 +29,17 @@ policy update/unpublish APIs and physical storage-object purge tooling remain la
 items. Deterministic Markdown compilation/source-map implementation has started in `Arden-AI`;
 cross-repository contract and integration work is not yet complete. Migration 0018 must be
 rehearsed on a disposable database before shared deployment.
+
+
+## Optional synthetic browser regression
+
+With a local frontend running and Playwright plus a browser installed in the test environment, run
+`node tools/verification/ask-arden-browser.cjs`. `ARDEN_UI_QA_ORIGIN` selects an HTTP loopback
+frontend (default `http://127.0.0.1:5180`). `ARDEN_QA_BROWSER_CHANNEL` can select an installed
+channel such as `msedge`; `ARDEN_PLAYWRIGHT_MODULE` optionally identifies an existing Playwright
+module instead of the default module resolution. No local machine path belongs in committed settings.
+
+This regression injects a synthetic session and API responses, verifies that a delayed answer
+cannot enter a reset conversation, and checks desktop/mobile rendering and page errors. Screenshots
+stay in ignored `.private/qa`. It does not sign in to a real server, invoke a model or establish
+live AI/authorization acceptance. The browser dependency is optional and is not installed on the server.
