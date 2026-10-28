@@ -186,6 +186,9 @@ database connection alongside `ARDEN_AI_URL` and `ARDEN_AI_SERVICE_TOKEN`. Its s
 has a bounded connection wait; transactions bound SQL/lock waits. The standalone worker uses its
 own `DATABASE_URL` with the same indexer login and must not run concurrently merely as a duplicate
 of the embedded worker. No worker/database credentials belong in GitHub build jobs or client bundles.
+Idle connection errors on the embedded worker's separate pool are logged without database error
+details; they do not terminate Core. Subsequent polls reconnect. The disposable built-process
+regression terminates an actual idle worker backend and checks API readiness and reconnection.
 
 Both entry points default to a 300-second lease; `ARDEN_INDEX_LEASE_SECONDS` accepts 180–600
 seconds, longer than the 120-second bounded AI call with a completion margin. Monitor local storage
