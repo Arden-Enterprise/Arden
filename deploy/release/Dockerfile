@@ -32,7 +32,9 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 CMD node 
 CMD ["node", "dist/index.js"]
 
 FROM nginx:stable-alpine@sha256:47928bf67eb62a1863cb08d9ecb52d3e704304ba614eaee17884204677702951 AS web
-RUN apk add --upgrade --no-cache brotli-libs=1.2.1-r0 curl=8.23.0-r0 libcurl=8.23.0-r0
+# Alpine repositories prune superseded patch revisions. Take current security
+# patches from this digest-pinned base's repository; scanning still gates release.
+RUN apk upgrade --no-cache brotli-libs curl libcurl
 ARG REVISION
 ARG SOURCE_TREE
 ARG MIGRATIONS

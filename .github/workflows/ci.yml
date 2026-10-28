@@ -135,6 +135,7 @@ jobs:
     concurrency:
       group: arden-shared-host-activation
       cancel-in-progress: false
+      queue: max
     environment:
       name: ${{ github.ref_name == 'staging' && 'staging' || 'production' }}
       url: ${{ github.ref_name == 'staging' && 'https://staging.ardenai.tech' || 'https://ardenai.tech' }}

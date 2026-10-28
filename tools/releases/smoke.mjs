@@ -48,6 +48,12 @@ try {
   if (version.commit !== source.commit || version.tree !== source.tree) throw new Error("Image source identity mismatch");
   const ready = await (await fetch(`${origin}/api/health/ready`)).json();
   if (ready.status !== "ok" || (await fetch(`${origin}/api/v1/me`)).status !== 401) throw new Error("API readiness/denial failed");
+  for (const path of ["/", "/release.json", "/healthz", "/assets/missing.js", "/api/v1/me", "/auth/missing", "/verify",
+    "/api/v1/organizations/00000000-0000-0000-0000-000000000000/knowledge/drafts/pdf"]) {
+    const response = await fetch(`${origin}${path}`);
+    if (response.headers.get("x-content-type-options") !== "nosniff") throw new Error(`Missing or duplicate nosniff header: ${path}`);
+    await response.body?.cancel();
+  }
   console.log("Disposable built-image smoke passed: migrations, non-superuser runtime, web identity, API readiness and anonymous denial.");
 } finally {
   for (const name of Object.values(names)) {
