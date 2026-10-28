@@ -148,12 +148,12 @@ describe("API auth and private draft routes", () => {
     expect(response.json().answer).toBeUndefined();
   });
 
-  it("rejects bounded plaintext that exceeds the semantic block limit without a server error", async () => {
+  it.each(["x\n".repeat(2001), "x\n".repeat(1500)])("rejects text exceeding semantic block or serialized-envelope limits", async (body) => {
     const session = await desktopSession(app, "owner@example.test");
     const response = await app.inject({ method: "POST",
       url: `/api/v1/organizations/${organizationId}/knowledge/drafts/new`,
       headers: { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey },
-      payload: { title: "Too many paragraphs", classification: "INTERNAL", body: "x\n".repeat(2001) },
+      payload: { title: "Too many paragraphs", classification: "INTERNAL", body },
     });
     expect(response.statusCode).toBe(400);
     expect(response.json().error.code).toBe("INVALID_DOCUMENT");

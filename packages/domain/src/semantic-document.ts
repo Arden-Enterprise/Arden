@@ -80,13 +80,16 @@ function parseText(value: unknown, counter: { text: number }): SemanticText | nu
   return { type: "text", text: value.text, styles };
 }
 
+export function isAllowedSemanticLinkHref(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > SEMANTIC_DOCUMENT_LIMITS.maximumLinkLength) return false;
+  try { return allowedLinkSchemes.has(new URL(value).protocol); }
+  catch { return false; }
+}
+
 function parseLink(value: unknown, counter: { text: number }): SemanticLink | null {
   if (!isRecord(value) || value.type !== "link" || typeof value.href !== "string"
-    || value.href.length > SEMANTIC_DOCUMENT_LIMITS.maximumLinkLength || !Array.isArray(value.content)) return null;
+    || !isAllowedSemanticLinkHref(value.href) || !Array.isArray(value.content)) return null;
   if (!hasOnlyKeys(value, ["type", "href", "content"])) return null;
-  let url: URL;
-  try { url = new URL(value.href); } catch { return null; }
-  if (!allowedLinkSchemes.has(url.protocol)) return null;
   const content: SemanticText[] = [];
   for (const item of value.content) {
     const text = parseText(item, counter);

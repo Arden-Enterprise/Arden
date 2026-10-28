@@ -1216,7 +1216,8 @@ export function buildApp(dependencies: AppDependencies) {
           allowedGenerationIds: before.map((source) => source.generationId),
         });
         const after = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId,
-          [...new Set(aiResponse.citations.map((citation) => citation.generationId))]);
+          [...new Set(aiResponse.citations.map((citation) => citation.generationId))],
+          [...new Set(aiResponse.citations.map((citation) => citation.chunkId))]);
         if (!after) return reply.code(404).send(resourceNotAvailable(request.id));
         const beforeByGeneration = new Map(before.map((source) => [source.generationId, source]));
         const afterByGeneration = new Map(after.map((source) => [source.generationId, source]));
@@ -1641,12 +1642,13 @@ function etag(version: number): string { return `"${version}"`; }
 
 function normalizeSharedDraftBody(body: string): string | null {
   const parsed = parseSemanticDocument(body);
-  if (parsed.ok) return serializeSemanticDocument(parsed.document);
-  if (body.startsWith("arden-document:")) return null;
+  if (!parsed.ok && body.startsWith("arden-document:")) return null;
   const digest = createHash("sha256").update(body).digest("hex").slice(0, 16);
-  const converted = plainTextToSemanticDocument(body, (index) => `import-${digest}-${index}`);
+  const converted = parsed.ok ? parsed.document : plainTextToSemanticDocument(body, (index) => `import-${digest}-${index}`);
   const validated = validateSemanticDocument(converted);
-  return validated ? serializeSemanticDocument(validated) : null;
+  if (!validated) return null;
+  const serialized = serializeSemanticDocument(validated);
+  return isValidText(serialized, maxBodyBytes, maxBodyBytes) ? serialized : null;
 }
 
 function encodeCursor(cursor: DraftCursor): string {
