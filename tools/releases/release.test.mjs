@@ -31,6 +31,8 @@ test("SSH uses fixed operations, pinned hosts and validated connection fields", 
     key: "/tmp/release/key", hosts: "/tmp/release/known_hosts" });
   assert.ok(args.includes("StrictHostKeyChecking=yes"));
   assert.ok(args.includes("ClearAllForwardings=yes"));
+  assert.ok(args.includes("ServerAliveInterval=15"));
+  assert.ok(args.includes("ServerAliveCountMax=3"));
   assert.equal(args.at(-1), "arden-ci-staging@server.example.test");
   for (const patch of [{ host: "-oProxyCommand=evil" }, { port: "22;whoami" },
     { user: "root\ncommand" }, { port: "0" }]) {
@@ -51,4 +53,27 @@ test("production promotion changes deployment identity without rebuilding images
   assert.deepEqual(result, { op: "promote", environment: "production", commit: "a".repeat(40),
     tree: "b".repeat(40), run_id: "12345", attempt: 1 });
   assert.equal(Object.hasOwn(result, "images"), false);
+});
+
+test("preflight checks each environment with a read-only status request", async () => {
+  for (const branch of ["staging", "main"]) {
+    const calls = [];
+    await release.checkReadiness({ ...environment, GITHUB_REF_NAME: branch }, async request => {
+      calls.push(request);
+      return { active: { manifest: { schema: 1, commit: "b".repeat(40) } }, pending: null };
+    });
+    assert.deepEqual(calls, [{ op: "status", environment: branch === "main" ? "production" : "staging" }]);
+  }
+});
+
+test("preflight refuses unavailable, incomplete or unresolved release state", async () => {
+  const active = { manifest: { schema: 1, commit: "b".repeat(40) } };
+  for (const status of [undefined, {}, { active }, { active, pending: {} },
+    { active: { manifest: { schema: 2, commit: "b".repeat(40) } }, pending: null }]) {
+    await assert.rejects(() => release.checkReadiness(environment, async () => status));
+  }
+  await assert.rejects(() => release.checkReadiness(environment, async () => { throw new Error("unreachable"); }), /unreachable/);
+  let called = false;
+  await assert.rejects(() => release.checkReadiness({ ...environment, GITHUB_EVENT_NAME: "pull_request" }, async () => { called = true; }));
+  assert.equal(called, false);
 });

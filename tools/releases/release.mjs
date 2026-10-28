@@ -32,7 +32,8 @@ export function sshArguments({ host, port, user, key, hosts }) {
   return ["-F", "/dev/null", "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
     "-o", `UserKnownHostsFile=${hosts}`, "-o", "GlobalKnownHostsFile=/dev/null",
     "-o", "IdentitiesOnly=yes", "-o", "ClearAllForwardings=yes", "-o", "ForwardAgent=no",
-    "-o", "ConnectTimeout=20", "-i", key, "-p", port, `${user}@${host}`];
+    "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
+    "-i", key, "-p", port, `${user}@${host}`];
 }
 
 export async function assertCurrentHead(env, getHead = async () => execFileSync("gh", ["api",
@@ -46,6 +47,15 @@ export function promotionRequest(env, tree) {
   const context = releaseContext(env);
   if (context.environment !== "production" || !sha.test(tree)) throw new Error("Invalid promotion identity");
   return { op: "promote", environment: "production", ...context, tree };
+}
+
+export async function checkReadiness(env, request) {
+  const { environment } = releaseContext(env);
+  const status = await request({ op: "status", environment });
+  if (status?.pending !== null || status?.active?.manifest?.schema !== 1
+    || !sha.test(status.active.manifest.commit ?? "")) {
+    throw new Error("Release state needs operator inspection before building or deploying");
+  }
 }
 
 function metadata() {
@@ -156,10 +166,23 @@ async function main(mode, env) {
       join(root, "manifest.json"), join(root, "roundtrip")], { stdio: "inherit", timeout: 180_000 });
     return;
   }
-  if (mode !== "deploy") throw new Error("Unknown release client command");
+  if (!["preflight", "deploy"].includes(mode)) throw new Error("Unknown release client command");
   const context = releaseContext(env);
   prepareSsh(env, root);
   await assertCurrentHead(env);
+  if (mode === "preflight") {
+    try {
+      await checkReadiness(env, request => rpc(env, root, request));
+      console.log("Restricted deployment connection and release state are ready.");
+    } finally {
+      // Keep deployment credentials out of the following build/scan steps.
+      for (const name of ["key", "known_hosts"]) {
+        const path = join(root, name);
+        if (existsSync(path)) unlinkSync(path);
+      }
+    }
+    return;
+  }
   if (context.environment === "staging") {
     const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
     if (manifest.commit !== context.commit || manifest.tree !== metadata().tree
