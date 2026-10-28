@@ -1572,6 +1572,17 @@ export class ArdenRepository implements ArdenDataRepository {
 
   async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }> {
     return this.withActorContext(userId, organizationId, async (client) => {
+      // Lock the mutable document before reading its version join. Under READ
+      // COMMITTED, a waiter otherwise rechecks the new document against an old
+      // joined-version snapshot and can incorrectly report an owned draft missing.
+      const locked = await client.query(`SELECT d.draft_id FROM draft_document d
+        JOIN private_workspace w ON w.workspace_id = d.workspace_id
+        JOIN organization_membership om ON om.membership_id = w.membership_id
+        WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
+          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
+          AND ${membershipPermissionSql("$4")}
+        FOR UPDATE OF d`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
+      if (!locked.rowCount) return { kind: "not-found" };
       const currentResult = await client.query<{
         membership_id: string;
         title: string;
@@ -1591,8 +1602,7 @@ export class ArdenRepository implements ArdenDataRepository {
           JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
          WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
            AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
-           AND ${membershipPermissionSql("$4")}
-         FOR UPDATE OF d`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
+           AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
       const current = currentResult.rows[0];
       if (!current) return { kind: "not-found" };
       if (current.current_version_no !== expectedVersion) return { kind: "conflict", currentVersion: current.current_version_no };
