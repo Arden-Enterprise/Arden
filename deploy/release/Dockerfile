@@ -7,7 +7,7 @@ RUN pnpm install --frozen-lockfile --filter arden --filter @arden/api... --filte
 RUN pnpm --filter @arden/api build && pnpm --filter @arden/web build
 RUN pnpm --filter @arden/api deploy --prod --legacy /release/api
 
-FROM node:24.22.1-bookworm-slim@sha256:55fb5f5a527ea2c5c4a95f963e48ef90aa38c7b346054fdc8ee9957a2b55d205 AS api
+FROM node:24.22.1-alpine3.23@sha256:0468540aa58203ff9e40c2aab3907c52644ab818af6176b1c70a026137dc92a2 AS api
 ARG REVISION
 ARG SOURCE_TREE
 ARG MIGRATIONS
@@ -16,6 +16,10 @@ LABEL org.opencontainers.image.revision=$REVISION \
       io.arden.release.migrations=$MIGRATIONS \
       io.arden.release.managed="1"
 WORKDIR /app
+# Runtime needs Node only. Do not ship package-manager toolchains or their
+# unrelated transitive dependencies in the service image.
+RUN rm -rf /usr/local/lib/node_modules /opt/yarn-* \
+    /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/yarn /usr/local/bin/yarnpkg /usr/local/bin/corepack
 COPY --from=build --chown=1000:1000 /release/api/package.json ./package.json
 COPY --from=build --chown=1000:1000 /release/api/node_modules/ ./node_modules/
 COPY --from=build --chown=1000:1000 /release/api/dist/ ./dist/
