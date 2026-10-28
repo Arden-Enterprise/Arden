@@ -11,6 +11,8 @@
 !apps/desktop/
 !apps/desktop/package.json
 !packages/
+!packages/domain/
+!packages/domain/**
 !packages/ui/
 !packages/ui/**
 !deploy/

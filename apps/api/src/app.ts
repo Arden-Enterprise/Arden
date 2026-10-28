@@ -1,5 +1,6 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
@@ -7,6 +8,8 @@ import type { InvitationMailer } from "./email/smtp-mailer.js";
 import type { KnowledgeClassification } from "./knowledge/policy.js";
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
+import type { AskArdenClient } from "./answers/ai-client.js";
+import { citationPage } from "./answers/citation-page.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -26,6 +29,7 @@ type AppDependencies = {
   publicWebOrigin?: string | null;
   publicApiOrigin?: string | null;
   invitationDeliveryMode?: "email" | "local-test-no-email";
+  askArden?: AskArdenClient | null;
   testActor?: SessionContext;
 };
 
@@ -608,7 +612,11 @@ export function buildApp(dependencies: AppDependencies) {
       if (!isValidText(body, maxBodyBytes, maxBodyBytes)) {
         return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note version cannot be copied.", request.id));
       }
-      copied = await dependencies.storage.write(body);
+      const semanticBody = normalizeSharedDraftBody(body);
+      if (!semanticBody) {
+        return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note uses an unsupported Arden document envelope.", request.id));
+      }
+      copied = await dependencies.storage.write(semanticBody);
       creationAttempted = true;
       const result = await dependencies.repository.createKnowledgeDraft(context.userId, organizationId, {
         actorMembershipId: actor.membershipId,
@@ -631,7 +639,7 @@ export function buildApp(dependencies: AppDependencies) {
         await dependencies.storage.remove(copied.sourceUri);
         copied = null;
       }
-      const responseBody = result.kind === "created" ? body
+      const responseBody = result.kind === "created" ? semanticBody
         : await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
       reply.header("Cache-Control", "no-store");
       reply.header("ETag", etag(result.draft.currentVersion));
@@ -692,7 +700,9 @@ export function buildApp(dependencies: AppDependencies) {
       try {
         const actor = await dependencies.repository.requireActiveMembership(context.userId, organizationId);
         if (!actor) return reply.code(404).send(resourceNotAvailable(request.id));
-        stored = await dependencies.storage.write(request.body.body);
+        const semanticBody = normalizeSharedDraftBody(request.body.body);
+        if (!semanticBody) return reply.code(400).send(safeError("INVALID_DOCUMENT", "The Semantic Document is invalid.", request.id));
+        stored = await dependencies.storage.write(semanticBody);
         creationAttempted = true;
         const result = await dependencies.repository.createNewKnowledgeDraft(context.userId, organizationId, {
           actorMembershipId: actor.membershipId, title, classification: request.body.classification,
@@ -705,7 +715,7 @@ export function buildApp(dependencies: AppDependencies) {
             : reply.code(409).send(safeError("IDEMPOTENCY_CONFLICT", "Use a new idempotency key for a different request.", request.id));
         }
         if (result.kind === "replayed") await dependencies.storage.remove(stored.sourceUri);
-        const body = result.kind === "created" ? request.body.body
+        const body = result.kind === "created" ? semanticBody
           : await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
         reply.header("Cache-Control", "no-store");
         reply.header("ETag", etag(result.draft.currentVersion));
@@ -882,13 +892,14 @@ export function buildApp(dependencies: AppDependencies) {
         if (existing.currentVersion !== expectedVersion) {
           return reply.code(412).send(safeError("VERSION_CONFLICT", "This draft changed. Reload it before saving again.", request.id));
         }
-        if (existing.hasPendingSubmission) {
-          return reply.code(409).send(safeError("REVIEW_PENDING", "A submitted version is awaiting review. Editing can resume after a decision.", request.id));
-        }
         if (existing.mimeType === "application/pdf" && patch.body !== undefined) {
           return reply.code(400).send(safeError("INVALID_REQUEST", "Uploaded PDFs cannot be edited as text.", request.id));
         }
-        if (patch.body !== undefined) stored = await dependencies.storage.write(patch.body);
+        const semanticBody = patch.body === undefined ? undefined : normalizeSharedDraftBody(patch.body);
+        if (semanticBody === null) {
+          return reply.code(400).send(safeError("INVALID_DOCUMENT", "The Semantic Document is invalid.", request.id));
+        }
+        if (typeof semanticBody === "string") stored = await dependencies.storage.write(semanticBody);
         updateAttempted = true;
         const result = await dependencies.repository.updateKnowledgeDraft(context.userId, organizationId, draftId,
           expectedVersion, { ...patch, audienceRoleIds: audienceIds, title: patch.title?.trim(),
@@ -898,11 +909,10 @@ export function buildApp(dependencies: AppDependencies) {
         if (result.kind !== "updated") {
           if (stored) await dependencies.storage.remove(stored.sourceUri);
           if (result.kind === "conflict") return reply.code(412).send(safeError("VERSION_CONFLICT", "This draft changed. Reload it before saving again.", request.id));
-          if (result.kind === "pending") return reply.code(409).send(safeError("REVIEW_PENDING", "A submitted version is awaiting review. Editing can resume after a decision.", request.id));
           if (result.kind === "invalid-metadata") return reply.code(400).send(safeError("INVALID_METADATA", "The draft metadata is invalid.", request.id));
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
-        const content = patch.body !== undefined ? { body: patch.body }
+        const content: { body: string; pdfBase64?: string } = typeof semanticBody === "string" ? { body: semanticBody }
           : await readKnowledgeContent(dependencies.storage, result.draft.sourceUri, result.draft.contentHash, result.draft.mimeType);
         reply.header("Cache-Control", "no-store");
         reply.header("ETag", etag(result.draft.currentVersion));
@@ -1099,7 +1109,7 @@ export function buildApp(dependencies: AppDependencies) {
     });
 
   app.post<{ Params: { organizationId: string; submissionId: string }; Body: {
-    action: "APPROVE" | "REQUEST_REVISION" | "REJECT";
+    action: "APPROVE" | "REJECT";
     expectedSnapshotVersionId: string; expectedContentHash: string; comment?: string | null;
   } }>("/api/v1/organizations/:organizationId/knowledge/reviews/:submissionId/decisions", {
     schema: {
@@ -1111,7 +1121,7 @@ export function buildApp(dependencies: AppDependencies) {
       } },
       body: { type: "object", additionalProperties: false,
         required: ["action", "expectedSnapshotVersionId", "expectedContentHash"], properties: {
-          action: { type: "string", enum: ["APPROVE", "REQUEST_REVISION", "REJECT"] },
+          action: { type: "string", enum: ["APPROVE", "REJECT"] },
           expectedSnapshotVersionId: { type: "string", pattern: uuidPattern },
           expectedContentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
           comment: { anyOf: [{ type: "string", maxLength: 2000 }, { type: "null" }] },
@@ -1170,6 +1180,84 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  app.post<{ Params: { organizationId: string }; Body: { query: string } }>(
+    "/api/v1/organizations/:organizationId/ai/answers", {
+      schema: {
+        params: { type: "object", required: ["organizationId"], additionalProperties: false, properties: {
+          organizationId: { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", required: ["query"], additionalProperties: false, properties: {
+          query: { type: "string", minLength: 1, maxLength: 4_000 },
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      const query = request.body.query.trim();
+      if (!query) return reply.code(400).send(safeError("INVALID_REQUEST", "The question is empty.", request.id));
+      if (!dependencies.askArden) {
+        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
+      }
+      try {
+        const { organizationId } = request.params;
+        const before = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId);
+        if (!before) return reply.code(404).send(resourceNotAvailable(request.id));
+        if (before.length === 0) {
+          reply.header("Cache-Control", "no-store");
+          return { status: "INSUFFICIENT_EVIDENCE", answer: "I could not find any indexed published knowledge you are allowed to read.", citations: [] };
+        }
+        const requestId = randomUUID();
+        const aiResponse = await dependencies.askArden.answer({
+          contractVersion: 1,
+          requestId,
+          organizationId,
+          query,
+          allowedGenerationIds: before.map((source) => source.generationId),
+        });
+        const after = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId);
+        if (!after) return reply.code(404).send(resourceNotAvailable(request.id));
+        const beforeByGeneration = new Map(before.map((source) => [source.generationId, source]));
+        const afterByGeneration = new Map(after.map((source) => [source.generationId, source]));
+        const citations = aiResponse.citations.map((citation) => {
+          const initial = beforeByGeneration.get(citation.generationId);
+          const current = afterByGeneration.get(citation.generationId);
+          if (!initial || !current || initial.publishedVersionId !== current.publishedVersionId
+            || current.snapshotVersionId !== citation.snapshotVersionId
+            || current.snapshotContentHash !== citation.snapshotContentHash) {
+            return null;
+          }
+          return {
+            documentId: current.draftId,
+            versionId: current.publishedVersionId,
+            blockId: citation.sourceBlockIds[0] ?? citation.parentSectionBlockId ?? undefined,
+            page: citationPage(citation.sourceBlockIds, citation.parentSectionBlockId),
+            excerpt: citation.excerpt,
+            title: current.title,
+            version: `v${current.versionNo}`,
+            scope: current.targetScopeType === "ORGANIZATION" ? "Company-wide" : "Department",
+            classification: current.classification,
+          };
+        });
+        if (citations.some((citation) => citation === null)) {
+          return reply.code(409).send(safeError("KNOWLEDGE_ACCESS_CHANGED",
+            "Knowledge access changed while the answer was being prepared. Please ask again.", request.id));
+        }
+        const authorizedCitations = citations.filter((citation): citation is NonNullable<typeof citation> => citation !== null);
+        const uniqueCitations = authorizedCitations.filter((citation, index, all) => {
+          const location = citation.page === undefined ? citation.blockId ?? "source" : `page-${citation.page}`;
+          return all.findIndex((candidate) => {
+            const candidateLocation = candidate.page === undefined ? candidate.blockId ?? "source" : `page-${candidate.page}`;
+            return candidate.versionId === citation.versionId && candidateLocation === location;
+          }) === index;
+        });
+        reply.header("Cache-Control", "no-store");
+        return { status: aiResponse.status, answer: aiResponse.answer, citations: uniqueCitations };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Ask Arden answer failed");
+        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
+      }
+    });
+
   app.get<{ Params: { organizationId: string; publishedVersionId: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/published/:publishedVersionId", {
       schema: { params: { type: "object", required: ["organizationId", "publishedVersionId"], properties: {
@@ -1190,7 +1278,9 @@ export function buildApp(dependencies: AppDependencies) {
         }
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
-          classification: publication.classification, ...content, mimeType, contentHash: publication.contentHash,
+          classification: publication.classification,
+          responsibleDepartmentId: publication.responsibleDepartmentId,
+          ...content, mimeType, contentHash: publication.contentHash,
           audienceIds: publication.audienceRoleIds,
           publishedAt: publication.publishedAt.toISOString(), validFrom: publication.validFrom.toISOString(),
           validUntil: publication.validUntil?.toISOString() ?? null };
@@ -1529,6 +1619,7 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     audienceIds: submission.audienceRoleIds,
     contentHash: submission.contentHash,
     status: submission.status,
+    publicationState: submission.publicationState,
     decisionComment: submission.decisionComment,
     submittedAt: submission.submittedAt.toISOString(),
     publishedVersionId: submission.publishedVersionId,
@@ -1544,6 +1635,14 @@ function parseEtag(value: string | undefined): number | "missing" | null {
 }
 
 function etag(version: number): string { return `"${version}"`; }
+
+function normalizeSharedDraftBody(body: string): string | null {
+  const parsed = parseSemanticDocument(body);
+  if (parsed.ok) return serializeSemanticDocument(parsed.document);
+  if (body.startsWith("arden-document:")) return null;
+  const digest = createHash("sha256").update(body).digest("hex").slice(0, 16);
+  return serializeSemanticDocument(plainTextToSemanticDocument(body, (index) => `import-${digest}-${index}`));
+}
 
 function encodeCursor(cursor: DraftCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");

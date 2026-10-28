@@ -33,6 +33,9 @@ importers:
         specifier: 8.23.0
         version: 8.23.0
     devDependencies:
+      '@arden/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.6
@@ -42,6 +45,9 @@ importers:
       '@types/pg':
         specifier: ^8.0.0
         version: 8.23.1
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       tsx:
         specifier: 4.23.15
         version: 4.23.15
@@ -108,8 +114,17 @@ importers:
         specifier: 7.3.6
         version: 7.3.6(@types/node@24.13.6)(tsx@4.23.15)
 
+  packages/domain:
+    devDependencies:
+      vitest:
+        specifier: 5.0.1
+        version: 5.0.1(@types/node@24.13.6)(vite@7.3.6(@types/node@24.13.6)(tsx@4.23.15))
+
   packages/ui:
     dependencies:
+      '@arden/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@blocknote/ariakit':
         specifier: 0.55.0
         version: 0.55.0(@floating-ui/dom@1.8.0)(@types/hast@3.0.5)(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)

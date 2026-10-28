@@ -33,3 +33,6 @@ __pycache__/
 build/
 
 .cache/
+
+# Personal remote-development setup; use the shared placeholder templates instead.
+/kiet-local/

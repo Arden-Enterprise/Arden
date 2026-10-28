@@ -24,9 +24,9 @@ const request: ReviewDecisionRequest = {
 };
 
 describe("planReviewDecision", () => {
-  it("plans atomic publication only for an authorized final one-step approval", () => {
+  it("plans publication preparation only for an authorized final one-step approval", () => {
     expect(planReviewDecision(facts, request)).toEqual({
-      kind: "APPROVE_AND_PUBLISH_ATOMICALLY", decision: "APPROVED", submissionId: "submission",
+      kind: "APPROVE_FOR_PREPARATION", decision: "APPROVED", submissionId: "submission",
       snapshotVersionId: "version-2", contentHash: hash, comment: null,
     });
   });
@@ -58,13 +58,22 @@ describe("planReviewDecision", () => {
       .toEqual({ kind: "DENIED", reason: "UNSUPPORTED_POLICY" });
   });
 
-  it("allows revision/rejection with a reason but never emits publication intent", () => {
+  it("allows rejection with a reason but never emits publication intent", () => {
     const blocked = { ...facts, audienceEnforceable: false };
-    expect(planReviewDecision(blocked, { ...request, action: "REQUEST_REVISION", comment: " Narrow the audience " }))
-      .toEqual({ kind: "RECORD_ONLY", decision: "CHANGES_REQUESTED", comment: "Narrow the audience" });
     expect(planReviewDecision(blocked, { ...request, action: "REJECT", comment: "Not suitable" }))
       .toEqual({ kind: "RECORD_ONLY", decision: "REJECTED", comment: "Not suitable" });
     expect(planReviewDecision(blocked, { ...request, action: "REJECT", comment: "  " }))
       .toEqual({ kind: "DENIED", reason: "COMMENT_REQUIRED" });
+  });
+
+  it("allows Organization Admin self-approval without a reviewer grant", () => {
+    const adminFacts: ReviewDecisionFacts = {
+      ...facts,
+      actor: { membershipId: "author", organizationId: "org", status: "ACTIVE", isOrganizationAdmin: true },
+      reviewerGrants: [],
+    };
+    expect(planReviewDecision(adminFacts, request)).toMatchObject({
+      kind: "APPROVE_FOR_PREPARATION", decision: "APPROVED",
+    });
   });
 });

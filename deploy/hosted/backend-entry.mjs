@@ -47,7 +47,11 @@ async function stopChild() {
 
 /** Install Linux dependencies from the frozen lockfile into writable dependency volumes. */
 async function install() {
-  child = spawn('pnpm', ['--filter', '@arden/api...', 'install', '--frozen-lockfile', '--prefer-offline', '--store-dir', '/pnpm/store'], { stdio: 'inherit', detached: true });
+  // Install the API project into its writable dependency volume. Workspace
+  // packages are source-only dependencies here; selecting the full dependency
+  // graph would make pnpm create package-level node_modules directories inside
+  // the read-only source mount.
+  child = spawn('pnpm', ['--filter', '@arden/api', 'install', '--frozen-lockfile', '--prefer-offline', '--store-dir', '/pnpm/store'], { stdio: 'inherit', detached: true });
   await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => code === 0 ? resolve() : reject(new Error('Frozen backend dependency install failed.'))); });
 }
 

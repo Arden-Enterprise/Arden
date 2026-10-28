@@ -34,6 +34,7 @@ export type NavigationItem = {
 
 export const workNavigation: NavigationItem[] = [
   { label: "My Work", shortLabel: "My Work", icon: "work", view: "my-work" },
+  { label: "Ask Arden", shortLabel: "Ask", icon: "chat", view: "ask-arden" },
   { label: "Private Notes", shortLabel: "Notes", icon: "lock", view: "personal-workspace" },
 ];
 
@@ -46,7 +47,7 @@ export const knowledgeNavigation: NavigationItem[] = [
 
 export const adminNavigation: NavigationItem = { label: "Administration", shortLabel: "Admin", icon: "organization", view: "organization-access" };
 
-/** Server-backed sessions only reach destinations with connected server workflows. */
+/** Server-backed sessions expose Ask Arden through the authenticated Core API. */
 export function navigationDisabled(item: NavigationItem, authenticated: boolean): boolean {
   if (item.planned) return true;
   return authenticated && (item.view === "my-work" || item.view === "knowledge-handover");
