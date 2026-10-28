@@ -49,6 +49,10 @@ Migration `0015_org_admin_member_profiles.sql` adds a `SELECT`-only RLS policy s
 
 Migration `0016_fix_flow2_cross_actor_validation.sql` repairs reviewer approval/publication under the forced-RLS runtime role. It validates Flow 2 audit and publication tenant ownership from the submission's explicit organization instead of querying the submitter's membership, which is intentionally hidden from another member, and replaces circular current-publication write policies with approved-submission checks while retaining the exact-pointer validation trigger. On 2026-10-16 the migration DDL and an existing cross-member approve/publish transaction were exercised on `dev-3` inside one rollback-only transaction as `arden_runtime`; the review decision, separate review and system audit events, published version, current pointer, and deferred constraints all succeeded, then all schema and data changes were rolled back. Migration 0016 was then applied atomically with the reviewed `supabase_admin` migration-owner role and recorded in the `dev-3` hosted ledger; post-commit checks confirmed both replacement functions remain `SECURITY INVOKER`, both current-publication policies exist, the pending submission was unchanged, and API readiness returned 200. Staging and production were not changed. Apply 0016 with the reviewed migration-owner procedure to other targets before expecting the reviewer UI to publish successfully there. The new real-PostgreSQL regression test also requires a migrated disposable `arden_test_*` database and was skipped here because `ARDEN_TEST_DATABASE_URL` was not configured.
 
+Migration `0018_flow3_contract_and_test_content_reset.sql` contains the approved development test-content reset, including private/shared drafts, review/publication records, chunks and AI artifacts. It preserves organization/identity structures but is not a data-preserving upgrade. Merging Flow 3 into `staging` does not authorize applying this reset to staging/production data. Inspect the actual ledger and data, verify recovery and obtain target-specific reset approval before applying it to a shared release database. The release pipeline's migration fingerprint gate must remain in place; do not bypass it to deploy the merged source.
+
+Migration `0020_permission_aware_answer_sources.sql` grants the runtime role a narrow `SELECT` on READY index generations only when the same actor can still see the matching active publication through existing publication RLS. It supplies Core's generation allow-list for Ask Arden; it does not authorize Chroma directly or grant Arden-AI database access. Rehearse and apply it once with the reviewed migration connection before enabling the answer route. Verify an authorized actor receives only matching generation IDs and a revoked/non-audience actor receives none. Local unit tests do not establish this SQL behavior.
+
 For Coolify, mount `ARDEN_PRIVATE_STORAGE_ROOT` to persistent private storage with API-only access and include it in the protected backup/restore plan with PostgreSQL. Production API startup refuses to run when this path is unset. Set `ARDEN_CORE_URL` in the desktop launch environment to the public HTTPS origin; the desktop bridge rejects non-loopback HTTP and URL paths. A packaged settings UI and the complete staging/production application release stack are not implemented.
 
 Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and `pnpm remote:status`. They keep Vite local, use private SSH forwarding, and support four development slots. See [the authoritative setup/operations guide](remote-development.md), including [the current team layout](remote-development.md#current-team-layout), [database/storage readiness](remote-development.md#database-and-storage-readiness-before-onboarding), and [adoption into Coolify](remote-development.md#coolify-adoption). Bootstrap remains separate from Coolify registration; adopted installations use the protected management marker to start existing managed development containers without recreating legacy stacks. Development was reconciled to four personal APIs on 12 October 2026. The provisioner creates separate staging/production database templates only; application releases and Supabase Storage/Realtime integration remain incomplete.
@@ -72,6 +76,8 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Unset | Configure all six together for organization invitation email; runtime secrets stay API-side |
 | `ARDEN_PRIVATE_STORAGE_ROOT` | `.private/note-content` default | Required in production; must resolve to a protected persistent mount outside the image/static web root |
 | `ARDEN_CORE_URL` | `http://127.0.0.1:3001` for local desktop | Public HTTPS Core origin for the Windows desktop process; loopback HTTP is allowed only for local development |
+| `ARDEN_AI_URL` | Unset | Private HTTP(S) origin of Arden-AI, with no path or credentials; configure together with the service token |
+| `ARDEN_AI_SERVICE_TOKEN` | Unset | Server-only shared credential for Core/worker to call Arden-AI; never expose it to web/desktop clients |
 | `ARDEN_TEST_DATABASE_URL` | Unset | Optional real-PostgreSQL integration target; must be a disposable, pre-migrated database named `arden_test_*` |
 | `ARDEN_LOCAL_FLOW1_TEST_MODE` | Unset | Manual local browser-test auth; only `true` with loopback API/PostgreSQL, database `arden_test_*`, no Supabase config, and non-production mode |
 | `ARDEN_LOCAL_TEST_USERS` | Unset | JSON list of synthetic `@example.test` accounts, required only in fenced local Mainflow 1 test mode; keep the passwords in the launching shell, not files/Git |
@@ -158,3 +164,42 @@ Reference: [Coolify Compose deployments](https://coolify.io/docs/applications/bu
 - Diagnose with read-only checks first. Never delete user data, reset production, rotate customer credentials, upgrade infrastructure, or send external notifications as an assumed debugging step.
 - For destructive maintenance, resolve exact targets, verify scope/environment/backups, obtain applicable authorization, prefer recoverable operations, and report what was removed and recovery options.
 - Maintain customer-facing install/upgrade/backup/restore/troubleshooting runbooks as implementation matures. Do not label planned procedures as tested; record the actual release/environment used for rehearsal.
+
+
+## Core indexing database capability
+
+Provision a distinct non-superuser login for each environment's Core indexing worker after the
+reviewed schema migrations, using an administrator session and a privately generated password.
+The API request login keeps only its existing `arden_runtime` membership; do not grant it the
+indexing capability. The indexer role can execute only the reviewed claim/complete/fail functions,
+not read private document tables directly. For example, with placeholders replaced:
+
+```sql
+CREATE ROLE arden_index_worker LOGIN NOSUPERUSER NOBYPASSRLS NOINHERIT;
+-- Set the password privately through the administrator's secure credential workflow.
+GRANT arden_indexer TO arden_index_worker;
+GRANT CONNECT ON DATABASE app_database TO arden_index_worker;
+```
+
+For the embedded Core worker, set the private `ARDEN_INDEX_DATABASE_URL` to that login's app
+database connection alongside `ARDEN_AI_URL` and `ARDEN_AI_SERVICE_TOKEN`. Its separate pool
+has a bounded connection wait; transactions bound SQL/lock waits. The standalone worker uses its
+own `DATABASE_URL` with the same indexer login and must not run concurrently merely as a duplicate
+of the embedded worker. No worker/database credentials belong in GitHub build jobs or client bundles.
+Idle connection errors on the embedded worker's separate pool are logged without database error
+details; they do not terminate Core. Subsequent polls reconnect. The disposable built-process
+regression terminates an actual idle worker backend and checks API readiness and reconnection.
+
+Both entry points default to a 300-second lease; `ARDEN_INDEX_LEASE_SECONDS` accepts 180–600
+seconds, longer than the 120-second bounded AI call with a completion margin. Monitor local storage
+and database latency; an unhealthy filesystem is not a latency guarantee. No AI configuration means
+Core indexing is disabled and answers unavailable. A partial AI origin/token pair fails explicitly. If AI is enabled but the separate worker connection is missing, the API remains available and logs that embedded indexing is disabled; provision the worker before expecting new publications to activate.
+
+Migration 0021 preserves earlier migration history, serializes activation per draft and prevents a
+delayed older job from replacing any newer published snapshot, including after unpublication.
+`SUPERSEDED` denotes historical approved snapshots replaced by a newer publication; it is distinct
+from indexing failure. Superseded jobs fail terminally without retrying model work. The legacy
+unordered function is no longer executable by the worker. Existing publications are not automatically
+republished or repaired; review any pre-existing stale pointer separately. Core and web must be
+released together for the expanded state contract. A live schema upgrade still requires a separate
+reviewed backup, compatibility/recovery plan and explicit authorization; this guide is not consent.

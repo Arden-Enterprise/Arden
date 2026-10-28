@@ -1,10 +1,10 @@
 # 0008: Three levels of knowledge classification
 
-Status: accepted
+Status: partially superseded for review outcomes and activation by [decision 0011](0011-permission-aware-publication-and-semantic-documents.md)
 Date: 2026-10-07
 Decision owner/approval: project lead, explicit approval of the Mainflow 2 classification table in the project conversation
 Implementation: frontend preview implemented; authoritative policy enforcement not started
-Supersedes / superseded by: none
+Supersedes / superseded by: partially superseded by [0011](0011-permission-aware-publication-and-semantic-documents.md); the original accepted text below is retained as history
 
 ## Context and requirement
 

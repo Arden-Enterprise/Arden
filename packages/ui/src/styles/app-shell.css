@@ -414,5 +414,5 @@
   display: none;
 }
 
-.knowledge-feature-slot:not([hidden]) { display: contents; }
-.knowledge-feature-slot[hidden] { display: none; }
+.knowledge-feature-slot:not([hidden]), .workspace-feature-slot:not([hidden]) { display: contents; }
+.knowledge-feature-slot[hidden], .workspace-feature-slot[hidden] { display: none; }

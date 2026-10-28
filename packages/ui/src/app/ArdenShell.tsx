@@ -8,6 +8,8 @@ import { SignInPage } from "../sign-in/SignInPage";
 import { SetPasswordPage } from "../sign-in/SetPasswordPage";
 import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
 import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
+import { AskArdenPage } from "../ask-arden/AskArdenPage";
+import type { KnowledgeCitationReference, KnowledgeNavigationTarget } from "../knowledge/knowledgeCitation";
 import { InvitationAcceptPage } from "../organization/InvitationAcceptPage";
 import { InvitationLinkPage } from "../organization/InvitationLinkPage";
 import { OrganizationAdminPage } from "../organization/OrganizationAdminPage";
@@ -65,6 +67,14 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
     boundaryBody:
       "When the APIs are connected, this view must be limited to assigned review content and company-wide published knowledge. Private documents remain excluded.",
   },
+  "ask-arden": {
+    eyebrow: "ASK ARDEN CONTEXT",
+    title: "Published knowledge only",
+    description: "The interface preview shows how permission-aware answers and exact-version citations will appear.",
+    suggestions: ["Ask a focused question", "Inspect cited versions", "Verify the audience scope"],
+    boundaryTitle: "Retrieval is not connected",
+    boundaryBody: "No live knowledge is searched in this preview. The production service must authorize the member before retrieval and cite only active published versions they can read.",
+  },
   "personal-workspace": {
     eyebrow: "ACTIVE CONTEXT",
     title: "Private notes",
@@ -91,8 +101,8 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
   },
   "review-queue": {
     eyebrow: "REVIEW CONTEXT", title: "A snapshot to review",
-    description: "In the sample, final approval automatically publishes the reviewed snapshot.",
-    suggestions: ["Check the intended audience", "Request a specific revision"],
+    description: "In the sample, approval moves the reviewed snapshot into publication preparation.",
+    suggestions: ["Check the intended audience", "Approve or reject the snapshot"],
     boundaryTitle: "Immutable review snapshot", boundaryBody: "Review applies to the submitted version. Private originals remain excluded.",
   },
   "knowledge-handover": {
@@ -173,6 +183,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
   const [createdKnowledgeDraft, setCreatedKnowledgeDraft] = useState<CreatedKnowledgeDraft | null>(null);
   const [contributionAttempt, setContributionAttempt] = useState<ContributionAttempt | null>(null);
+  const [knowledgeCitationTarget, setKnowledgeCitationTarget] = useState<KnowledgeNavigationTarget | null>(null);
   const restoreStarted = useRef(false);
 
   const enterServerOrganization = (membership: OrganizationMembership) => {
@@ -181,6 +192,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setCreatedKnowledgeDraft(null);
     setAssignedReviewCount(undefined);
     setContributionAttempt(null);
+    setKnowledgeCitationTarget(null);
     setOrganization(null);
     setPreviewRole(null);
     setActiveView("personal-workspace");
@@ -257,6 +269,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setPreviewMemberId(memberId);
     if (memberId !== previewMemberId) privateNotes.reset([]);
     setActiveView("my-work");
+    setKnowledgeCitationTarget(null);
     setEntryView("workspace");
     setPendingMemberEntry(null);
   };
@@ -372,12 +385,19 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
   const navigate = (view: WorkspaceView) => {
     setNavOpen(false);
+    if (view !== "knowledge") setKnowledgeCitationTarget(null);
+    if (view === "ask-arden") setContextOpen(false);
     if (organizationDirty && activeView === "organization-access" && view !== activeView) {
       setPendingAction(view);
       return;
     }
     setOrganizationDirty(false);
     setActiveView(view);
+  };
+
+  const openKnowledgeCitation = (citation: KnowledgeCitationReference) => {
+    setKnowledgeCitationTarget({ ...citation, navigationId: crypto.randomUUID() });
+    navigate("knowledge");
   };
 
   const finishSignOut = () => {
@@ -388,6 +408,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setCreatedKnowledgeDraft(null);
     setAssignedReviewCount(undefined);
     setContributionAttempt(null);
+    setKnowledgeCitationTarget(null);
     setPreviewRole(null);
     setEntryView("sign-in");
     setOrganization(null);
@@ -458,6 +479,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={(previewRole === "admin" && !serverSession) || liveAdmin}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined} onNavigate={navigate} />
 
+      <div className="workspace-feature-slot" hidden={activeView !== "ask-arden"}>
+        <AskArdenPage key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`}
+          active={activeView === "ask-arden"} platform={platform} organizationId={serverOrganizationId} onOpenCitation={openKnowledgeCitation} />
+      </div>
       {activeView === "my-work" ? (
         <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
       ) : activeView === "organization-access" && serverOrganizationId && activeMembership && liveAdmin ? (
@@ -473,8 +498,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           platform={platform} organizationId={serverOrganizationId}
           organizationName={activeMembership?.organization.name ?? organization?.name}
           departmentName={activeMembership ? "Personal contribution" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
-          showPrivateSample={!serverSession && previewMemberId === "sample-employee"}
           createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
+          citationTarget={knowledgeCitationTarget}
           onAssignedReviewCount={setAssignedReviewCount}
           onNavigate={navigate} {...contextControl} />
       </div>

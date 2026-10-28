@@ -33,3 +33,6 @@ __pycache__/
 build/
 
 .cache/
+
+# Private per-developer setup packets; shared templates live under deploy/hosted.
+/*-local/

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, CreateSharedDraftResult, DecideReviewResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreateSharedDraftResult, DecideReviewResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -12,6 +12,9 @@ import type { InvitationEmail, InvitationMailer } from "./email/smtp-mailer.js";
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
 import { AudienceGroupError, type AudienceGroup, type AudienceGroupStore } from "./audiences/store.js";
 import { SystemAdministrationError, type SystemAdministrator, type SystemAdministrationStore } from "./system-administration/store.js";
+import { parseSemanticDocument } from "@arden/domain";
+import type { AskArdenClient } from "./answers/ai-client.js";
+import type { AiAnswerRequest, AiAnswerResponse } from "./answers/contracts.js";
 
 const ownerId = "11111111-1111-4111-8111-111111111111";
 const otherId = "22222222-2222-4222-8222-222222222222";
@@ -23,6 +26,18 @@ const sharedDraftId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const sharedVersionId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const createKey = "99999999-9999-4999-8999-999999999999";
 const systemAdminCandidateId = "33333333-3333-4333-8333-333333333333";
+const generationId = "44444444-4444-4444-8444-444444444444";
+
+function semanticDocumentText(body: string): string {
+  const parsed = parseSemanticDocument(body);
+  expect(parsed.ok).toBe(true);
+  if (!parsed.ok) return "";
+  return parsed.document.blocks.flatMap((block) => {
+    if (block.type === "asset" || block.type === "table") return [];
+    return block.content.flatMap((inline) => inline.type === "link"
+      ? inline.content.map((text) => text.text) : [inline.text]).join("");
+  }).join("\n");
+}
 
 describe("API auth and private draft routes", () => {
   let root: string;
@@ -30,6 +45,7 @@ describe("API auth and private draft routes", () => {
   let repository: MemoryRepository;
   let authProvider: FakeAuthProvider;
   let invitationMailer: FakeInvitationMailer;
+  let askArden: FakeAskArdenClient;
   let app: ReturnType<typeof buildApp>;
 
   beforeEach(async () => {
@@ -38,6 +54,7 @@ describe("API auth and private draft routes", () => {
     repository = new MemoryRepository();
     authProvider = new FakeAuthProvider();
     invitationMailer = new FakeInvitationMailer();
+    askArden = new FakeAskArdenClient();
     app = buildApp({
       checkDatabase: async () => undefined,
       auth: authProvider,
@@ -46,6 +63,7 @@ describe("API auth and private draft routes", () => {
       repository,
       storage,
       invitationMailer,
+      askArden,
       publicWebOrigin: "https://arden.example.test",
     });
   });
@@ -71,6 +89,75 @@ describe("API auth and private draft routes", () => {
     } finally {
       await unavailable.close();
     }
+  });
+
+  it("answers only from the caller's authorized generation and maps a live citation", async () => {
+    repository.authorizedAiSources = [{
+      generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
+      publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
+    }];
+    askArden.sourceBlockIds = ["pdf-page-2", "pdf-page-2-heading"];
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({
+      method: "POST", url: `/api/v1/organizations/${organizationId}/ai/answers`,
+      headers: { cookie: session, origin: "http://localhost:5180" }, payload: { query: "How is MFA used?" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(askArden.lastRequest?.allowedGenerationIds).toEqual([generationId]);
+    expect(response.json()).toMatchObject({ status: "ANSWERED", citations: [{
+      documentId: sharedDraftId, versionId, blockId: "pdf-page-2", page: 2, title: "Security policy",
+      version: "v3", scope: "Company-wide", classification: "INTERNAL",
+    }] });
+  });
+
+  it("drops the answer when publication access changes before citations are returned", async () => {
+    repository.authorizedAiSources = [{
+      generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
+      publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
+    }];
+    askArden.onAnswer = () => { repository.authorizedAiSources = []; };
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({
+      method: "POST", url: `/api/v1/organizations/${organizationId}/ai/answers`,
+      headers: { cookie: session, origin: "http://localhost:5180" }, payload: { query: "How is MFA used?" },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("KNOWLEDGE_ACCESS_CHANGED");
+  });
+
+  it.each([
+    { name: "unlisted chunk", patch: { chunkId: "c".repeat(64) } },
+    { name: "invented block", patch: { sourceBlockIds: ["other-block"] } },
+    { name: "wrong parent section", patch: { parentSectionBlockId: "actual-heading" } },
+  ])("rejects an AI citation with $name even when snapshot permission is valid", async ({ patch }) => {
+    repository.authorizedAiSources = [{
+      generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
+      publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null, ...patch }],
+    }];
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({ method: "POST",
+      url: `/api/v1/organizations/${organizationId}/ai/answers`,
+      headers: { cookie: session, origin: "http://localhost:5180" }, payload: { query: "MFA policy?" } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().answer).toBeUndefined();
+  });
+
+  it.each(["x\n".repeat(2001), "x\n".repeat(1500)])("rejects text exceeding semantic block or serialized-envelope limits", async (body) => {
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({ method: "POST",
+      url: `/api/v1/organizations/${organizationId}/knowledge/drafts/new`,
+      headers: { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey },
+      payload: { title: "Too many paragraphs", classification: "INTERNAL", body },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("INVALID_DOCUMENT");
+    expect(repository.sharedCreates).toBe(0);
   });
 
   it("signs in through the Supabase adapter and returns only the caller's membership context", async () => {
@@ -567,12 +654,13 @@ describe("API auth and private draft routes", () => {
     expect(created.headers.etag).toBe('"1"');
     expect(created.json()).toMatchObject({
       id: sharedDraftId, title: "Review notes", classification: "INTERNAL", status: "ACTIVE",
-      body: "Private body", currentVersion: { version: 1 },
+      currentVersion: { version: 1 },
     });
+    expect(semanticDocumentText(created.json().body)).toBe("Private body");
     expect(repository.currentSource.sourceUri).toBe(originalUri);
     expect(repository.sharedDraft?.sourceUri).not.toBe(originalUri);
     expect(await storage.read(originalUri, repository.currentSource.contentHash)).toBe("Private body");
-    expect(await storage.read(repository.sharedDraft!.sourceUri, repository.sharedDraft!.contentHash)).toBe("Private body");
+    expect(semanticDocumentText(await storage.read(repository.sharedDraft!.sourceUri, repository.sharedDraft!.contentHash))).toBe("Private body");
 
     const replay = await app.inject({ method: "POST", url, headers, payload });
     expect(replay.statusCode).toBe(200);
@@ -608,7 +696,9 @@ describe("API auth and private draft routes", () => {
     });
     expect(response.statusCode).toBe(500);
     expect(repository.attemptedSharedCopyUri).not.toBeNull();
-    await expect(storage.read(repository.attemptedSharedCopyUri!, repository.currentSource.contentHash)).resolves.toBe(repository.currentBody);
+    expect(repository.attemptedSharedCopyHash).not.toBeNull();
+    const copied = await storage.read(repository.attemptedSharedCopyUri!, repository.attemptedSharedCopyHash!);
+    expect(semanticDocumentText(copied)).toBe(repository.currentBody);
   });
 
   it("creates a server-backed new shared draft, then lists and reopens only that actor's draft", async () => {
@@ -618,7 +708,8 @@ describe("API auth and private draft routes", () => {
     const payload = { title: "Runbook", body: "Recovery steps", classification: "INTERNAL" };
     const created = await app.inject({ method: "POST", url, headers, payload });
     expect(created.statusCode).toBe(201);
-    expect(created.json()).toMatchObject({ title: "Runbook", body: "Recovery steps", status: "ACTIVE" });
+    expect(created.json()).toMatchObject({ title: "Runbook", status: "ACTIVE" });
+    expect(semanticDocumentText(created.json().body)).toBe("Recovery steps");
     expect(JSON.stringify(created.json())).not.toContain("arden-private-object");
     const listed = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/drafts`, headers });
     expect(listed.statusCode).toBe(200);
@@ -626,13 +717,13 @@ describe("API auth and private draft routes", () => {
     expect(JSON.stringify(listed.json())).not.toContain("arden-private-object");
     const reopened = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/drafts/${sharedDraftId}`, headers });
     expect(reopened.statusCode).toBe(200);
-    expect(reopened.json().body).toBe("Recovery steps");
+    expect(semanticDocumentText(reopened.json().body)).toBe("Recovery steps");
     expect((await app.inject({ method: "POST", url, headers, payload })).statusCode).toBe(200);
     expect(repository.sharedCreates).toBe(1);
     expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, title: "Other" } })).statusCode).toBe(409);
   });
 
-  it("preserves an uploaded PDF through metadata, submission, review and publication", async () => {
+  it("preserves an uploaded PDF through metadata, submission, review and preparation", async () => {
     const owner = await desktopSession(app, "owner@example.test");
     const reviewer = await desktopSession(app, "manager@example.test");
     const root = `/api/v1/organizations/${organizationId}/knowledge`;
@@ -678,10 +769,8 @@ describe("API auth and private draft routes", () => {
       payload: { action: "APPROVE", expectedSnapshotVersionId: updated.json().currentVersion.id,
         expectedContentHash: updated.json().currentVersion.contentHash } });
     expect(approved.statusCode).toBe(201);
-    const publication = await app.inject({ method: "GET", url: `${root}/published/${approved.json().publishedVersionId}`,
-      headers: { cookie: owner } });
-    expect(publication.json()).toMatchObject({ body: "", pdfBase64, mimeType: "application/pdf" });
-    expect(JSON.stringify(publication.json())).not.toContain("arden-private-object");
+    expect(approved.json()).toMatchObject({ status: "APPROVED", publicationState: "PREPARING", publishedVersionId: null });
+    expect((await app.inject({ method: "GET", url: `${root}/published`, headers: { cookie: owner } })).json().items).toEqual([]);
   });
 
   it("rejects malformed, oversized and cross-organization PDF uploads", async () => {
@@ -733,14 +822,15 @@ describe("API auth and private draft routes", () => {
       payload: { title: "Updated", body: "v2", teamTag: "API", projectTag: "Arden" } });
     expect(updated.statusCode).toBe(200);
     expect(updated.headers.etag).toBe('"2"');
-    expect(updated.json()).toMatchObject({ title: "Updated", body: "v2", teamTag: "API", projectTag: "Arden",
+    expect(updated.json()).toMatchObject({ title: "Updated", teamTag: "API", projectTag: "Arden",
       currentVersion: { version: 2 } });
+    expect(semanticDocumentText(updated.json().body)).toBe("v2");
     expect((await app.inject({ method: "PATCH", url, headers: { ...headers, "if-match": '"1"' },
       payload: { title: "Stale" } })).statusCode).toBe(412);
-    expect((await app.inject({ method: "GET", url, headers })).json().body).toBe("v2");
+    expect(semanticDocumentText((await app.inject({ method: "GET", url, headers })).json().body)).toBe("v2");
   });
 
-  it("routes submit, scoped review, automatic publication and audience read without exposing the private source", async () => {
+  it("routes submit, scoped review and preparation without exposing the private source", async () => {
     const ownerSession = await desktopSession(app, "owner@example.test");
     const reviewerSession = await desktopSession(app, "manager@example.test");
     const ownerHeaders = { cookie: ownerSession, origin: "http://localhost:5180" };
@@ -770,7 +860,7 @@ describe("API auth and private draft routes", () => {
     const submissionId = submit.json().id as string;
     const detail = await app.inject({ method: "GET", url: `${root}/reviews/${submissionId}`, headers: reviewerHeaders });
     expect(detail.statusCode).toBe(200);
-    expect(detail.json().body).toBe("Check upstream first");
+    expect(semanticDocumentText(detail.json().body)).toBe("Check upstream first");
     expect((await app.inject({ method: "GET", url: `${root}/reviews/${submissionId}`, headers: ownerHeaders })).statusCode).toBe(404);
     const decisionUrl = `${root}/reviews/${submissionId}/decisions`;
     const decisionPayload = { action: "APPROVE", expectedSnapshotVersionId: updated.json().currentVersion.id,
@@ -782,17 +872,11 @@ describe("API auth and private draft routes", () => {
       headers: { ...reviewerHeaders, "idempotency-key": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff" },
       payload: decisionPayload });
     expect(decided.statusCode).toBe(201);
-    expect(decided.json()).toMatchObject({ status: "APPROVED", publishedVersionId: "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd" });
-    const read = await app.inject({ method: "GET", url: `${root}/published/${decided.json().publishedVersionId}`,
-      headers: ownerHeaders });
-    expect(read.statusCode).toBe(200);
-    expect(read.json()).toMatchObject({ body: "Check upstream first", title: "Recovery runbook" });
-    expect(JSON.stringify(read.json())).not.toContain("arden-private-object");
-    expect((await app.inject({ method: "GET", url: `${root}/published/${decided.json().publishedVersionId}`,
-      headers: reviewerHeaders })).statusCode).toBe(404);
+    expect(decided.json()).toMatchObject({ status: "APPROVED", publicationState: "PREPARING", publishedVersionId: null });
+    expect((await app.inject({ method: "GET", url: `${root}/published`, headers: ownerHeaders })).json().items).toEqual([]);
   });
 
-  it("locks the working draft while review is pending and permits a revised version after feedback", async () => {
+  it("keeps the working draft mutable while the submitted snapshot remains pending", async () => {
     const owner = await desktopSession(app, "owner@example.test");
     const reviewer = await desktopSession(app, "manager@example.test");
     const root = `/api/v1/organizations/${organizationId}/knowledge`;
@@ -809,33 +893,28 @@ describe("API auth and private draft routes", () => {
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"2"',
         "idempotency-key": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" } });
     expect(first.statusCode).toBe(201);
-    const blocked = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+    const edited = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"2"' },
       payload: { body: "Premature edit" } });
-    expect(blocked.statusCode).toBe(409);
-    expect(blocked.json().error.code).toBe("REVIEW_PENDING");
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().currentVersion.version).toBe(3);
     expect((await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers: { cookie: owner } })).json().hasPendingSubmission).toBe(true);
     expect((await app.inject({ method: "POST", url: `${root}/reviewer-grants`,
       headers: { cookie: owner, origin: "http://localhost:5180" },
       payload: { reviewerMembershipId: otherId, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
         classifications: ["INTERNAL"], level: "STANDARD" } })).statusCode).toBe(201);
-    const revision = await app.inject({ method: "POST", url: `${root}/reviews/${first.json().id}/decisions`,
+    const rejection = await app.inject({ method: "POST", url: `${root}/reviews/${first.json().id}/decisions`,
       headers: { cookie: reviewer, origin: "http://localhost:5180", "idempotency-key": "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff" },
-      payload: { action: "REQUEST_REVISION", comment: "Clarify the rollback step.",
+      payload: { action: "REJECT", comment: "Clarify the rollback step.",
         expectedSnapshotVersionId: metadata.json().currentVersion.id,
         expectedContentHash: metadata.json().currentVersion.contentHash } });
-    expect(revision.statusCode).toBe(201);
-    expect(revision.json()).toMatchObject({ status: "CHANGES_REQUESTED", publishedVersionId: null,
+    expect(rejection.statusCode).toBe(201);
+    expect(rejection.json()).toMatchObject({ status: "REJECTED", publicationState: "NONE", publishedVersionId: null,
       decisionComment: "Clarify the rollback step." });
     const authorSubmissions = await app.inject({ method: "GET", url: `${root}/submissions`, headers: { cookie: owner } });
     expect(authorSubmissions.statusCode).toBe(200);
     expect(authorSubmissions.json().items[0].decisionComment).toBe("Clarify the rollback step.");
     expect((await app.inject({ method: "GET", url: `${root}/published`, headers: { cookie: owner } })).json().items).toEqual([]);
-    const revised = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
-      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"2"' },
-      payload: { body: "Clarified rollback step" } });
-    expect(revised.statusCode).toBe(200);
-    expect(revised.json().currentVersion.version).toBe(3);
     expect((await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"3"',
         "idempotency-key": "cccccccc-dddd-4eee-8fff-111111111111" } })).statusCode).toBe(201);
@@ -1047,6 +1126,32 @@ class MemorySystemAdministrationStore implements SystemAdministrationStore {
   }
 }
 
+class FakeAskArdenClient implements AskArdenClient {
+  lastRequest: AiAnswerRequest | null = null;
+  onAnswer: (() => void) | null = null;
+  sourceBlockIds = ["mfa"];
+
+  async answer(request: AiAnswerRequest): Promise<AiAnswerResponse> {
+    this.lastRequest = request;
+    this.onAnswer?.();
+    return {
+      contractVersion: 1,
+      requestId: request.requestId,
+      status: "ANSWERED",
+      answer: "MFA is required by the security policy.",
+      citations: [{
+        generationId,
+        snapshotVersionId: sharedVersionId,
+        snapshotContentHash: "a".repeat(64),
+        chunkId: "b".repeat(64),
+        sourceBlockIds: this.sourceBlockIds,
+        parentSectionBlockId: null,
+        excerpt: "All team members must use MFA.",
+      }],
+    };
+  }
+}
+
 class MemoryRepository implements ArdenDataRepository {
   readonly audienceGroups: AudienceGroupStore = new MemoryAudienceGroupStore();
   readonly systemAdministration: SystemAdministrationStore = new MemorySystemAdministrationStore();
@@ -1059,10 +1164,12 @@ class MemoryRepository implements ArdenDataRepository {
   sharedSubmission: SharedKnowledgeSubmission | null = null;
   reviewerGrant: ReviewerGrantRecord | null = null;
   publication: PublishedKnowledge | null = null;
+  authorizedAiSources: AuthorizedAiSource[] = [];
   private reviewRequestKey: string | null = null;
   sharedCreates = 0;
   failSharedCreate = false;
   attemptedSharedCopyUri: string | null = null;
+  attemptedSharedCopyHash: string | null = null;
   private sharedRequestKey: string | null = null;
 
   async requireActiveMembership(userId: string, requestedOrganization: string): Promise<ActiveMembership | null> {
@@ -1154,6 +1261,7 @@ class MemoryRepository implements ArdenDataRepository {
     idempotencyKey: string; expectedSource: PrivateContributionSource; copiedContent: StoredContentFields; requestId: string;
   }): Promise<CreateSharedDraftResult> {
     this.attemptedSharedCopyUri = input.copiedContent.sourceUri;
+    this.attemptedSharedCopyHash = input.copiedContent.contentHash;
     if (this.failSharedCreate) throw new Error("Synthetic database failure");
     if (this.sharedDraft && this.sharedRequestKey === input.idempotencyKey) {
       return this.sharedDraft.sourcePrivateVersionId === input.sourceVersionId && this.sharedDraft.classification === input.classification
@@ -1210,7 +1318,6 @@ class MemoryRepository implements ArdenDataRepository {
     const draft = await this.getKnowledgeDraft(userId, requestedOrganization, requestedDraft);
     if (!draft) return { kind: "not-found" };
     if (draft.currentVersion !== expectedVersion) return { kind: "conflict", currentVersion: draft.currentVersion };
-    if (draft.hasPendingSubmission) return { kind: "pending" };
     this.sharedDraft = {
       ...draft, title: patch.title ?? draft.title, classification: patch.classification ?? draft.classification,
       responsibleDepartmentId: patch.responsibleDepartmentId === undefined ? draft.responsibleDepartmentId : patch.responsibleDepartmentId,
@@ -1241,10 +1348,11 @@ class MemoryRepository implements ArdenDataRepository {
       targetDepartmentId: draft.targetScopeType === "DEPARTMENT" ? draft.responsibleDepartmentId : null,
       audienceRoleIds: draft.audienceRoleIds, contentHash: draft.contentHash,
       status: "PENDING_REVIEW", submittedAt: new Date("2026-10-10T10:00:00.000Z"), publishedVersionId: null,
+      publicationState: "NONE",
       decisionComment: null,
     };
     this.sharedDraft = { ...draft, hasPendingSubmission: true };
-    return { kind: "submitted", submission: this.sharedSubmission };
+    return { kind: "submitted", submission: this.sharedSubmission! };
   }
 
   async listKnowledgeSubmissions(userId: string, requestedOrganization: string): Promise<SharedKnowledgeSubmission[] | null> {
@@ -1304,17 +1412,12 @@ class MemoryRepository implements ArdenDataRepository {
     if (action !== "APPROVE" && !comment?.trim()) return { kind: "denied", reason: "COMMENT_REQUIRED" };
     this.reviewRequestKey = idempotencyKey;
     if (action === "APPROVE") {
-      this.publication = { id: "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd", draftId: submission.draftId,
-        title: submission.title, classification: submission.classification,
-        contentHash: submission.contentHash, sourceUri: this.sharedDraft!.sourceUri,
-        audienceRoleIds: submission.audienceRoleIds, publishedAt: new Date("2026-10-10T11:00:00.000Z"),
-        validFrom: new Date("2026-10-10T11:00:00.000Z"), validUntil: null };
-      this.sharedSubmission = { ...submission, status: "APPROVED", publishedVersionId: this.publication.id,
+      this.sharedSubmission = { ...submission, status: "APPROVED", publicationState: "PREPARING", publishedVersionId: null,
         decisionComment: comment?.trim() || null };
-    } else this.sharedSubmission = { ...submission, status: action === "REJECT" ? "REJECTED" : "CHANGES_REQUESTED",
+    } else this.sharedSubmission = { ...submission, status: "REJECTED", publicationState: "NONE",
       decisionComment: comment?.trim() || null };
     if (this.sharedDraft) this.sharedDraft = { ...this.sharedDraft, hasPendingSubmission: false };
-    return { kind: "decided", submission: this.sharedSubmission };
+    return { kind: "decided", submission: this.sharedSubmission! };
   }
 
   async listPublishedKnowledge(userId: string, requestedOrganization: string): Promise<PublishedKnowledge[] | null> {
@@ -1325,6 +1428,11 @@ class MemoryRepository implements ArdenDataRepository {
   async getPublishedKnowledge(userId: string, requestedOrganization: string, publishedVersionId: string): Promise<PublishedKnowledge | null> {
     return userId === ownerId && requestedOrganization === organizationId && this.publication?.id === publishedVersionId
       ? this.publication : null;
+  }
+
+  async listAuthorizedAiSources(userId: string, requestedOrganization: string): Promise<AuthorizedAiSource[] | null> {
+    if (requestedOrganization !== organizationId) return null;
+    return userId === ownerId ? this.authorizedAiSources : [];
   }
 
   async canCreateDraft(userId: string, requestedOrganization: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }

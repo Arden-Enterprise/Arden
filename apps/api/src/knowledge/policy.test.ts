@@ -22,6 +22,12 @@ describe("audience and review policy", () => {
     expect(canReadPublication({ actor: { ...actor, status: "SUSPENDED" }, publication, audience, now })).toBe(false);
   });
 
+  it("uses the active pointer rather than legacy publication dates", () => {
+    expect(canReadPublication({ actor, publication: { ...publication,
+      validFrom: new Date("2099-01-01T00:00:00Z"), validUntil: new Date("2000-01-01T00:00:00Z") },
+    audience, now })).toBe(true);
+  });
+
   it("applies managed organization and department audiences only at their matching scope", () => {
     const allOrganization = { ...group, audienceId: "org-all", kind: "ORGANIZATION_ALL" as const };
     const allEngineering = { ...group, audienceId: "engineering-all", kind: "DEPARTMENT_ALL" as const,
@@ -74,5 +80,13 @@ describe("audience and review policy", () => {
     expect(canReviewSnapshot({ ...input, grant: { ...grant, level: "STANDARD" } })).toBe(false);
     expect(canReviewSnapshot({ ...input, audienceEnforceable: false })).toBe(false);
     expect(canRespondToSubmission(input)).toBe(true);
+  });
+
+  it("allows Organization Admin to review and self-approve without a reviewer grant", () => {
+    const submission = { organizationId: "org", submittedByMembershipId: "author", departmentId: "dept",
+      status: "PENDING_REVIEW" as const, classification: "RESTRICTED" as const, policyVersion: 2,
+      teamTag: null, projectTag: null };
+    expect(canRespondToSubmission({ actor: { ...actor, isOrganizationAdmin: true }, submission,
+      grant: null, effectivePolicyVersion: 2, now })).toBe(true);
   });
 });

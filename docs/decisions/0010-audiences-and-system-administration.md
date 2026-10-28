@@ -1,6 +1,6 @@
 # 0010: Audience access and Arden system administration
 
-Status: accepted
+Status: partially superseded for Organization Admin review authority and review outcomes by [decision 0011](0011-permission-aware-publication-and-semantic-documents.md)
 Date: 2026-10-20
 Decision owner/approval: task owner explicitly approved the audience and Arden System Admin boundaries
 Implementation: partial — canonical APIs and migration foundation implemented; database rehearsal and System Admin UI remain

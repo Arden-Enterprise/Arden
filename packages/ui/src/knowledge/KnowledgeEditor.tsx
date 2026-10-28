@@ -1,4 +1,4 @@
-import { KnowledgeBadge, KnowledgeHeading, KnowledgeNotice, KnowledgeRow } from "./KnowledgePrimitives";
+import { KnowledgeBadge, KnowledgeHeading, KnowledgeRow } from "./KnowledgePrimitives";
 import { useAutosizeTextarea } from "../shared/useAutosizeTextarea";
 import { draftReadyForReview, knowledgeDraftChanged, knowledgeDraftMatchesPublication, type KnowledgeDraft, type KnowledgePreviewAction, type KnowledgePreviewState } from "./knowledgePreviewModel";
 
@@ -8,16 +8,15 @@ export function KnowledgeEditor({ state, dispatch, onBack, onSubmitted }: { stat
   const ready = draftReadyForReview(draft);
   const publishedUnchanged = knowledgeDraftMatchesPublication(state);
   const draftChanged = knowledgeDraftChanged(state);
-  const headingTitle = state.revisionRequested && !publishedUnchanged ? "Revision requested" : draft.title || "Untitled knowledge";
-  const submitLabel = state.revisionRequested ? "Resubmit for review" : state.publication ? "Submit new version for review" : "Submit for review";
+  const headingTitle = draft.title || "Untitled knowledge";
+  const submitLabel = state.publication ? "Submit new version for review" : "Submit for review";
   const update = (changes: Partial<KnowledgeDraft>) => dispatch({ type: "edit", draft: { ...draft, ...changes } });
   const updateSection = (index: number, key: "heading" | "body", value: string) => update({ sections: draft.sections.map((section, sectionIndex) => sectionIndex === index ? { ...section, [key]: value } : section) });
   const submit = () => { if (!ready || publishedUnchanged) return; dispatch({ type: "submit" }); onSubmitted(); };
 
   return <>
     <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title={headingTitle}  action={publishedUnchanged ? <KnowledgeBadge tone="jade">Published · Sample</KnowledgeBadge> : <button type="button" className="primary-button" disabled={!ready} onClick={submit}>{submitLabel}</button>} />
-    <div className="knowledge-draft-controls"><KnowledgeBadge tone={publishedUnchanged ? "jade" : "amber"}>{publishedUnchanged ? "Published sample" : state.revisionRequested ? "Revision required" : "Sample draft"}</KnowledgeBadge><KnowledgeBadge tone="blue">{draft.classification}</KnowledgeBadge><span>{draftChanged ? "Unsaved changes" : "Saved in this session"}</span><button type="button" className="secondary-button" disabled={!draftChanged} onClick={() => dispatch({ type: "save" })}>Save draft</button></div>
-    {state.revisionRequested && !publishedUnchanged && <KnowledgeNotice title="Two changes requested by Minh Tran" tone="amber">Replace the private dashboard source and link incident INC-2841. This feedback belongs to the sample review.</KnowledgeNotice>}
+    <div className="knowledge-draft-controls"><KnowledgeBadge tone={publishedUnchanged ? "jade" : "amber"}>{publishedUnchanged ? "Published sample" : "Sample draft"}</KnowledgeBadge><KnowledgeBadge tone="blue">{draft.classification}</KnowledgeBadge><span>{draftChanged ? "Unsaved changes" : "Saved in this session"}</span><button type="button" className="secondary-button" disabled={!draftChanged} onClick={() => dispatch({ type: "save" })}>Save draft</button></div>
     <div className="knowledge-editor-grid">
       <article className="knowledge-article">
         <div className="knowledge-format-toolbar" aria-label="Editor format"><span>Plain text editor</span><button type="button" disabled title="Rich text formatting is not connected">B</button><button type="button" disabled title="Rich text formatting is not connected">I</button><button type="button" disabled>Link</button><button type="button" disabled>List</button></div>

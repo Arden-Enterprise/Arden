@@ -12,6 +12,7 @@ const submission: KnowledgeSubmission = {
   id: "submission", draftId: "draft", snapshotVersionId: "version-2", title: "Guide",
   classification: "INTERNAL", responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT",
   targetDepartmentId: "dept", audienceIds: ["audience"], contentHash: "hash", status: "APPROVED",
+  publicationState: "ACTIVE",
   submittedAt: "2026-10-02T00:00:00Z", publishedVersionId: "published", decisionComment: null,
 };
 
@@ -31,7 +32,9 @@ describe("redesigned knowledge states", () => {
     expect(draftStatus({ ...draft, hasPendingSubmission: true }, submission).label).toBe("Awaiting review");
     expect(draftStatus(draft, submission).label).toBe("Published");
     expect(draftStatus({ ...draft, versionId: "version-3" }, submission).label).toBe("Edited after publication");
-    expect(draftStatus(draft, { ...submission, status: "CHANGES_REQUESTED" }).label).toBe("Revision requested");
+    expect(draftStatus(draft, { ...submission, publicationState: "PREPARING", publishedVersionId: null }).label).toBe("Preparing publication");
+    expect(draftStatus(draft, { ...submission, publicationState: "SUPERSEDED" }).label).toBe("Replaced by a newer publication");
+    expect(draftStatus(draft, { ...submission, publicationState: "FAILED", publishedVersionId: null })).toEqual({ label: "Publication failed", tone: "is-danger" });
     expect(draftStatus(draft, { ...submission, status: "REJECTED" }).tone).toBe("is-danger");
   });
 });

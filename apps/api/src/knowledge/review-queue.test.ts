@@ -40,11 +40,19 @@ describe("listAssignedReviews", () => {
     });
   });
 
-  it("keeps an invalid-audience submission visible so the reviewer can request correction", () => {
+  it("keeps an invalid-audience submission visible so the reviewer can reject it", () => {
     expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...candidate, audienceEnforceable: false }] }))
       .toEqual([{ submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide",
         departmentId: "engineering", classification: "INTERNAL", submittedAt: candidate.submittedAt,
         approvalBlocked: true }]);
+  });
+
+  it("shows Organization Admin their own pending submission without a reviewer grant", () => {
+    const self = { ...candidate, submission: { ...candidate.submission, submittedByMembershipId: "admin" },
+      reviewerGrants: [] };
+    const result = listAssignedReviews({ actor: { membershipId: "admin", organizationId: "org",
+      status: "ACTIVE", isOrganizationAdmin: true }, now, candidates: [self] });
+    expect(result.map((item) => item.submissionId)).toEqual(["submission-1"]);
   });
 
   it("accepts one matching live grant, including classification and attribute filters", () => {
