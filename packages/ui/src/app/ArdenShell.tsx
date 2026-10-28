@@ -485,8 +485,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       </div>
       {activeView === "my-work" ? (
         <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
-      ) : activeView === "ask-arden" ? (
-        <AskArdenPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} onOpenCitation={openKnowledgeCitation} />
       ) : activeView === "organization-access" && serverOrganizationId && activeMembership && liveAdmin ? (
         <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} {...contextControl} />
       ) : activeView === "organization-access" && organization && previewRole === "admin" ? (

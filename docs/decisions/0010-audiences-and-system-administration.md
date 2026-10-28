@@ -55,7 +55,7 @@ is outside every customer organization and must not become a content superuser.
   target department when applicable, classification and one or more audiences.
 - An author may target only audiences they can currently read. Hidden audience groups are not listed.
 - Submit freezes the audience identifiers with the immutable version/hash and policy metadata.
-  Reviewers approve or reject that exact snapshot; they do not silently edit its audience.
+  Reviewers approve that exact snapshot or request revision; they do not silently edit its audience.
 - Approval is blocked if the author is no longer eligible to target the audience or the audience is
   no longer enforceable.
 - Read, search, graph, citation, AI/RAG and contribution-copy operations recheck the current audience.

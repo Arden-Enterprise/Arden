@@ -24,12 +24,12 @@ Mainflow 2 needs a content classification that influences reviewer eligibility a
 | `CONFIDENTIAL` | Internal recruiting procedures or unreleased plans | Normally one reviewer explicitly authorized for the responsible department and document category. |
 | `RESTRICTED` | Sensitive security procedures or especially sensitive personnel information | A specialist or senior reviewer with the applicable grant. A second review step exists only when organization policy requires it. |
 
-Every level follows the same release transition: final approval moves the immutable submitted snapshot to `PREPARING`; the system activates it only after the complete index generation is ready. There is no separate human publisher role or button. A classification alone never grants read access; publication audience and effective access controls determine that separately. `PRIVATE` is a personal access scope, not a classification value.
+Every level follows the same release transition: the system automatically publishes the immutable submitted snapshot after the final required approval. There is no separate publisher role or button. A classification alone never grants read access; publication audience and effective access controls determine that separately. `PRIVATE` is a personal access scope, not a classification value.
 
 ## Boundaries and consequences
 
 - Freeze classification with content, metadata and intended audience on submission. A later change to classification or a wider audience requires a new snapshot and review.
-- Check reviewer authority and policy for the exact snapshot at each decision. A reviewer must reject if the proposed audience is too broad for the sensitivity or cannot be enforced by current access controls; the author may submit a corrected snapshot.
+- Check reviewer authority and policy for the exact snapshot at each decision. A reviewer must request revision or reject if the proposed audience is too broad for the sensitivity or cannot be enforced by current access controls.
 - In particular, do not publish `RESTRICTED` knowledge into a broad organization/department audience when the intended readers are narrower and Arden lacks the required access grants.
 - The exact content-to-level examples, default for existing documents, who may override a proposed classification, and organization-specific extra review triggers remain open implementation-policy details. Do not infer that `RESTRICTED` always needs two reviewers.
 
