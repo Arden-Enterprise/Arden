@@ -63,10 +63,15 @@ def main():
             "CREATE TABLE public.outside_restore_boundary(value text);"
             "INSERT INTO public.outside_restore_boundary VALUES ('preserve-external-service');")
         before = snapshot()
+        # pg_dump --table overrides --schema; use two independently complete
+        # archives, then restore both inside the same transaction.
         backup = docker("exec", container, "pg_dump", "-U", "postgres", "-d", database,
-                        "--format=custom", "--schema=arden", "--table=public.arden_schema_migrations")
+                        "--format=custom", "--schema=arden")
+        ledger = docker("exec", container, "pg_dump", "-U", "postgres", "-d", database,
+                        "--format=custom", "--table=public.arden_schema_migrations")
         listing = docker("exec", "-i", container, "pg_restore", "--list", data=backup)
-        assert b"arden_schema_migrations" in listing and b"knowledge_base" in listing
+        assert b"SCHEMA - arden" in listing and b"knowledge_base" in listing
+        assert b"arden_schema_migrations" in docker("exec", "-i", container, "pg_restore", "--list", data=ledger)
         # Failure before commit must preserve the complete old schema and data.
         try:
             sql("BEGIN;\n" + migration_sql(migrations[17:]) + "\nSELECT 1/0; COMMIT;")
@@ -79,6 +84,7 @@ def main():
         assert sql("SELECT count(*) FROM arden.organization;").strip() == b"1"
         # Recover only Arden and its ledger, keeping the external service probe.
         restore = docker("exec", "-i", container, "pg_restore", "--file=-", data=backup)
+        restore += docker("exec", "-i", container, "pg_restore", "--file=-", data=ledger)
         sql("BEGIN; DROP SCHEMA arden CASCADE; DROP TABLE public.arden_schema_migrations;\n"
             + restore.decode("utf-8") + "\nCOMMIT;")
         assert snapshot() == before, "Restored data/ledger differs from baseline"
