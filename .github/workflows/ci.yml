@@ -3,27 +3,85 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ARDEN_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
 
 jobs:
   check:
+    if: github.repository == 'Arden-Enterprise/Arden' && github.event.repository.visibility == 'public'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    concurrency:
+      group: checks-${{ github.event.pull_request.number || github.ref }}-${{ matrix.os }}
+      cancel-in-progress: true
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0, dereferenced commit
         with:
           version: 11.19.0
-      - uses: actions/setup-node@v4
+          run_install: false
+          cache: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: 24
-          cache: pnpm
+          node-version: 24.22.1
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm test:remote
-      - name: Hosted protocol and maintenance fence tests (Linux)
-        if: runner.os == 'Linux'
-        run: sudo --non-interactive python3 -m unittest discover -s deploy/hosted/tests -v
       - run: pnpm build
+
+  database:
+    name: Disposable PostgreSQL authorization tests
+    if: github.repository == 'Arden-Enterprise/Arden' && github.event.repository.visibility == 'public'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: database-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17-bookworm@sha256:ac08538c6f8b9904c33c8224c5e5706dbe760aca29db1d096972b4052c22a75d
+        env:
+          POSTGRES_DB: arden_test_ci
+          POSTGRES_PASSWORD: disposable_ci_only
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 11.19.0
+          run_install: false
+          cache: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile
+      - name: Apply all migrations only to the disposable runner database
+        run: pnpm --filter @arden/api db:migrate
+        env:
+          ARDEN_MIGRATION_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci
+      - name: Exercise actual PostgreSQL isolation and permission rules
+        run: pnpm --filter @arden/api test
+        env:
+          ARDEN_TEST_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci

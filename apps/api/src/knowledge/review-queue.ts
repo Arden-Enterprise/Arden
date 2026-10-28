@@ -39,13 +39,16 @@ export function listAssignedReviews(input: {
     if (!candidate.submissionId || !candidate.snapshotId || !candidate.title.trim()
       || !Number.isFinite(candidate.submittedAt.getTime()) || seen.has(candidate.submissionId)) continue;
 
-    const authorized = candidate.reviewerGrants.some((grant) => canRespondToSubmission({
+    const authorize = (grant: ReviewerGrant | null) => canRespondToSubmission({
       actor: input.actor,
       submission: candidate.submission,
       grant,
       now: input.now,
       effectivePolicyVersion: candidate.effectivePolicyVersion,
-    }));
+    });
+    const authorized = input.actor.isOrganizationAdmin === true
+      ? authorize(null)
+      : candidate.reviewerGrants.some(authorize);
     if (!authorized) continue;
 
     seen.add(candidate.submissionId);

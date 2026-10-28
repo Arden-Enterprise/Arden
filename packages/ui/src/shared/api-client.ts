@@ -84,7 +84,8 @@ export type KnowledgeSubmission = {
   targetDepartmentId: string | null;
   audienceIds: string[];
   contentHash: string;
-  status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED" | "WITHDRAWN";
+  status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
+  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED";
   submittedAt: string;
   publishedVersionId: string | null;
   decisionComment: string | null;
@@ -111,6 +112,10 @@ export type PublishedKnowledge = {
   draftId: string;
   title: string;
   classification: KnowledgeClassification;
+  responsibleDepartmentId: string;
+  documentCode?: string;
+  versionLabel?: string;
+  summary?: string;
   audienceIds: string[];
   contentHash: string;
   publishedAt: string;
@@ -131,6 +136,21 @@ export type ReviewerGrant = {
   validFrom: string;
   validUntil: string | null;
   status: "ACTIVE" | "INACTIVE";
+};
+export type AskArdenAnswer = {
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
+  answer: string;
+  citations: Array<{
+    documentId: string;
+    versionId: string;
+    blockId?: string;
+    page?: number;
+    excerpt: string;
+    title: string;
+    version: string;
+    scope: string;
+    classification: KnowledgeClassification;
+  }>;
 };
 
 function knowledgePath(organizationId: string): string {
@@ -202,7 +222,7 @@ export function loadKnowledgeReview(platform: Platform, organizationId: string, 
 }
 
 export function decideKnowledgeReview(platform: Platform, organizationId: string, detail: KnowledgeReviewDetail,
-  action: "APPROVE" | "REQUEST_REVISION" | "REJECT", comment: string | null, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  action: "APPROVE" | "REJECT", comment: string | null, idempotencyKey: string): Promise<KnowledgeSubmission> {
   return request(platform, `${knowledgePath(organizationId)}/reviews/${detail.id}/decisions`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ action, expectedSnapshotVersionId: detail.snapshotVersionId,
@@ -217,6 +237,12 @@ export async function listPublishedKnowledge(platform: Platform, organizationId:
 
 export function loadPublishedKnowledge(platform: Platform, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge> {
   return request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}`);
+}
+
+export function askArden(platform: Platform, organizationId: string, query: string): Promise<AskArdenAnswer> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/answers`, {
+    method: "POST", body: JSON.stringify({ query }),
+  });
 }
 
 export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {
