@@ -19,6 +19,7 @@ const knowledgeDraftSubmit = new RegExp(`^/api/v1/organizations/${uuid}/knowledg
 const knowledgeReviewItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}$`);
 const knowledgeReviewDecision = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}/decisions$`);
 const publishedKnowledgeItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}$`);
+const aiAnswerPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/answers$`);
 const reviewerGrantDeactivate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants/${uuid}/deactivate$`);
 const administrationPath = new RegExp(`^/api/v1/organizations/${uuid}/administration$`);
 const adminCreatePath = new RegExp(`^/api/v1/organizations/${uuid}/(departments|invitations)$`);
@@ -87,6 +88,8 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && request.method === "POST" && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const grantDeactivate = reviewerGrantDeactivate.test(url.pathname) && request.method === "POST"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const aiAnswer = aiAnswerPath.test(url.pathname) && request.method === "POST"
+    && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const adminGet = administrationPath.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
   const audienceGroupGet = audienceGroupReadPath.test(url.pathname) && request.method === "GET"
@@ -120,7 +123,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   ) && !request.idempotencyKey;
   const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
   return (otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
-    || knowledgeSubmit || knowledgeDecision || grantCreate || grantDeactivate || adminGet
+    || knowledgeSubmit || knowledgeDecision || grantCreate || grantDeactivate || aiAnswer || adminGet
     || adminPost || adminAction || accountPost || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke) && (!url.search || queryAllowed);

@@ -20,7 +20,7 @@ export type KnowledgeDraft = {
 export type KnowledgeSnapshot = Readonly<{
   version: number;
   draft: KnowledgeDraft;
-  decision: "pending" | "approved" | "revision-requested";
+  decision: "pending" | "approved" | "rejected";
 }>;
 
 export type KnowledgePreviewState = {
@@ -28,7 +28,6 @@ export type KnowledgePreviewState = {
   savedDraft: KnowledgeDraft;
   submitted: KnowledgeSnapshot | null;
   publication: KnowledgeSnapshot | null;
-  revisionRequested: boolean;
   nextVersion: number;
   message: string;
 };
@@ -37,8 +36,9 @@ export type KnowledgePreviewAction =
   | { type: "edit"; draft: KnowledgeDraft }
   | { type: "save" }
   | { type: "submit" }
-  | { type: "request-revision" }
-  | { type: "approve"; version: number };
+  | { type: "reject" }
+  | { type: "approve"; version: number }
+  | { type: "activate"; version: number };
 
 export const sampleQuestion = "How should we respond to an API gateway outage?";
 
@@ -71,7 +71,6 @@ export function createKnowledgePreview(): KnowledgePreviewState {
     savedDraft: copyDraft(draft),
     submitted: { version: 24, draft: copyDraft(draft), decision: "pending" },
     publication: null,
-    revisionRequested: false,
     nextVersion: 25,
     message: "",
   };
@@ -104,11 +103,11 @@ export function reduceKnowledgePreview(state: KnowledgePreviewState, action: Kno
       if (!draftReadyForReview(state.draft)) return { ...state, message: "Complete the content and both review checks before submitting a shared snapshot." };
       if (knowledgeDraftMatchesPublication(state)) return { ...state, message: "This sample is already published. Edit the working draft before submitting a new version." };
       const submitted: KnowledgeSnapshot = { version: state.nextVersion, draft: copyDraft(state.draft), decision: "pending" };
-      return { ...state, submitted, savedDraft: copyDraft(state.draft), nextVersion: state.nextVersion + 1, revisionRequested: false, message: "An immutable sample snapshot is ready for review. The working draft remains separate." };
+      return { ...state, submitted, savedDraft: copyDraft(state.draft), nextVersion: state.nextVersion + 1, message: "An immutable sample snapshot is ready for review. The working draft remains separate." };
     }
-    case "request-revision":
+    case "reject":
       if (!state.submitted || state.submitted.decision !== "pending") return state;
-      return { ...state, submitted: { ...state.submitted, decision: "revision-requested" }, revisionRequested: true, message: "Sample revision requested. Resolve the source visibility and recovery checklist before resubmitting." };
+      return { ...state, submitted: { ...state.submitted, decision: "rejected" }, message: "Sample snapshot rejected. The working draft remains editable and can be submitted again." };
     case "approve":
       if (!state.submitted || state.submitted.version !== action.version || state.submitted.decision !== "pending" || !draftReadyForReview(state.submitted.draft)) return { ...state, message: "This snapshot is not ready for approval. Resolve the checks and submit a new snapshot." };
       {
@@ -116,10 +115,17 @@ export function reduceKnowledgePreview(state: KnowledgePreviewState, action: Kno
         return {
           ...state,
           submitted: approved,
-          publication: { ...approved, draft: copyDraft(approved.draft) },
-          message: "The sample snapshot was approved and automatically published in this session. No real publication or audit record was created.",
+          message: "The sample snapshot was approved and entered publication preparation. It is not active or searchable yet.",
         };
       }
+    case "activate":
+      if (!state.submitted || state.submitted.version !== action.version
+        || state.submitted.decision !== "approved") return state;
+      return {
+        ...state,
+        publication: { ...state.submitted, draft: copyDraft(state.submitted.draft) },
+        message: "Indexing completed and the approved sample snapshot became active atomically.",
+      };
   }
 }
 
