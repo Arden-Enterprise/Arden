@@ -65,7 +65,9 @@ class ReceiverTests(unittest.TestCase):
         self.assertIsNotNone(ReleaseEngine, "Release receiver is not implemented")
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # Hosted Windows runners can expose TEMP through an 8.3 alias. Use the
+        # canonical fixture root; production still rejects symlinked state paths.
+        self.root = Path(self.temp.name).resolve()
         self.manager = MemoryManager()
         self.engine = ReleaseEngine("staging", self.root / "staging", self.manager)
         self.manifest, self.payload = fixture()

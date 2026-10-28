@@ -28,7 +28,7 @@ class RetentionTests(unittest.TestCase):
         self.assertIsNotNone(collect_releases, "Scoped release retention is not implemented")
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name)
+        self.root = Path(self.temporary.name).resolve()
         (self.root / "staging" / "uploads").mkdir(parents=True)
         (self.root / "production").mkdir()
 

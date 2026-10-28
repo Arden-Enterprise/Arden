@@ -16,7 +16,7 @@ const ids = {
   managerMembership: randomUUID(),
   department: randomUUID(),
 };
-const roleCodes = [`ARDEN_TEST_OWNER_${ids.owner.replaceAll("-", "")}`, `ARDEN_TEST_MANAGER_${ids.manager.replaceAll("-", "")}`];
+const roleCodes = [`ARDEN_TEST_OWNER_${ids.owner.replaceAll("-", "").toUpperCase()}`, `ARDEN_TEST_MANAGER_${ids.manager.replaceAll("-", "").toUpperCase()}`];
 const repository = pool ? new ArdenRepository(pool) : null;
 let fixtureReady = false;
 
