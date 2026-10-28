@@ -339,6 +339,9 @@ def rollback(environment):
     engine.manager.preflight(previous["manifest"])
     engine.manager.ensure_images(previous["manifest"])
     before = copy.deepcopy(state["active"])
+    # An operator-retired release is no longer evidence for automatic main promotion.
+    # A deliberate staging verification/deployment may establish fresh evidence later.
+    before["eligible_for_promotion"] = False
     state["pending"] = {"before": before, "target": previous["manifest"], "operator": "rollback"}
     write_json(engine.path, state)
     try:

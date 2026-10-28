@@ -77,6 +77,7 @@ class PrivilegeTests(unittest.TestCase):
             self.assertEqual(state["active"]["manifest"]["images"], manager.original["images"])
             self.assertEqual(state["highest"], highest)
             self.assertIsNone(state["pending"])
+            self.assertIs(state["previous"]["eligible_for_promotion"], False)
 
     def test_private_state_rejects_links_and_writable_ancestors(self):
         guard = getattr(entrypoint, "secure_directory", None)
