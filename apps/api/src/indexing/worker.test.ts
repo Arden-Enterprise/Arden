@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { PrivateContentStorage } from "../private-notes/content-storage.js";
 import type { IndexGenerationClient } from "./ai-client.js";
-import type { IndexGenerationJob, IndexGenerationManifest } from "./contracts.js";
+import { IndexGenerationSupersededError, type IndexGenerationJob, type IndexGenerationManifest } from "./contracts.js";
 import type { IndexGenerationStore } from "./store.js";
-import { IndexingWorker } from "./worker.js";
+import { IndexingWorker, indexWorkerLeaseSeconds } from "./worker.js";
 
 const snapshot = "arden-document:application/vnd.arden.semantic-blocks+json;version=1\n{\"schemaVersion\":1,\"blocks\":[]}";
 const pdfSnapshot = Buffer.from("%PDF-1.7\nsynthetic test payload\n%%EOF", "utf8");
@@ -65,6 +65,25 @@ const storage: PrivateContentStorage = {
 const logger = { info() {}, error() {} };
 
 describe("indexing worker", () => {
+  it("rejects leases shorter than the bounded AI request plus completion margin", () => {
+    expect(indexWorkerLeaseSeconds(undefined)).toBe(300);
+    expect(indexWorkerLeaseSeconds("180")).toBe(180);
+    for (const value of ["90", "179", "601", "180.5", "NaN"]) {
+      expect(() => indexWorkerLeaseSeconds(value)).toThrow("ARDEN_INDEX_LEASE_SECONDS");
+    }
+  });
+
+  it("does not retry a generation superseded by an already published snapshot", async () => {
+    const job = makeJob();
+    const store = new FakeStore(job);
+    store.complete = async () => { throw new IndexGenerationSupersededError("superseded"); };
+    const worker = new IndexingWorker("10000000-0000-4000-8000-000000000008", 300,
+      store, storage, { index: async () => makeManifest(job) }, logger);
+    await worker.runOnce();
+    expect(store.completed).toBe(false);
+    expect(store.failure).toEqual({ code: "INDEX_GENERATION_SUPERSEDED", retryable: false });
+  });
+
   it("indexes one claimed snapshot and delegates atomic activation to core storage", async () => {
     const job = makeJob();
     const store = new FakeStore(job);

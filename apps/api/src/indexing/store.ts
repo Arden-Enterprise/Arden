@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import type { IndexGenerationJob, IndexGenerationManifest } from "./contracts.js";
-import { assertIndexGenerationJob } from "./contracts.js";
+import { assertIndexGenerationJob, IndexGenerationSupersededError } from "./contracts.js";
 
 type ClaimedJobRow = {
   job_id: string;
@@ -77,6 +77,8 @@ export class PgIndexGenerationStore implements IndexGenerationStore {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
+      await client.query("SET LOCAL statement_timeout = '15s'");
+      await client.query("SET LOCAL lock_timeout = '5s'");
       await client.query("SET LOCAL ROLE arden_indexer");
       await client.query("SET LOCAL search_path TO arden, public");
       const result = await work(client);
@@ -84,6 +86,9 @@ export class PgIndexGenerationStore implements IndexGenerationStore {
       return result;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
+      if (typeof error === "object" && error !== null && "code" in error && error.code === "AR001") {
+        throw new IndexGenerationSupersededError("A newer snapshot has already been published");
+      }
       throw error;
     } finally {
       client.release();

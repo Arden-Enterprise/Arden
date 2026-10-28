@@ -85,7 +85,7 @@ export type KnowledgeSubmission = {
   audienceIds: string[];
   contentHash: string;
   status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
-  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED";
+  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED";
   submittedAt: string;
   publishedVersionId: string | null;
   decisionComment: string | null;

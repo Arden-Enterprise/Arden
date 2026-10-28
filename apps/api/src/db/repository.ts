@@ -93,7 +93,7 @@ export type SharedKnowledgeSubmission = {
   audienceRoleIds: string[];
   contentHash: string;
   status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
-  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED";
+  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED";
   submittedAt: Date;
   publishedVersionId: string | null;
   decisionComment: string | null;
@@ -426,7 +426,7 @@ export interface ArdenDataRepository {
     idempotencyKey: string, requestId: string): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
-  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[]): Promise<AuthorizedAiSource[] | null>;
+  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null>;
 }
 
 function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): string {
@@ -1494,15 +1494,17 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[]): Promise<AuthorizedAiSource[] | null> {
-    if (generationIds && generationIds.length > 12) throw new Error("Too many citation generations");
+  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null> {
+    if ((generationIds && generationIds.length > 12) || (chunkIds && chunkIds.length > 12)) throw new Error("Too many citation locations");
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
       const result = await client.query<AuthorizedAiSourceRow>(`
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
                pv.classification, cp.target_scope_type,
-               CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE g.manifest_json->'chunks' END AS chunks
+               CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
+                 (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
+                   WHERE $3::text[] IS NULL OR chunk->>'chunkId' = ANY($3::text[])) END AS chunks
           FROM knowledge_current_publication cp
           JOIN published_knowledge_version pv
             ON pv.published_version_id = cp.published_version_id
@@ -1511,7 +1513,7 @@ export class ArdenRepository implements ArdenDataRepository {
          WHERE cp.organization_id = $1
            AND ($2::uuid[] IS NULL OR g.generation_id = ANY($2::uuid[]))
          ORDER BY pv.published_at DESC, pv.published_version_id DESC
-         LIMIT 500`, [organizationId, generationIds ?? null]);
+         LIMIT 500`, [organizationId, generationIds ?? null, chunkIds ?? null]);
       return result.rows.map((row) => ({
         generationId: row.generation_id,
         chunks: row.chunks,
