@@ -71,8 +71,9 @@
   display: block; width: 100%; min-height: 40px; max-height: 160px; padding: 2px 4px; border: 0; color: var(--arden-text-primary);
   background: transparent; font-size: 13px; line-height: 1.45; resize: none;
 }
-.ask-composer textarea::placeholder { color: #777684; }
+.ask-composer textarea::placeholder { color: #aaa6b4; }
 .ask-composer textarea:focus-visible { outline: 0; }
+.ask-composer:focus-within { outline: 2px solid #b7a7ef; outline-offset: 2px; }
 .ask-composer-tools { display: flex; align-items: center; gap: 6px; }
 .ask-scope {
   display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 3px; border: 0; color: var(--arden-text-secondary);
@@ -98,7 +99,7 @@
 .ask-message-meta { display: flex; align-items: center; gap: 8px; color: var(--arden-text-muted); font-size: 11px; font-weight: 600; }
 .ask-message-meta small { padding: 2px 6px; border: 1px solid var(--arden-border); border-radius: 5px; color: var(--arden-text-muted); font-size: 10px; font-weight: 500; }
 .ask-message-body { max-width: 680px; color: #dedde6; font-size: 14px; line-height: 1.72; }
-.ask-message-body p { margin: 0; }
+.ask-message-body p { margin: 0; white-space: pre-wrap; }
 .ask-message.is-member .ask-message-body { max-width: 520px; padding: 10px 14px; border: 1px solid var(--arden-border); border-radius: 10px; background: var(--arden-surface-raised); }
 .ask-answer-pending { display: flex; align-items: center; gap: 8px; color: var(--arden-text-muted); font-size: 11px; }
 .ask-answer-pending span { width: 7px; height: 7px; border-radius: 999px; background: var(--arden-violet); animation: ask-pulse 1.1s ease-in-out infinite; }

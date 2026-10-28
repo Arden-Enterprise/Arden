@@ -257,6 +257,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     if (!active || view !== "knowledge" || !citationTarget || openedCitationId.current === citationTarget.navigationId) return;
     openedCitationId.current = citationTarget.navigationId;
     let present = true;
+    let loading = true;
     setBusy(true); setError("");
     void loadPublishedKnowledge(platform, organizationId, citationTarget.versionId)
       .then((loaded) => {
@@ -269,8 +270,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         setOpenedCitation(null);
         setError("This citation source is unavailable in your current access scope.");
       })
-      .finally(() => { if (present) setBusy(false); });
-    return () => { present = false; };
+      .finally(() => { loading = false; if (present) setBusy(false); });
+    return () => {
+      present = false;
+      if (loading) { openedCitationId.current = null; setBusy(false); }
+    };
   }, [active, citationTarget, organizationId, platform, view]);
 
   const latestByDraft = new Map<string, KnowledgeSubmission>();
@@ -412,7 +416,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             </KnowledgeNotice>}
             {latest?.status === "APPROVED" && (latest.publicationState === "ACTIVE"
               ? <KnowledgeNotice title="Published" tone="jade">The reviewed snapshot is active. Access follows its current audience permissions.</KnowledgeNotice>
-              : latest.publicationState === "FAILED"
+              : latest.publicationState === "SUPERSEDED"
+                ? <KnowledgeNotice title="Replaced by a newer publication" tone="amber">This historical snapshot is not the current publication.</KnowledgeNotice>
+                : latest.publicationState === "FAILED"
                 ? <KnowledgeNotice title="Publication failed" tone="danger">Indexing failed. This snapshot is not active; contact an administrator to inspect the failed job.</KnowledgeNotice>
                 : <KnowledgeNotice title="Approved · preparing publication" tone="amber">The reviewed snapshot is waiting for indexing and atomic activation. It is not searchable yet.</KnowledgeNotice>)}
             <div className="draft-document-body knowledge-live-form">
