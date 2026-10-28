@@ -46,8 +46,7 @@ $result = Illuminate\Support\Facades\DB::transaction(function () use ($input, $r
     $before = ['is_api_enabled' => $settings->is_api_enabled, 'allowed_ips' => $settings->allowed_ips];
     $owner = $team->members()->wherePivot('role', 'owner')->orderBy('users.id')->firstOrFail();
     $token = $owner->createToken('arden-release-local-' . $input['nonce'],
-        ['read', 'read:sensitive', 'write', 'deploy'], now()->addDays(90));
-    $token->accessToken->forceFill(['team_id' => $teamId])->save();
+        ['read', 'read:sensitive', 'write', 'deploy'], now()->addDays(90), (int) $teamId);
     $settings->is_api_enabled = true;
     $settings->allowed_ips = '127.0.0.1,::1';
     $settings->save();
