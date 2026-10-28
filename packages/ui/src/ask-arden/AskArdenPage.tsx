@@ -9,12 +9,13 @@ import { answerMessage, starterPrompts, type AskArdenMessage } from "./askArdenM
 const ardenOrbSource = new URL("./assets/arden-orb-source.png", import.meta.url).href;
 
 type AskArdenPageProps = {
+  active?: boolean;
   platform: Platform;
   organizationId: string | null;
   onOpenCitation?: (citation: KnowledgeCitationReference) => void;
 };
 
-export function AskArdenPage({ platform, organizationId, onOpenCitation }: AskArdenPageProps) {
+export function AskArdenPage({ platform, organizationId, onOpenCitation, active = true }: AskArdenPageProps) {
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<AskArdenMessage[]>([]);
   const [examplesVisible, setExamplesVisible] = useState(true);
@@ -78,7 +79,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation }: AskAr
     </div>
   </form>;
 
-  return <main id="arden-main" className="workspace-page ask-arden-page" aria-labelledby="ask-arden-title" tabIndex={-1}>
+  return <main id={active ? "arden-main" : undefined} className="workspace-page ask-arden-page" aria-labelledby="ask-arden-title" tabIndex={-1}>
     <h1 id="ask-arden-title" className="sr-only">Ask Arden</h1>
     <div className={`ask-arden-stage${empty ? " is-empty" : " is-thread"}`}>
       <header className="ask-thread-header">

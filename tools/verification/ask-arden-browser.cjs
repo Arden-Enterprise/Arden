@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
+    let answerCount = 0;
     let finishAnswer;
     const waitingAnswer = new Promise(resolve => { finishAnswer = resolve; });
     let receivedAnswer;
@@ -25,9 +26,15 @@ const assert = require('node:assert/strict');
         }],
       } });
       if (path.endsWith('/ai/answers')) {
-        receivedAnswer();
-        await waitingAnswer;
-        return route.fulfill({ json: { status: 'ANSWERED', answer: 'Synthetic delayed answer', citations: [] } });
+        if (++answerCount === 1) {
+          receivedAnswer();
+          await waitingAnswer;
+          return route.fulfill({ json: { status: 'INSUFFICIENT_EVIDENCE', answer: 'Synthetic delayed answer', citations: [] } });
+        }
+        return route.fulfill({ json: { status: 'ANSWERED', answer: 'Synthetic current answer', citations: [{
+          documentId: '00000000-0000-4000-8000-000000000003', versionId: '00000000-0000-4000-8000-000000000004',
+          title: 'Synthetic policy', version: 'v1', scope: 'Company-wide', excerpt: 'Synthetic evidence',
+        }] } });
       }
       return route.fulfill({ json: { items: [], nextCursor: null } });
     });
@@ -46,6 +53,13 @@ const assert = require('node:assert/strict');
     await page.screenshot({ path: '.private/qa/feature-ask-reset-desktop.png' });
     assert.equal(await page.getByText('Synthetic delayed answer', { exact: true }).count(), 0,
       'A completed old request must not insert an answer into a reset conversation');
+    await page.getByRole('textbox', { name: 'Ask Arden', exact: true }).fill('Synthetic source question');
+    await page.getByRole('button', { name: 'Send prompt' }).click();
+    await page.getByText('Synthetic current answer', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Open source 1: Synthetic policy, v1', exact: true }).click();
+    await page.getByRole('button', { name: 'Ask Arden', exact: true }).click();
+    assert.equal(await page.getByText('Synthetic current answer', { exact: true }).count(), 1,
+      'Reading a citation must preserve the conversation when returning to Ask Arden');
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: '.private/qa/feature-ask-mobile.png' });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'No mobile horizontal overflow');

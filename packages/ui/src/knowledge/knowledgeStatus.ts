@@ -16,6 +16,7 @@ export function validatePdfFile(file: Pick<File, "name" | "type" | "size"> | nul
 export function draftStatus(item: Pick<KnowledgeDraftSummary, "hasPendingSubmission" | "responsibleDepartmentId" | "targetScopeType" | "audienceIds" | "versionId">, latest?: KnowledgeSubmission): { label: string; tone: string } {
   if (item.hasPendingSubmission) return { label: "Awaiting review", tone: "is-info" };
   if (!latest) return { label: item.responsibleDepartmentId && item.targetScopeType && item.audienceIds.length ? "Draft" : "Draft · metadata incomplete", tone: "" };
+  if (latest.status === "APPROVED" && latest.publicationState === "FAILED") return { label: "Publication failed", tone: "is-danger" };
   if (latest.status === "APPROVED") return latest.publicationState === "ACTIVE"
     ? (latest.snapshotVersionId === item.versionId
       ? { label: "Published", tone: "is-success" } : { label: "Edited after publication", tone: "is-info" })
