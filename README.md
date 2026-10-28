@@ -10,6 +10,10 @@ Start with [AGENTS.md](AGENTS.md), which applies to agents and human contributor
 
 Accepted product, architecture, technology, security, and deployment decisions must update these documents in the same change; they must not live only in chat. Installed capabilities and future plans must remain clearly distinguished.
 
+Use the [feature and flow index](docs/product/README.md) to locate owning specifications, complete-path acceptance cases and known reconciliation gaps. The [specification rule](docs/engineering/rules/specifications.md) records agreed brainstorm decisions and requires an informed comparison before conflicting accepted requirements change. The index separates current main from newer branch-only contracts and does not certify every roadmap item as implemented.
+
+The [modular rules index](docs/engineering/rules/README.md) gives each task, Git, security, PR, engineering, design, verification and server rule one home. [AI reviewer guidance](docs/engineering/ai-reviewers.md) distinguishes vendor limits and actual coverage from Arden's [review-size policy](docs/engineering/rules/git-workflow.md#reviewable-pr-size).
+
 ## Local development
 
 Prerequisites: Node.js 24+, pnpm 11+, and Docker Desktop or Docker Engine with Compose.
@@ -25,6 +29,8 @@ The web shell runs at `http://127.0.0.1:5180`; the API runs at `http://127.0.0.1
 `pnpm db:down` stops the local database without deleting its volume. The Compose password is **for local development only**. Production must supply its own secret and connection string.
 
 ## Current UI foundation
+
+Historical preview description: the paragraphs below predate current authenticated/server-backed slices. Read [DESIGN.md](DESIGN.md), the [implementation inventory](docs/engineering/implementation-status.md) and the feature index for current source boundaries; do not treat the older sample/scaffold claims below as the current product contract.
 
 The shared React package implements the [Living Archive Figma redesign](https://www.figma.com/design/UmW5qb5cTWo6lwMYZ4Z9bC/Arden?node-id=147-2) for web and desktop, using dark surfaces and locally bundled Sora/DM Sans fonts on authentication screens. The signed-in workspace uses the accepted Island system (graphite tones, one violet accent, locally bundled Inter/Inter Tight, floating navigation and status islands) described in [DESIGN.md](DESIGN.md):
 

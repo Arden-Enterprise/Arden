@@ -91,6 +91,10 @@ This is not persistence, authentication, offline synchronization or authorizatio
 
 In the sample knowledge workflow, an unchanged working copy that was approved shows **Published · Sample**; editing it may start a new reviewable version and never edits the published snapshot in place.
 
+## Approved brand artwork reference
+
+The selected **Flux Circle — Equal rhythm spacing (option 2, v15)** artwork is delivered in [the final logo package](brand/arden-logo-final/README.md), with vector/raster variants, selection metadata, checksums and the Sora licence. The artwork was selected on 15 October 2026. This export package does not replace the current application icons, favicons or installer assets; adopting it in shipped surfaces requires a separate implementation and visual verification.
+
 ## Future graph surface (planned)
 
 The planned graph home keeps the network dominant within its workspace, with a restrained dot grid, Zoom/Fit controls and a Knowledge Pane for the selected item's identity, provenance, freshness, context and connections. Shared items use solid-outline circles, personal items dashed-outline circles and external items squares, with neutral fills, visible labels and a legend. Selection uses the violet accent with a visible halo. At narrow widths provide a selected-item summary and a navigable item list; canvas interaction needs a keyboard-accessible alternative. These are requirements for future work, not a claim that the preview ships a graph.
