@@ -20,6 +20,15 @@ def verify_migration_inventory(rows, applied):
     return hashlib.sha256(json.dumps(ordered, separators=(",", ":")).encode()).hexdigest()
 
 
+def candidate_template(final):
+    candidate = copy.deepcopy(final)
+    for name, network in candidate["services"]["arden-web"]["networks"].items():
+        if name != "default":
+            # Coolify's Compose serializer does not preserve an empty aliases array.
+            network.pop("aliases", None)
+    return candidate
+
+
 def deployment_key_line(environment, public_key):
     if environment not in {"staging", "production"} or not isinstance(public_key, str):
         raise ValueError("Invalid deployment-key environment")

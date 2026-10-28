@@ -85,6 +85,17 @@ class BootstrapTests(unittest.TestCase):
         build_app_template("staging", "source123456", self.api, self.web)
         self.assertEqual((self.api, self.web), before)
 
+    def test_candidate_omits_empty_public_alias_fields_for_coolify_serialization(self):
+        prepare = getattr(bootstrap, "candidate_template", None)
+        self.assertTrue(callable(prepare), "Candidate network preparation is missing")
+        final = build_app_template("staging", "source123456", self.api, self.web)["compose"]
+        before = copy.deepcopy(final)
+        candidate = prepare(final)
+        for name, network in candidate["services"]["arden-web"]["networks"].items():
+            if name != "default":
+                self.assertNotIn("aliases", network)
+        self.assertEqual(final, before)
+
     def test_schema_approval_requires_the_exact_applied_migration_inventory(self):
         verify = getattr(bootstrap, "verify_migration_inventory", None)
         self.assertTrue(callable(verify), "Database ledger verification is missing")

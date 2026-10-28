@@ -17,7 +17,7 @@ import time
 from urllib.parse import urlsplit, unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bootstrap import build_app_template, deployment_key_line, verify_migration_inventory
+from bootstrap import build_app_template, deployment_key_line, verify_migration_inventory, candidate_template
 from entrypoint import secure_file, secure_directory
 from management import CoolifyManager
 from receiver import ReleaseEngine
@@ -175,10 +175,7 @@ def prepare(environment, settings, management):
     migrations = migration_fingerprint(old_api, database, values["DATABASE_URL"])
     baseline = {"commit": settings["baseline_commit"], "tree": settings["baseline_tree"],
                 "migrations": migrations, "images": {"api": {"id": api["Image"]}, "web": {"id": web["Image"]}}}
-    candidate = copy.deepcopy(final)
-    for name, network in candidate["services"]["arden-web"]["networks"].items():
-        if name != "default":
-            network["aliases"] = []
+    candidate = candidate_template(final)
     config = {"environment": environment, "service_uuid": source,
               "api_url": "http://127.0.0.1:8080/api/v1", "api_namespace": True,
               "token_path": str(CONFIG / "management.token"), "origin": settings["origins"][environment],
