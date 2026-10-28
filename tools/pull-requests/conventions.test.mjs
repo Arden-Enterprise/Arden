@@ -16,6 +16,15 @@ test("accept documented work types without a tool or agent namespace", () => {
   }
 });
 
+test("accept only the two exact deployment branches for release promotion PRs", () => {
+  for (const branch of ["staging", "main"]) {
+    assert.deepEqual(validatePullRequest({ ...valid, branch, title: "ci: promote verified staging release" }).errors, []);
+  }
+  for (const branch of ["develop", "staging/test", "production", "Staging", "staging\n"]) {
+    assert.ok(validatePullRequest({ ...valid, branch }).errors.length);
+  }
+});
+
 test("accept semantic release versions including prerelease/build suffixes", () => {
   for (const version of ["0.1.0", "1.0.0-rc.1", "1.2.3+build.7", "1.2.3-beta.2+linux"]) {
     assert.deepEqual(validatePullRequest({ ...valid, branch: `release/${version}`, title: "release: prepare supported version" }).errors, []);
@@ -26,7 +35,7 @@ test("accept semantic release versions including prerelease/build suffixes", () 
 });
 
 test("reject malformed names, control characters and unknown work types", () => {
-  for (const branch of ["main", "feature/private-notes", "feat/notes", "feat/Private-Notes", "codex/private-notes", "codex/feat/scoped-document-change", "codex/docs/too/many/segments", "feat/private-notes\n", "feat/private--notes", "feat/private notes"]) {
+  for (const branch of ["feature/private-notes", "feat/notes", "feat/Private-Notes", "codex/private-notes", "codex/feat/scoped-document-change", "codex/docs/too/many/segments", "feat/private-notes\n", "feat/private--notes", "feat/private notes"]) {
     assert.ok(validatePullRequest({ ...valid, branch }).errors.length, branch);
   }
 });
