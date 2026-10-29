@@ -73,16 +73,16 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
         (membership_id, department_id, is_primary)
         VALUES ($1, $2, true), ($3, $2, true)`,
       [ids.ownerMembership, ids.department, ids.managerMembership]);
-      await client.query(`INSERT INTO audience (audience_id, organization_id, kind, name, is_managed,
-        created_by_membership_id, legacy_role_id)
-        VALUES ($1, $2, 'GROUP', 'Synthetic owners', false, $3, $1)`,
-      [ids.ownerRole, ids.organization, ids.ownerMembership]);
-      await client.query(`INSERT INTO audience_group_membership
-        (audience_id, organization_id, membership_id, assigned_by_membership_id)
-        VALUES ($1, $2, $3, $3)`, [ids.ownerRole, ids.organization, ids.ownerMembership]);
+      // Managed audiences also need the bounded legacy role projection until schema contraction.
+      await client.query(`INSERT INTO role (role_id, organization_id, code, name)
+        VALUES ($1, $2, 'ALL_MEMBERS', 'Everyone in organization')`,
+      [ids.organizationAudience, ids.organization]);
+      await client.query(`INSERT INTO role_permission (role_id, permission_id)
+        SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`,
+      [ids.organizationAudience]);
       await client.query(`INSERT INTO audience
-        (audience_id, organization_id, kind, name, is_managed)
-        VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone in organization', true)`,
+        (audience_id, organization_id, kind, name, is_managed, legacy_role_id)
+        VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone in organization', true, $1)`,
       [ids.organizationAudience, ids.organization]);
       await client.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type) VALUES ($1, $2, 'ORGANIZATION')`, [ids.organizationScope, ids.organization]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id) VALUES ($1, $2, $3), ($4, $5, $3)`, [ids.ownerMembership, ids.ownerRole, ids.organizationScope, ids.managerMembership, ids.managerRole]);
@@ -164,10 +164,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM department_membership WHERE membership_id = ANY($1::uuid[])",
             [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
-          await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.readerAudience]]);
+          await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.readerAudience, ids.organizationAudience]]);
           await client.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership, ids.organizationReviewerMembership]]);
           await client.query("DELETE FROM department WHERE department_id = $1", [ids.department]);
-          await client.query("DELETE FROM role WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.readerAudience]]);
+          await client.query("DELETE FROM role WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.readerAudience, ids.organizationAudience]]);
           await client.query("DELETE FROM access_scope WHERE access_scope_id = $1", [ids.organizationScope]);
           await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])",
             [[ids.owner, ids.manager, ids.organizationReviewer]]);
@@ -401,7 +401,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       return submitted.submission;
     };
 
-    const limited = await submit("limited-scope", ids.ownerRole);
+    const limited = await submit("limited-scope", ids.readerAudience);
     const organizationWide = await submit("organization-scope", ids.organizationAudience);
     const assigned = await repository.listAssignedReviews(ids.organizationReviewer,
       ids.organization);
