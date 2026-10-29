@@ -17,7 +17,9 @@ import time
 from urllib.parse import urlsplit, unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bootstrap import build_app_template, deployment_key_line, verify_migration_inventory, candidate_template
+from bootstrap import (build_app_template, deployment_key_line, verify_migration_inventory,
+                       candidate_template, plan_migration_checksum_baseline,
+                       migration_baseline_statements)
 from entrypoint import secure_file, secure_directory
 from management import CoolifyManager
 from receiver import ReleaseEngine
@@ -127,6 +129,192 @@ process.stdout.write(JSON.stringify(rows));"""
                      database_container, "sh", "-c", shell, "_", database,
                      "SELECT migration_id FROM public.arden_schema_migrations ORDER BY migration_id").splitlines()
     return verify_migration_inventory(rows, applied)
+
+
+def private_migration_url(environment):
+    path = CONFIG / f"{environment}.migration.env"
+    secure_file(path)
+    raw = path.read_text(encoding="utf-8")
+    lines = raw.splitlines()
+    if (len(lines) != 1 or not lines[0].startswith("ARDEN_MIGRATION_DATABASE_URL=")
+            or "\r" in raw or "\n" in lines[0]):
+        raise ValueError("The protected migration connection file has an invalid format")
+    value = lines[0].partition("=")[2]
+    parsed = urlsplit(value)
+    database = unquote(parsed.path.lstrip("/"))
+    if (parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname
+            or not parsed.username or not parsed.password
+            or parsed.query or parsed.fragment or (parsed.port and parsed.port != 5432)
+            or not re.fullmatch(r"[a-zA-Z0-9_]{1,63}", database)):
+        raise ValueError("The protected migration connection is invalid")
+    return path, parsed, database
+
+
+def read_migration_ledger(database_container, database_url):
+    database = unquote(urlsplit(database_url).path.lstrip("/"))
+    if not re.fullmatch(r"[a-zA-Z0-9_]{1,63}", database):
+        raise ValueError("Review the selected database name before reading its migration ledger")
+    shell = ('exec psql --username="$POSTGRES_USER" --dbname="$1" --no-psqlrc '
+             '--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align --field-separator="|" --command="$2"')
+    options = "-c default_transaction_read_only=on -c statement_timeout=5000"
+    column = docker("exec", "--env", "PGOPTIONS=" + options, database_container, "sh", "-c", shell, "_", database,
+                    "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' "
+                    "AND table_name='arden_schema_migrations' AND column_name='checksum')").strip()
+    if column not in {"t", "f"}:
+        raise ValueError("The migration ledger schema could not be verified")
+    checksum = "checksum" if column == "t" else "NULL::text"
+    result = docker("exec", "--env", "PGOPTIONS=" + options, database_container, "sh", "-c", shell, "_", database,
+                    "SELECT migration_id || '|' || COALESCE(" + checksum + ", '') "
+                    "FROM public.arden_schema_migrations ORDER BY migration_id")
+    rows = []
+    for line in result.splitlines():
+        pieces = line.split("|")
+        if len(pieces) != 2:
+            raise ValueError("The migration ledger response is malformed")
+        rows.append({"migration_id": pieces[0], "checksum": pieces[1] or None})
+    return rows
+
+
+def migration_image_rows(container):
+    code = """const fs=require('node:fs'),c=require('node:crypto');
+const root='/app/migrations';const files=fs.readdirSync(root).filter(x=>/^\\d{4}_[a-z0-9_]+\\.sql$/.test(x)).sort();
+if(!files.length)process.exit(1);
+process.stdout.write(JSON.stringify(files.map(name=>({name,sha256:c.createHash('sha256').update(fs.readFileSync(root+'/'+name)).digest('hex')}))));"""
+    return json.loads(docker("exec", "--user", "1000:1000", container, "node", "-e", code))
+
+
+def private_database_aliases(container):
+    names = {container}
+    details = inspect(container)
+    for network in details.get("NetworkSettings", {}).get("Networks", {}).values():
+        names.update(alias for alias in network.get("Aliases", []) if isinstance(alias, str))
+    return names
+
+
+def run_migration_sql(image, network, env_file, sql):
+    runtime = docker("image", "inspect", "--format", "{{.Config.User}}", image).strip()
+    if not runtime or runtime in {"0", "root", "0:0", "root:root"}:
+        raise ValueError("The approved database image has no non-root client identity")
+    shell = ('exec psql --dbname="$ARDEN_MIGRATION_DATABASE_URL" --no-psqlrc '
+             '--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align --field-separator="|"')
+    return run(["/usr/bin/docker", "run", "--rm", "--pull=never", "--network", network,
+                "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+                "--memory", "128m", "--cpus", "0.50", "--pids-limit", "32",
+                "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                "--env-file", str(env_file), "--entrypoint", "/bin/sh", image, "-c", shell],
+               data=sql, timeout=90)
+
+
+def baseline_migrations(environment):
+    if environment not in {"staging", "production"}:
+        raise ValueError("Select the exact migration baseline environment")
+    config_path = CONFIG / f"{environment}.json"
+    secure_file(config_path)
+    config = read_json(config_path)
+    if (config.get("environment") != environment
+            or config.get("state_dir") != f"/var/lib/arden/releases/{environment}"
+            or config.get("staging_dir") != "/var/lib/arden/releases/staging"):
+        raise ValueError("The protected migration target configuration is invalid")
+    state_path = Path(config["state_dir"]) / "state.json"
+    secure_file(state_path)
+    state = read_json(state_path)
+    active = state.get("active", {})
+    manifest = active.get("manifest", {})
+    manager = CoolifyManager(config)
+    if (state.get("pending") or manifest != manager.baseline()
+            or active.get("deployment_commit") != manifest.get("commit")):
+        raise ValueError("The active application release no longer matches its approved baseline")
+
+    api_name = f"arden-api-{config['service_uuid']}"
+    api = inspect(api_name)
+    labels = api.get("Config", {}).get("Labels", {})
+    if (not api.get("State", {}).get("Running")
+            or api.get("State", {}).get("Health", {}).get("Status") != "healthy"
+            or api.get("Image") != manifest.get("images", {}).get("api", {}).get("id")
+            or labels.get("com.docker.compose.project") != config["service_uuid"]
+            or labels.get("com.docker.compose.service") != "arden-api"):
+        raise ValueError("The active API container does not match the protected migration source")
+    app_values = {}
+    for entry in api.get("Config", {}).get("Env", []):
+        key, separator, value = entry.partition("=")
+        if separator and key not in app_values:
+            app_values[key] = value
+    app_url = app_values.get("DATABASE_URL", "")
+    app_target = urlsplit(app_url)
+    database = database_peer(api, {"DATABASE_URL": app_url})
+    db = inspect(database)
+    db_image = db.get("Image", "")
+    if not re.fullmatch(r"sha256:[a-f0-9]{64}", db_image):
+        raise ValueError("The exact private database image is unavailable")
+    shared_networks = sorted(set(api.get("NetworkSettings", {}).get("Networks", {}))
+                             & set(db.get("NetworkSettings", {}).get("Networks", {})))
+    if len(shared_networks) != 1:
+        raise ValueError("The API and database do not share one unambiguous private network")
+
+    env_file, migration_target, migration_database = private_migration_url(environment)
+    if (migration_target.hostname not in private_database_aliases(database)
+            or migration_database != unquote(app_target.path.lstrip("/"))
+            or migration_target.hostname in {"localhost", "127.0.0.1", "::1"}):
+        raise ValueError("The protected migration connection does not target the active private database")
+    role_query = (
+        "SELECT current_database() || '|' || current_user || '|' || r.rolsuper::text || '|' || "
+        "r.rolbypassrls::text || '|' || r.rolcreatedb::text || '|' || r.rolcreaterole::text || '|' || "
+        "r.rolreplication::text || '|' || has_schema_privilege(current_user, 'arden', 'CREATE')::text || '|' || "
+        "(SELECT pg_get_userbyid(relowner) = current_user FROM pg_class "
+        "WHERE oid = 'public.arden_schema_migrations'::regclass)::text "
+        "FROM pg_roles r WHERE r.rolname = current_user"
+    )
+    role_result = run_migration_sql(db_image, shared_networks[0], env_file, role_query).strip()
+    role = role_result.split("|")
+    if (len(role) != 9 or role[0] != migration_database or role[1] in {"", "postgres"}
+            or role[2:7] != ["false"] * 5 or role[7:] != ["true", "true"]):
+        raise ValueError("The server-side migration role is not the approved least-privilege owner")
+
+    image_rows = migration_image_rows(api_name)
+    ledger_rows = read_migration_ledger(database, app_url)
+    expected_source = {
+        "commit": manifest.get("commit"),
+        "tree": manifest.get("tree"),
+        "api_image": manifest.get("images", {}).get("api", {}).get("id"),
+        "migrations": manifest.get("migrations"),
+    }
+    plan = plan_migration_checksum_baseline(environment, environment, expected_source,
+                                             expected_source, image_rows, ledger_rows)
+    ddl_path = Path(__file__).with_name("migration-ledger.sql")
+    if ddl_path.is_symlink() or not ddl_path.is_file():
+        raise ValueError("The versioned migration ledger DDL is unavailable")
+    statements = migration_baseline_statements(plan, ddl_path.read_text(encoding="utf-8"))
+    sql = "\n".join(statements)
+    verified = run_migration_sql(db_image, shared_networks[0], env_file, sql)
+    result_rows = []
+    for line in verified.splitlines():
+        pieces = line.split("|")
+        if len(pieces) != 2:
+            raise ValueError("Migration checksum baseline verification failed")
+        result_rows.append({"migration_id": pieces[0], "checksum": pieces[1]})
+    if result_rows != plan["checksums"]:
+        raise ValueError("Migration checksum baseline does not match the active image")
+    receipt = {
+        "schema": 1,
+        "environment": environment,
+        "source": plan["source"],
+        "checksums": plan["checksums"],
+        "verified_at": int(time.time()),
+    }
+    receipt_path = Path(config["state_dir"]) / "migration-baseline.json"
+    if receipt_path.exists() or receipt_path.is_symlink():
+        secure_file(receipt_path)
+        previous = read_json(receipt_path)
+        if (previous.get("schema") != 1 or previous.get("environment") != environment
+                or previous.get("source") != plan["source"] or previous.get("checksums") != plan["checksums"]):
+            raise ValueError("An existing migration baseline receipt has a different source")
+        receipt = previous
+    else:
+        write_json(receipt_path, receipt)
+        os.chown(receipt_path, 0, 0)
+        os.chmod(receipt_path, 0o600)
+    return {"status": "BASELINED", "environment": environment,
+            "migration_count": len(plan["checksums"]), "source_commit": plan["source"]["commit"]}
 
 
 def database_peer(api, values):
@@ -440,13 +628,20 @@ def main():
         raise ValueError("Install and review the root-owned operator package first")
     os.umask(0o077)
     parser = argparse.ArgumentParser()
-    parser.add_argument("phase", choices=["enable-management", "prepare", "cutover", "install-account", "rollback"])
+    parser.add_argument("phase", choices=["enable-management", "prepare", "cutover", "install-account",
+                                          "rollback", "baseline-migrations"])
     parser.add_argument("environment", choices=["staging", "production"], nargs="?")
     arguments = parser.parse_args()
     settings = profile()
     secure_directory(CONFIG, private=True)
     secure_directory(STATE, private=True)
     with release_lock(STATE):
+        if arguments.phase == "baseline-migrations":
+            if not arguments.environment:
+                raise ValueError("Select the exact migration baseline environment")
+            result = baseline_migrations(arguments.environment)
+            print(json.dumps({"ok": True, **result}, separators=(",", ":")))
+            return
         management = enable_management(settings)
         if arguments.phase != "enable-management":
             if not arguments.environment:
