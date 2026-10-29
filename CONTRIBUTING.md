@@ -14,6 +14,8 @@ The exact reserved deployment branches `staging` and `main` are additional owner
 
 ## Local development
 
+For the maintainer-approved shared-Staging cohort, start with [shared staging development](docs/engineering/shared-staging-development.md). That workflow uses local unit/preview checks and the shared deployed Staging services for integration testing; it does not require a local database or authorize reconnecting retired developer slots. The isolated local setup below remains an explicit alternative, not that cohort's default. Separately retained development environments are unaffected.
+
 Use Node.js 24 and the root `packageManager` version (currently pnpm 11.19.0). Docker Desktop on Windows or Docker Engine with Compose provides the local database.
 
 ```sh

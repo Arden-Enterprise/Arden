@@ -1,5 +1,7 @@
 # Start coding on Arden
 
+**Read first (2026-10-29):** for the team moved to shared Staging, use [Hướng dẫn làm việc với Staging dùng chung](shared-staging-development.md). No per-person database or retired dev-slot setup is required for that workflow. The rest of this document describes the older hosted-slot setup for an explicitly provisioned/retained slot, not the current onboarding path for that team. Its dated infrastructure/assignment statements must not be treated as a live inventory.
+
 This guide takes a new teammate from installing tools to editing Arden, seeing changes, and opening a pull request. Use it for the **local frontend with hosted development backend** workflow.
 
 **Source to use:** the development commands are merged into `main`. Start from current `main`, then create your task branch. Each teammate needs their own private SSH setup and `.private/remote.json`; these are deliberately absent from GitHub. Use the slot mapping below and have the operator confirm your handoff is ready.

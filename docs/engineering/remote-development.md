@@ -1,5 +1,7 @@
 # Local frontend, hosted development backend
 
+**Shared-Staging onboarding (2026-10-29):** contributors whose per-person environments were retired must use [shared staging development](shared-staging-development.md). Do not run this guide's sync/preview/start commands against retired slots or reinterpret Staging as a slot. The historical layout below is not proof of current provisioning; a separately retained development slot remains outside this consolidation.
+
 ## Layout and scope
 
 | Environment | Frontend | API | Database |
@@ -14,7 +16,7 @@ Development roles cannot routinely connect to one another's databases, but share
 
 ### Current team layout
 
-The operating layout reconciled on 12 October 2026 differs from the fresh bootstrap template. Do not infer an API's database from its Coolify display label or from an unused logical database with a similar name. Inspect its private runtime configuration before any migration.
+The following is the historical operating layout reconciled on 12 October 2026, not the current assignment list for contributors moved to shared Staging. It differs from the fresh bootstrap template. Do not infer an API's database from its Coolify display label or from an unused logical database with a similar name. Inspect its private runtime configuration before any migration.
 
 | Person / label | Slot | Arden application data | Supabase identity |
 | --- | --- | --- | --- |

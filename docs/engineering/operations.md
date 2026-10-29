@@ -4,6 +4,8 @@ Read [AGENTS.md](../../AGENTS.md), [the technology guide](technology-guide.md), 
 
 ## 1. Supported baseline and current commands
 
+The maintainer-approved shared-Staging cohort follows [shared staging development](shared-staging-development.md): Staging is its shared development/integration target, with no routine per-person local DB or retired slot. The isolated-local and hosted-slot sections below describe alternative/legacy workflows, not instructions to provision those retired resources. Keep separately retained development and Production isolated and unchanged. This documentation does not provision local API access to Staging DB/files.
+
 - Development/CI baseline: Node.js 24, root-pinned pnpm (currently 11.19.0), and Docker with Compose. Windows is the first desktop target; Ubuntu 24.04 is the customer server target.
 - Do not assume host Node and Electron's bundled Node/Chromium are interchangeable. Native dependencies must be compatible with the desktop runtime and packaged target.
 - Do not upgrade a major runtime/database/package-manager version just because a newer release exists. Record the support decision, update related tooling/config/docs together, and test the upgrade path.
@@ -90,6 +92,8 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 - Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice; connector credentials, model profiles, resource limits, and retention remain future configuration surfaces. Keep actual values out of tracked files.
 
 ## 3. Isolated local development for every developer
+
+This section applies only when isolated development is explicitly selected. It is not a requirement for the [shared-Staging cohort](shared-staging-development.md), whose destructive DB tests run on disposable CI targets, not the shared database. The four-slot narrative below is historical for retired slots; verify actual provisioning before using any slot command.
 
 For local Mainflow 1 browser testing before Supabase is available, `ARDEN_LOCAL_FLOW1_TEST_MODE=true` selects a process-memory test auth provider and an invitation mail sink. This mode is deliberately fenced: `NODE_ENV` must not be `production`; Supabase variables must be absent; `ARDEN_API_HOST` must be loopback; `DATABASE_URL` must connect directly to loopback PostgreSQL and a database named `arden_test_*`; and `ARDEN_LOCAL_TEST_USERS` must contain only synthetic `@example.test` accounts with passwords of at least 16 characters. The migration URL may use a privileged local account for this disposable database. Do not use an SSH tunnel, Coolify hostname, shared dev database, or real account/email. Test invitations are persisted as pending, but no email is sent and acceptance is not part of this local sign-in mode. The live Supabase adapter remains the only non-test authentication path.
 
