@@ -87,6 +87,12 @@ def main():
         assert sql("SELECT count(*) FROM arden.knowledge_base;").strip() == b"0"
         assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"21"
         assert sql("SELECT count(*) FROM arden.organization;").strip() == b"1"
+        upgraded = snapshot()
+        try:
+            sql(grouped)
+            raise AssertionError("Grouped upgrade accepted an already upgraded database")
+        except subprocess.CalledProcessError:
+            assert snapshot() == upgraded, "Baseline rejection changed upgraded data"
         # Recover only Arden and its ledger, keeping the external service probe.
         restore = docker("exec", "-i", container, "pg_restore", "--file=-", data=backup)
         restore += docker("exec", "-i", container, "pg_restore", "--file=-", data=ledger)
