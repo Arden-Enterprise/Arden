@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const privateAuthUrl = "http://private-auth.example.test:8080";
@@ -33,7 +34,9 @@ describe("SupabaseAuthProvider Google OAuth URL boundary", () => {
     expect(url.searchParams.get("provider")).toBe("google");
     expect(url.searchParams.get("redirect_to")).toBe(callbackUrl);
     expect(url.searchParams.get("code_challenge_method")).toBe("s256");
-    expect(url.searchParams.get("code_challenge")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    const codeChallenge = url.searchParams.get("code_challenge");
+    expect(codeChallenge).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(codeChallenge).toBe(createHash("sha256").update(result.verifier).digest("base64url"));
     expect(result.flowId).toMatch(/^[a-f0-9]{32}$/);
   });
 
