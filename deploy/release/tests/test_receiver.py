@@ -1,5 +1,6 @@
 import copy
 import io
+import hashlib
 from pathlib import Path
 import sys
 import tempfile
@@ -32,6 +33,9 @@ class MemoryManager:
         self.fail_next_activation = False
         self.fail_all_verification = False
         self.fail_recovery = False
+        self.migration_status = "NO_PENDING"
+        self.migration_events = []
+        self.fail_migration = False
 
     def baseline(self):
         return copy.deepcopy(self.original)
@@ -44,8 +48,29 @@ class MemoryManager:
             raise ValueError("Image not loaded")
 
     def preflight(self, manifest):
-        if manifest["migrations"] != "c" * 64:
+        if manifest.get("schema") == 1 and manifest["migrations"] != "c" * 64:
             raise ValueError("Unapproved schema")
+
+    def plan_migrations(self, candidate):
+        self.migration_events.append("plan")
+        ids = [row["filename"][:-4] for row in candidate["migration_inventory"]]
+        return {"status": self.migration_status,
+                "migration_ids": ids if self.migration_status == "READY" else []}
+
+    def reconcile_migration_execution(self, _candidate):
+        self.migration_events.append("reconcile")
+
+    def reconcile_migration_execution(self, _candidate):
+        self.migration_events.append("reconcile")
+
+    def apply_migrations(self, manifest):
+        self.migration_events.append("migrate")
+        if self.fail_migration:
+            self.fail_migration = False
+            raise RuntimeError("synthetic migration failure")
+        self.migration_status = "NO_PENDING"
+        return {"status": "APPLIED", "migration_ids": [
+            row["filename"][:-4] for row in manifest["migration_inventory"]]}
 
     def activate(self, manifest):
         if self.fail_next_activation:
@@ -66,6 +91,25 @@ def verified_proof(op, manifest):
     request = {"op": op, "environment": "staging", "manifest": manifest}
     return {"provider": "github-actions-oidc", "repository_id": "1372698702", "owner_id": "329889661",
             "environment": "staging", "sha": manifest["commit"], "request_digest": request_digest(request)}
+
+
+def plan_request(environment, manifest):
+    return {"op": "plan-migrations", "environment": environment,
+            "commit": manifest["commit"], "tree": manifest["tree"],
+            "run_id": manifest["run_id"], "attempt": manifest["attempt"],
+            "migrations": manifest["migrations"],
+            "migration_inventory": copy.deepcopy(manifest["migration_inventory"])}
+
+
+def reconcile_request(environment, manifest):
+    return {"op": "reconcile-migrations", "environment": environment,
+            "commit": manifest["commit"], "run_id": manifest["run_id"], "attempt": manifest["attempt"]}
+
+
+def verified_plan_proof(request):
+    return {"provider": "github-actions-oidc", "repository_id": "1372698702", "owner_id": "329889661",
+            "environment": request["environment"], "sha": request["commit"],
+            "request_digest": request_digest(request)}
 
 
 class ReceiverTests(unittest.TestCase):
@@ -190,6 +234,162 @@ class ReceiverTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.engine.deploy(self.manifest)
         self.assertEqual(self.manager.current["images"], self.manager.original["images"])
+
+    def test_signed_plan_is_read_only_and_returns_only_safe_status_and_ids(self):
+        request = plan_request("staging", self.manifest)
+        self.manager.migration_status = "READY"
+        before = copy.deepcopy(self.manager.current)
+        result = self.engine.plan_migrations(request, verified_plan_proof(request))
+        self.assertEqual(result, {"status": "READY", "migration_ids": ["0001_example"]})
+        self.assertEqual(self.manager.current, before)
+        self.assertFalse((self.root / "staging" / "state.json").exists())
+        with self.assertRaises(ValueError):
+            self.engine.plan_migrations(request, {**verified_plan_proof(request), "request_digest": "0" * 64})
+
+    def test_existing_schema_one_active_release_remains_readable_after_protocol_upgrade(self):
+        self.upload()
+        self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
+        path = self.root / "staging" / "state.json"
+        state = json.loads(path.read_text())
+        state["active"]["manifest"]["schema"] = 1
+        state["active"]["manifest"].pop("migration_inventory")
+        state["active"].pop("migration_receipt")
+        path.write_text(json.dumps(state))
+        status = self.engine.status()
+        self.assertEqual(status["active"]["manifest"]["schema"], 1)
+
+    def test_deploy_recomputes_plan_and_blocks_when_database_changes_after_preflight(self):
+        self.upload()
+        self.manager.migration_status = "READY"
+        original_plan = self.manager.plan_migrations
+        calls = []
+
+        def change_after_plan(candidate):
+            calls.append(True)
+            if len(calls) == 1:
+                return original_plan(candidate)
+            self.manager.migration_status = "DRIFT"
+            return {"status": "DRIFT", "migration_ids": []}
+
+        self.manager.plan_migrations = change_after_plan
+        request = plan_request("staging", self.manifest)
+        self.engine.plan_migrations(request, verified_plan_proof(request))
+        with self.assertRaisesRegex(ValueError, "DRIFT"):
+            self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
+        self.assertEqual(self.manager.current["images"], self.manager.original["images"])
+        self.assertNotIn("migrate", self.manager.migration_events)
+
+    def test_safe_migrations_finish_before_candidate_activation_and_produce_receipt(self):
+        self.upload()
+        self.manager.migration_status = "READY"
+        self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
+        state = self.engine.status()
+        self.assertEqual(self.manager.migration_events, ["plan", "migrate"])
+        receipt = state["active"].get("migration_receipt")
+        self.assertEqual(receipt["status"], "verified")
+        self.assertEqual(receipt["source"]["migrations"], self.manifest["migrations"])
+        self.assertEqual(receipt["source"]["api_image"], self.manifest["images"]["api"]["id"])
+
+    def test_migration_failure_keeps_app_unchanged_and_retry_reconciles_partial_progress(self):
+        self.upload()
+        self.manager.migration_status = "READY"
+        self.manager.fail_migration = True
+        with self.assertRaisesRegex(RuntimeError, "migration"):
+            self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
+        state = self.engine.status()
+        self.assertEqual(self.manager.current["images"], self.manager.original["images"])
+        self.assertEqual(state["pending"]["phase"], "migrating")
+
+        retry = copy.deepcopy(self.manifest)
+        retry["attempt"] = 2
+        request = plan_request("staging", retry)
+        self.assertEqual(self.engine.plan_migrations(request, verified_plan_proof(request)),
+                         {"status": "RECOVERY_REQUIRED", "migration_ids": []})
+        stale_recovery = reconcile_request("staging", self.manifest)
+        self.assertEqual(self.engine.reconcile_migrations(stale_recovery, verified_plan_proof(stale_recovery)),
+                         {"status": "STALE_RUN"})
+        recovery = reconcile_request("staging", retry)
+        self.assertEqual(self.engine.reconcile_migrations(recovery, verified_plan_proof(recovery)),
+                         {"status": "RECONCILED"})
+        self.assertEqual(self.engine.plan_migrations(request, verified_plan_proof(request)),
+                         {"status": "READY", "migration_ids": ["0001_example"]})
+        self.assertIsNone(self.engine.status().get("pending"))
+        self.engine.upload(retry, io.BytesIO(self.payload), verified_proof("upload", retry))
+        self.engine.deploy(retry, verified_proof("deploy", retry))
+        self.assertEqual(self.manager.current["images"], retry["images"])
+        self.assertIsNone(self.engine.status().get("pending"))
+
+    def test_production_requires_verified_staging_migration_receipt(self):
+        self.upload()
+        self.manager.migration_status = "READY"
+        self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
+        stage_state = self.root / "staging" / "state.json"
+        state = json.loads(stage_state.read_text())
+        state["active"].pop("migration_receipt", None)
+        stage_state.write_text(json.dumps(state))
+        production_manager = MemoryManager()
+        production_manager.loaded.update(self.manager.loaded)
+        target = ReleaseEngine("production", self.root / "production", production_manager,
+                               staging_dir=self.root / "staging")
+        with self.assertRaises(ValueError):
+            target.promote({"op": "promote", "environment": "production", "commit": "d" * 40,
+                            "tree": self.manifest["tree"], "run_id": "12346", "attempt": 1})
+        self.assertEqual(production_manager.current["images"], production_manager.original["images"])
+
+    def test_production_plan_resolves_only_the_exact_verified_staging_release(self):
+        self.upload()
+        self.manager.migration_status = "READY"
+        self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
+        production_manager = MemoryManager()
+        seen = []
+        production_manager.plan_migrations = lambda candidate: (
+            seen.append(copy.deepcopy(candidate)) or {"status": "READY", "migration_ids": ["0001_example"]})
+        target = ReleaseEngine("production", self.root / "production", production_manager,
+                               staging_dir=self.root / "staging")
+        request = plan_request("production", self.manifest)
+        request["commit"] = "d" * 40  # Main merge commit; the candidate image remains the verified staging image.
+        proof = verified_plan_proof(request)
+        result = target.plan_migrations(request, proof)
+        self.assertEqual(result, {"status": "READY", "migration_ids": ["0001_example"]})
+        self.assertEqual(seen[0]["images"], self.manifest["images"])
+        self.assertEqual(seen[0]["migration_inventory"], self.manifest["migration_inventory"])
+        self.assertFalse((self.root / "production" / "state.json").exists())
+
+    def test_production_rejects_corrupt_staging_state_before_considering_receipts(self):
+        stage_path = self.root / "staging" / "state.json"
+        self.engine.status()
+        stage_path.write_text('{"active":null,"previous":null,"pending":null,"highest":[0,0]}')
+        target = ReleaseEngine("production", self.root / "production", MemoryManager(),
+                               staging_dir=self.root / "staging")
+        with self.assertRaisesRegex(ValueError, "Stored release state"):
+            target.promote({"op": "promote", "environment": "production", "commit": "d" * 40,
+                            "tree": "b" * 40, "run_id": "12346", "attempt": 1})
+
+    def test_production_plan_fails_closed_when_verified_stage_does_not_match_source_inventory(self):
+        self.upload()
+        self.manager.migration_status = "READY"
+        self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
+        production_manager = MemoryManager()
+        production_manager.plan_migrations = lambda _candidate: self.fail(
+            "An unmatched staging artifact must not reach the database planner")
+        target = ReleaseEngine("production", self.root / "production", production_manager,
+                               staging_dir=self.root / "staging")
+        request = plan_request("production", self.manifest)
+        request["commit"] = "d" * 40
+        request["migration_inventory"][0]["sha256"] = "e" * 64
+        request["migrations"] = hashlib.sha256(json.dumps(request["migration_inventory"],
+            separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        result = target.plan_migrations(request, verified_plan_proof(request))
+        self.assertEqual(result, {"status": "OUTCOME_UNKNOWN", "migration_ids": []})
+
+    def test_app_activation_failure_after_expand_migration_recovers_previous_app(self):
+        self.upload()
+        self.manager.migration_status = "READY"
+        self.manager.fail_next_activation = True
+        with self.assertRaisesRegex(RuntimeError, "recovered"):
+            self.engine.deploy(self.manifest, verified_proof("deploy", self.manifest))
+        self.assertEqual(self.manager.current["images"], self.manager.original["images"])
+        self.assertEqual(self.manager.migration_status, "NO_PENDING")
 
     def test_production_promotes_same_verified_images_for_a_different_merge_commit(self):
         self.upload()

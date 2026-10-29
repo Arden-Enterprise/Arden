@@ -8,7 +8,7 @@ import struct
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 try:
-    from bootstrap import build_app_template
+    from bootstrap import build_app_template, build_migration_target_config
     import bootstrap
     deployment_key_line = getattr(bootstrap, "deployment_key_line", None)
 except ModuleNotFoundError:
@@ -84,6 +84,26 @@ class BootstrapTests(unittest.TestCase):
         before = copy.deepcopy((self.api, self.web))
         build_app_template("staging", "source123456", self.api, self.web)
         self.assertEqual((self.api, self.web), before)
+
+    def test_migration_config_captures_one_private_target_without_credentials(self):
+        database = {"Image": "sha256:" + "9" * 64,
+                    "NetworkSettings": {"Networks": {"database-network": {}}}}
+        target = build_migration_target_config("staging",
+            self.api["NetworkSettings"]["Networks"], database["NetworkSettings"]["Networks"],
+            database["Image"], "postgresql://arden_runtime:private-password@database/arden")
+        self.assertEqual(target, {"network": "database-network", "database_image": database["Image"],
+            "database_host": "database", "database_name": "arden", "runtime_database_user": "arden_runtime",
+            "env_file": "/etc/arden/releases/staging.migration.env"})
+        self.assertNotIn("private-password", json.dumps(target))
+        for networks, image, url in [
+            ({"other": {}}, database["Image"], "postgresql://arden_runtime:x@database/arden"),
+            ({"database-network": {}}, "latest", "postgresql://arden_runtime:x@database/arden"),
+            ({"database-network": {}}, database["Image"], "postgresql://arden_runtime:x@127.0.0.1/arden"),
+            ({"database-network": {}}, database["Image"], "postgresql://arden_runtime:x@database/arden?sslmode=disable"),
+        ]:
+            with self.subTest(networks=networks, image=image, url=url), self.assertRaises(ValueError):
+                build_migration_target_config("staging", self.api["NetworkSettings"]["Networks"],
+                                              networks, image, url)
 
     def test_candidate_omits_empty_public_alias_fields_for_coolify_serialization(self):
         prepare = getattr(bootstrap, "candidate_template", None)

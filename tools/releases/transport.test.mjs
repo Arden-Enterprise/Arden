@@ -36,6 +36,31 @@ test("early receiver rejection closes an in-progress upload without unhandled fa
   } finally { rmSync(join(root, "archive"), { force: true }); rmdirSync(root); }
 });
 
+test("a bounded migration block keeps only its safe status and migration IDs", async () => {
+  assert.ok(exchange, "Bounded process transport is not implemented");
+  const child = spawn(process.execPath, ["-e", `console.log(JSON.stringify({ok:false,error:"migration_blocked",
+    status:"REQUIRES_OPERATOR",migration_ids:["0022_remove_old_data"]}));process.exit(1);`],
+  { stdio: ["pipe", "pipe", "pipe"] });
+  await assert.rejects(exchange(child, { op: "deploy" }), error => {
+    assert.equal(error.code, "ARDEN_MIGRATION_BLOCKED");
+    assert.equal(error.status, "REQUIRES_OPERATOR");
+    assert.deepEqual(error.migrationIds, ["0022_remove_old_data"]);
+    return true;
+  });
+});
+
+test("untrusted receiver failure text is discarded", async () => {
+  assert.ok(exchange, "Bounded process transport is not implemented");
+  const child = spawn(process.execPath, ["-e", `console.log(JSON.stringify({ok:false,error:"migration_blocked",
+    status:"DRIFT",migration_ids:["secret=private-password"]}));process.exit(1);`],
+  { stdio: ["pipe", "pipe", "pipe"] });
+  await assert.rejects(exchange(child, { op: "deploy" }), error => {
+    assert.notEqual(error.code, "ARDEN_MIGRATION_BLOCKED");
+    assert.doesNotMatch(error.message, /private-password/);
+    return true;
+  });
+});
+
 test("hung or oversized receiver responses fail within the transport boundary", async () => {
   assert.ok(exchange, "Bounded process transport is not implemented");
   const hung = spawn(process.execPath, ["-e", "setInterval(()=>{},1000)"], { stdio: ["pipe", "pipe", "pipe"] });
