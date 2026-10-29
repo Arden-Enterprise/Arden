@@ -34,6 +34,12 @@ identity/content and an outside-service probe, then exercises:
 This verifies the database method. It does not prove a live backup, Coolify
 maintenance, or restoration of real data. Those need their own operator record.
 
+The rehearsal now also checks a separate 0021 → 0022 forward upgrade with retained
+synthetic organization/content, induced failure rollback and the new default review
+rule, before restoring the original 0017 snapshot. Its full source-inventory fence
+is explicitly bounded to 0022. The historical operator bundle remains exactly
+0018–0021; later migrations must not be silently included in that destructive bundle.
+
 Use separate custom-format `pg_dump` archives for the entire `arden` schema and
 `public.arden_schema_migrations`. **Do not combine `--schema` and `--table` in one
 command:** PostgreSQL's table selection overrides schema selection and omits
