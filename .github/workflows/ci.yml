@@ -103,6 +103,10 @@ jobs:
         run: pnpm --filter @arden/api db:migrate
         env:
           ARDEN_MIGRATION_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci
+      - name: Verify a repeated full-chain migration is an idempotent no-op
+        run: pnpm --filter @arden/api db:migrate
+        env:
+          ARDEN_MIGRATION_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci
       - name: Exercise actual PostgreSQL isolation and permission rules
         run: pnpm --filter @arden/api test
         env:

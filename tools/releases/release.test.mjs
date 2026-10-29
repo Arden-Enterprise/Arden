@@ -68,6 +68,95 @@ test("production promotion changes deployment identity without rebuilding images
   assert.equal(Object.hasOwn(result, "images"), false);
 });
 
+function inventorySource(commit, tree) {
+  const migration_inventory = [{ id: "0001", filename: "0001_example.sql", sha256: "d".repeat(64), rollout: "expand" }];
+  return { commit, tree, migration_inventory,
+    migrations: migrationInventory.fingerprintMigrationInventory(migration_inventory) };
+}
+
+test("staging plans the exact source before upload and fences every mutating call", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const source = inventorySource(environment.GITHUB_SHA, "b".repeat(40));
+  const manifest = { schema: 2, ...source, run_id: environment.GITHUB_RUN_ID,
+    attempt: 1, images: { api: { id: "sha256:" + "1".repeat(64) }, web: { id: "sha256:" + "2".repeat(64) } },
+    archive_sha256: "c".repeat(64), archive_size: 10 };
+  const calls = [], heads = [];
+  const send = async (request, archive) => {
+    calls.push({ request, archive });
+    return request.op === "plan-migrations" ? { status: "READY", migration_ids: ["0001_example"] } : { status: "ok" };
+  };
+  const getHead = async () => { heads.push(true); return environment.GITHUB_SHA; };
+  const result = await release.executeStagingRelease(environment, manifest, "temporary-archive", send, getHead);
+  assert.deepEqual(result, { status: "ok" });
+  assert.deepEqual(calls.map(call => call.request.op), ["plan-migrations", "upload", "deploy"]);
+  assert.equal(calls[0].request.migrations, source.migrations);
+  assert.deepEqual(calls[0].request.migration_inventory, source.migration_inventory);
+  assert.equal(calls[0].archive, undefined);
+  assert.equal(calls[1].archive, "temporary-archive");
+  assert.equal(heads.length, 3);
+});
+
+test("a blocked or malformed staging plan stops before any upload", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const source = inventorySource(environment.GITHUB_SHA, "b".repeat(40));
+  const manifest = { schema: 2, ...source, run_id: environment.GITHUB_RUN_ID,
+    attempt: 1, images: { api: { id: "sha256:" + "1".repeat(64) }, web: { id: "sha256:" + "2".repeat(64) } },
+    archive_sha256: "c".repeat(64), archive_size: 10 };
+  for (const plan of [
+    { status: "REQUIRES_OPERATOR", migration_ids: ["0022_remove_old_data"] },
+    { status: "DRIFT", migration_ids: [] },
+    { status: "READY", migration_ids: [] },
+    { status: "NO_PENDING", migration_ids: ["0001_example"] },
+    { status: "READY", migration_ids: ["../../secret"] },
+  ]) {
+    const calls = [];
+    await assert.rejects(() => release.executeStagingRelease(environment, manifest, "temporary-archive",
+      async request => { calls.push(request.op); return plan; }, async () => environment.GITHUB_SHA));
+    assert.deepEqual(calls, ["plan-migrations"]);
+  }
+});
+
+test("production plans against its own verified staging artifact then promotes without upload or rebuild", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const main = { ...environment, GITHUB_REF_NAME: "main" };
+  const source = inventorySource(main.GITHUB_SHA, "b".repeat(40));
+  const calls = [], heads = [];
+  const send = async (request, archive) => {
+    calls.push({ request, archive });
+    return request.op === "plan-migrations" ? { status: "NO_PENDING", migration_ids: [] } : { status: "promoted" };
+  };
+  const result = await release.executeProductionRelease(main, source, send,
+    async () => { heads.push(true); return main.GITHUB_SHA; });
+  assert.deepEqual(result, { status: "promoted" });
+  assert.deepEqual(calls.map(call => call.request.op), ["plan-migrations", "promote"]);
+  assert.equal(calls[0].request.environment, "production");
+  assert.equal(calls[0].request.tree, source.tree);
+  assert.equal(calls[1].request.tree, source.tree);
+  assert.equal(calls[0].archive, undefined);
+  assert.equal(Object.hasOwn(calls[1].request, "images"), false);
+  assert.equal(heads.length, 2);
+});
+
+test("PR, fork and stale-head jobs cannot send migration or deployment requests", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const source = inventorySource(environment.GITHUB_SHA, "b".repeat(40));
+  const manifest = { schema: 2, ...source, run_id: environment.GITHUB_RUN_ID,
+    attempt: 1, images: { api: { id: "sha256:" + "1".repeat(64) }, web: { id: "sha256:" + "2".repeat(64) } },
+    archive_sha256: "c".repeat(64), archive_size: 10 };
+  for (const env of [{ ...environment, GITHUB_EVENT_NAME: "pull_request" },
+    { ...environment, GITHUB_REPOSITORY: "attacker/Arden" }]) {
+    const calls = [];
+    await assert.rejects(() => release.executeStagingRelease(env, manifest, "archive",
+      async request => calls.push(request.op), async () => env.GITHUB_SHA));
+    assert.deepEqual(calls, []);
+  }
+  const calls = [];
+  await assert.rejects(() => release.executeStagingRelease(environment, manifest, "archive",
+    async request => { calls.push(request.op); return { status: "NO_PENDING", migration_ids: [] }; },
+    async () => "e".repeat(40)), /superseded/i);
+  assert.deepEqual(calls, []);
+});
+
 test("preflight checks each environment with a read-only status request", async () => {
   for (const branch of ["staging", "main"]) {
     const calls = [];
