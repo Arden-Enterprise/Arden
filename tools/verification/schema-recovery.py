@@ -1,4 +1,4 @@
-"""Rehearse the publication reset, 0022 forward upgrade and scoped restore on a disposable CI DB.
+"""Rehearse the publication reset, 0023 forward upgrade and scoped restore on a disposable CI DB.
 
 This is verification, not a release/migration command. It accepts only the
 GitHub job's PostgreSQL service and creates its own unpredictable test database.
@@ -46,7 +46,7 @@ def main():
         return result
 
     migrations = sorted(Path("apps/api/migrations").glob("[0-9][0-9][0-9][0-9]_*.sql"))
-    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 23)]:
+    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 24)]:
         raise ValueError("Revisit this bounded rehearsal before changing migration inventory")
     spec = importlib.util.spec_from_file_location('publication_upgrade', 'deploy/release/publication_upgrade.py')
     upgrade = importlib.util.module_from_spec(spec)
@@ -107,7 +107,7 @@ def main():
         except subprocess.CalledProcessError:
             assert snapshot() == before_reviewer_upgrade, "Failed reviewer upgrade changed baseline"
         sql(forward + "COMMIT;")
-        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"22"
+        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"23"
         assert sql("SELECT name FROM arden.knowledge_base;").strip() == b"Preserve on reviewer upgrade"
         assert sql("SELECT count(*) FROM arden.organization;").strip() == b"1"
         assert sql("SELECT column_default FROM information_schema.columns "
@@ -122,7 +122,7 @@ def main():
         assert sql("SELECT value FROM public.outside_restore_boundary;").strip() == b"preserve-external-service"
         assert sql("SELECT to_regclass('arden.knowledge_index_generation') IS NULL;").strip() == b"t"
         assert sql("SELECT count(*) FROM pg_trigger WHERE tgname='trg_audit_event_append_only';").strip() == b"1"
-        print("PASS: atomic reset/0022 failures, populated 0021->0022 upgrade, "
+        print("PASS: atomic reset/0023 failures, populated 0021->0023 upgrade, "
               "exact table/ledger restore, external boundary preserved")
     finally:
         docker("exec", container, "dropdb", "-U", "postgres", database)

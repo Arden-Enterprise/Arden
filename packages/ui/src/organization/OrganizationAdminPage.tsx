@@ -36,23 +36,6 @@ const tabDescriptions: Record<AdminTab, (organizationName: string) => string> = 
 const invitationTone: Record<InvitationState, string> = { PENDING: "tone-info", ACCEPTED: "tone-success", EXPIRED: "", REVOKED: "" };
 function titleCase(value: string): string { return value[0] + value.slice(1).toLowerCase(); }
 
-function ConfirmAction({ confirmation, busy, error, onClose, onConfirm }: {
-  confirmation: Confirmation; busy: boolean; error: string; onClose: () => void; onConfirm: () => void;
-}) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const titleId = useId();
-  useEffect(() => {
-    const previous = document.activeElement; dialog.current?.showModal();
-    return () => { dialog.current?.close(); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
-  }, []);
-  return <dialog ref={dialog} className="organization-dialog admin-confirm" role="alertdialog" aria-modal="true" aria-labelledby={titleId}
-    onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
-    <h2 id={titleId}>{confirmation.title}</h2><p>{confirmation.description}</p>{error && <p className="admin-feedback is-error" role="alert">{error}</p>}
-    <div className="organization-dialog-actions"><button type="button" className="secondary-button" autoFocus disabled={busy} onClick={onClose}>Cancel</button>
-      <button type="button" className="admin-danger-button" disabled={busy} onClick={onConfirm}>{busy ? "Working…" : confirmation.action}</button></div>
-  </dialog>;
-}
-
 export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext, onDirtyChange }: Props) {
   const [data, setData] = useState<OrganizationAdministration | null>(null);
   const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
