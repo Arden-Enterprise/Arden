@@ -24,7 +24,11 @@ test("release metadata binds the complete migration policy inventory", () => {
   const source = release.metadata();
   assert.equal(source.migrations, migrationInventory.fingerprintMigrationInventory(source.migration_inventory));
   assert.ok(source.migration_inventory.length >= 23);
-  assert.ok(source.migration_inventory.every(row => row.rollout === "operator"));
+  const operatorOnlyIds = new Set(["0018", "0019", "0020", "0021", "0022", "0023"]);
+  for (const id of operatorOnlyIds) {
+    assert.equal(source.migration_inventory.find(row => row.id === id)?.rollout, "operator",
+      `Migration ${id} must remain operator-class`);
+  }
 });
 
 test("only public canonical push targets can obtain a deployment environment", () => {

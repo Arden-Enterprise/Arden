@@ -104,7 +104,7 @@ export function fingerprintMigrationInventory(entries) {
   return sha256(Buffer.from(JSON.stringify(normalized), "utf8"));
 }
 
-function removeSqlComments(sql) {
+function removeSqlCommentsAndQuotedContents(sql) {
   let output = "";
   let lineComment = false;
   let blockDepth = 0;
@@ -123,12 +123,12 @@ function removeSqlComments(sql) {
       continue;
     }
     if (quote) {
-      output += current;
-      if (current === quote && next === quote) { output += next; index += 1; }
-      else if (current === quote) quote = null;
+      if (current === quote && next === quote) { output += "  "; index += 1; }
+      else if (current === quote) { quote = null; output += " "; }
+      else output += current === "\n" ? "\n" : " ";
       continue;
     }
-    if (current === "'" || current === '"') { quote = current; output += current; }
+    if (current === "'" || current === '"') { quote = current; output += " "; }
     else if (current === "-" && next === "-") { lineComment = true; index += 1; }
     else if (current === "/" && next === "*") { blockDepth = 1; index += 1; }
     else output += current;
@@ -146,7 +146,7 @@ const destructiveSql = [
 export function assertSafeExpandMigrations(entries, migrationDirectory) {
   for (const entry of entries) {
     if (entry.rollout !== "expand") continue;
-    const sql = removeSqlComments(readFileSync(join(migrationDirectory, entry.filename), "utf8"));
+    const sql = removeSqlCommentsAndQuotedContents(readFileSync(join(migrationDirectory, entry.filename), "utf8"));
     if (destructiveSql.some(pattern => pattern.test(sql))) {
       throw new Error(`Migration ${entry.id} contains a known destructive SQL operation and must remain operator-class`);
     }

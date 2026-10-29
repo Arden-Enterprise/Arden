@@ -75,6 +75,16 @@ if (inventory && releaseMigrations) {
     });
   });
 
+  test("loader permits an explicitly reviewed compatible expand migration", () => {
+    withFixture({ "0024_expand.sql": "ALTER TABLE item ADD COLUMN future_value text;\n" }, records => ({
+      schema: 1, migrations: records.map(record => ({ ...record, rollout: "expand" })),
+    }), ({ migrationDirectory, policyPath }) => {
+      const rows = inventory.loadMigrationInventory(migrationDirectory, policyPath);
+      assert.equal(rows[0].rollout, "expand");
+      assert.doesNotThrow(() => inventory.assertSafeExpandMigrations(rows, migrationDirectory));
+    });
+  });
+
   test("policy refresh records exact SQL bytes and detects an unreviewed line-ending change", () => {
     withFixture({ "0001_first.sql": "SELECT 1;\r\n" }, null, ({ migrationDirectory, policyPath }) => {
       writeFileSync(join(migrationDirectory, "0001_first.sql"), "SELECT 2;\r\n");
@@ -140,10 +150,13 @@ if (inventory && releaseMigrations) {
     });
   });
 
-  test("checked-in policy covers every repository migration without auto-classifying it", () => {
+  test("checked-in policy keeps pending operator migrations blocked without banning future expand reviews", () => {
     const rows = inventory.loadMigrationInventory("apps/api/migrations");
     assert.ok(rows.length >= 23);
-    assert.ok(rows.every(row => row.rollout === "operator"));
+    const operatorOnlyIds = new Set(["0018", "0019", "0020", "0021", "0022", "0023"]);
+    for (const id of operatorOnlyIds) {
+      assert.equal(rows.find(row => row.id === id)?.rollout, "operator", `Migration ${id} must remain operator-class`);
+    }
   });
 
   test("refresh updates registered checksums only and refuses to register an unreviewed migration", () => {
@@ -188,7 +201,7 @@ if (inventory && releaseMigrations) {
   });
 
   test("expand policy rejects known destructive SQL while operator policy remains eligible for review", () => {
-    withFixture({ "0001_first.sql": "-- DROP TABLE item;\nALTER TABLE item ADD COLUMN note text;\n" }, records => ({ schema: 1, migrations: [
+    withFixture({ "0001_first.sql": "-- DROP TABLE item;\nALTER TABLE item ADD COLUMN note text;\nALTER TABLE item ALTER COLUMN note SET DEFAULT 'DROP';\n" }, records => ({ schema: 1, migrations: [
       { ...records[0], rollout: "expand" },
     ] }), ({ migrationDirectory, policyPath }) => {
       const rows = inventory.loadMigrationInventory(migrationDirectory, policyPath);
