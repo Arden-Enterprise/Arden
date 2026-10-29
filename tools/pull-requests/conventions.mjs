@@ -19,10 +19,11 @@ export function validatePullRequest(input) {
   }
   const errors = [];
   const match = typeof branch === "string" ? branchPattern.exec(branch) : null;
-  if (!match || branch.length > 80 || forbiddenCharacters.test(branch)
+  const deploymentBranch = branch === "staging" || branch === "main";
+  if (!deploymentBranch && (!match || branch.length > 80 || forbiddenCharacters.test(branch)
     || (match[1] !== "release" && prohibitedDescription.test(match[2]))
-    || !(match[1] === "release" ? versionPattern : descriptionPattern).test(match[2])) {
-    errors.push("Use type/specific-kebab-description or release/semver, with at most 80 characters; do not add a tool/agent prefix.");
+    || !(match[1] === "release" ? versionPattern : descriptionPattern).test(match[2]))) {
+    errors.push("Use type/specific-kebab-description or release/semver; exact main/staging are reserved deployment branches. Do not add a tool/agent prefix.");
   }
   const titleMatch = typeof title === "string" ? titlePattern.exec(title) : null;
   if (!titleMatch || forbiddenCharacters.test(title) || title !== title.trim()

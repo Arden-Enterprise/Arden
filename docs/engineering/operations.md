@@ -1,6 +1,6 @@
 # Development, deployment, and operations rules
 
-Read [AGENTS.md](../../AGENTS.md), [the technology guide](technology-guide.md), and [security/data rules](security-and-data.md). This is the operational policy for the intended product. The repository now has a reviewed initial SQL migration command and local database Compose file, but it still has no complete Coolify release, worker, installer, or backup automation.
+Read [AGENTS.md](../../AGENTS.md), [the technology guide](technology-guide.md), and [security/data rules](security-and-data.md). This is the operational policy for the intended product. The repository includes reviewed SQL migration/local database tooling and the [branch-based app release implementation](release-pipeline.md). Its [approved design and delivery status](release-pipeline-design.md) distinguish implementation from live activation. Worker, installer and backup automation remain separate work.
 
 ## 1. Supported baseline and current commands
 

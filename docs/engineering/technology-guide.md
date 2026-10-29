@@ -6,7 +6,7 @@ All implementation/testing work also follows [code-quality.md](code-quality.md).
 
 ## 1. Stack inventory
 
-Deployment and hosted identity status updated 12 October 2026. Library versions below retain the 5 October inventory; verify current manifests and lockfile before using them:
+Release automation status updated 28 October 2026; hosted identity inventory retains its 12 October checkpoint. Other library versions below retain the earlier inventory; verify current manifests and lockfile before using them:
 
 | Area | Present in the scaffold | Target, not yet implemented |
 | --- | --- | --- |
@@ -22,7 +22,7 @@ Deployment and hosted identity status updated 12 October 2026. Library versions 
 | Storage | Protected local note-content volume via `LocalPrivateContentStorage`; opaque UUID `source_uri`, SHA-256 integrity check, production persistent mount required | Broader attachment/document storage; optional S3-compatible backend later |
 | AI | Separate Python 3.11 `Arden-AI` service with deterministic compiler/source maps, OpenAI embeddings/generation, LangChain standalone packages, self-hosted ChromaDB indexing/retrieval, Core-owned generation allow-lists and evidence rechecks | Langfuse tracing/evaluation and advanced retrieval optimization |
 | Tests | Vitest 5.0.1, Fastify auth/private-note tests, real-PostgreSQL repository/RLS test gated by `ARDEN_TEST_DATABASE_URL`, pure UI preview and API-client tests | Live Supabase Auth smoke, native Electron interaction, broader Playwright flows |
-| Deployment | Local database Compose; Ubuntu/Windows CI; hosted development commands and four Coolify-managed development API/database slots with local Vite frontends | Immutable release application images, complete isolated staging/production deployments and recovery evidence |
+| Deployment | Local database Compose; Ubuntu/Windows and disposable PostgreSQL CI; four hosted development slots; GitHub-built immutable web/API images, restricted staging deployment and same-tree production-promotion implementation | First authorized main promotion and broader backup/restore, alerting and availability acceptance; see actual release evidence |
 
 The existing PostgreSQL image may include pgvector software, but Mainflow 3 vector retrieval targets
 the separate ChromaDB service under [decision 0012](../decisions/0012-separate-python-ai-service-and-chromadb.md).
@@ -232,3 +232,10 @@ References: [GitHub App permissions](https://docs.github.com/en/apps/creating-gi
 - Test the same user across organizations, different users/roles, private/shared/external sources, versions, grant/revoke transitions, and delayed work. Add a regression case when fixing a leak or duplicate write.
 - Document commands only when scripts exist, and note environment/dependency requirements. Do not list nonexistent `pnpm lint`, migrations, seeds, E2E, installer, or deploy scripts as runnable today.
 - Technology adoption is incomplete until its version source, setup/configuration, boundary, license, security/failure behavior, verification, and operational consequences are documented and tested to the task's scope.
+
+## 13. Release verification and deployment
+
+- The [release guide](release-pipeline.md) owns daily branch flow, operator setup, credentials, failure/recovery and maintenance. Hosted development remains a separate workflow. Actual deployment status belongs to the linked runs and task evidence, not the presence of a workflow file.
+- `tools/releases` uses Node built-ins on standard public GitHub runners. Build/scanning files are temporary; do not add retained artifacts, persistent caches, registry pushes or paid runners without a new owner decision. Actions, container bases and scanner are pinned in their source configuration.
+- `deploy/release` is a separate root-owned Python operator/receiver package, outside the application and Electron bundle. Signed GitHub job verification uses `cryptography`: the CI wheel pin is in `requirements-ci.txt` (50.0.2 at adoption), while the server uses Ubuntu's maintained package. Its package metadata declares `Apache-2.0 OR BSD-3-Clause`; preserve applicable notices if redistributing it. Do not implement RSA verification manually or disable certificate/signature validation to recover a failed job.
+- The fixed SSH capability selects its environment; OIDC proof binds each mutation to the exact job/source/request. Keep the management capability server-local. Tests cover denied, malformed, stale, concurrent and recovery paths; the initial controlled rollback/recovery passed for `73e6bee`, and `8506abc` subsequently passed the signed GitHub staging path and live verification (see the [release evidence](release-pipeline-design.md#current-state-and-required-activation-inputs)). The initial owner-approved schema/app cutovers reached 0021 on 29 October, and `f347579` passed automatic staging run 40824623831 attempt 2. Current main promotions and later releases require their own GitHub/operator evidence; future bootstrap changes still need staging/recovery evidence. This does not establish application sign-in, mail, backup-restore or high-availability acceptance.

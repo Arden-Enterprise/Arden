@@ -40,6 +40,16 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm test:remote
+      - name: Release client and branch policy tests
+        run: node --test tools/releases/release.test.mjs tools/releases/transport.test.mjs tools/releases/identity.test.mjs tools/pull-requests/conventions.test.mjs
+      - name: Prepare temporary release-verifier test environment without pip caching
+        run: python tools/releases/setup-python.py
+      - name: Release protocol tests (Windows)
+        if: runner.os == 'Windows'
+        run: '& "$env:ARDEN_RELEASE_PYTHON" -m unittest discover -s deploy/release/tests -v'
+      - name: Release protocol and privilege tests (Linux)
+        if: runner.os == 'Linux'
+        run: sudo --non-interactive "$ARDEN_RELEASE_PYTHON" -m unittest discover -s deploy/release/tests -v
       - name: Hosted protocol and maintenance fence tests (Linux)
         if: runner.os == 'Linux'
         run: sudo --non-interactive python3 -m unittest discover -s deploy/hosted/tests -v
@@ -80,6 +90,10 @@ jobs:
           node-version: 24.22.1
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile
+      - name: Rehearse scoped schema backup, upgrade failure and restoration
+        run: python3 tools/verification/schema-recovery.py
+        env:
+          ARDEN_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
       - name: Apply all migrations only to the disposable runner database
         run: pnpm --filter @arden/api db:migrate
         env:
@@ -94,3 +108,80 @@ jobs:
         run: node tools/verification/api-optional-indexer.mjs
         env:
           ARDEN_TEST_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci
+
+  image-check:
+    name: Image build and security checks
+    needs: [check, database]
+    if: >-
+      github.repository == 'Arden-Enterprise/Arden' && github.event.repository.visibility == 'public' &&
+      (github.event_name != 'push' || (github.ref_name != 'staging' && github.ref_name != 'main'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    concurrency:
+      group: image-check-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+      - name: Build and scan without retained cache or registry publication
+        run: node tools/releases/build.mjs
+
+  release:
+    name: Deploy verified app release
+    needs: [check, database]
+    if: >-
+      github.repository == 'Arden-Enterprise/Arden' && github.event.repository.visibility == 'public' &&
+      github.event_name == 'push' && (github.ref_name == 'staging' || github.ref_name == 'main')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: arden-shared-host-activation
+      cancel-in-progress: false
+      queue: max
+    environment:
+      name: ${{ github.ref_name == 'staging' && 'staging' || 'production' }}
+      url: ${{ github.ref_name == 'staging' && 'https://staging.ardenai.tech' || 'https://ardenai.tech' }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+      - name: Check restricted deployment connection before image work
+        timeout-minutes: 2
+        run: node tools/releases/release.mjs preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+      - name: Build and scan the staging image pair on temporary runner disk
+        if: github.ref_name == 'staging'
+        run: node tools/releases/build.mjs
+      - name: Prepare bounded temporary staging image archive
+        if: github.ref_name == 'staging'
+        run: node tools/releases/release.mjs bundle
+      - name: Upload staging or promote the identical verified images to production
+        run: node tools/releases/release.mjs deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+      - name: Remove only this job's temporary image archive and key files
+        if: always()
+        run: node tools/releases/release.mjs cleanup

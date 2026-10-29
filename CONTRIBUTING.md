@@ -8,7 +8,9 @@ Follow [current main context](docs/engineering/rules/main-context.md) before pla
 
 ## Branch convention
 
-Follow [Git workflow](docs/engineering/rules/git-workflow.md) for allowed types and meaningful `<type>/<short-kebab-description>` names, or the `release/<semver>` exception. Do not prepend `codex/`, a tool/agent name, or an individual's name. Use a focused branch from inspected current main; preserve existing branches and work.
+Follow [Git workflow](docs/engineering/rules/git-workflow.md) for allowed types and meaningful `<type>/<short-kebab-description>` names, or the `release/<semver>` exception. Do not prepend `codex/`, a tool/agent name, or an individual's name. Read inspected current main's contract, then create ordinary delivery branches from safely refreshed `staging` and compare its pending changes; preserve existing branches and work.
+
+The exact reserved deployment branches `staging` and `main` are additional owner-approved exceptions. Feature PRs normally enter staging; main promotes the matching staging-tested source tree to production. Do not infer that release automation is active from these names alone; consult the [release design](docs/engineering/release-pipeline-design.md) and current operator evidence.
 
 ## Local development
 
@@ -62,6 +64,8 @@ CI performs a frozen-lockfile install and these checks on Ubuntu and Windows. UI
 UI changes also need actual web/desktop visual and interaction checks where applicable. Database changes need disposable PostgreSQL migration/constraint/authorization tests. Security and governance changes need denial/revocation/exact-version tests. Docs-only changes need links and consistency checks; do not imply application tests ran when they did not.
 
 ## Pull requests and review
+
+Application release flow is feature branch → PR into `staging` → verified staging → promotion PR into `main`. See the [release guide](docs/engineering/release-pipeline.md) for setup, activation status, automatic production deployment, migration gates and recovery. Hosted development slots remain independent.
 
 Describe the purpose, changed behavior, tests actually run, and risks. Include screenshots for visual changes, migration/compatibility steps for data or contract changes, and configuration/data-flow details for infrastructure/security changes. Mark irrelevant checklist items as not applicable rather than asserting they were tested.
 
