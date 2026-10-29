@@ -88,6 +88,15 @@ class HostedFixture(unittest.TestCase):
 
 
 class SyncTests(HostedFixture):
+    def test_numbered_migrations_may_use_security_domain_terms(self):
+        for name in [
+            'apps/api/migrations/0005_allow_accepted_invitation_token_read.sql',
+            'apps/api/migrations/0008_enable_private_shared_draft_creation.sql',
+        ]:
+            self.assertTrue(sync.permitted(name), name)
+        self.assertFalse(sync.permitted('apps/api/migrations/private.sql'))
+        self.assertFalse(sync.permitted('apps/api/src/private-config.sql'))
+
     def test_competing_writer_cannot_replace_lease(self):
         self.call('acquire')
         with self.assertRaisesRegex(ValueError, 'active writer'):

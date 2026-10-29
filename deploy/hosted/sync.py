@@ -17,6 +17,8 @@ ROOT_FILES = {'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'tsconfig
 PACKAGES = {'domain', 'db', 'ai', 'api-client'}
 EXTENSIONS = {'.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.sql'}
 EXCLUDED = {'node_modules', 'dist', 'out', 'coverage', 'fixtures', 'backups', 'data'}
+NUMBERED_MIGRATION = re.compile(r'^apps/api/migrations/\d{4}_[a-z0-9][a-z0-9_-]*\.sql$', re.I)
+CREDENTIAL_LIKE_FILENAME = re.compile(r'(secret|credential|token|password|private|\.local)([._-]|$)', re.I)
 LEASE_SECONDS = 300
 
 
@@ -25,7 +27,7 @@ def permitted(name):
     parts = name.split('/')
     if any(not part or part.startswith('.') or part in EXCLUDED for part in parts):
         return False
-    if '\\' in name or re.search(r'(secret|credential|token|password|private|\.local)([._-]|$)', parts[-1], re.I):
+    if '\\' in name or (not NUMBERED_MIGRATION.fullmatch(name) and CREDENTIAL_LIKE_FILENAME.search(parts[-1])):
         return False
     if name in ROOT_FILES:
         return True
