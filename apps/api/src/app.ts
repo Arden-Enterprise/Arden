@@ -856,7 +856,7 @@ export function buildApp(dependencies: AppDependencies) {
           request.headers["idempotency-key"] as string, request.id);
         if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
         if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT", "Reload this draft and its review status.", request.id));
-        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Add an active responsible department, access scope and audience before submitting.", request.id));
+        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Choose who can read this draft and save it before submitting. You need an active primary department; ask an Org Admin if you have none.", request.id));
         reply.header("Cache-Control", "no-store");
         return reply.code(result.kind === "submitted" ? 201 : 200).send(representSubmission(result.submission));
       } catch (error) {
