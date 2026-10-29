@@ -106,8 +106,27 @@ Test the receiver using disposable fixtures and injected management boundaries b
 
 ## Current state and required activation inputs
 
-The owner approved this design and inline implementation on 28 October, including app-only Service separation, restricted deployment access and restricted local Coolify management bootstrap. The permanent `staging` branch is published and its environment, restricted access and signed-job deployment path have been exercised. [Run 40712177548](https://github.com/Arden-Enterprise/Arden/actions/runs/40712177548), attempt 2, deployed revision `73e6bee` as a GitHub-built pair; a controlled root-only rollback restored the exact previous pair while preserving infrastructure/private storage and workflow fencing. Attempt 3 verified fresh automated recovery. Revision `8506abc` subsequently passed [staging run 40719483404](https://github.com/Arden-Enterprise/Arden/actions/runs/40719483404) and exact live image/tree, readiness/denial and protected infrastructure/storage checks. Later branch changes need their own verification. Production's app-only baseline cutover and restricted capability/selected-main environment are also verified; it still serves the prior version pending authorized main integration. Preserve unfinished Knowledge consolidation notes and excluded recovery material.
+The owner approved this design and inline implementation on 28 October, including app-only Service separation, restricted deployment access and restricted local Coolify management bootstrap. The permanent `staging` branch is published and its environment, restricted access and signed-job deployment path have been exercised. [Run 40712177548](https://github.com/Arden-Enterprise/Arden/actions/runs/40712177548), attempt 2, deployed revision `73e6bee` as a GitHub-built pair; a controlled root-only rollback restored the exact previous pair while preserving infrastructure/private storage and workflow fencing. Attempt 3 verified fresh automated recovery. Revision `8506abc` subsequently passed [staging run 40719483404](https://github.com/Arden-Enterprise/Arden/actions/runs/40719483404) and exact live image/tree, readiness/denial and protected infrastructure/storage checks. Later branch changes need their own verification. Production's app-only baseline cutover and restricted capability/selected-main environment have an [operator verification record](#production-baseline-verification); it still serves the prior version pending authorized main integration. The cited GitHub runs establish staging evidence only. Preserve unfinished Knowledge consolidation notes and excluded recovery material.
 
 Existing repository administration and authorized server SSH access are available, so no new domain, DNS migration, paid plan or build machine is required. Main integration and first automatic production promotion still require their actual readiness/approval and verification. Root management credentials remain local, and the production environment accepts only main. Any inaccessible permission is a specific blocker to report; never request passwords/tokens in chat.
 
 Bootstrap order must avoid accidental production promotion: prepare and test code, provision narrow access and baseline records, integrate approved workflow/configuration, publish the staging branch, verify its first release, then enable and verify main promotion against that tested artifact. Do not mark an unactivated pipeline complete.
+
+## Production baseline verification
+
+Operator evidence, 28–29 October 2026: prior production application source
+`6d06292be349924fa84f3bfa84af802692ab7ad5` runs in its app-only resource.
+The operator verified its exact image pair, public HTTPS/readiness, anonymous
+401 denial, preserved private volume and three protected infrastructure
+identities. The environment has a restricted production deployment capability
+and selected `main` branch policy without required human deployment approval.
+Its restricted status probe was repeated on 29 October: successful, no pending
+recovery. Following an external Coolify replacement, the 4.5.3 action/adapter,
+existing certificate bind, settled activity journals and local management were
+revalidated; outside-namespace management was denied with HTTP 403.
+
+Resource IDs, connection settings, before/after identities and capability-denial
+evidence remain in protected operator records. This public-safe summary records
+what was checked without publishing them. It is **not** evidence of the new
+source/schema cutover or automatic production promotion; those milestones
+remain pending until their live checks and main run are recorded.
