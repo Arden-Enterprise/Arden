@@ -87,6 +87,50 @@ class IdentityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.verify(self.token({**claims, "repository_id": "999"}))
 
+    def test_migration_plan_identity_is_signed_for_exact_candidate_and_each_environment(self):
+        import hashlib
+        inventory = [{"id": "0001", "filename": "0001_example.sql",
+                      "sha256": "d" * 64, "rollout": "expand"}]
+        migrations = hashlib.sha256(json.dumps(inventory, separators=(",", ":"),
+                                     ensure_ascii=False).encode()).hexdigest()
+        for environment, branch in [("staging", "staging"), ("production", "main")]:
+            request = {"op": "plan-migrations", "environment": environment,
+                       "commit": "a" * 40, "tree": "b" * 40, "run_id": "12345", "attempt": 1,
+                       "migrations": migrations, "migration_inventory": inventory}
+            claims = {**self.claims,
+                "aud": self.identity.request_audience(request),
+                "sub": f"repo:Arden-Enterprise@329889661/Arden@1372698702:environment:{environment}",
+                "environment": environment, "ref": f"refs/heads/{branch}",
+                "sha": "a" * 40, "run_id": "12345", "run_attempt": "1",
+                "workflow_ref": f"Arden-Enterprise/Arden/.github/workflows/ci.yml@refs/heads/{branch}",
+                "workflow_sha": "a" * 40}
+            self.assertEqual(self.verify(self.token(claims), request),
+                             self.identity.verify_identity(self.token(claims), request,
+                                 now=1010, load_keys=lambda: self.jwks))
+            for changed in [{**request, "tree": "c" * 40}, {**request, "run_id": "12344"},
+                            {**request, "environment": "production" if environment == "staging" else "staging"}]:
+                with self.subTest(environment=environment, changed=changed), self.assertRaises(ValueError):
+                    self.verify(self.token(claims), changed)
+            stale = {**claims, "run_id": "12344"}
+            with self.subTest(environment=environment, stale_run=True), self.assertRaises(ValueError):
+                self.verify(self.token(stale), request)
+
+    def test_migration_plan_requires_candidate_inventory_and_oidc_proof(self):
+        import hashlib
+        inventory = [{"id": "0001", "filename": "0001_example.sql",
+                      "sha256": "d" * 64, "rollout": "expand"}]
+        migrations = hashlib.sha256(json.dumps(inventory, separators=(",", ":"),
+                                     ensure_ascii=False).encode()).hexdigest()
+        request = {"op": "plan-migrations", "environment": "staging", "commit": "a" * 40,
+                   "tree": "b" * 40, "run_id": "12345", "attempt": 1,
+                   "migrations": migrations, "migration_inventory": inventory}
+        from protocol import read_header
+        with self.assertRaises(ValueError):
+            read_header(__import__("io").BytesIO(json.dumps(request).encode() + b"\n"), "staging")
+        malformed = {**request, "migration_inventory": [{**inventory[0], "rollout": "safe"}]}
+        with self.assertRaises(ValueError):
+            self.verify(self.token(self.claims), malformed)
+
 
 if __name__ == "__main__":
     unittest.main()

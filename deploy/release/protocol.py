@@ -15,6 +15,8 @@ MAX_HEADER = 16384
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}\Z")
+MIGRATION_ID = re.compile(r"[0-9]{4}\Z")
+MIGRATION_FILENAME = re.compile(r"[0-9]{4}_[a-z0-9_]+\.sql\Z")
 MEMBER = re.compile(r"(?:manifest\.json|"
                     r"blobs/sha256/[0-9a-f]{64}|[0-9a-f]{64}\.json|"
                     r"[0-9a-f]{64}/(?:layer\.tar|json|VERSION))\Z")
@@ -56,10 +58,48 @@ def run_identity(run_id, attempt):
     return int(run_id), attempt
 
 
-def validate_manifest(value):
-    exact(value, {"schema", "commit", "tree", "run_id", "attempt", "migrations",
-                  "images", "archive_sha256", "archive_size"})
-    if type(value["schema"]) is not int or value["schema"] != 1:
+def validate_migration_inventory(rows, fingerprint):
+    """Validate and fingerprint the exact canonical release migration inventory."""
+    identity(fingerprint, DIGEST)
+    if type(rows) is not list or not 1 <= len(rows) <= 1000:
+        raise ValueError("Invalid release migration inventory")
+    normalized = []
+    ids, filenames = set(), set()
+    for row in rows:
+        exact(row, {"id", "filename", "sha256", "rollout"})
+        migration_id, filename = row["id"], row["filename"]
+        identity(migration_id, MIGRATION_ID)
+        identity(filename, MIGRATION_FILENAME)
+        identity(row["sha256"], DIGEST)
+        if (filename[:4] != migration_id or type(row["rollout"]) is not str
+                or row["rollout"] not in {"expand", "operator"}):
+            raise ValueError("Invalid release migration entry")
+        if migration_id in ids or filename in filenames:
+            raise ValueError("Duplicate release migration entry")
+        ids.add(migration_id)
+        filenames.add(filename)
+        normalized.append({"id": migration_id, "filename": filename,
+                           "sha256": row["sha256"], "rollout": row["rollout"]})
+    if [row["id"] for row in normalized] != sorted(ids):
+        raise ValueError("Release migration inventory is not ordered")
+    digest = hashlib.sha256(json.dumps(normalized, separators=(",", ":"),
+                             ensure_ascii=False).encode()).hexdigest()
+    if digest != fingerprint:
+        raise ValueError("Release migration inventory fingerprint mismatch")
+    return rows
+
+
+def validate_manifest(value, allow_legacy=False):
+    if type(value) is not dict or type(value.get("schema")) is not int:
+        raise ValueError("Unsupported release schema")
+    if value["schema"] == 1 and allow_legacy:
+        exact(value, {"schema", "commit", "tree", "run_id", "attempt", "migrations",
+                      "images", "archive_sha256", "archive_size"})
+    elif value["schema"] == 2:
+        exact(value, {"schema", "commit", "tree", "run_id", "attempt", "migrations",
+                      "migration_inventory", "images", "archive_sha256", "archive_size"})
+        validate_migration_inventory(value["migration_inventory"], value["migrations"])
+    else:
         raise ValueError("Unsupported release schema")
     identity(value["commit"], SHA)
     identity(value["tree"], SHA)
@@ -78,6 +118,63 @@ def validate_manifest(value):
     if value["images"]["api"]["id"] == value["images"]["web"]["id"]:
         raise ValueError("App components require distinct images")
     return value
+
+
+def validate_stored_manifest(value):
+    """Allow old schema-1 active/baseline state without accepting it from new requests."""
+    if type(value) is dict and "schema" not in value:
+        exact(value, {"commit", "tree", "migrations", "images"})
+        identity(value["commit"], SHA)
+        identity(value["tree"], SHA)
+        identity(value["migrations"], DIGEST)
+        exact(value["images"], {"api", "web"})
+        for image in value["images"].values():
+            exact(image, {"id"})
+            identity(image["id"], IMAGE_ID)
+        return value
+    return validate_manifest(value, allow_legacy=True)
+
+
+def compare_migration_ledger(inventory, ledger_rows):
+    """Compare a database ledger with a validated candidate inventory without applying SQL."""
+    if type(inventory) is not list:
+        raise ValueError("Invalid migration inventory")
+    if ledger_rows is None:
+        return {"status": "BASELINE_REQUIRED", "migration_ids": []}
+    if type(ledger_rows) is not list:
+        return {"status": "DRIFT", "migration_ids": []}
+    applied = []
+    checksums = {}
+    for row in ledger_rows:
+        if (type(row) is not dict or set(row) != {"migration_id", "checksum"}
+                or type(row.get("migration_id")) is not str
+                or not re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", row["migration_id"])):
+            return {"status": "DRIFT", "migration_ids": []}
+        migration_id, checksum = row["migration_id"], row["checksum"]
+        if migration_id in checksums or (checksum is not None
+                and (type(checksum) is not str or not DIGEST.fullmatch(checksum))):
+            return {"status": "DRIFT", "migration_ids": []}
+        applied.append(migration_id)
+        checksums[migration_id] = checksum
+    if applied != sorted(applied):
+        return {"status": "DRIFT", "migration_ids": []}
+    by_id = {row["filename"][:-4]: row for row in inventory}
+    if any(migration_id not in by_id for migration_id in applied):
+        return {"status": "DRIFT", "migration_ids": []}
+    for migration_id in applied:
+        if checksums[migration_id] is None:
+            return {"status": "BASELINE_REQUIRED", "migration_ids": []}
+        if checksums[migration_id] != by_id[migration_id]["sha256"]:
+            return {"status": "DRIFT", "migration_ids": []}
+    if [row["filename"][:-4] for row in inventory[:len(applied)]] != applied:
+        return {"status": "DRIFT", "migration_ids": []}
+    pending = inventory[len(applied):]
+    migration_ids = [row["filename"][:-4] for row in pending]
+    if not pending:
+        return {"status": "NO_PENDING", "migration_ids": []}
+    if any(row["rollout"] != "expand" for row in pending):
+        return {"status": "REQUIRES_OPERATOR", "migration_ids": migration_ids}
+    return {"status": "READY", "migration_ids": migration_ids}
 
 
 def validate_request(value, forced_environment):
@@ -100,6 +197,13 @@ def validate_request(value, forced_environment):
         identity(value["commit"], SHA)
         identity(value["tree"], SHA)
         run_identity(value["run_id"], value["attempt"])
+    elif op == "plan-migrations":
+        exact(value, {"op", "environment", "commit", "tree", "run_id", "attempt",
+                      "migrations", "migration_inventory"})
+        identity(value["commit"], SHA)
+        identity(value["tree"], SHA)
+        run_identity(value["run_id"], value["attempt"])
+        validate_migration_inventory(value["migration_inventory"], value["migrations"])
     else:
         raise ValueError("Unknown release operation")
     return value

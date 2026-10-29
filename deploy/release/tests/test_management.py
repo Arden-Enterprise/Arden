@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -26,6 +27,23 @@ def configuration():
                          "cap_drop": ["ALL"], "security_opt": ["no-new-privileges:true"]}
                          for component, kind, uid in [("arden-api", "api", "1000:1000"),
                                                        ("arden-web", "web", "101:101")]}}}
+
+
+def migration_configuration():
+    config = configuration()
+    config["migrations"] = config["baseline"]["migrations"]
+    config["migration"] = {
+        "network": "arden-database-private",
+        "database_image": "sha256:" + "9" * 64,
+        "database_host": "database",
+        "database_name": "postgres",
+        "runtime_database_user": "arden_runtime",
+        "env_file": "/etc/arden/releases/staging.migration.env",
+    }
+    config["template"]["networks"] = {
+        "default": {}, "database": {"external": True, "name": "arden-database-private"}}
+    config["template"]["services"]["arden-api"]["networks"] = {"database": {}}
+    return config
 
 
 class ManagementTests(unittest.TestCase):
@@ -174,6 +192,147 @@ class ManagementTests(unittest.TestCase):
         with patch.object(manager, "_remove_local_image", side_effect=lambda *args: removed.append(args)):
             manager.remove_incomplete_upload(manifest, proof, {ids[0]})
         self.assertEqual(removed, [(ids[1], manifest["commit"])])
+
+    def test_migration_configuration_is_exact_and_uses_only_an_api_private_network(self):
+        config = migration_configuration()
+        self.assertEqual(validate_config(config, "staging")["migration"]["network"], "arden-database-private")
+        mutations = [lambda c: c["migration"].update(network="bridge"),
+                     lambda c: c["migration"].update(database_image="latest"),
+                     lambda c: c["migration"].update(env_file="/tmp/attacker.env"),
+                     lambda c: c["migration"].update(command=["sh", "-c", "id"]),
+                     lambda c: c["template"]["services"]["arden-api"].update(networks={}),
+                     lambda c: c["template"]["networks"]["database"].update(external=False)]
+        for mutate in mutations:
+            bad = copy.deepcopy(config)
+            mutate(bad)
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_config(bad, "staging")
+
+    def test_migration_runner_uses_fixed_candidate_api_image_private_network_and_limits(self):
+        config = migration_configuration()
+        calls = []
+
+        def run(arguments, timeout=0):
+            calls.append((arguments, timeout))
+            if "--entrypoint" in arguments and arguments[arguments.index("--entrypoint") + 1] == "node":
+                return '{"status":"APPLIED","migration_ids":["0001_example"]}\n'
+            self.fail("The manager attempted an unexpected migration command")
+
+        manager = CoolifyManager(config, command=lambda _args: "", migration_command=run)
+        manifest, _ = fixture()
+        with patch.object(manager, "image_id", side_effect=lambda release, component: release["images"][component]["id"]), \
+             patch.object(manager, "ensure_images"), \
+             patch.object(manager, "plan_migrations", side_effect=[
+                 {"status": "READY", "migration_ids": ["0001_example"]},
+                 {"status": "NO_PENDING", "migration_ids": []}]), \
+             patch.object(manager, "_migration_settings", return_value=config["migration"]):
+            result = manager.apply_migrations(manifest)
+        self.assertEqual(result["status"], "APPLIED")
+        self.assertEqual(len(calls), 1)
+        arguments, timeout = calls[0]
+        self.assertEqual(timeout, 900)
+        self.assertIn("--network", arguments)
+        self.assertEqual(arguments[arguments.index("--network") + 1], "arden-database-private")
+        self.assertEqual(arguments[arguments.index("--env-file") + 1], config["migration"]["env_file"])
+        self.assertTrue(all(option in arguments for option in ["--rm", "--pull=never", "--read-only",
+                         "--memory", "512m", "--cpus", "0.75", "--pids-limit", "64",
+                         "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true"]))
+        entrypoint = arguments.index("--entrypoint")
+        self.assertEqual(arguments[entrypoint + 1:], ["node", manifest["images"]["api"]["id"],
+                                                       "dist/db/migrate.js", "--apply-safe"])
+        self.assertNotIn("--privileged", arguments)
+        self.assertNotIn("--network", arguments[arguments.index("--entrypoint") + 2:])
+
+    def test_migration_runner_failure_reconciles_without_leaking_command_output(self):
+        config = migration_configuration()
+        manager = CoolifyManager(config, migration_command=lambda *args, **kwargs:
+                                 (_ for _ in ()).throw(RuntimeError("synthetic database password")))
+        manifest, _ = fixture()
+        with patch.object(manager, "ensure_images"), \
+             patch.object(manager, "image_id", side_effect=lambda release, component: release["images"][component]["id"]), \
+             patch.object(manager, "plan_migrations", side_effect=[
+                 {"status": "READY", "migration_ids": ["0001_example"]},
+                 {"status": "READY", "migration_ids": ["0001_example"]}]), \
+             patch.object(manager, "_migration_settings", return_value=config["migration"]):
+            with self.assertRaises(RuntimeError) as caught:
+                manager.apply_migrations(manifest)
+        self.assertNotIn("synthetic database password", str(caught.exception))
+
+    def test_migration_plan_distinguishes_ready_operator_drift_baseline_and_backup(self):
+        config = migration_configuration()
+        manager = CoolifyManager(config, command=lambda _args: "")
+        manifest, _ = fixture()
+        settings = config["migration"]
+        with patch.object(manager, "_migration_settings", return_value=settings), \
+             patch.object(manager, "_baseline_receipt_ready", return_value=True), \
+             patch.object(manager, "_read_migration_ledger", return_value=[]), \
+             patch.object(manager, "_backup_ready", return_value=True):
+            self.assertEqual(manager.plan_migrations(manifest),
+                             {"status": "READY", "migration_ids": ["0001_example"]})
+        with patch.object(manager, "_migration_settings", return_value=settings), \
+             patch.object(manager, "_baseline_receipt_ready", return_value=True), \
+             patch.object(manager, "_read_migration_ledger", return_value=[]), \
+             patch.object(manager, "_backup_ready", return_value=False):
+            self.assertEqual(manager.plan_migrations(manifest),
+                             {"status": "BACKUP_NOT_READY", "migration_ids": ["0001_example"]})
+        with patch.object(manager, "_migration_settings", return_value=settings), \
+             patch.object(manager, "_baseline_receipt_ready", return_value=False):
+            self.assertEqual(manager.plan_migrations(manifest),
+                             {"status": "BASELINE_REQUIRED", "migration_ids": []})
+        for ledger, expected in [
+            ([{"migration_id": "0009_unknown", "checksum": "f" * 64}], "DRIFT"),
+            ([{"migration_id": "0001_example", "checksum": "d" * 64}], "NO_PENDING"),
+        ]:
+            with patch.object(manager, "_migration_settings", return_value=settings), \
+                 patch.object(manager, "_baseline_receipt_ready", return_value=True), \
+                 patch.object(manager, "_read_migration_ledger", return_value=ledger), \
+                 patch.object(manager, "_backup_ready", return_value=False):
+                self.assertEqual(manager.plan_migrations(manifest), {"status": expected, "migration_ids": []})
+        operator = copy.deepcopy(manifest)
+        operator["migration_inventory"][0]["rollout"] = "operator"
+        operator["migrations"] = hashlib.sha256(json.dumps(operator["migration_inventory"],
+            separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        with patch.object(manager, "_migration_settings", return_value=settings), \
+             patch.object(manager, "_baseline_receipt_ready", return_value=True), \
+             patch.object(manager, "_read_migration_ledger", return_value=[]), \
+             patch.object(manager, "_backup_ready", side_effect=AssertionError("operator migration must not check backups")):
+            self.assertEqual(manager.plan_migrations(operator),
+                             {"status": "REQUIRES_OPERATOR", "migration_ids": ["0001_example"]})
+
+    def test_read_only_ledger_probe_uses_pinned_database_image_and_fixed_private_query(self):
+        config = migration_configuration()
+        image = config["migration"]["database_image"]
+        settings = {**config["migration"], "migration_database_user": "arden_migrator"}
+        commands = []
+
+        def docker(arguments):
+            if "{{.Id}}" in arguments:
+                return image
+            if "{{.Config.User}}" in arguments:
+                return "postgres"
+            self.fail("Unexpected Docker image inspection")
+
+        def migration_command(arguments, timeout):
+            commands.append((arguments, timeout))
+            return ("READY\nROLE|postgres|arden_migrator|false|false|false|false|false|true|true\n"
+                    "0001_example|" + "d" * 64 + "\n")
+
+        manager = CoolifyManager(config, command=docker, migration_command=migration_command)
+        manifest, _ = fixture()
+        with patch.object(manager, "_migration_settings", return_value=settings), \
+             patch.object(manager, "_baseline_receipt_ready", return_value=True):
+            result = manager.plan_migrations(manifest)
+        self.assertEqual(result, {"status": "NO_PENDING", "migration_ids": []})
+        arguments, timeout = commands[0]
+        self.assertEqual(timeout, 60)
+        self.assertEqual(arguments[arguments.index("--network") + 1], "arden-database-private")
+        self.assertEqual(arguments[arguments.index("--env-file") + 1], settings["env_file"])
+        self.assertEqual(arguments[arguments.index("--env") + 1],
+                         "PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=2000")
+        self.assertEqual(arguments[-4:-1], ["/bin/sh", image, "-c"])
+        self.assertIn("MISSING_CHECKSUM", arguments[-1])
+        self.assertIn("ORDER BY migration_id", arguments[-1])
+        self.assertNotIn("SELECT ", " ".join(arguments[:arguments.index("-c")]))
 
 
 if __name__ == "__main__":

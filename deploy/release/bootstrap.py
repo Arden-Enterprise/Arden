@@ -6,7 +6,42 @@ from pathlib import PurePosixPath
 import re
 import struct
 import hashlib
+import ipaddress
 import json
+from urllib.parse import unquote, urlsplit
+
+
+def build_migration_target_config(environment, api_networks, database_networks, database_image, runtime_database_url):
+    """Capture only non-secret target identity; migration credentials stay in a root-only env file."""
+    if environment not in {"staging", "production"}:
+        raise ValueError("Select the exact migration environment")
+    shared = sorted(set(api_networks) & set(database_networks))
+    if len(shared) != 1 or not re.fullmatch(r"sha256:[a-f0-9]{64}", database_image or ""):
+        raise ValueError("The database image and its private network must be unambiguous")
+    try:
+        url = urlsplit(runtime_database_url)
+        database_host = url.hostname or ""
+        database_name = unquote(url.path.lstrip("/"))
+        database_user = unquote(url.username or "")
+        port = url.port
+    except (AttributeError, ValueError) as error:
+        raise ValueError("The existing application database target is invalid") from error
+    try:
+        ipaddress.ip_address(database_host)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+    if (url.scheme not in {"postgres", "postgresql"} or not database_host
+            or is_ip
+            or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", database_host)
+            or not re.fullmatch(r"[a-zA-Z0-9_]{1,63}", database_name)
+            or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]{0,62}", database_user)
+            or url.query or url.fragment or (port is not None and port != 5432)):
+        raise ValueError("The existing application database target is invalid")
+    return {"network": shared[0], "database_image": database_image,
+            "database_host": database_host, "database_name": database_name,
+            "runtime_database_user": database_user,
+            "env_file": f"/etc/arden/releases/{environment}.migration.env"}
 
 
 def verify_migration_inventory(rows, applied):

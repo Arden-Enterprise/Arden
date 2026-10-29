@@ -19,7 +19,7 @@ from urllib.parse import urlsplit, unquote
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bootstrap import (build_app_template, deployment_key_line, verify_migration_inventory,
                        candidate_template, plan_migration_checksum_baseline,
-                       migration_baseline_statements)
+                       migration_baseline_statements, build_migration_target_config)
 from entrypoint import secure_file, secure_directory
 from management import CoolifyManager
 from receiver import ReleaseEngine
@@ -358,6 +358,11 @@ def prepare(environment, settings, management):
     if values.get("ARDEN_PUBLIC_WEB_ORIGIN", "").rstrip("/") != settings["origins"][environment].rstrip("/"):
         raise ValueError("Runtime origin does not match the approved target")
     database = database_peer(api, values)
+    database_container = inspect(database)
+    migration = build_migration_target_config(
+        environment, api.get("NetworkSettings", {}).get("Networks", {}).keys(),
+        database_container.get("NetworkSettings", {}).get("Networks", {}).keys(),
+        database_container.get("Image"), values["DATABASE_URL"])
     protected = sorted(set([name for name in names if name not in {old_api, old_web}] + [database]))
     protected_ids = {name: inspect(name)["Id"] for name in protected}
     migrations = migration_fingerprint(old_api, database, values["DATABASE_URL"])
@@ -369,6 +374,7 @@ def prepare(environment, settings, management):
               "token_path": str(CONFIG / "management.token"), "origin": settings["origins"][environment],
               "state_dir": str(STATE / environment), "staging_dir": str(STATE / "staging"),
               "migrations": migrations, "baseline": baseline, "protected_containers": protected,
+              "migration": migration,
               "coolify_image_id": inspect("coolify")["Image"], "template": candidate}
     Path(config["state_dir"]).mkdir(mode=0o700, exist_ok=True)
     adapter = CoolifyManager(config)

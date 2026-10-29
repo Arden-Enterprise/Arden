@@ -9,6 +9,48 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import entrypoint
 
 
+class EntrypointDispatchTests(unittest.TestCase):
+    def test_signed_migration_plan_dispatches_read_only_without_request_body(self):
+        import io
+        calls = []
+
+        class Engine:
+            def plan_migrations(self, request):
+                calls.append(("plan", request))
+                return {"status": "READY", "migration_ids": ["0001_example"]}
+
+        request = {"op": "plan-migrations", "environment": "staging"}
+        proof = {"provider": "github-actions-oidc"}
+        result = entrypoint.dispatch_request(Engine(), request, io.BytesIO(), proof)
+        self.assertEqual(result, {"status": "READY", "migration_ids": ["0001_example"]})
+        self.assertEqual(calls, [("plan", request)])
+
+    def test_plan_dispatch_rejects_an_appended_body_before_database_access(self):
+        import io
+
+        class Engine:
+            def plan_migrations(self, _request):
+                self.fail("A request body must be rejected before planning")
+
+        with self.assertRaisesRegex(ValueError, "Unexpected data"):
+            entrypoint.dispatch_request(Engine(), {"op": "plan-migrations"},
+                                        io.BytesIO(b"unexpected"), {"provider": "test"})
+
+    def test_migration_block_response_contains_only_validated_status_and_ids(self):
+        from receiver import MigrationBlocked
+        error = MigrationBlocked("REQUIRES_OPERATOR", ["0022_remove_old_data"])
+        self.assertEqual(entrypoint.error_response(error), {
+            "ok": False, "error": "migration_blocked", "status": "REQUIRES_OPERATOR",
+            "migration_ids": ["0022_remove_old_data"]})
+
+    def test_invalid_migration_block_data_is_replaced_with_unknown(self):
+        from receiver import MigrationBlocked
+        error = MigrationBlocked("DRIFT", [{"secret": "never-return"}])
+        self.assertEqual(entrypoint.error_response(error), {
+            "ok": False, "error": "migration_blocked", "status": "OUTCOME_UNKNOWN",
+            "migration_ids": []})
+
+
 @unittest.skipUnless(os.name == "posix" and os.geteuid() == 0, "Requires isolated Linux root fixtures")
 class PrivilegeTests(unittest.TestCase):
     def test_public_key_directories_remain_searchable_under_private_operator_umask(self):
