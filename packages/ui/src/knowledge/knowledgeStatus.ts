@@ -23,5 +23,5 @@ export function draftStatus(item: Pick<KnowledgeDraftSummary, "hasPendingSubmiss
     ? (latest.snapshotVersionId === item.versionId
       ? { label: "Published", tone: "is-success" } : { label: "Edited after publication", tone: "is-info" })
     : { label: "Preparing publication", tone: "is-info" };
-  return { label: statusLabel(latest.status), tone: latest.status === "REJECTED" ? "is-danger" : latest.status === "CHANGES_REQUESTED" ? "is-attention" : "" };
+  return { label: statusLabel(latest.status), tone: latest.status === "REJECTED" ? "is-danger" : "" };
 }
