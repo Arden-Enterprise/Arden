@@ -37,7 +37,7 @@ Decisions the user accepted:
 
 Out of scope: two-step review, per-person audiences, dropping the classification or level columns, and deployment.
 
-## 2. Database — new migration `apps/api/migrations/0020_organization_reviewer_grants.sql`
+## 2. Database — new migration `apps/api/migrations/0022_organization_reviewer_grants.sql`
 
 Migrations run in filename order (`apps/api/src/db/migrate.ts`) and are recorded in `public.arden_schema_migrations`. Read the latest definitions of everything you change (migrations 0010, 0016, 0018, 0019) before writing.
 

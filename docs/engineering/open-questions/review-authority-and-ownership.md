@@ -36,7 +36,7 @@
 | Mọi trường hợp | Org Admin được quyết định (0011) |
 
 **Giới hạn kỹ thuật cần biết:**
-- **Migration 0020 đã được viết nhưng chưa chạy trên PostgreSQL.** Hàm RLS `actor_has_reviewer_grant` giữ chữ ký cũ nên là điều kiện rộng; policy TypeScript mới là cổng chính xác cho scope và `review_rule`. Quyền thực tế vẫn cần cả DB và TS.
+- **Migration 0022 đã được viết nhưng chưa chạy trên PostgreSQL.** Hàm RLS `actor_has_reviewer_grant` giữ chữ ký cũ nên là điều kiện rộng; policy TypeScript mới là cổng chính xác cho scope và `review_rule`. Quyền thực tế vẫn cần cả DB và TS.
 - **Chưa từng chạy trên PostgreSQL thật.** Máy phát triển không có PostgreSQL; test tích hợp DB tự bỏ qua khi thiếu `ARDEN_TEST_DATABASE_URL`. Các câu SQL mới (tính "toàn tổ chức", lấy phòng ban chính) chưa chạy trên database thật.
 - **Slot dev-3 đang chạy code cũ.** Người dùng đang chạy `pnpm remote:preview --slot dev-3`, lệnh này **không upload code**. Push lên GitHub cũng không cập nhật slot; phải chạy `pnpm dev:remote --slot <slot>`. Đây là nguyên nhân lỗi "The request is invalid" đã gặp.
 
@@ -58,7 +58,7 @@
 **Cách triển khai đã chấp nhận:**
 - Migration: thêm cột phạm vi vào `reviewer_grant`, cho phép `department_id` để trống khi phạm vi là toàn tổ chức.
 - Sửa thân hàm `actor_has_reviewer_grant` nhưng **giữ nguyên chữ ký** (database cho phép thêm trường hợp grant toàn tổ chức, server TS áp quy tắc chặt), để khỏi viết lại khoảng 15 RLS policy và trigger đang gọi hàm này.
-- Migration 0020 thêm `scope`, `review_rule` và availability function. Vẫn cần chạy thử trên một database tạm `arden_test_*`.
+- Migration 0022 thêm `scope`, `review_rule` và availability function. Vẫn cần chạy thử trên một database tạm `arden_test_*`.
 
 **Chuyển tiếp và nợ kỹ thuật:** submission cũ mang `review_rule = LEGACY`, nên tài liệu toàn tổ chức cũ vẫn nhận Specialist/Senior của phòng ban hoặc grant Organization. Submission mới mang `GRANT_SCOPE`. Hàm SQL giữ chữ ký cũ và rộng hơn policy chính xác ở TypeScript; đây là nợ kỹ thuật phải siết lại khi contraction schema. Chưa có bằng chứng PostgreSQL vì thiếu `ARDEN_TEST_DATABASE_URL`.
 

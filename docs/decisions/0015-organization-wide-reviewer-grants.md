@@ -30,7 +30,7 @@ Reviewer grants have one of two disjoint scopes:
 
 ## Transition
 
-Migration 0020 marks existing submissions `LEGACY` and defaults later submissions to `GRANT_SCOPE`.
+Migration 0022 marks existing submissions `LEGACY` and defaults later submissions to `GRANT_SCOPE`.
 
 - A legacy organization-wide submission may be decided by an Organization grant or by a Specialist/Senior Department grant for its responsible department.
 - Legacy `CONFIDENTIAL` and `RESTRICTED` classification checks remain. In particular, a Standard Organization grant cannot decide a legacy `RESTRICTED` submission.
@@ -47,7 +47,7 @@ This broader SQL gate is accepted temporary debt. During classification/level sc
 ## Evidence and rollout
 
 - **Obtained:** API policy, queue, decision and HTTP tests cover scope separation, legacy transition, validity/tags/self-review and Organization Admin behavior. UI tests cover scope-based grant labels. API/UI tests and typechecks, the web production build and desktop typecheck pass in this checkout.
-- **Not obtained:** `ARDEN_TEST_DATABASE_URL` was unavailable, so migration 0020, the availability function and real RLS behavior are not verified on PostgreSQL. The integration suite contains the cases but remains skipped.
+- **Not obtained:** `ARDEN_TEST_DATABASE_URL` was unavailable, so migration 0022, the availability function and real RLS behavior are not verified on PostgreSQL. The integration suite contains the cases but remains skipped.
 - Do not apply this migration to a hosted slot until it passes on a disposable `arden_test_*` database. Deployment remains a separate user-approved step.
 
 ## Consequences
@@ -62,5 +62,5 @@ This broader SQL gate is accepted temporary debt. During classification/level sc
 - [0011: Permission-aware publication lifecycle](0011-permission-aware-publication-and-semantic-documents.md)
 - [0013: Audience-breadth review levels](0013-audience-breadth-review-levels.md)
 - [0014: Author owns shared drafts](0014-author-owns-shared-drafts.md)
-- `apps/api/migrations/0020_organization_reviewer_grants.sql`
+- `apps/api/migrations/0022_organization_reviewer_grants.sql`
 - `apps/api/src/knowledge/policy.ts`
