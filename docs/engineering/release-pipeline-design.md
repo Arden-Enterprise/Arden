@@ -1,7 +1,7 @@
 # GitHub-hosted staging and production releases
 
-Status: owner-approved design on 28 October 2026; implemented with a verified GitHub staging rollout and live app rollback. Main integration/first production promotion remain separate activation milestones; follow ARD-65 and the linked run evidence.
-Source baseline: Arden main `ce912b703fe71d1fb1c52b34f5e5c12a2157efe9`, inspected 28 October 2026.
+Status: owner-approved design on 28 October 2026; implementation, staging rollout/rollback and initial schema/app cutovers verified through 29 October. Per-release activation evidence belongs to [GitHub deployments](https://github.com/Arden-Enterprise/Arden/deployments) and ARD-65; the bootstrap checkpoint below is historical.
+Design baseline: Arden main `ce912b703fe71d1fb1c52b34f5e5c12a2157efe9`, inspected 28 October 2026.
 Accountable decision owner: project lead. Record author: coding agent at the owner's request.
 Related task: ARD-65. The deployment-settings review scheduled for 2 November remains separate.
 
@@ -106,6 +106,8 @@ Test the receiver using disposable fixtures and injected management boundaries b
 
 ## Current state and required activation inputs
 
+**Historical bootstrap checkpoint — 28 October 2026.** Use the later verification notes and current deployment/task records for activation status.
+
 The owner approved this design and inline implementation on 28 October, including app-only Service separation, restricted deployment access and restricted local Coolify management bootstrap. The permanent `staging` branch is published and its environment, restricted access and signed-job deployment path have been exercised. [Run 40712177548](https://github.com/Arden-Enterprise/Arden/actions/runs/40712177548), attempt 2, deployed revision `73e6bee` as a GitHub-built pair; a controlled root-only rollback restored the exact previous pair while preserving infrastructure/private storage and workflow fencing. Attempt 3 verified fresh automated recovery. Revision `8506abc` subsequently passed [staging run 40719483404](https://github.com/Arden-Enterprise/Arden/actions/runs/40719483404) and exact live image/tree, readiness/denial and protected infrastructure/storage checks. Later branch changes need their own verification. Production's app-only baseline cutover and restricted capability/selected-main environment have an [operator verification record](#production-baseline-verification); it still serves the prior version pending authorized main integration. The cited GitHub runs establish staging evidence only. Preserve unfinished Knowledge consolidation notes and excluded recovery material.
 
 Existing repository administration and authorized server SSH access are available, so no new domain, DNS migration, paid plan or build machine is required. Main integration and first automatic production promotion still require their actual readiness/approval and verification. Root management credentials remain local, and the production environment accepts only main. Any inaccessible permission is a specific blocker to report; never request passwords/tokens in chat.
@@ -114,8 +116,8 @@ Bootstrap order must avoid accidental production promotion: prepare and test cod
 
 ## Production baseline verification
 
-Operator evidence, 28–29 October 2026: prior production application source
-`6d06292be349924fa84f3bfa84af802692ab7ad5` runs in its app-only resource.
+Operator evidence, before the 29 October publication cutover: prior production application source
+`6d06292be349924fa84f3bfa84af802692ab7ad5` ran in its app-only resource.
 The operator verified its exact image pair, public HTTPS/readiness, anonymous
 401 denial, preserved private volume and three protected infrastructure
 identities. The environment has a restricted production deployment capability
@@ -127,6 +129,24 @@ revalidated; outside-namespace management was denied with HTTP 403.
 
 Resource IDs, connection settings, before/after identities and capability-denial
 evidence remain in protected operator records. This public-safe summary records
-what was checked without publishing them. It is **not** evidence of the new
-source/schema cutover or automatic production promotion; those milestones
-remain pending until their live checks and main run are recorded.
+what was checked without publishing them. It is **not** evidence of a later release. Each source/schema cutover and automatic
+production promotion needs its own live checks and main-run record.
+
+## Publication cutover verification — 29 October
+
+The owner explicitly approved backed-up content resets and initial schema/app
+cutovers for staging and production. Both cutovers reached reviewed source
+`f347579`, schema 0021, with exact image/tree, HTTPS/readiness/anonymous-denial,
+private-volume and protected-infrastructure checks. Their initial cutovers were
+manual, non-promotable baselines. Staging subsequently passed [signed automatic
+deployment 40824623831, attempt 2](https://github.com/Arden-Enterprise/Arden/actions/runs/40824623831),
+establishing fresh eligibility. This separates the one-time maintenance from
+normal branch deployments.
+
+Database/configuration recovery copies are protected on the server and copied
+with verified checksums to the operator's excluded local recovery storage. Old
+image exports remain in root-only server recovery storage. The grouped SQL
+renderer is exercised by disposable upgrade/failure/repeated-apply rejection/restore
+tests. No automatic SQL capability was added to the CI credential. Current
+automatic main promotions and later source versions must be checked in the linked
+GitHub deployment records and ARD-65, rather than inferred from this dated record.

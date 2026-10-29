@@ -46,6 +46,8 @@ The owner approved **standard free runners for this public repository**, with te
 
 There are no Actions build artifacts, persistent package/Docker caches, registry pushes or paid/larger runners. Trivy's database and build files are on the disposable runner disk. Normal Git history, job logs, statuses and deployment records remain on GitHub. Historical Actions caches from older workflows are separate; an operator may remove only confirmed obsolete caches. Old branches can recreate caches until their workflows are updated.
 
+One-time schema recovery archives and old-image exports remain separately protected operator backups with their own reviewed retention; routine image collection does not delete them.
+
 The application server necessarily retains running images and a bounded rollback set: active/previous releases for both environments, pending recovery references and the newest unactivated upload for at most one hour. Collection runs under the shared host lock and only removes unused images carrying this pipeline's exact ownership/revision labels and permitted tags. It never prunes the host or removes live volumes. Keep sufficient headroom for upload, image loading and recovery; a full disk blocks deployment.
 
 ## One-time operator setup

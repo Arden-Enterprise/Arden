@@ -63,6 +63,11 @@ Interfaces: protected operator input maps existing Coolify environments, app/inf
 
 ## Task 4: Review, publication and controlled activation
 
+The checklist below is the dated bootstrap planning checkpoint. Current execution
+completion and final main/Knowledge integration are reconciled in ARD-65 and the
+[owning release evidence](../release-pipeline-design.md); unchecked historical
+items are not a live deployment status feed.
+
 Interfaces: Tasks 1–3's verified code, immutable image manifest, actual GitHub environments and protected operator state.
 
 - [x] Run one fresh whole-change review, assess findings against actual source, fix required defects with regression evidence and rerun affected checks.
@@ -72,3 +77,10 @@ Interfaces: Tasks 1–3's verified code, immutable image manifest, actual GitHub
 - [ ] Finalize owning public/private guides and ARD-65 with exact source/check/deployment evidence. Keep any required unverified milestone open; no generic production-readiness claim.
 
 Delivery checkpoint (28 October): revision `73e6bee` passed staging's signed rollout, exact previous-pair rollback and automated recovery in run 40712177548 (attempts 2/3). Revision `8506abc` then passed staging run 40719483404 and live identity/readiness/denial/protected-state checks. Later branch updates require fresh evidence. Production's app-only baseline and restricted deployment capability/environment are verified. Main integration, first automatic production promotion and final task/Knowledge integration remain pending; the unchecked items retain those required milestones.
+
+29 October execution evidence: feature PR #14 is merged; release PR #13 has
+completed substantive bot review and prepared valid fixes. Both approved 0021
+schema/app cutovers passed; automatic staging run 40824623831 attempt 2 passed.
+Public guides now route current release status to actual GitHub/task evidence.
+The final main run and private Knowledge merge must still be verified before
+closing the task; this plan is not proof of those outcomes.
