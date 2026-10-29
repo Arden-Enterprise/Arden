@@ -42,6 +42,7 @@ try {
     env: { ...environment, NODE_ENV: 'production', ARDEN_API_HOST: '127.0.0.1', ARDEN_API_PORT: '0',
       ...(withIndexer ? { ARDEN_INDEX_DATABASE_URL: indexing.href } : {}),
       DATABASE_URL: runtime.href, SUPABASE_URL: 'http://127.0.0.1:1',
+      SUPABASE_AUTH_PUBLIC_URL: 'https://auth.example.test',
       SUPABASE_PUBLISHABLE_KEY: 'synthetic-not-a-live-key', ARDEN_AUTH_TRUSTED_ORIGINS: 'https://example.test',
       ARDEN_PRIVATE_STORAGE_ROOT: temporary, ARDEN_AI_URL: 'http://127.0.0.1:1',
       ARDEN_AI_SERVICE_TOKEN: 'synthetic-not-a-live-token' },
