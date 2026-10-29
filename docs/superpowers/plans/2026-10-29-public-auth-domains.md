@@ -42,7 +42,7 @@
 **Interfaces:**
 - `SupabaseAuthProvider(privateUrl, publishableKey, publicAuthUrl?)`
 - OAuth start returns an authorization URL built from `publicAuthUrl`; callback exchange and all other Auth calls continue using `privateUrl`.
-- `SUPABASE_AUTH_PUBLIC_URL` is optional in development (defaults to private `SUPABASE_URL`) and required for the production API when Supabase Auth is configured.
+- `SUPABASE_AUTH_PUBLIC_URL` is optional in development (defaults to private `SUPABASE_URL`) and required to start Google sign-in in production when Supabase Auth is configured. Without it, the API remains available and the Google start endpoint fails closed rather than returning the private Auth URL.
 - The per-call PKCE client must use its supplied ephemeral storage adapter; Supabase Auth JS 2.117.2 ignores custom storage when `persistSession` is false.
 
 - [x] **Step 1: Write the failing tests**

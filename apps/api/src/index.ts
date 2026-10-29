@@ -28,7 +28,7 @@ const pool = new Pool({ connectionString: databaseUrl });
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPABASE_ANON_KEY;
 const supabaseAuthPublicUrl = resolveSupabaseAuthPublicUrl(
-  process.env.SUPABASE_AUTH_PUBLIC_URL, supabaseUrl, process.env.NODE_ENV === "production",
+  process.env.SUPABASE_AUTH_PUBLIC_URL, supabaseUrl,
 );
 const localFlow1TestMode = process.env.ARDEN_LOCAL_FLOW1_TEST_MODE === "true";
 const remoteFlow1TestMode = isKietLocalFlow1TestTarget(
@@ -113,7 +113,9 @@ const app = buildApp({
   auth: localFlow1TestMode
     ? new LocalFlow1TestAuthProvider(parseLocalTestAccounts(process.env.ARDEN_LOCAL_TEST_USERS))
     : supabaseUrl && supabasePublishableKey
-      ? new SupabaseAuthProvider(supabaseUrl, supabasePublishableKey, supabaseAuthPublicUrl)
+      ? new SupabaseAuthProvider(supabaseUrl, supabasePublishableKey, supabaseAuthPublicUrl, {
+        requirePublicAuthUrl: process.env.NODE_ENV === "production",
+      })
       : null,
   testActor: remoteFlow1TestMode ? kietLocalFlow1TestActor : undefined,
   authTrustedOrigins: flow1TestMode ? ["http://127.0.0.1:5180"] : trustedOrigins,

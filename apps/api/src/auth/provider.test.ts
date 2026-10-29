@@ -11,14 +11,20 @@ afterEach(() => {
 });
 
 describe("SupabaseAuthProvider Google OAuth URL boundary", () => {
-  it("requires a public Auth origin in production when Supabase Auth is configured", async () => {
-    const { resolveSupabaseAuthPublicUrl } = await import("./provider.js");
-    expect(() => resolveSupabaseAuthPublicUrl(undefined, privateAuthUrl, true))
-      .toThrow("SUPABASE_AUTH_PUBLIC_URL is required in production");
-    expect(resolveSupabaseAuthPublicUrl(undefined, privateAuthUrl, false)).toBeUndefined();
-    expect(resolveSupabaseAuthPublicUrl(publicAuthUrl, privateAuthUrl, true)).toBe(publicAuthUrl);
-    expect(() => resolveSupabaseAuthPublicUrl(publicAuthUrl, undefined, false))
+  it("blocks production Google sign-in when the public Auth origin is missing", async () => {
+    const { resolveSupabaseAuthPublicUrl, SupabaseAuthProvider } = await import("./provider.js");
+    expect(resolveSupabaseAuthPublicUrl(undefined, privateAuthUrl)).toBeUndefined();
+    expect(resolveSupabaseAuthPublicUrl(publicAuthUrl, privateAuthUrl)).toBe(publicAuthUrl);
+    expect(() => resolveSupabaseAuthPublicUrl(publicAuthUrl, undefined))
       .toThrow("SUPABASE_AUTH_PUBLIC_URL requires SUPABASE_URL");
+
+    const fetchMock = vi.fn(async () => { throw new Error("Unexpected Auth request without a public origin"); });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new SupabaseAuthProvider(privateAuthUrl, publishableKey, undefined, {
+      requirePublicAuthUrl: true,
+    });
+    await expect(provider.startGoogleSignIn(callbackUrl)).rejects.toThrow("SUPABASE_AUTH_PUBLIC_URL_REQUIRED");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("starts Google sign-in on the public Auth host with the exact Arden callback", async () => {

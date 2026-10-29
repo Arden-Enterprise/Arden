@@ -37,14 +37,23 @@ export interface AuthProvider {
 }
 
 export class SupabaseAuthProvider implements AuthProvider {
-  constructor(url: string, publishableKey: string, publicAuthUrl?: string) {
+  constructor(
+    url: string,
+    publishableKey: string,
+    publicAuthUrl?: string,
+    options: { requirePublicAuthUrl?: boolean } = {},
+  ) {
     this.url = url;
+    this.publicAuthUrlConfigured = publicAuthUrl !== undefined;
     this.publicAuthUrl = publicAuthUrl === undefined ? url : validateSupabaseAuthPublicUrl(publicAuthUrl);
+    this.requirePublicAuthUrl = options.requirePublicAuthUrl ?? false;
     this.publishableKey = publishableKey;
   }
 
   private readonly url: string;
+  private readonly publicAuthUrlConfigured: boolean;
   private readonly publicAuthUrl: string;
+  private readonly requirePublicAuthUrl: boolean;
   private readonly publishableKey: string;
 
   private createAuthClient(): SupabaseClient {
@@ -150,6 +159,9 @@ export class SupabaseAuthProvider implements AuthProvider {
   }
 
   async startGoogleSignIn(redirectTo: string): Promise<GoogleOAuthStart> {
+    if (this.requirePublicAuthUrl && !this.publicAuthUrlConfigured) {
+      throw new Error("SUPABASE_AUTH_PUBLIC_URL_REQUIRED");
+    }
     const storage = new MapStorage();
     const { data, error } = await this.createPkceClient(storage, this.publicAuthUrl).auth.signInWithOAuth({
       provider: "google",
@@ -235,10 +247,8 @@ export class SupabaseAuthProvider implements AuthProvider {
 export function resolveSupabaseAuthPublicUrl(
   publicUrl: string | undefined,
   privateUrl: string | undefined,
-  production: boolean,
 ): string | undefined {
   if (publicUrl === undefined || publicUrl === "") {
-    if (production && privateUrl) throw new Error("SUPABASE_AUTH_PUBLIC_URL is required in production");
     return undefined;
   }
   if (!privateUrl) throw new Error("SUPABASE_AUTH_PUBLIC_URL requires SUPABASE_URL");
