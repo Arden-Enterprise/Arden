@@ -137,7 +137,7 @@ Evidence obtained so far: none. This record is a proposal.
 
 - [PRODUCT.md](../../PRODUCT.md): replace the three accepted classification levels with the audience-breadth review rule.
 - [ARDEN_BLUEPRINT.md](../../ARDEN_BLUEPRINT.md): update the review-policy and classification paragraphs and the "policy classification" pipeline step.
-- [AGENTS.md](../../AGENTS.md) §2 item 5 lists the accepted classifications. It is **not yet updated**: as a cross-repository rule it needs explicit approval. Until then, read it together with this record; legacy classification values still exist in the data.
+- [AGENTS.md](../../AGENTS.md) §2 item 5: updated on 2026-10-29 at the user's request to state the ownership and audience-breadth review rules (0014, 0015). Legacy classification values are described as stored data only.
 - Mark [0008](0008-three-level-knowledge-classification.md) superseded and annotate the classification lines of [0010](0010-audiences-and-system-administration.md).
 - [DESIGN.md](../../DESIGN.md): remove classification controls and chips from Knowledge, Reviews and Administration descriptions.
 - [Security and data rules](../engineering/security-and-data.md) and the [operations guide](../engineering/operations.md): record the policy-version rule and the phase 2 migration procedure.

@@ -80,7 +80,7 @@
 - **Khi chỉ có group (kể cả scope Organization),** người duyệt vẫn là người của phòng ban sở hữu, ở cấp thường.
 
 **Cần AI góp ý:**
-1. Group vượt nhiều phòng ban với scope Organization có nên được coi là "rộng" và cần người duyệt cấp tổ chức không, hay chỉ `ORGANIZATION_ALL` mới tính là rộng?
+1. ~~Group vượt nhiều phòng ban với scope Organization có nên được coi là "rộng" và cần người duyệt cấp tổ chức không?~~ **Đã chốt (2026-10-29): giữ như hiện tại.** Chỉ `ORGANIZATION_ALL` mới tính là toàn tổ chức. Tài liệu chỉ có group (kể cả group vượt nhiều phòng ban) do grant phòng ban của phòng ban phụ trách duyệt; thành phần của group không đổi người duyệt. Xem [0015](../../decisions/0015-organization-wide-reviewer-grants.md).
 2. Mặc định scope Organization cho trường hợp chỉ có group có đúng không, hay nên mặc định Department (an toàn hơn)?
 
 ## 5. Câu hỏi mở về chủ sở hữu và phòng ban (0014)
@@ -96,7 +96,7 @@
 
 - **Classification (0013):**
   - Phase 1b (migration database, `policy_version = 2`, đóng băng cấp duyệt yêu cầu) và phase 2 (xóa cột) chưa làm.
-  - `AGENTS.md` §2 mục 5 vẫn ghi ba mức classification là quyết định đã chấp nhận; cần người dùng duyệt rõ mới được sửa vì là quy tắc chung của repo.
+  - ~~`AGENTS.md` §2 mục 5 vẫn ghi ba mức classification~~ Đã cập nhật ngày 2026-10-29 theo 0013–0015.
   - Repo `Arden-AI` (dịch vụ Python) chưa được kiểm tra xem có dùng classification không.
 - **Người đọc là từng cá nhân** (audience `DIRECT_MEMBER`): ngoài phạm vi V1 theo 0010. Muốn có thì cần decision record. Rủi ro: lộ danh bạ, thu hồi quyền khi người đó rời tổ chức hoặc phòng ban, vượt ranh giới phòng ban.
 - **Câu chữ trên giao diện:** đã sửa thành "no reviewer can approve their own submission", đúng với ngoại lệ Org Admin của 0011.

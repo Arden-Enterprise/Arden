@@ -22,6 +22,7 @@ Reviewer grants have one of two disjoint scopes:
 | Includes `ORGANIZATION_ALL` | An active `ORGANIZATION` grant |
 
 - An Organization Admin may still decide any submission and may self-approve with `selfApproved` audit evidence, as accepted in [0011](0011-permission-aware-publication-and-semantic-documents.md).
+- Group composition never changes who reviews: a group-only snapshot is reviewed by the responsible department even when the group spans several departments. The user confirmed this on 2026-10-29, rather than treating cross-department groups as organization-wide or adding a second review step.
 - An `ORGANIZATION` grant does not review department/group-only submissions. A `DEPARTMENT` grant does not review new organization-wide submissions.
 - One eligible reviewer decides. This change does not introduce a second approval step.
 - Both grant scopes retain active membership, grant status, validity window, team/project tag matching and ordinary-reviewer self-review checks.
