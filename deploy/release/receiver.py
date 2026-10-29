@@ -17,6 +17,10 @@ from retention import collect_releases
 from state import read_json, write_json, release_lock
 from identity import trusted_provenance
 
+VALID_OPERATOR_ACTIONS = {
+    "rollback", "approved-hk-data-cutover", "approved-schema-cutover",
+}
+
 
 class MigrationBlocked(ValueError):
     """Safe migration status for the workflow; never carries database output."""
@@ -65,10 +69,18 @@ class ReleaseEngine:
             raise ValueError("Stored release state is malformed")
         if "operator_action" in value:
             action = value["operator_action"]
-            verified_at = action.get("verified_at") if type(action) is dict else None
             if (type(action) is not dict or set(action) != {"action", "verified_at"}
-                    or action["action"] != "rollback" or type(verified_at) not in {int, float}
-                    or not math.isfinite(verified_at) or verified_at <= 0):
+                    or type(action["action"]) is not str
+                    or action["action"] not in VALID_OPERATOR_ACTIONS):
+                raise ValueError("Stored operator action receipt is malformed")
+            verified_at = action["verified_at"]
+            if type(verified_at) not in {int, float}:
+                raise ValueError("Stored operator action receipt is malformed")
+            try:
+                valid_timestamp = math.isfinite(verified_at) and verified_at > 0
+            except OverflowError:
+                valid_timestamp = False
+            if not valid_timestamp:
                 raise ValueError("Stored operator action receipt is malformed")
         if type(value["active"]) is not dict:
             raise ValueError("Stored release state is malformed")
