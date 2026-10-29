@@ -4,6 +4,7 @@
 import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import shutil
@@ -15,6 +16,10 @@ from protocol import (validate_archive, validate_manifest, validate_stored_manif
 from retention import collect_releases
 from state import read_json, write_json, release_lock
 from identity import trusted_provenance
+
+VALID_OPERATOR_ACTIONS = {
+    "rollback", "approved-hk-data-cutover", "approved-schema-cutover",
+}
 
 
 class MigrationBlocked(ValueError):
@@ -59,8 +64,24 @@ class ReleaseEngine:
     @staticmethod
     def _validate_state(value):
         if (type(value) is not dict or not {"active", "previous", "pending", "highest"}.issubset(value)
-                or set(value) - {"active", "previous", "pending", "highest", "last_failure"}):
+                or set(value) - {"active", "previous", "pending", "highest", "last_failure",
+                                 "operator_action"}):
             raise ValueError("Stored release state is malformed")
+        if "operator_action" in value:
+            action = value["operator_action"]
+            if (type(action) is not dict or set(action) != {"action", "verified_at"}
+                    or type(action["action"]) is not str
+                    or action["action"] not in VALID_OPERATOR_ACTIONS):
+                raise ValueError("Stored operator action receipt is malformed")
+            verified_at = action["verified_at"]
+            if type(verified_at) not in {int, float}:
+                raise ValueError("Stored operator action receipt is malformed")
+            try:
+                valid_timestamp = math.isfinite(verified_at) and verified_at > 0
+            except OverflowError:
+                valid_timestamp = False
+            if not valid_timestamp:
+                raise ValueError("Stored operator action receipt is malformed")
         if type(value["active"]) is not dict:
             raise ValueError("Stored release state is malformed")
         releases = [value["active"], value["previous"]]
