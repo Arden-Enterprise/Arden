@@ -20,7 +20,7 @@ import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
 import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
-import { StatusIslandContext, type StatusIslandToast } from "../shared/StatusIslandContext";
+import { StatusIslandContext, type StatusIslandConfirm, type StatusIslandToast } from "../shared/StatusIslandContext";
 import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
 import { membershipReadiness } from "../organization/organizationWorkflow";
 import type { PaneContent, Platform, PrivateNote, WorkspaceView } from "../shared/types";
@@ -149,6 +149,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [navOpen, setNavOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [islandToast, setIslandToast] = useState<StatusIslandToast | null>(null);
+  const [islandConfirm, setIslandConfirm] = useState<StatusIslandConfirm | null>(null);
   const [contextOverlay, setContextOverlay] = useState(false);
   const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
   const shellRef = useRef<HTMLDivElement>(null);
@@ -420,7 +421,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
   return (
     <WorkspaceNavigationContext.Provider value={{ open: navOpen, setOpen: setNavOpen }}>
-    <StatusIslandContext.Provider value={{ toast: islandToast, setToast: setIslandToast }}>
+    <StatusIslandContext.Provider value={{ toast: islandToast, setToast: setIslandToast, confirm: islandConfirm, setConfirm: setIslandConfirm }}>
     <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${navCollapsed ? " is-nav-collapsed" : ""}${activeView === "my-work" ? " is-my-work" : ""}`}>
       <a className="skip-link" href="#arden-main">Skip to content</a>
       <AppSidebar

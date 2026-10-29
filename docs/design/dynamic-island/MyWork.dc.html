@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Arden — My Work</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Inter+Tight:wght@500;600&amp;display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:dark;--bg-app:#101014;--bg-sidebar:#15151a;--surface:#1c1c23;--surface-raised:#25252e;--surface-hover:rgb(255 255 255 / 4%);--border:#303039;--border-strong:#6a6976;--text-primary:#f2f1f7;--text-secondary:#a5a4b1;--text-muted:#8c8b98;--accent:#8b82f6;--accent-hover:#a69eff;--accent-subtle:rgb(139 130 246 / 14%);--accent-border:rgb(139 130 246 / 38%);--text-on-accent:#101014;--focus-ring:#a69eff;--success:#7fcfa3;--success-subtle:rgb(127 207 163 / 12%);--success-border:rgb(127 207 163 / 30%);--warning:#e3b26b;--warning-subtle:rgb(227 178 107 / 12%);--warning-border:rgb(227 178 107 / 30%);--info:#7eb0f0;--info-subtle:rgb(126 176 240 / 12%);--info-border:rgb(126 176 240 / 30%);--shadow-island:inset 0 1px 0 rgb(255 255 255 / 3%),0 16px 36px -20px rgb(0 0 0 / 75%)}
+body{margin:0;background:var(--bg-app);color:var(--text-primary);font-family:Inter,"Segoe UI",sans-serif;font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;font-feature-settings:"cv11","ss03"}
+h1,h2,h3{font-family:"Inter Tight",Inter,"Segoe UI",sans-serif;font-weight:600;margin:0;letter-spacing:-.02em}
+a{color:var(--accent-hover)}a:hover{color:#c2bcff}
+button{font-family:inherit}
+:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.i{fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.isl{background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-island)}
+.nav{width:256px;flex:none;min-height:956px;background:var(--bg-sidebar);border:1px solid var(--border);border-radius:16px;padding:10px;box-sizing:border-box;display:flex;flex-direction:column;gap:2px}
+.org{display:flex;align-items:center;gap:10px;width:100%;min-height:44px;padding:6px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text-primary);text-align:left;cursor:pointer}
+.logo{width:30px;height:30px;flex:none;border-radius:7px;background:var(--text-primary);color:var(--bg-app);display:inline-flex;align-items:center;justify-content:center;font:600 11px/1 "Inter Tight",Inter,sans-serif}
+.ni{display:flex;align-items:center;gap:10px;min-height:32px;padding:0 10px;border-radius:8px;color:var(--text-secondary);text-decoration:none;font-size:14px;white-space:nowrap}
+.ni:hover{background:var(--surface-hover);color:var(--text-primary)}
+.ni.on{background:var(--accent-subtle);color:var(--text-primary)}
+.ni .i{color:var(--text-muted)}.ni.on .i{color:var(--accent-hover)}
+.gl{font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--text-muted);padding:0 10px;margin:16px 0 4px}
+.badge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:6px;background:var(--surface-raised);color:var(--text-secondary);font-size:11px;font-weight:600;display:inline-flex;align-items:center;justify-content:center;font-variant-numeric:tabular-nums;box-sizing:border-box}
+.mn{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;gap:12px;min-height:956px}
+.top{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:12px;min-height:64px}
+.di{display:flex;align-items:center;gap:10px;height:44px;width:380px;max-width:calc(100vw - 48px);padding:0 6px 0 8px;border-radius:12px;background:var(--surface-raised);border:1px solid var(--border);box-sizing:border-box;box-shadow:0 18px 40px -20px rgb(0 0 0 / 80%);overflow:hidden}
+.mini{width:28px;height:28px;flex:none;border-radius:6px;background:var(--text-primary);color:var(--bg-app);display:inline-flex;align-items:center;justify-content:center;font:600 10px/1 "Inter Tight",Inter,sans-serif}
+.ck{display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--text-secondary);font-size:12px;cursor:pointer;white-space:nowrap}
+.ic{width:32px;height:32px;flex:none;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--text-secondary);display:inline-flex;align-items:center;justify-content:center;cursor:pointer;padding:0;position:relative}
+.ic:hover{background:var(--surface-hover);color:var(--text-primary)}
+.pg{display:flex;flex-direction:column;gap:16px;padding:8px 12px 40px;box-sizing:border-box}
+.eb{font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--text-muted)}
+.btn1{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:var(--text-on-accent);font-weight:650;font-size:13px;white-space:nowrap;text-decoration:none}
+.btn1:hover{background:var(--accent-hover);color:var(--text-on-accent)}
+.btn2{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:28px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface-raised);color:var(--text-primary);font-weight:600;font-size:12px;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn2:hover{border-color:var(--border-strong);color:var(--text-primary)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;font-size:12px;font-weight:600;border:1px solid var(--border);background:var(--surface-raised);color:var(--text-secondary);white-space:nowrap;box-sizing:border-box}
+.c-warn{color:var(--warning);border-color:var(--warning-border);background:var(--warning-subtle)}
+.c-info{color:var(--info);border-color:var(--info-border);background:var(--info-subtle)}
+.meta{font-size:12px;color:var(--text-secondary)}
+.av{width:24px;height:24px;flex:none;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font:600 10px/1 "Inter Tight",Inter,sans-serif;color:var(--text-primary);background:var(--surface-raised)}
+.card{border-radius:14px;padding:6px}
+.ch{display:flex;align-items:center;gap:10px;padding:10px 12px 8px}
+.row{display:flex;align-items:center;gap:14px;padding:12px;border-radius:10px;flex-wrap:wrap}
+.row:hover{background:var(--surface-hover)}
+.row+.row{box-shadow:0 -1px 0 var(--border)}
+.lk{text-decoration:none;color:var(--text-primary);font-weight:600}
+.lk:hover{color:var(--text-primary);text-decoration:underline;text-underline-offset:3px}
+</style>
+</helmet>
+
+<div style="display: flex; flex-wrap: wrap; gap: 12px; min-height: 980px; padding: 12px; box-sizing: border-box; background: var(--bg-app); align-items: flex-start">
+
+  <nav class="nav" aria-label="Northstar Studio">
+    <button type="button" class="org" aria-haspopup="menu" aria-expanded="false" aria-label="Switch organization — Northstar Studio"><span class="logo">NS</span><span style="display: flex; flex-direction: column; min-width: 0; flex: 1"><span style="font: 600 14px/1.3 'Inter Tight', Inter, sans-serif">Northstar Studio</span><span style="font-size: 12px; color: var(--text-secondary)">Organization Admin</span></span><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="color: var(--text-muted); margin-right: 6px"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg></button>
+    <div class="gl">WORK</div>
+    <a class="ni on" href="MyWork.dc.html" aria-current="page"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M3 13h18"/></svg>My Work</a>
+    <a class="ni" href="PrivateNotes.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Private Notes</a>
+    <div class="gl">KNOWLEDGE</div>
+    <a class="ni" href="Library.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></svg>Library</a>
+    <a class="ni" href="Contributions.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 3 8l9 5 9-5z"/><path d="m3 13 9 5 9-5"/></svg>Contributions</a>
+    <a class="ni" href="Reviews.dc.html" aria-label="Reviews, 3 assigned"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 13l2 2 4-4"/></svg>Reviews<span class="badge">3</span></a>
+    <div class="gl">MANAGE ORGANIZATION</div>
+    <a class="ni" href="Main.dc.html"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14a6 6 0 0 1 3.5 6"/></svg>Administration</a>
+    <div style="flex: 1"></div>
+    <a class="ni" href="#" style="padding-left: 6px"><span class="av">HN</span>Account</a>
+  </nav>
+
+  <main class="mn">
+    <header class="top">
+      <div></div>
+      <div class="di" role="region" aria-label="Status island">
+        <span class="mini">NS</span>
+        <span style="font-size: 13px; color: var(--text-secondary); white-space: nowrap">Work</span><span style="color: var(--text-muted)" aria-hidden="true">/</span>
+        <span style="font-size: 13px; font-weight: 600; flex: 1; white-space: nowrap">My Work</span>
+        <button type="button" class="ck" aria-label="Search (Ctrl K)"><svg class="i" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Ctrl K</button>
+      </div>
+      <div style="display: flex; justify-content: flex-end"><button type="button" class="ic" aria-label="Notifications, 2 new"><svg class="i" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg><span aria-hidden="true" style="position: absolute; top: 6px; right: 7px; width: 7px; height: 7px; border-radius: 999px; background: var(--accent); box-shadow: 0 0 0 2px var(--bg-app)"></span></button></div>
+    </header>
+
+    <div class="pg" style="max-width: 1180px; width: 100%">
+      <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
+        <div style="flex: 1 1 320px; min-width: 0">
+          <div class="eb">WORK</div>
+          <h1 style="font-size: 34px; line-height: 1.2; margin: 4px 0 4px">My Work</h1>
+          <p style="margin: 0; color: var(--text-secondary)">2 contributions need you · 3 reviews assigned</p>
+        </div>
+        <a class="btn1" href="DraftFromPdf.dc.html"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="stroke-width: 2"><path d="M12 5v14M5 12h14"/></svg>New draft</a>
+      </div>
+
+      <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start">
+        <div style="flex: 2 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+
+          <section class="isl card" aria-labelledby="h-c">
+            <div class="ch"><h2 id="h-c" style="font-size: 15px">Contributions needing you</h2><span class="badge" style="margin-left: 0">2</span><a href="Contributions.dc.html" style="margin-left: auto; font-size: 13px; text-decoration: none">All contributions</a></div>
+            <div class="row">
+              <div style="flex: 1 1 260px; min-width: 0">
+                <a class="lk" href="Contributions.dc.html">Incident response runbook <span style="color: var(--text-secondary); font-weight: 500">· v2</span></a>
+                <div class="meta">Linh Pham: "Step 4 still points to the old paging rotation." · 2 hours ago</div>
+              </div>
+              <span class="chip c-warn">Revision requested</span>
+              <a class="btn2" href="Contributions.dc.html">Revise</a>
+            </div>
+            <div class="row">
+              <div style="flex: 1 1 260px; min-width: 0">
+                <a class="lk" href="DraftFromPdf.dc.html">Security baseline <span style="color: var(--text-secondary); font-weight: 500">· v3 draft</span></a>
+                <div class="meta">Drafted from a PDF · 4 sections to check · yesterday</div>
+              </div>
+              <span class="chip">Draft</span>
+              <a class="btn2" href="DraftFromPdf.dc.html">Continue</a>
+            </div>
+          </section>
+
+          <section class="isl card" aria-labelledby="h-r">
+            <div class="ch"><h2 id="h-r" style="font-size: 15px">Reviews assigned to you</h2><span class="badge" style="margin-left: 0">3</span><a href="Reviews.dc.html" style="margin-left: auto; font-size: 13px; text-decoration: none">Open queue</a></div>
+            <div class="row">
+              <div style="flex: 1 1 260px; min-width: 0"><a class="lk" href="Reviews.dc.html">Data retention policy <span style="color: var(--text-secondary); font-weight: 500">· v3</span></a><div class="meta">Minh Tran · Engineering · CONFIDENTIAL · submitted Oct 21</div></div>
+              <span class="chip c-info">Waiting</span>
+            </div>
+            <div class="row">
+              <div style="flex: 1 1 260px; min-width: 0"><a class="lk" href="Reviews.dc.html">Release checklist <span style="color: var(--text-secondary); font-weight: 500">· v1</span></a><div class="meta">An Le · Engineering · INTERNAL · submitted Oct 22</div></div>
+              <span class="chip c-info">Waiting</span>
+            </div>
+            <div class="row">
+              <div style="flex: 1 1 260px; min-width: 0"><a class="lk" href="Reviews.dc.html">Customer escalation guide <span style="color: var(--text-secondary); font-weight: 500">· v2</span></a><div class="meta">Quynh Do · Operations · INTERNAL · resubmitted today</div></div>
+              <span class="chip c-warn">Approval blocked</span>
+            </div>
+          </section>
+        </div>
+
+        <div style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+          <section class="isl card" aria-labelledby="h-p">
+            <div class="ch"><h2 id="h-p" style="font-size: 15px">Recently published</h2><a href="Library.dc.html" style="margin-left: auto; font-size: 13px; text-decoration: none">Library</a></div>
+            <div class="row"><div style="min-width: 0"><a class="lk" href="Library.dc.html">Onboarding handbook 2026</a><div class="meta">Everyone in organization · Oct 20</div></div></div>
+            <div class="row"><div style="min-width: 0"><a class="lk" href="Library.dc.html">API style guide · v4</a><div class="meta">Everyone in Engineering · Oct 18</div></div></div>
+            <div class="row"><div style="min-width: 0"><a class="lk" href="Library.dc.html">Security baseline · v2</a><div class="meta">Incident leads · Oct 15</div></div></div>
+          </section>
+
+          <section aria-labelledby="h-n" style="background: var(--bg-sidebar); border: 1px solid var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; align-items: center; gap: 10px">
+              <span style="width: 32px; height: 32px; border-radius: 8px; background: var(--surface-raised); color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center"><svg class="i" width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span>
+              <h2 id="h-n" style="font-size: 15px">Private Notes</h2>
+              <span class="badge">12</span>
+            </div>
+            <p style="margin: 0; color: var(--text-secondary); font-size: 13px">Only you can open these. They stay out of shared search and AI answers.</p>
+            <a class="btn2" href="PrivateNotes.dc.html" style="align-self: flex-start; height: 32px; padding: 0 12px; font-size: 13px">Open Private Notes</a>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

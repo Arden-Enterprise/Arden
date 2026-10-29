@@ -5,7 +5,7 @@
 .organization-live-admin .organization-access-heading .meta-label { display: block; }
 .organization-live-admin .organization-access-heading h1 { font-size: 34px; line-height: 1.2; }
 .organization-live-admin .admin-tabs { justify-self: start; margin: 0 12px; padding: 4px; gap: 2px; overflow: visible; }
-.organization-live-admin .admin-tabs button { min-height: 28px; padding: 0 12px; border-bottom: 0; color: var(--arden-text-secondary); }
+.organization-live-admin .admin-tabs button { min-height: var(--arden-control-sm); padding: 0 12px; border-bottom: 0; color: var(--arden-text-secondary); }
 .organization-live-admin .admin-tabs button[aria-selected="true"] { color: var(--arden-text-primary); }
 .organization-live-admin .admin-tabs button .island-badge { margin-left: 0; padding: 0 7px; color: var(--arden-text-secondary); background: var(--arden-surface-raised); }
 .organization-live-admin .workspace-scroll-content { padding-top: 8px; }
@@ -30,13 +30,9 @@
 .admin-side-form .primary-button, .admin-form-island .admin-grant-actions .primary-button { justify-self: start; }
 .organization-live-admin .organization-field { display: grid; gap: 6px; }
 .organization-live-admin .organization-field small { color: var(--arden-text-secondary); font-size: 12px; font-weight: 400; }
-.admin-grant-classes { display: grid; gap: 2px; margin: 0; padding: 0; border: 0; }
-.admin-grant-classes legend { margin-bottom: 4px; color: var(--arden-text-secondary); font-size: 12px; font-weight: 600; }
-.admin-grant-classes label { display: flex; align-items: center; gap: 10px; min-height: 32px; font-size: 13px; font-weight: 600; letter-spacing: .02em; }
-.admin-grant-classes input { width: 16px; height: 16px; margin: 0; }
-.admin-grant-classes small { color: var(--arden-text-secondary); font-size: 12px; }
-.admin-grant-classes[aria-invalid="true"] legend { color: var(--arden-danger); }
 .admin-grant-tags { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.admin-grant-scope .island-seg { width: 100%; }
+.admin-grant-scope .island-seg > button { flex: 1; }
 .organization-live-admin .admin-scope-preview { margin: 0; padding: 12px 14px; border: 1px solid var(--arden-border); border-radius: 12px; color: var(--arden-text-secondary); background: var(--arden-surface-raised); font-size: 13px; }
 .organization-live-admin .admin-grant-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .organization-live-admin .admin-new-tag { color: var(--arden-success); font-size: 11px; font-weight: 600; text-transform: uppercase; }
@@ -71,7 +67,7 @@
 
 /* Sample (preview) administration keeps its structure but uses the segmented island tabs. */
 .arden-app-shell .organization-tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 4px; border: 1px solid var(--arden-border); border-radius: 12px; background: var(--arden-bg-sidebar); }
-.arden-app-shell .organization-tabs button { min-height: 28px; padding: 0 12px; border: 0; border-radius: 8px; color: var(--arden-text-secondary); background: transparent; font-size: 13px; font-weight: 600; transform: none; box-shadow: none; }
+.arden-app-shell .organization-tabs button { min-height: var(--arden-control-sm); padding: 0 12px; border: 0; border-radius: 8px; color: var(--arden-text-secondary); background: transparent; font-size: 13px; font-weight: 600; transform: none; box-shadow: none; }
 .arden-app-shell .organization-tabs button::before { content: none; }
 .arden-app-shell .organization-tabs button:hover { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
 .arden-app-shell .organization-tabs button.is-active, .arden-app-shell .organization-tabs button.is-active:hover { color: var(--arden-text-primary); border: 0; background: var(--arden-accent-subtle); box-shadow: inset 0 0 0 1px var(--arden-accent-border); }
@@ -82,3 +78,13 @@
   .organization-live-admin .admin-search { max-width: none; }
   .organization-live-admin .admin-inline-form .primary-button { margin-top: 0; }
 }
+/* One-line description: a wrapping description would push the tab bar down when switching tabs. */
+.organization-live-admin .organization-access-heading p { max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Filter rows sit above the split so a side island's top aligns with the table, not the filters. */
+.organization-live-admin .admin-tabpanel { display: grid; gap: 12px; min-width: 0; }
+.organization-live-admin .island-split > .island-side { flex: 1 1 300px; max-width: 340px; }
+.island-seg.is-filter > button[aria-pressed="true"] { background: var(--arden-surface-raised); box-shadow: inset 0 0 0 1px var(--arden-border); }
+.audience-row .island-badge { min-width: 28px; }
+.audience-row .island-chip { justify-content: center; min-width: 76px; }
+.organization-live-admin .island-detail-section > .secondary-button.is-danger { justify-self: stretch; }

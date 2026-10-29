@@ -18,7 +18,7 @@
 .my-work-row-copy { display: grid; flex: 1 1 260px; gap: 2px; min-width: 0; }
 .my-work-row-copy strong, .my-work-row-link strong { font-weight: 600; overflow-wrap: anywhere; }
 .my-work-row-copy span, .my-work-row-link span { color: var(--arden-text-secondary); font-size: 12px; }
-.my-work-row .secondary-button { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.my-work-row .secondary-button { min-height: var(--arden-control-sm); padding: 0 10px; font-size: 12px; }
 .my-work-row.is-compact { padding: 10px 12px; }
 .my-work-row-link { display: grid; flex: 1; gap: 2px; min-width: 0; padding: 0; border: 0; color: var(--arden-text-primary); background: transparent; text-align: left; cursor: pointer; }
 .my-work-row-link:hover:not(:disabled) strong { text-decoration: underline; text-underline-offset: 3px; }

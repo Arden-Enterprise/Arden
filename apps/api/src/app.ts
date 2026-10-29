@@ -5,7 +5,7 @@ import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
-import type { KnowledgeClassification } from "./knowledge/policy.js";
+import { allKnowledgeClassifications, defaultKnowledgeClassification, type KnowledgeClassification } from "./knowledge/policy.js";
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
 
@@ -31,7 +31,8 @@ type AppDependencies = {
 };
 
 type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean; passwordSetupRequired?: boolean };
-type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification: KnowledgeClassification };
+// Decision 0013: classification is optional and defaults to INTERNAL; review strictness comes from audience breadth.
+type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification?: KnowledgeClassification };
 
 export function buildApp(dependencies: AppDependencies) {
   const app = Fastify({
@@ -484,7 +485,7 @@ export function buildApp(dependencies: AppDependencies) {
       headers: { type: "object", required: ["idempotency-key"], properties: {
         "idempotency-key": { type: "string", pattern: uuidPattern },
       } },
-      body: { type: "object", additionalProperties: false, required: ["sourcePrivateVersionId", "classification"], properties: {
+      body: { type: "object", additionalProperties: false, required: ["sourcePrivateVersionId"], properties: {
         sourcePrivateVersionId: { type: "string", pattern: uuidPattern },
         classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
       } },
@@ -519,7 +520,7 @@ export function buildApp(dependencies: AppDependencies) {
       const result = await dependencies.repository.createKnowledgeDraft(context.userId, organizationId, {
         actorMembershipId: actor.membershipId,
         sourceVersionId: source.versionId,
-        classification: request.body.classification,
+        classification: request.body.classification ?? defaultKnowledgeClassification,
         idempotencyKey: request.headers["idempotency-key"] as string,
         expectedSource: source,
         copiedContent: copied,
@@ -571,14 +572,14 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: { title: string; body: string; classification: KnowledgeClassification } }>(
+  app.post<{ Params: { organizationId: string }; Body: { title: string; body: string; classification?: KnowledgeClassification } }>(
     "/api/v1/organizations/:organizationId/knowledge/drafts/new", {
       schema: {
         params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
         headers: { type: "object", required: ["idempotency-key"], properties: {
           "idempotency-key": { type: "string", pattern: uuidPattern },
         } },
-        body: { type: "object", additionalProperties: false, required: ["title", "body", "classification"], properties: {
+        body: { type: "object", additionalProperties: false, required: ["title", "body"], properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           body: { type: "string", maxLength: maxBodyBytes },
           classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
@@ -603,7 +604,7 @@ export function buildApp(dependencies: AppDependencies) {
         stored = await dependencies.storage.write(semanticBody);
         creationAttempted = true;
         const result = await dependencies.repository.createNewKnowledgeDraft(context.userId, organizationId, {
-          actorMembershipId: actor.membershipId, title, classification: request.body.classification,
+          actorMembershipId: actor.membershipId, title, classification: request.body.classification ?? defaultKnowledgeClassification,
           idempotencyKey: request.headers["idempotency-key"] as string, content: stored, requestId: request.id,
         });
         if (result.kind === "unavailable" || result.kind === "idempotency-conflict") {
@@ -630,7 +631,7 @@ export function buildApp(dependencies: AppDependencies) {
       }
     });
 
-  app.post<{ Params: { organizationId: string }; Body: { title: string; pdfBase64: string; classification: KnowledgeClassification } }>(
+  app.post<{ Params: { organizationId: string }; Body: { title: string; pdfBase64: string; classification?: KnowledgeClassification } }>(
     "/api/v1/organizations/:organizationId/knowledge/drafts/pdf", {
       bodyLimit: maxPdfBase64Length + 4096,
       schema: {
@@ -638,7 +639,7 @@ export function buildApp(dependencies: AppDependencies) {
         headers: { type: "object", required: ["idempotency-key"], properties: {
           "idempotency-key": { type: "string", pattern: uuidPattern },
         } },
-        body: { type: "object", additionalProperties: false, required: ["title", "pdfBase64", "classification"], properties: {
+        body: { type: "object", additionalProperties: false, required: ["title", "pdfBase64"], properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
           classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
@@ -666,7 +667,7 @@ export function buildApp(dependencies: AppDependencies) {
         stored = await dependencies.storage.writePdf(bytes);
         creationAttempted = true;
         const result = await dependencies.repository.createNewKnowledgeDraft(context.userId, request.params.organizationId, {
-          actorMembershipId: actor.membershipId, title, classification: request.body.classification,
+          actorMembershipId: actor.membershipId, title, classification: request.body.classification ?? defaultKnowledgeClassification,
           idempotencyKey: request.headers["idempotency-key"] as string, content: stored, requestId: request.id,
         });
         if (result.kind === "unavailable" || result.kind === "idempotency-conflict") {
@@ -855,7 +856,7 @@ export function buildApp(dependencies: AppDependencies) {
           request.headers["idempotency-key"] as string, request.id);
         if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
         if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT", "Reload this draft and its review status.", request.id));
-        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Add an active responsible department, access scope and audience before submitting.", request.id));
+        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Choose who can read this draft and save it before submitting. You need an active primary department; ask an Org Admin if you have none.", request.id));
         reply.header("Cache-Control", "no-store");
         return reply.code(result.kind === "submitted" ? 201 : 200).send(representSubmission(result.submission));
       } catch (error) {
@@ -901,14 +902,19 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: Omit<ReviewerGrantInput, "validUntil"> & { validUntil: string | null } }>(
+  app.post<{ Params: { organizationId: string }; Body: {
+    reviewerMembershipId: string; scope?: ReviewerGrantInput["scope"]; departmentId?: string | null;
+    classifications?: ReviewerGrantInput["classifications"]; level?: ReviewerGrantInput["level"];
+    teamTag?: string | null; projectTag?: string | null; validUntil: string | null;
+  } }>(
     "/api/v1/organizations/:organizationId/knowledge/reviewer-grants", {
       schema: {
         params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
         body: { type: "object", additionalProperties: false,
-          required: ["reviewerMembershipId", "departmentId", "classifications", "level"], properties: {
+          required: ["reviewerMembershipId"], properties: {
             reviewerMembershipId: { type: "string", pattern: uuidPattern },
-            departmentId: { type: "string", pattern: uuidPattern },
+            scope: { type: "string", enum: ["DEPARTMENT", "ORGANIZATION"], default: "DEPARTMENT" },
+            departmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
             classifications: { type: "array", minItems: 1, maxItems: 3, uniqueItems: true,
               items: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] } },
             level: { type: "string", enum: ["STANDARD", "SPECIALIST", "SENIOR"] },
@@ -921,15 +927,22 @@ export function buildApp(dependencies: AppDependencies) {
       const context = await requestActor(request, reply);
       if (!context) return;
       const { validUntil, ...rest } = request.body;
+      const scope = rest.scope ?? "DEPARTMENT";
+      const departmentId = rest.departmentId ?? null;
       const expiry = validUntil ? new Date(validUntil) : null;
       if ((expiry && (!Number.isFinite(expiry.getTime()) || expiry <= new Date()))
+        || (scope === "DEPARTMENT" && departmentId === null)
+        || (scope === "ORGANIZATION" && departmentId !== null)
         || (rest.teamTag !== undefined && rest.teamTag !== null && !rest.teamTag.trim())
         || (rest.projectTag !== undefined && rest.projectTag !== null && !rest.projectTag.trim())) {
         return reply.code(400).send(safeError("INVALID_REQUEST", "The reviewer grant is invalid.", request.id));
       }
       try {
         const grant = await dependencies.repository.createReviewerGrant(context.userId, request.params.organizationId, {
-          ...rest, teamTag: rest.teamTag?.trim() ?? null,
+          reviewerMembershipId: rest.reviewerMembershipId, scope, departmentId,
+          level: rest.level, teamTag: rest.teamTag?.trim() ?? null,
+          // Decision 0013: a grant no longer narrows by classification; legacy pending submissions still match a level.
+          classifications: rest.classifications ?? [...allKnowledgeClassifications],
           projectTag: rest.projectTag?.trim() ?? null, validUntil: expiry,
         }, request.id);
         if (!grant) return reply.code(404).send(resourceNotAvailable(request.id));

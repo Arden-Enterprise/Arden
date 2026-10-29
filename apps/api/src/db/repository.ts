@@ -2,7 +2,7 @@ import type { Pool, PoolClient } from "pg";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { createHash, randomUUID } from "node:crypto";
-import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, type KnowledgeClassification } from "../knowledge/policy.js";
+import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
 import { planReviewDecision, type ReviewAction, type ReviewDecisionPlan } from "../knowledge/review-decision.js";
 
@@ -106,14 +106,16 @@ export type SubmitKnowledgeDraftResult =
   | { kind: "not-ready" };
 export type ReviewerGrantInput = {
   reviewerMembershipId: string;
-  departmentId: string;
+  scope: "DEPARTMENT" | "ORGANIZATION";
+  departmentId: string | null;
   classifications: KnowledgeClassification[];
-  level: "STANDARD" | "SPECIALIST" | "SENIOR";
+  level?: "STANDARD" | "SPECIALIST" | "SENIOR";
   teamTag: string | null;
   projectTag: string | null;
   validUntil: Date | null;
 };
-export type ReviewerGrantRecord = ReviewerGrantInput & {
+export type ReviewerGrantRecord = Omit<ReviewerGrantInput, "level"> & {
+  level: "STANDARD" | "SPECIALIST" | "SENIOR";
   id: string;
   status: "ACTIVE" | "INACTIVE";
   validFrom: Date;
@@ -225,16 +227,25 @@ type SharedSubmissionRow = {
   team_tag: string | null;
   project_tag: string | null;
   policy_version: number;
+  review_rule: "LEGACY" | "GRANT_SCOPE";
+  organization_wide: boolean;
   published_version_id: string | null;
   decision_comment: string | null;
 };
+// organization_wide: the frozen audience includes the organization audience. That kind is valid only at
+// Organization scope (audience_snapshot_enforceable) and audience_member_read shows it to every active member,
+// so it is detected even when the reviewer cannot see the snapshot's group or department audiences.
 const submissionSelect = `
   SELECT s.submission_id, s.shared_draft_id, s.shared_draft_version_id,
          s.snapshot_version_no,
          s.title, s.classification, s.responsible_department_id, s.target_scope_type,
          s.target_department_id, s.audience_role_ids, s.content_hash, s.content_uri,
          s.mime_type, s.status, s.publication_state, s.submitted_at, s.submitted_by_membership_id,
-         s.team_tag, s.project_tag, s.policy_version, cp.published_version_id,
+         s.team_tag, s.project_tag, s.policy_version, s.review_rule,
+         (s.target_scope_type = 'ORGANIZATION' AND EXISTS (
+           SELECT 1 FROM audience a WHERE a.organization_id = s.organization_id
+              AND a.audience_id = ANY(s.audience_role_ids) AND a.kind = 'ORGANIZATION_ALL')) AS organization_wide,
+         cp.published_version_id,
          rd.comment AS decision_comment
     FROM shared_submission s
     LEFT JOIN published_knowledge_version pv ON pv.submission_id = s.submission_id
@@ -262,7 +273,8 @@ function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmissio
 type ReviewerGrantRow = {
   reviewer_grant_id: string;
   reviewer_membership_id: string;
-  department_id: string;
+  scope: "DEPARTMENT" | "ORGANIZATION";
+  department_id: string | null;
   classifications: KnowledgeClassification[];
   level: "STANDARD" | "SPECIALIST" | "SENIOR";
   team_tag: string | null;
@@ -275,6 +287,7 @@ function mapReviewerGrant(row: ReviewerGrantRow): ReviewerGrantRecord {
   return {
     id: row.reviewer_grant_id,
     reviewerMembershipId: row.reviewer_membership_id,
+    scope: row.scope,
     departmentId: row.department_id,
     classifications: row.classifications,
     level: row.level,
@@ -293,8 +306,11 @@ function reviewAuthorizationFromRow(row: SharedSubmissionRow, organizationId: st
     status: row.status,
     classification: row.classification,
     policyVersion: row.policy_version,
+    reviewRule: row.review_rule,
     teamTag: row.team_tag,
     projectTag: row.project_tag,
+    // Anything but an explicit false fails closed to the stricter organization-wide requirement.
+    audienceBreadth: row.organization_wide === false ? "LIMITED" as const : "ORGANIZATION_WIDE" as const,
   };
 }
 type PublishedKnowledgeRow = {
@@ -343,6 +359,9 @@ export type OrganizationAdminData = {
 };
 export type KnowledgeOptions = {
   departments: Array<{ id: string; name: string }>;
+  /** The signed-in member's active primary department, which owns and reviews their drafts (decision 0014). */
+  primaryDepartmentId: string | null;
+  organizationReviewerAvailable: boolean;
   audiences: Array<{ id: string; name: string; departmentId: string | null;
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
 };
@@ -706,8 +725,12 @@ export class ArdenRepository implements ArdenDataRepository {
         kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>(`SELECT audience_id AS id,
         name, department_id, kind FROM audience WHERE organization_id = $1 AND status = 'ACTIVE'
         ORDER BY kind, name, audience_id`, [organizationId]);
+      const organizationReviewer = await client.query<{ available: boolean }>(`
+        SELECT organization_has_active_reviewer_grant($1) AS available`, [organizationId]);
       return {
         departments: departments.rows,
+        primaryDepartmentId: await this.actorPrimaryDepartment(client, userId, organizationId),
+        organizationReviewerAvailable: organizationReviewer.rows[0]?.available === true,
         audiences: audiences.rows.map(audience => ({
           id: audience.id, name: audience.name, departmentId: audience.department_id,
           kind: audience.kind,
@@ -1143,11 +1166,14 @@ export class ArdenRepository implements ArdenDataRepository {
       if (!row) return { kind: "not-found" };
       if (row.current_version_no !== expectedVersion) return { kind: "conflict", currentVersion: row.current_version_no };
       const current = mapSharedDraft(row, organizationId);
+      // Decision 0014: the responsible department always follows the author's primary department.
+      const responsible = resolveResponsibleDepartment(patch.responsibleDepartmentId,
+        await this.actorPrimaryDepartment(client, userId, organizationId));
+      if (!responsible.ok) return { kind: "invalid-metadata" };
       const next = {
         title: patch.title ?? current.title,
         classification: patch.classification ?? current.classification,
-        responsibleDepartmentId: patch.responsibleDepartmentId === undefined
-          ? current.responsibleDepartmentId : patch.responsibleDepartmentId,
+        responsibleDepartmentId: responsible.departmentId,
         targetScopeType: patch.targetScopeType === undefined ? current.targetScopeType : patch.targetScopeType,
         teamTag: patch.teamTag === undefined ? current.teamTag : patch.teamTag,
         projectTag: patch.projectTag === undefined ? current.projectTag : patch.projectTag,
@@ -1223,6 +1249,8 @@ export class ArdenRepository implements ArdenDataRepository {
         FROM audience WHERE organization_id = $1 AND audience_id = ANY($2::uuid[])`,
       [organizationId, row.audience_role_ids]);
       const ready = canSubmitSnapshot({
+        responsibleDepartmentId: row.responsible_department_id,
+        authorPrimaryDepartmentId: await this.actorPrimaryDepartment(client, userId, organizationId),
         actor: { membershipId: row.author_membership_id, organizationId, status: "ACTIVE" },
         draft: { organizationId, authorMembershipId: row.author_membership_id, status: row.status,
           currentVersionId: row.shared_draft_version_id },
@@ -1285,7 +1313,7 @@ export class ArdenRepository implements ArdenDataRepository {
   async listReviewerGrants(userId: string, organizationId: string): Promise<ReviewerGrantRecord[] | null> {
     return this.withOrganizationAdmin(userId, organizationId, async (client) => {
       const result = await client.query<ReviewerGrantRow>(`SELECT reviewer_grant_id, reviewer_membership_id,
-        department_id, classifications, level, team_tag, project_tag, status, valid_from, valid_until
+        scope, department_id, classifications, level, team_tag, project_tag, status, valid_from, valid_until
         FROM reviewer_grant WHERE organization_id = $1
         ORDER BY created_at DESC, reviewer_grant_id DESC LIMIT 200`, [organizationId]);
       return result.rows.map(mapReviewerGrant);
@@ -1299,24 +1327,29 @@ export class ArdenRepository implements ArdenDataRepository {
         JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
         WHERE om.membership_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`,
       [input.reviewerMembershipId, organizationId]);
-      const department = await client.query(`SELECT 1 FROM department WHERE department_id = $1
-        AND organization_id = $2 AND status = 'ACTIVE'`, [input.departmentId, organizationId]);
-      if (target.rowCount === 0 || department.rowCount === 0) return null;
+      const department = input.scope === "DEPARTMENT" && input.departmentId !== null
+        ? await client.query(`SELECT 1 FROM department WHERE department_id = $1
+            AND organization_id = $2 AND status = 'ACTIVE'`, [input.departmentId, organizationId])
+        : null;
+      if (target.rowCount === 0
+        || (input.scope === "DEPARTMENT" && (!department || department.rowCount === 0))
+        || (input.scope === "ORGANIZATION" && input.departmentId !== null)) return null;
+      const level = input.level ?? "STANDARD";
       const result = await client.query<ReviewerGrantRow>(`
-        INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, department_id,
+        INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope, department_id,
           granted_by_membership_id, classifications, level, team_tag, project_tag, valid_until)
-        VALUES ($1, $2, $3, $4, $5::text[], $6, $7, $8, $9)
-        RETURNING reviewer_grant_id, reviewer_membership_id, department_id, classifications,
+        VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10)
+        RETURNING reviewer_grant_id, reviewer_membership_id, scope, department_id, classifications,
                   level, team_tag, project_tag, status, valid_from, valid_until`, [organizationId,
-        input.reviewerMembershipId, input.departmentId, adminMembershipId,
-        input.classifications, input.level, input.teamTag, input.projectTag, input.validUntil]);
+        input.reviewerMembershipId, input.scope, input.departmentId, adminMembershipId,
+        input.classifications, level, input.teamTag, input.projectTag, input.validUntil]);
       const row = result.rows[0];
       if (!row) throw new Error("Reviewer grant insert returned no row");
       await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id,
         event_type, outcome, details_json) VALUES ($1, $2, 'REVIEWER_GRANT_CREATED', 'SUCCESS', $3::jsonb)`, [
         organizationId, adminMembershipId,
         JSON.stringify({ reviewerGrantId: row.reviewer_grant_id, reviewerMembershipId: input.reviewerMembershipId,
-          departmentId: input.departmentId, requestId }),
+          scope: input.scope, departmentId: input.departmentId, requestId }),
       ]);
       return mapReviewerGrant(row);
     });
@@ -1675,12 +1708,13 @@ export class ArdenRepository implements ArdenDataRepository {
   private async loadActorReviewerGrants(client: PoolClient, membershipId: string, organizationId: string) {
     const result = await client.query<ReviewerGrantRow>(`
       SELECT reviewer_grant_id, reviewer_membership_id, department_id, classifications,
-             level, team_tag, project_tag, status, valid_from, valid_until
+             scope, level, team_tag, project_tag, status, valid_from, valid_until
         FROM reviewer_grant WHERE organization_id = $1 AND reviewer_membership_id = $2`,
     [organizationId, membershipId]);
     return result.rows.map((row) => ({
       membershipId: row.reviewer_membership_id,
       organizationId,
+      scope: row.scope,
       departmentId: row.department_id,
       status: row.status,
       classifications: row.classifications,
@@ -1690,6 +1724,18 @@ export class ArdenRepository implements ArdenDataRepository {
       validFrom: row.valid_from,
       validUntil: row.valid_until,
     }));
+  }
+
+  /** The actor's active primary department in an active department, read under the actor's own RLS context. */
+  private async actorPrimaryDepartment(client: PoolClient, userId: string, organizationId: string): Promise<string | null> {
+    const result = await client.query<{ department_id: string }>(`
+      SELECT dm.department_id FROM department_membership dm
+        JOIN organization_membership om ON om.membership_id = dm.membership_id
+        JOIN department d ON d.department_id = dm.department_id AND d.organization_id = om.organization_id
+       WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
+         AND dm.is_primary AND dm.status = 'ACTIVE' AND d.status = 'ACTIVE'
+       LIMIT 1`, [userId, organizationId]);
+    return result.rows[0]?.department_id ?? null;
   }
 
   private async audienceEnforceable(client: PoolClient, organizationId: string, audienceIds: string[],

@@ -7,13 +7,15 @@ const rootFiles = new Set(['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yam
 const serverPackages = new Set(['domain', 'db', 'ai', 'api-client']);
 const extensions = new Set(['.ts', '.tsx', '.js', '.mjs', '.cjs', '.json', '.yaml', '.yml', '.sql']);
 const excluded = new Set(['node_modules', 'dist', 'out', 'coverage', 'fixtures', 'backups', 'data']);
+const numberedMigration = /^apps\/api\/migrations\/\d{4}_[a-z0-9][a-z0-9_-]*\.sql$/i;
+const credentialLikeFilename = /(secret|credential|token|password|private|\.local)([._-]|$)/i;
 
 // Mirror only code needed by the API. Git ignores are an additional boundary.
 /** Keep the upload boundary limited to backend code; the server checks it independently. */
 export function allowedSource(name) {
   const parts = name.split('/');
   if (parts.some(part => part.startsWith('.') || excluded.has(part))) return false;
-  if (/(secret|credential|token|password|private|\.local)([._-]|$)/i.test(path.basename(name))) return false;
+  if (!numberedMigration.test(name) && credentialLikeFilename.test(path.basename(name))) return false;
   if (rootFiles.has(name)) return true;
   if (parts[0] === 'apps' && parts[2] === 'package.json' && parts.length === 3) return true;
   if (parts[0] === 'packages' && parts[2] === 'package.json' && parts.length === 3) return true;

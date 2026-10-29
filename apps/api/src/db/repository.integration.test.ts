@@ -11,12 +11,15 @@ const ids = {
   organization: randomUUID(),
   owner: randomUUID(),
   manager: randomUUID(),
+  organizationReviewer: randomUUID(),
   ownerRole: randomUUID(),
   managerRole: randomUUID(),
   organizationScope: randomUUID(),
   ownerMembership: randomUUID(),
   managerMembership: randomUUID(),
+  organizationReviewerMembership: randomUUID(),
   department: randomUUID(),
+  organizationAudience: randomUUID(),
 };
 const roleCodes = [`ARDEN_TEST_OWNER_${ids.owner.slice(0, 8).toUpperCase()}`,
   `ARDEN_TEST_MANAGER_${ids.manager.slice(0, 8).toUpperCase()}`];
@@ -38,19 +41,32 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
        WHERE migration_id IN ('0001_initial_schema', '0008_enable_private_shared_draft_creation',
          '0015_org_admin_member_profiles', '0016_fix_flow2_cross_actor_validation',
          '0017_audience_and_instance_admin_foundation',
-         '0019_flow3_durable_index_generations')`);
-    if (migration.rows[0]?.count !== "6") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0018_flow3_contract_and_test_content_reset',
+          '0019_flow3_durable_index_generations', '0020_permission_aware_answer_sources',
+          '0021_monotonic_publication_activation', '0022_organization_reviewer_grants')`);
+    if (migration.rows[0]?.count !== "10") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query(`INSERT INTO organization (organization_id, name, slug) VALUES ($1, 'Arden Integration Test', $2)`, [ids.organization, `arden-test-${ids.organization}`]);
-      await client.query(`INSERT INTO user_account (user_id, email, full_name) VALUES ($1, $2, 'Synthetic Owner'), ($3, $4, 'Synthetic Manager')`, [ids.owner, `${ids.owner}@example.test`, ids.manager, `${ids.manager}@example.test`]);
-      await client.query(`INSERT INTO organization_membership (membership_id, organization_id, user_id) VALUES ($1, $2, $3), ($4, $2, $5)`, [ids.ownerMembership, ids.organization, ids.owner, ids.managerMembership, ids.manager]);
+      await client.query(`INSERT INTO user_account (user_id, email, full_name)
+        VALUES ($1, $2, 'Synthetic Owner'), ($3, $4, 'Synthetic Manager'),
+          ($5, $6, 'Synthetic Organization Reviewer')`,
+      [ids.owner, `${ids.owner}@example.test`, ids.manager, `${ids.manager}@example.test`,
+        ids.organizationReviewer, `${ids.organizationReviewer}@example.test`]);
+      await client.query(`INSERT INTO organization_membership (membership_id, organization_id, user_id)
+        VALUES ($1, $2, $3), ($4, $2, $5), ($6, $2, $7)`,
+      [ids.ownerMembership, ids.organization, ids.owner, ids.managerMembership, ids.manager,
+        ids.organizationReviewerMembership, ids.organizationReviewer]);
       await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Synthetic private-note owner'), ($4, $2, $5, 'Synthetic manager')`, [ids.ownerRole, ids.organization, roleCodes[0], ids.managerRole, roleCodes[1]]);
       await client.query(`INSERT INTO department (department_id, organization_id, code, name, default_role_id)
         VALUES ($1, $2, 'TEST', 'Synthetic department', $3)`, [ids.department, ids.organization, ids.ownerRole]);
+      await client.query(`INSERT INTO department_membership
+        (membership_id, department_id, is_primary)
+        VALUES ($1, $2, true), ($3, $2, true)`,
+      [ids.ownerMembership, ids.department, ids.managerMembership]);
       await client.query(`INSERT INTO audience (audience_id, organization_id, kind, name, is_managed,
         created_by_membership_id, legacy_role_id)
         VALUES ($1, $2, 'GROUP', 'Synthetic readers', false, $3, $1)`,
@@ -58,6 +74,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query(`INSERT INTO audience_group_membership
         (audience_id, organization_id, membership_id, assigned_by_membership_id)
         VALUES ($1, $2, $3, $3)`, [ids.ownerRole, ids.organization, ids.ownerMembership]);
+      await client.query(`INSERT INTO audience
+        (audience_id, organization_id, kind, name, is_managed)
+        VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone in organization', true)`,
+      [ids.organizationAudience, ids.organization]);
       await client.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type) VALUES ($1, $2, 'ORGANIZATION')`, [ids.organizationScope, ids.organization]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id) VALUES ($1, $2, $3), ($4, $5, $3)`, [ids.ownerMembership, ids.ownerRole, ids.organizationScope, ids.managerMembership, ids.managerRole]);
       await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
@@ -111,13 +131,17 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM private_workspace WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM audience_group_membership WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM audience WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM department_membership WHERE membership_id = ANY($1::uuid[])",
+            [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
-          await client.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])",
+            [[ids.ownerMembership, ids.managerMembership, ids.organizationReviewerMembership]]);
           await client.query("DELETE FROM department WHERE department_id = $1", [ids.department]);
           await client.query("DELETE FROM role WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
           await client.query("DELETE FROM access_scope WHERE access_scope_id = $1", [ids.organizationScope]);
-          await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])", [[ids.owner, ids.manager]]);
+          await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])",
+            [[ids.owner, ids.manager, ids.organizationReviewer]]);
           await client.query("DELETE FROM organization WHERE organization_id = $1", [ids.organization]);
           await client.query("ALTER TABLE draft_version ENABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_draft_version ENABLE TRIGGER USER");
@@ -245,6 +269,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const grant = await repository.createReviewerGrant(ids.owner, ids.organization, {
       reviewerMembershipId: ids.managerMembership,
+      scope: "DEPARTMENT",
       departmentId: ids.department,
       classifications: ["INTERNAL"],
       level: "STANDARD",
@@ -271,6 +296,123 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query("ROLLBACK");
       client.release();
     }
+  });
+
+  it("keeps organization and department reviewer scopes disjoint and exposes grant availability", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+
+    await expect(repository.getKnowledgeOptions(ids.owner, ids.organization))
+      .resolves.toMatchObject({ organizationReviewerAvailable: false });
+
+    const grant = await repository.createReviewerGrant(ids.owner, ids.organization, {
+      reviewerMembershipId: ids.organizationReviewerMembership,
+      scope: "ORGANIZATION",
+      departmentId: null,
+      classifications: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"],
+      teamTag: null,
+      projectTag: null,
+      validUntil: null,
+    }, "integration-organization-reviewer-grant");
+    expect(grant).toMatchObject({
+      scope: "ORGANIZATION",
+      departmentId: null,
+      level: "STANDARD",
+      status: "ACTIVE",
+    });
+    await expect(repository.getKnowledgeOptions(ids.owner, ids.organization))
+      .resolves.toMatchObject({ organizationReviewerAvailable: true });
+
+    const submit = async (title: string, audienceId: string) => {
+      const created = await repository.createNewKnowledgeDraft(ids.owner, ids.organization, {
+        actorMembershipId: ids.ownerMembership,
+        title,
+        classification: "INTERNAL",
+        idempotencyKey: randomUUID(),
+        content: {
+          sourceUri: `arden-private-object://${randomUUID()}`,
+          mimeType: "text/plain",
+          contentHash: randomUUID().replaceAll("-", "").padEnd(64, "0"),
+        },
+        requestId: `integration-${title}-create`,
+      });
+      expect(created.kind).toBe("created");
+      if (created.kind !== "created") throw new Error("Knowledge draft was not created");
+      const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
+        created.draft.id, created.draft.currentVersion, {
+          responsibleDepartmentId: ids.department,
+          targetScopeType: "ORGANIZATION",
+          audienceRoleIds: [audienceId],
+        }, null, `integration-${title}-configure`);
+      expect(configured.kind).toBe("updated");
+      if (configured.kind !== "updated") throw new Error("Knowledge draft was not configured");
+      const submitted = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
+        created.draft.id, configured.draft.currentVersion, randomUUID(),
+        `integration-${title}-submit`);
+      expect(submitted.kind).toBe("submitted");
+      if (submitted.kind !== "submitted") throw new Error("Knowledge draft was not submitted");
+      return submitted.submission;
+    };
+
+    const limited = await submit("limited-scope", ids.ownerRole);
+    const organizationWide = await submit("organization-scope", ids.organizationAudience);
+    const assigned = await repository.listAssignedReviews(ids.organizationReviewer,
+      ids.organization);
+    expect(assigned).not.toBeNull();
+    const assignedIds = assigned?.map(item => item.submissionId) ?? [];
+    expect(assignedIds).toContain(organizationWide.id);
+    expect(assignedIds).not.toContain(limited.id);
+    await expect(repository.decideReview(ids.organizationReviewer, ids.organization, limited.id,
+      "REJECT", limited.snapshotVersionId, limited.contentHash, "Wrong reviewer scope",
+      randomUUID(), "integration-organization-reviewer-limited-denied"))
+      .resolves.toEqual({ kind: "unavailable" });
+    await expect(repository.decideReview(ids.organizationReviewer, ids.organization,
+      organizationWide.id, "REJECT", organizationWide.snapshotVersionId,
+      organizationWide.contentHash, "Organization review completed", randomUUID(),
+      "integration-organization-reviewer-decide"))
+      .resolves.toMatchObject({ kind: "decided", submission: { status: "REJECTED" } });
+
+    const newRules = await pool.query<{ submission_id: string; review_rule: string }>(`
+      SELECT submission_id, review_rule FROM arden.shared_submission
+       WHERE submission_id = ANY($1::uuid[]) ORDER BY submission_id`,
+    [[limited.id, organizationWide.id]]);
+    expect(newRules.rows).toEqual(expect.arrayContaining([
+      { submission_id: limited.id, review_rule: "GRANT_SCOPE" },
+      { submission_id: organizationWide.id, review_rule: "GRANT_SCOPE" },
+    ]));
+
+    const legacy = await submit("legacy-organization-scope", ids.organizationAudience);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL search_path TO arden, public");
+      await client.query("ALTER TABLE shared_submission DISABLE TRIGGER trg_protect_flow2_submission_snapshot");
+      await client.query("UPDATE shared_submission SET review_rule = 'LEGACY' WHERE submission_id = $1",
+        [legacy.id]);
+      await client.query("ALTER TABLE shared_submission ENABLE TRIGGER trg_protect_flow2_submission_snapshot");
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+    const specialist = await repository.createReviewerGrant(ids.owner, ids.organization, {
+      reviewerMembershipId: ids.managerMembership,
+      scope: "DEPARTMENT",
+      departmentId: ids.department,
+      classifications: ["INTERNAL"],
+      level: "SPECIALIST",
+      teamTag: null,
+      projectTag: null,
+      validUntil: null,
+    }, "integration-legacy-specialist-grant");
+    expect(specialist).toMatchObject({ scope: "DEPARTMENT", level: "SPECIALIST" });
+    const legacyQueue = await repository.listAssignedReviews(ids.manager, ids.organization);
+    expect(legacyQueue).not.toBeNull();
+    expect(legacyQueue?.map(item => item.submissionId) ?? []).toContain(legacy.id);
+    await expect(pool.query<{ review_rule: string }>(
+      "SELECT review_rule FROM arden.shared_submission WHERE submission_id = $1", [legacy.id]))
+      .resolves.toMatchObject({ rows: [{ review_rule: "LEGACY" }] });
   });
 
   it("durably enqueues and atomically activates a different member's approved snapshot", async () => {
@@ -307,6 +449,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const grant = await repository.createReviewerGrant(ids.owner, ids.organization, {
       reviewerMembershipId: ids.managerMembership,
+      scope: "DEPARTMENT",
       departmentId: ids.department,
       classifications: ["INTERNAL"],
       level: "STANDARD",
@@ -376,9 +519,11 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.listPublishedKnowledge(ids.manager, ids.organization)).resolves.toEqual([]);
 
     const evidence = await pool.query<{ event_type: string; count: string }>(`
-      SELECT event_type, count(*)::text AS count FROM arden.audit_event
-       WHERE organization_id = $1 AND event_type IN ('KNOWLEDGE_REVIEW_DECIDED', 'KNOWLEDGE_INDEX_ACTIVATED')
-       GROUP BY event_type ORDER BY event_type`, [ids.organization]);
+      SELECT a.event_type, count(*)::text AS count FROM arden.audit_event a
+      JOIN arden.review_decision rd ON rd.review_decision_id = a.review_decision_id
+       WHERE a.organization_id = $1 AND rd.submission_id = $2
+         AND a.event_type IN ('KNOWLEDGE_REVIEW_DECIDED', 'KNOWLEDGE_INDEX_ACTIVATED')
+       GROUP BY a.event_type ORDER BY a.event_type`, [ids.organization, submitted.submission.id]);
     expect(evidence.rows).toEqual([
       { event_type: "KNOWLEDGE_INDEX_ACTIVATED", count: "1" },
       { event_type: "KNOWLEDGE_REVIEW_DECIDED", count: "1" },
