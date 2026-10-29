@@ -5,6 +5,7 @@ GitHub job's PostgreSQL service and creates its own unpredictable test database.
 No backup is published or retained outside the temporary runner.
 """
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -47,6 +48,10 @@ def main():
     migrations = sorted(Path("apps/api/migrations").glob("[0-9][0-9][0-9][0-9]_*.sql"))
     if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 22)]:
         raise ValueError("Revisit this bounded rehearsal before changing migration inventory")
+    spec = importlib.util.spec_from_file_location('publication_upgrade', 'deploy/release/publication_upgrade.py')
+    upgrade = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(upgrade)
+    grouped = upgrade.render_upgrade([{'name': p.name, 'sql': p.read_text(encoding='utf-8')} for p in migrations])
 
     def migration_sql(paths):
         return "\n".join(p.read_text(encoding="utf-8") + "\nINSERT INTO public.arden_schema_migrations "
@@ -74,11 +79,11 @@ def main():
         assert b"arden_schema_migrations" in docker("exec", "-i", container, "pg_restore", "--list", data=ledger)
         # Failure before commit must preserve the complete old schema and data.
         try:
-            sql("BEGIN;\n" + migration_sql(migrations[17:]) + "\nSELECT 1/0; COMMIT;")
+            sql(grouped.removesuffix('COMMIT;\n') + "SELECT 1/0; COMMIT;\n")
             raise AssertionError("Expected failed migration rehearsal")
         except subprocess.CalledProcessError:
             assert snapshot() == before, "Failed transaction changed baseline"
-        sql("BEGIN;\n" + migration_sql(migrations[17:]) + "\nCOMMIT;")
+        sql(grouped)
         assert sql("SELECT count(*) FROM arden.knowledge_base;").strip() == b"0"
         assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"21"
         assert sql("SELECT count(*) FROM arden.organization;").strip() == b"1"

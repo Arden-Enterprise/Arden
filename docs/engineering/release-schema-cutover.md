@@ -46,6 +46,35 @@ See [pg_dump](https://www.postgresql.org/docs/17/app-pgdump.html) and
 
 ## Ordered maintenance
 
+Prepare executable grouped SQL from the reviewed checkout's immutable Git HEAD
+(no credentials or database connection are needed):
+
+```sh
+python deploy/release/publication_upgrade.py --output .private/publication-upgrade.sql
+```
+
+The tool refuses changed migration files, an unexpected inventory, or an existing
+output. It writes UTF-8 directly, avoiding shell-dependent redirection encodings,
+and reports the source commit and SQL checksum. Review that file, preserve its
+checksum with the backup, and transfer it through the approved private operator
+path. After approval and steps 1–4 below, run it using the selected database's
+trusted administrator connection. For example, on the server, replace uppercase
+placeholders with values from the private profile:
+
+```sh
+docker exec -i DATABASE_CONTAINER psql --no-psqlrc --username=ADMIN_ROLE \
+  --dbname=APP_DATABASE --set=ON_ERROR_STOP=1 < publication-upgrade.sql
+```
+
+The file contains `BEGIN`, the migration advisory lock, an exact 0001–0017 ledger
+guard, all four pending migrations and ledger inserts, then one `COMMIT`. The
+disposable recovery job executes this path, including induced failure before
+commit. **Do not substitute `pnpm db:migrate`:** the normal runner deliberately
+commits each migration separately and cannot provide the cutover's grouped
+rollback boundary. The tool prepares SQL only; CI cannot invoke administrative
+migrations through the receiver. It does not replace target/data inspection,
+backup or named reset authorization.
+
 1. Finish source/reviewer checks and image scanning. Retain the exact validated
    new image pair and source identity on the server before stopping the app.
    An upload receipt is not deployment or migration approval.
