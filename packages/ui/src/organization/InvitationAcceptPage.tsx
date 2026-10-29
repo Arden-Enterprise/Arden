@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Icon } from "../shared/Icon";
+import { IslandEntryLayout } from "../shared/IslandEntryLayout";
 import { invitationStatus, transitionOrganization } from "./organizationWorkflow";
 import type { OrganizationPreview } from "./previewModel";
 
@@ -30,13 +31,49 @@ export function InvitationAcceptPage({ organization, invitationId, onChange, onB
   const titles: Record<string, string> = {
     pending: "You're invited to join", expired: "This invitation has expired", revoked: "This invitation was revoked", accepted: acceptedMemberId && scenario === "current" ? "You're part of the organization" : "This invitation has already been used", missing: "Invitation unavailable",
   };
-  return <main id="arden-main" className="organization-flow-page" aria-labelledby="invitation-title" tabIndex={-1}>
-    <header className="organization-flow-topbar"><div className="organization-flow-brand"><Icon name="knowledge" size={24} /><strong>ARDEN</strong></div><span className="organization-preview-badge">INVITATION PREVIEW</span><button type="button" className="secondary-button" onClick={onBack}>Back to administration</button></header>
-    <div className="organization-flow-layout"><section className="organization-flow-story"><span className="meta-label organization-jade">01 / JOIN THE ORGANIZATION</span><h1 id="invitation-title">{titles[visibleStatus]}{visibleStatus === "pending" && <span>{organization.name}.</span>}</h1><ol className="organization-flow-steps"><li className={visibleStatus === "accepted" ? "is-complete" : "is-current"}><span>01</span><div><strong>Accept your invitation</strong></div></li><li className={visibleStatus === "accepted" ? "is-current" : ""}><span>02</span><div><strong>Administrator assigns access</strong></div></li><li><span>03</span><div><strong>Enter your workspace</strong></div></li></ol></section>
-      <section className="organization-flow-card"><span className="meta-label organization-amber">{organization.name.toUpperCase()}</span>
-        {visibleStatus === "pending" && invitation ? <><h2>Review your invitation</h2><dl className="organization-invitation-detail"><div><dt>Invited member</dt><dd>{invitation.name}</dd></div><div><dt>Work email</dt><dd>{invitation.email}</dd></div><div><dt>Expires</dt><dd>{new Date(invitation.expiresAt).toLocaleDateString()}</dd></div><div><dt>Department & role</dt><dd>Assigned after acceptance</dd></div></dl><div className="organization-notice is-info"><strong>{identity === "signed-out" ? "Sign-in is required in the live flow" : identity === "invited" ? "Invited demo account selected" : "Different demo account selected"}</strong><span>{identity === "signed-out" ? "Use the account provisioned by your organization. This preview uses a demo identity and does not sign you in." : identity === "invited" ? invitation.email : "other.member@example.invalid"}</span></div><label className="organization-field"><span>Demo identity — no real authentication</span><select value={identity} onChange={(event) => { const value = event.target.value; if (value === "signed-out" || value === "invited" || value === "different") setIdentity(value); setError(""); }}><option value="signed-out">No demo identity selected</option><option value="invited">Invited account · {invitation.email}</option><option value="different">Different account · test rejection</option></select></label>{error && <p className="organization-form-error" role="alert">{error}</p>}<button type="button" className="primary-button organization-full-button" onClick={accept}>Accept preview invitation<Icon name="arrow" size={16} /></button></> : visibleStatus === "accepted" && acceptedMemberId && scenario === "current" ? <><div className="organization-state-icon is-success"><Icon name="check" size={28} /></div><h2>Membership created</h2><div className="organization-notice"><strong>Waiting for access assignment</strong><span>Membership alone does not open the workspace.</span></div><button type="button" className="primary-button organization-full-button" onClick={() => onContinue(acceptedMemberId)}>Check my preview access<Icon name="arrow" size={16} /></button><button type="button" className="secondary-button organization-full-button" onClick={onBack}>Return to admin and assign access</button></> : <><div className="organization-state-icon"><Icon name="lock" size={28} /></div><h2>{visibleStatus === "expired" ? "Request a renewed invitation" : visibleStatus === "revoked" ? "Acceptance is no longer available" : visibleStatus === "accepted" ? "Use your existing membership" : "Check with your administrator"}</h2><button type="button" className="secondary-button organization-full-button" onClick={onBack}>Back to administration</button></>}
-        <details className="organization-scenario-controls"><summary>Preview invitation states</summary><label className="organization-field"><span>Scenario — changes only this view</span><select value={scenario} onChange={(event) => { const value = event.target.value; if (value === "current" || value === "expired" || value === "revoked" || value === "used") setScenario(value); setError(""); }}><option value="current">Current invitation</option><option value="expired">Expired invitation</option><option value="revoked">Revoked invitation</option><option value="used">Already accepted</option></select></label></details>
-
-      </section></div>
-  </main>;
+  const steps = [
+    { label: "Accept your invitation", state: visibleStatus === "accepted" ? "is-complete" : "is-current" },
+    { label: "Administrator assigns access", state: visibleStatus === "accepted" ? "is-current" : "" },
+    { label: "Enter your workspace", state: "" },
+  ];
+  return <IslandEntryLayout titleId="invitation-title" eyebrow="JOIN THE ORGANIZATION" badge="INVITATION PREVIEW"
+    title={<>{titles[visibleStatus]}{visibleStatus === "pending" && <> {organization.name}</>}</>}
+    actions={<button type="button" className="secondary-button" onClick={onBack}>Back to administration</button>}>
+    <ol className="island-entry-steps" aria-label="Joining progress">{steps.map((step, index) => <li key={step.label} className={step.state}
+      aria-current={step.state === "is-current" ? "step" : undefined}><span>{String(index + 1).padStart(2, "0")}</span>{step.label}</li>)}</ol>
+    <section className="island island-panel island-entry-card" aria-label={organization.name}>
+      <span className="meta-label">{organization.name.toUpperCase()}</span>
+      {visibleStatus === "pending" && invitation ? <>
+        <h2>Review your invitation</h2>
+        <dl className="island-kv">
+          <dt>Invited member</dt><dd>{invitation.name}</dd>
+          <dt>Work email</dt><dd>{invitation.email}</dd>
+          <dt>Expires</dt><dd>{new Date(invitation.expiresAt).toLocaleDateString()}</dd>
+          <dt>Department & role</dt><dd>Assigned after acceptance</dd>
+        </dl>
+        <p className="island-note" role="note"><Icon name="people" size={14} /><span><strong>{identity === "signed-out" ? "Sign-in is required in the live flow" : identity === "invited" ? "Invited demo account selected" : "Different demo account selected"}.</strong>{" "}
+          {identity === "signed-out" ? "Use the account provisioned by your organization. This preview uses a demo identity and does not sign you in." : identity === "invited" ? invitation.email : "other.member@example.invalid"}</span></p>
+        <label className="island-field"><span>Demo identity — no real authentication</span><select value={identity} onChange={(event) => { const value = event.target.value; if (value === "signed-out" || value === "invited" || value === "different") setIdentity(value); setError(""); }}>
+          <option value="signed-out">No demo identity selected</option><option value="invited">Invited account · {invitation.email}</option><option value="different">Different account · test rejection</option></select></label>
+        {error && <p className="island-note is-danger" role="alert"><Icon name="warning" size={14} /><span>{error}</span></p>}
+        <button type="button" className="primary-button" onClick={accept}>Accept preview invitation<Icon name="arrow" size={14} /></button>
+      </> : visibleStatus === "accepted" && acceptedMemberId && scenario === "current" ? <>
+        <span className="island-tile island-entry-state is-success" aria-hidden="true"><Icon name="check" size={22} /></span>
+        <h2>Membership created</h2>
+        <p className="island-note" role="note"><Icon name="lock" size={14} /><span><strong>Waiting for access assignment.</strong> Membership alone does not open the workspace.</span></p>
+        <div className="island-entry-actions-stack">
+          <button type="button" className="primary-button" onClick={() => onContinue(acceptedMemberId)}>Check my preview access<Icon name="arrow" size={14} /></button>
+          <button type="button" className="secondary-button" onClick={onBack}>Return to admin and assign access</button>
+        </div>
+      </> : <>
+        <span className="island-tile island-entry-state" aria-hidden="true"><Icon name="lock" size={22} /></span>
+        <h2>{visibleStatus === "expired" ? "Request a renewed invitation" : visibleStatus === "revoked" ? "Acceptance is no longer available" : visibleStatus === "accepted" ? "Use your existing membership" : "Check with your administrator"}</h2>
+        <button type="button" className="secondary-button" onClick={onBack}>Back to administration</button>
+      </>}
+      <details className="island-entry-details"><summary>Preview invitation states</summary>
+        <label className="island-field"><span>Scenario — changes only this view</span><select value={scenario} onChange={(event) => { const value = event.target.value; if (value === "current" || value === "expired" || value === "revoked" || value === "used") setScenario(value); setError(""); }}>
+          <option value="current">Current invitation</option><option value="expired">Expired invitation</option><option value="revoked">Revoked invitation</option><option value="used">Already accepted</option></select></label>
+      </details>
+    </section>
+  </IslandEntryLayout>;
 }

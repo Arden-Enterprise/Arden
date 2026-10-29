@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { draftStatus, validatePdfFile } from "../src/knowledge/knowledgeStatus";
+import { draftStatus, reviewerLabel, validatePdfFile } from "../src/knowledge/knowledgeStatus";
 import type { KnowledgeDraftSummary, KnowledgeSubmission } from "../src/shared/api-client";
 
 const draft: KnowledgeDraftSummary = {
@@ -36,5 +36,14 @@ describe("redesigned knowledge states", () => {
     expect(draftStatus(draft, { ...submission, publicationState: "SUPERSEDED" }).label).toBe("Replaced by a newer publication");
     expect(draftStatus(draft, { ...submission, publicationState: "FAILED", publishedVersionId: null })).toEqual({ label: "Publication failed", tone: "is-danger" });
     expect(draftStatus(draft, { ...submission, status: "REJECTED" }).tone).toBe("is-danger");
+  });
+
+  it("names the reviewer from audience breadth and flags only legacy restricted snapshots", () => {
+    const department = { departmentName: "Product Engineering", classification: "INTERNAL" as const };
+    expect(reviewerLabel({ ...department, organizationWide: false })).toBe("Product Engineering reviewer");
+    expect(reviewerLabel({ ...department, organizationWide: true })).toBe("Organization reviewer");
+    expect(reviewerLabel({ ...department, organizationWide: false, classification: "CONFIDENTIAL" })).toBe("Product Engineering reviewer");
+    expect(reviewerLabel({ ...department, organizationWide: true, classification: "RESTRICTED" }))
+      .toBe("Organization reviewer · legacy restricted rule");
   });
 });

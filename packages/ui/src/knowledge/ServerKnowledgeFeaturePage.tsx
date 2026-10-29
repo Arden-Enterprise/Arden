@@ -21,7 +21,7 @@ import { libraryDateLabel, libraryTitleParts } from "./libraryDisplay";
 import { ReaderPicker } from "./ReaderPicker";
 import { addReader, onlyGroupReaders, ownerDepartment, readerChoices, removeReader, scopeForReaders } from "./readerSelection";
 import { ActionToast } from "../shared/ActionToast";
-import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
+import { draftStatus, reviewerLabel, statusLabel, validatePdfFile } from "./knowledgeStatus";
 import { KnowledgeDocumentDetail, readerDocumentStatusAt } from "./KnowledgeDocumentDetail";
 import type { KnowledgeNavigationTarget } from "./knowledgeCitation";
 
@@ -419,10 +419,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <section aria-labelledby="review-frozen-title">
               <h3 id="review-frozen-title" className="review-section-label">FROZEN AT SUBMISSION</h3>
               <dl className="review-frozen">
-                <div><dt>Reviewed by</dt><dd>{review.classification === "RESTRICTED"
-                  ? "Specialist or Senior reviewer"
-                  : review.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
-                    ? "Organization reviewer" : `${departmentName(review.responsibleDepartmentId)} reviewer`}</dd></div>
+                <div><dt>Reviewed by</dt><dd>{reviewerLabel({
+                  organizationWide: review.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL"),
+                  departmentName: departmentName(review.responsibleDepartmentId), classification: review.classification })}</dd></div>
                 <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
                 <div><dt>Access scope</dt><dd>{review.targetScopeType === "DEPARTMENT" ? "Responsible department" : "Organization"}</dd></div>
                 <div><dt>Audience</dt><dd title={audienceNames(review.audienceIds)}>{audienceNames(review.audienceIds)}</dd></div>
@@ -498,7 +497,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <span className="island-meta">v{draft.currentVersion.version} · {draft.currentVersion.mimeType === "application/pdf" ? "PDF original" : "Text"}{dirty ? " · Unsaved changes" : ""}</span>
             </div>
             {draft.hasPendingSubmission && <KnowledgeNotice title="Waiting for a reviewer" tone="amber">
-              A different member needs an active reviewer grant for this department and classification. An Org Admin can assign one if the review queue is empty.
+              A different member with an active reviewer grant must decide: one for this department, or for the whole organization when everyone can read it. An Org Admin can assign one if the review queue is empty.
             </KnowledgeNotice>}
             {latest?.status === "REJECTED" && <KnowledgeNotice title="Submission rejected" tone="danger">
               {latest.decisionComment && <>Reviewer: {latest.decisionComment}<br /></>}
@@ -673,7 +672,6 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <button type="button" className="island-icon-button" onClick={() => setSelectedContributionId(null)} aria-label="Close contribution details"><Icon name="close" size={14} /></button></div>
             {selectedContributionLatest?.decisionComment && <blockquote className="island-box contribution-reason"><strong>Reviewer note</strong><p>{selectedContributionLatest.decisionComment}</p></blockquote>}
             <dl className="island-kv">
-              <dt>Classification</dt><dd>{selectedContribution.classification}</dd>
               <dt>Department</dt><dd>{departmentName(selectedContribution.responsibleDepartmentId)}</dd>
               <dt>Audience</dt><dd>{audienceNames(selectedContribution.audienceIds)}</dd>
               <dt>Snapshot</dt><dd className="knowledge-hash">{selectedContribution.contentHash}</dd>

@@ -1,4 +1,15 @@
 import type { KnowledgeDraftSummary, KnowledgeSubmission } from "../shared/api-client";
+import type { KnowledgeClassification } from "../shared/knowledge-classification";
+
+/**
+ * Who decides a frozen snapshot (decision 0015): an organization reviewer when everyone in the organization
+ * may read it, otherwise a reviewer of the responsible department. Classification is no longer chosen by authors;
+ * a legacy RESTRICTED snapshot still needs an elevated grant, so the label says so instead of hiding it.
+ */
+export function reviewerLabel(input: { organizationWide: boolean; departmentName: string; classification: KnowledgeClassification }): string {
+  const reviewer = input.organizationWide ? "Organization reviewer" : `${input.departmentName} reviewer`;
+  return input.classification === "RESTRICTED" ? `${reviewer} · legacy restricted rule` : reviewer;
+}
 
 export function statusLabel(status: KnowledgeSubmission["status"]): string {
   return ({ PENDING_REVIEW: "Awaiting review", APPROVED: "Approved", REJECTED: "Rejected",

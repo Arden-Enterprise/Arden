@@ -30,7 +30,6 @@
 }
 
 .workspace-search,
-.sign-in-card input,
 .knowledge-metadata input,
 .knowledge-metadata select,
 .organization-field input,
@@ -46,7 +45,6 @@
   box-shadow: 0 0 0 3px rgb(231 185 112 / 10%);
 }
 
-.sign-in-card input:focus,
 .knowledge-metadata input:focus,
 .knowledge-metadata select:focus,
 .organization-field input:focus,
@@ -63,7 +61,6 @@
 .my-work-published-row,
 .knowledge-row,
 .knowledge-featured,
-.workspace-membership,
 .note-list > button,
 .organization-department-nav > button,
 .organization-tabs button,
@@ -96,16 +93,14 @@
     box-shadow: var(--arden-shadow-hover);
   }
 
-  .knowledge-featured:hover:not(:disabled),
-  .workspace-membership:hover:not(:disabled) {
+  .knowledge-featured:hover:not(:disabled) {
     transform: translateY(-3px);
     box-shadow: var(--arden-shadow-hover);
   }
 }
 
 button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item,
-  .my-work-queue-row, .my-work-published-row, .knowledge-row, .knowledge-featured,
-  .workspace-membership):active:not(:disabled),
+  .my-work-queue-row, .my-work-published-row, .knowledge-row, .knowledge-featured):active:not(:disabled),
 .note-list > button:active:not(:disabled) {
   transform: translateY(1px);
   box-shadow: none;
@@ -114,15 +109,12 @@ button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item
 .my-work-queue-row:focus-visible,
 .knowledge-row:focus-visible,
 .knowledge-featured:focus-visible,
-.workspace-membership:focus-visible,
 .note-list > button:focus-visible {
   border-color: var(--arden-accent);
   background: var(--arden-elevated);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .sign-in-welcome-copy,
-  .sign-in-card,
   .workspace-page-header,
   .my-work-content .my-work-status-strip,
   .my-work-spotlight,
@@ -141,7 +133,6 @@ button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item
 
   .knowledge-action-message,
   .organization-feedback,
-  .sign-in-message,
   .organization-notice.is-success {
     animation: arden-rise-in 240ms var(--arden-motion-ease) both;
   }

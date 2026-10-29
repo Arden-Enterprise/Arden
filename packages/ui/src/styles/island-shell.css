@@ -1,7 +1,8 @@
 /*
  * Island system (accepted 23 October 2026, see DESIGN.md): graphite tones with one violet accent.
  * Semantic tokens below are the only colours components read; the older --arden-* names are
- * re-pointed so existing workspace rules keep working. Authentication/onboarding are unaffected.
+ * re-pointed so existing workspace rules keep working. Post-sign-in onboarding reuses this scope (island-entry.css);
+ * sign-in and password screens are unaffected.
  */
 .arden-app-shell {
   --arden-bg-app: #101014;

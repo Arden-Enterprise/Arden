@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { WelcomePanel } from "../sign-in/WelcomePanel";
+import { Icon } from "../shared/Icon";
+import { IslandEntryLayout } from "../shared/IslandEntryLayout";
 import { acceptInvitation, ApiError, currentSession, signIn, signOut as apiSignOut, signUp, type CurrentSession } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 
@@ -116,49 +117,46 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     } finally { setBusy(false); }
   };
 
-  return <main className="sign-in-page workspace-select-page">
-    <WelcomePanel mode="workspace" />
-    <section className="sign-in-panel" aria-labelledby="invitation-link-title">
-      <div className="sign-in-card workspace-select-card">
-        <span className="meta-label">ORGANIZATION INVITATION</span>
-        <h2 id="invitation-link-title">Continue to Arden</h2>
-
-        {signedIn ? <>
-          <div className="organization-notice is-info">
-            <strong>Signed-in account</strong>
-            <span>{currentAccountEmail ? `You are currently signed in as ${currentAccountEmail}.` : "Your session is signed in."} Accepting joins the organization with this account.</span>
-          </div>
-          <button type="button" className="primary-button workspace-continue" disabled={busy} onClick={() => void handleAccept()}>
+  return <IslandEntryLayout titleId="invitation-link-title" eyebrow="ORGANIZATION INVITATION" title="Join your organization"
+    description="Accepting joins the organization with the invited email address. Your private notes stay yours.">
+    <section className="island island-panel island-entry-card" aria-label="Invitation">
+      {signedIn ? <>
+        <div className="island-box island-entry-account">
+          <span className="island-tile" aria-hidden="true"><Icon name="people" size={16} /></span>
+          <span className="island-entry-row-copy"><strong>{currentAccountEmail ?? "Signed-in account"}</strong>
+            <small>{currentAccountEmail ? "You are signed in with this account." : "Your session is signed in."} Accepting joins the organization with it.</small></span>
+        </div>
+        <div className="island-entry-actions-stack">
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void handleAccept()}>
             {busy ? "Accepting invitation…" : "Accept invitation"}
           </button>
           <button type="button" className="secondary-button" disabled={busy} onClick={() => void changeAccount()}>
             Sign out and use another account
           </button>
           {session && session.memberships.length > 0 && (
-            <button type="button" className="text-button workspace-back" disabled={busy} onClick={() => onAccepted(session)}>
+            <button type="button" className="island-link-button" disabled={busy} onClick={() => onAccepted(session)}>
               Continue to existing workspace
             </button>
           )}
-        </> : <>
-          <div className="invitation-entry-tabs" role="group" aria-label="Account options">
-            <button type="button" aria-pressed={mode === "sign-in"} onClick={() => { setMode("sign-in"); setError(""); }}>Sign in</button>
-            <button type="button" aria-pressed={mode === "create-account"} onClick={() => { setMode("create-account"); setError(""); }}>Create account</button>
-          </div>
-          {mode === "sign-in" ? <form onSubmit={(event) => void handleSignIn(event)}>
-            <label><span>Email</span><input autoComplete="email" type="email" required maxLength={320} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-            <label><span>Password</span><input autoComplete="current-password" type="password" required maxLength={1024} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-            <button type="submit" className="primary-button" disabled={busy}>{busy ? "Signing in and accepting…" : "Sign in and accept"}</button>
-          </form> : <form onSubmit={(event) => void handleSignUp(event)}>
-            <label><span>Your name</span><input autoComplete="name" required maxLength={200} value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>
-            <label><span>Email</span><input autoComplete="email" type="email" required maxLength={320} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-            <label><span>Password</span><input autoComplete="new-password" type="password" required maxLength={1024} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-            <button type="submit" className="primary-button" disabled={busy}>{busy ? "Starting account setup…" : "Create account"}</button>
-          </form>}
-        </>}
-        {message && <div className="organization-notice is-success" role="status"><strong>Notice</strong><span>{message}</span></div>}
-        {error && <div className="sign-in-message" role="alert"><strong>Action required</strong><span>{error}</span></div>}
-
-      </div>
+        </div>
+      </> : <>
+        <div className="island-seg island-entry-tabs" role="group" aria-label="Account options">
+          <button type="button" aria-pressed={mode === "sign-in"} onClick={() => { setMode("sign-in"); setError(""); }}>Sign in</button>
+          <button type="button" aria-pressed={mode === "create-account"} onClick={() => { setMode("create-account"); setError(""); }}>Create account</button>
+        </div>
+        {mode === "sign-in" ? <form className="island-entry-form" onSubmit={(event) => void handleSignIn(event)}>
+          <label className="island-field"><span>Email</span><input autoComplete="email" type="email" required maxLength={320} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+          <label className="island-field"><span>Password</span><input autoComplete="current-password" type="password" required maxLength={1024} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+          <button type="submit" className="primary-button" disabled={busy}>{busy ? "Signing in and accepting…" : "Sign in and accept"}</button>
+        </form> : <form className="island-entry-form" onSubmit={(event) => void handleSignUp(event)}>
+          <label className="island-field"><span>Your name</span><input autoComplete="name" required maxLength={200} value={fullName} onChange={(event) => setFullName(event.target.value)} /></label>
+          <label className="island-field"><span>Email</span><input autoComplete="email" type="email" required maxLength={320} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
+          <label className="island-field"><span>Password</span><input autoComplete="new-password" type="password" required maxLength={1024} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+          <button type="submit" className="primary-button" disabled={busy}>{busy ? "Starting account setup…" : "Create account"}</button>
+        </form>}
+      </>}
+      {message && <p className="island-note is-success" role="status"><Icon name="check" size={14} /><span>{message}</span></p>}
+      {error && <p className="island-note is-danger" role="alert"><Icon name="warning" size={14} /><span><strong>Action required.</strong> {error}</span></p>}
     </section>
-  </main>;
+  </IslandEntryLayout>;
 }

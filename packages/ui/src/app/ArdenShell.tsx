@@ -447,7 +447,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         boundaryBody: "Drafts remain author-owned. Approved versions are shown only when your current server-side audience and access scope allow them." }
       : serverOrganizationId && activeView === "review-queue"
         ? { ...paneContent[activeView], description: "Submissions assigned by an explicit reviewer grant.",
-          boundaryBody: "A reviewer can act only within the granted department and classification, never on their own submission." }
+          boundaryBody: "A reviewer can act only within the granted department or organization scope, never on their own submission." }
         : paneContent[activeView];
 
   return (
