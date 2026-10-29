@@ -7,6 +7,8 @@ export interface MigrationInventoryEntry {
   rollout: MigrationRollout;
 }
 
+export declare function migrationSqlChecksum(content: string | Uint8Array): string;
+
 export declare function loadMigrationInventory(
   migrationDirectory: string,
   policyPath?: string,

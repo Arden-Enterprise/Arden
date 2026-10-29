@@ -115,6 +115,25 @@ class IdentityTests(unittest.TestCase):
             with self.subTest(environment=environment, stale_run=True), self.assertRaises(ValueError):
                 self.verify(self.token(stale), request)
 
+    def test_migration_reconciliation_requires_a_new_signed_push_attempt_per_environment(self):
+        for environment, branch in [("staging", "staging"), ("production", "main")]:
+            request = {"op": "reconcile-migrations", "environment": environment,
+                       "commit": "a" * 40, "run_id": "12346", "attempt": 2}
+            claims = {**self.claims,
+                "aud": self.identity.request_audience(request),
+                "sub": f"repo:Arden-Enterprise@329889661/Arden@1372698702:environment:{environment}",
+                "environment": environment, "ref": f"refs/heads/{branch}",
+                "sha": "a" * 40, "run_id": "12346", "run_attempt": "2",
+                "workflow_ref": f"Arden-Enterprise/Arden/.github/workflows/ci.yml@refs/heads/{branch}",
+                "workflow_sha": "a" * 40}
+            self.assertEqual(self.verify(self.token(claims), request),
+                             self.identity.verify_identity(self.token(claims), request,
+                                 now=1010, load_keys=lambda: self.jwks))
+            for changed in [{**request, "commit": "c" * 40}, {**request, "attempt": 1},
+                            {**request, "environment": "production" if environment == "staging" else "staging"}]:
+                with self.subTest(environment=environment, changed=changed), self.assertRaises(ValueError):
+                    self.verify(self.token(claims), changed)
+
     def test_migration_plan_requires_candidate_inventory_and_oidc_proof(self):
         import hashlib
         inventory = [{"id": "0001", "filename": "0001_example.sql",

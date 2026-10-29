@@ -45,7 +45,9 @@ def dispatch_request(engine, request, stream, provenance):
     if op == "status":
         return engine.status()
     if op == "plan-migrations":
-        return engine.plan_migrations(request)
+        return engine.plan_migrations(request, provenance)
+    if op == "reconcile-migrations":
+        return engine.reconcile_migrations(request, provenance)
     if op == "deploy":
         return engine.deploy(request["manifest"], provenance)
     if op == "promote":

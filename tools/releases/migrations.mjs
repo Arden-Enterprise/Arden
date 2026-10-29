@@ -1,11 +1,11 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   assertImmutableMigrationHistory, assertSafeExpandMigrations,
-  fingerprintMigrationInventory, loadMigrationInventory,
+  fingerprintMigrationInventory, loadMigrationInventory, migrationSqlChecksum,
 } from "../../apps/api/migrations/inventory.mjs";
 
 export { assertImmutableMigrationHistory };
@@ -70,7 +70,7 @@ export function refreshMigrationPolicy(migrationDirectory, policyPath = join(mig
     if (registered.filename !== filename) throw new Error(`Migration filename changed for existing ID: ${id}`);
     const path = join(directory, filename);
     if (!lstatSync(path).isFile()) throw new Error(`Migration is not a regular file: ${filename}`);
-    const sha256 = createHash("sha256").update(readFileSync(path)).digest("hex");
+    const sha256 = migrationSqlChecksum(readFileSync(path));
     currentById.set(id, { id, filename, sha256, rollout: registered.rollout });
   }
   if (currentById.size !== existingById.size) throw new Error("Refusing to remove a registered migration from policy");

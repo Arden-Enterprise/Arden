@@ -57,6 +57,12 @@ class MemoryManager:
         return {"status": self.migration_status,
                 "migration_ids": ids if self.migration_status == "READY" else []}
 
+    def reconcile_migration_execution(self, _candidate):
+        self.migration_events.append("reconcile")
+
+    def reconcile_migration_execution(self, _candidate):
+        self.migration_events.append("reconcile")
+
     def apply_migrations(self, manifest):
         self.migration_events.append("migrate")
         if self.fail_migration:
@@ -93,6 +99,11 @@ def plan_request(environment, manifest):
             "run_id": manifest["run_id"], "attempt": manifest["attempt"],
             "migrations": manifest["migrations"],
             "migration_inventory": copy.deepcopy(manifest["migration_inventory"])}
+
+
+def reconcile_request(environment, manifest):
+    return {"op": "reconcile-migrations", "environment": environment,
+            "commit": manifest["commit"], "run_id": manifest["run_id"], "attempt": manifest["attempt"]}
 
 
 def verified_plan_proof(request):
@@ -291,6 +302,18 @@ class ReceiverTests(unittest.TestCase):
 
         retry = copy.deepcopy(self.manifest)
         retry["attempt"] = 2
+        request = plan_request("staging", retry)
+        self.assertEqual(self.engine.plan_migrations(request, verified_plan_proof(request)),
+                         {"status": "RECOVERY_REQUIRED", "migration_ids": []})
+        stale_recovery = reconcile_request("staging", self.manifest)
+        self.assertEqual(self.engine.reconcile_migrations(stale_recovery, verified_plan_proof(stale_recovery)),
+                         {"status": "STALE_RUN"})
+        recovery = reconcile_request("staging", retry)
+        self.assertEqual(self.engine.reconcile_migrations(recovery, verified_plan_proof(recovery)),
+                         {"status": "RECONCILED"})
+        self.assertEqual(self.engine.plan_migrations(request, verified_plan_proof(request)),
+                         {"status": "READY", "migration_ids": ["0001_example"]})
+        self.assertIsNone(self.engine.status().get("pending"))
         self.engine.upload(retry, io.BytesIO(self.payload), verified_proof("upload", retry))
         self.engine.deploy(retry, verified_proof("deploy", retry))
         self.assertEqual(self.manager.current["images"], retry["images"])

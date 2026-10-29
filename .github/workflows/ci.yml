@@ -46,7 +46,7 @@ jobs:
       - run: pnpm test
       - run: pnpm test:remote
       - name: Release client and branch policy tests
-        run: node --test tools/releases/release.test.mjs tools/releases/transport.test.mjs tools/releases/identity.test.mjs tools/pull-requests/conventions.test.mjs
+        run: node --test tools/releases/release.test.mjs tools/releases/transport.test.mjs tools/releases/identity.test.mjs tools/releases/migration-inventory.test.mjs tools/pull-requests/conventions.test.mjs
       - name: Prepare temporary release-verifier test environment without pip caching
         run: python tools/releases/setup-python.py
       - name: Release protocol tests (Windows)

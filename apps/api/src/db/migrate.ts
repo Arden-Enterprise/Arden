@@ -100,6 +100,24 @@ function emit(output: unknown): void {
   process.stdout.write(`${JSON.stringify(output)}\n`);
 }
 
+export function formatMigrationFailure(error: unknown): string {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    const code = (error as { code?: unknown }).code;
+    const safeCode = typeof code === "string" && /^[A-Za-z0-9_]{1,32}$/.test(code) ? code : "unknown";
+    return `Database migration failed (${safeCode})`;
+  }
+  if (error instanceof Error) {
+    const message = error.message
+      .replace(/\b(postgres(?:ql)?:\/\/)[^\s"'<>]+/gi, "$1[redacted]")
+      .replace(/\b(pgpassword|password|passwd|pwd|secret|token|api[_-]?key|database[_-]?url|connection[_-]?string)(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/gi,
+        "$1$2[redacted]")
+      .replace(/[\r\n\t]+/g, " ")
+      .slice(0, 300);
+    return `Migration runner failed: ${message || "unknown error"}`;
+  }
+  return "Migration runner failed: unknown error";
+}
+
 async function readOnlyPlan(pool: Pool, inventory: MigrationInventoryEntry[]): Promise<number> {
   const client = await pool.connect();
   try {
@@ -314,7 +332,8 @@ export async function runMigrationCommand(arguments_: string[]): Promise<number>
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   runMigrationCommand(process.argv.slice(2)).then((status) => {
     process.exitCode = status;
-  }).catch(() => {
+  }).catch((error: unknown) => {
+    process.stderr.write(`${formatMigrationFailure(error)}\n`);
     emit({ status: "FAILED", reason: "MIGRATION_RUNNER_FAILED", migration_ids: [] });
     process.exitCode = 1;
   });

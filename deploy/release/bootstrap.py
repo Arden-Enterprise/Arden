@@ -147,7 +147,7 @@ def migration_baseline_statements(plan, ledger_ddl):
         + cases
         + " ELSE NULL END)) THEN RAISE EXCEPTION 'migration baseline source changed'; END IF; END $$;"
     )
-    statements = ["BEGIN;", "SELECT pg_advisory_xact_lock(hashtext('arden:migrations'));",
+    statements = ["BEGIN;", "DO $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext('arden:migrations')); END $$;",
                   ledger_ddl, guard]
     for row in plan["updates"]:
         if (not isinstance(row, dict) or set(row) != {"migration_id", "checksum"}

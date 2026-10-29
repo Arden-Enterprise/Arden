@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 type MigrationCommandModule = {
   assertMigrationTarget: (mode: string, databaseUrl: string, nodeEnvironment?: string) => void;
+  formatMigrationFailure: (error: unknown) => string;
   parseMigrationMode: (arguments_: string[]) => "plan" | "apply-safe" | "local-full";
 };
 
@@ -16,7 +17,30 @@ describe("migration command safety", () => {
   it("implements explicit guarded command modes", () => {
     expect(moduleExists).toBe(true);
     expect(command?.assertMigrationTarget).toBeTypeOf("function");
+    expect(command?.formatMigrationFailure).toBeTypeOf("function");
     expect(command?.parseMigrationMode).toBeTypeOf("function");
+  });
+
+  it("reports database error codes without leaking their message or connection details", () => {
+    const error = Object.assign(
+      new Error("password=synthetic-secret at postgresql://arden:synthetic-secret@db.internal/arden"),
+      { code: "28P01" },
+    );
+    expect(command?.formatMigrationFailure(error)).toBe("Database migration failed (28P01)");
+  });
+
+  it("keeps useful runner diagnostics while removing complete database URLs", () => {
+    const error = new Error("Migration inventory checksum mismatch for 0001: postgresql://arden:synthetic-secret@db/arden?sslpassword=hidden");
+    expect(command?.formatMigrationFailure(error)).toBe(
+      "Migration runner failed: Migration inventory checksum mismatch for 0001: postgresql://[redacted]",
+    );
+  });
+
+  it("redacts standalone password and token assignments in runner messages", () => {
+    const error = new Error("Migration rejected password=synthetic-secret token: another-secret");
+    expect(command?.formatMigrationFailure(error)).toBe(
+      "Migration runner failed: Migration rejected password=[redacted] token: [redacted]",
+    );
   });
 
   it("accepts only a local development database for the full migration chain", () => {

@@ -1,7 +1,7 @@
 // Every database, image and fixture belongs to this temporary hosted runner.
 import { createHash, randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 
 const source = JSON.parse(execFileSync(process.execPath, ["tools/releases/release.mjs", "metadata"], { encoding: "utf8" }));
@@ -48,6 +48,7 @@ writeFileSync(join(migrationDirectory, migrationFilename), migrationSql, { mode:
 writeFileSync(join(migrationDirectory, "release-policy.json"), JSON.stringify({ schema: 1, migrations: [
   { id: "0001", filename: migrationFilename, sha256: migrationChecksum, rollout: "expand" },
 ] }), { mode: 0o644 });
+copyFileSync(resolve("apps/api/migrations/inventory.mjs"), join(migrationDirectory, "inventory.mjs"));
 chmodSync(migrationDirectory, 0o755);
 
 try {

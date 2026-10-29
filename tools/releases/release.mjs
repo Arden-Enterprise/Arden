@@ -51,7 +51,7 @@ export function promotionRequest(env, tree) {
 }
 
 const migrationStatuses = new Set(["NO_PENDING", "READY", "REQUIRES_OPERATOR", "DRIFT",
-  "BACKUP_NOT_READY", "BASELINE_REQUIRED", "OUTCOME_UNKNOWN", "STALE_RUN"]);
+  "BACKUP_NOT_READY", "BASELINE_REQUIRED", "OUTCOME_UNKNOWN", "STALE_RUN", "RECOVERY_REQUIRED"]);
 
 export function migrationPlanRequest(env, candidate) {
   const context = releaseContext(env);
@@ -63,6 +63,29 @@ export function migrationPlanRequest(env, candidate) {
   return { op: "plan-migrations", environment: context.environment, commit: context.commit,
     tree: candidate.tree, run_id: context.run_id, attempt: context.attempt,
     migrations: candidate.migrations, migration_inventory: candidate.migration_inventory };
+}
+
+export function migrationReconcileRequest(env) {
+  const context = releaseContext(env);
+  return { op: "reconcile-migrations", environment: context.environment,
+    commit: context.commit, run_id: context.run_id, attempt: context.attempt };
+}
+
+async function planMigrationsWithRecovery(env, candidate, send, getHead) {
+  const request = migrationPlanRequest(env, candidate);
+  let plan = await send(request);
+  if (plan?.status === "RECOVERY_REQUIRED") {
+    await assertCurrentHead(env, getHead);
+    const result = await send(migrationReconcileRequest(env));
+    if (!result || typeof result !== "object" || Array.isArray(result)
+      || Object.keys(result).sort().join("\0") !== "status"
+      || !["RECONCILED", "NO_PENDING"].includes(result.status)) {
+      throw new Error("Migration recovery could not be verified");
+    }
+    await assertCurrentHead(env, getHead);
+    plan = await send(request);
+  }
+  return assertMigrationPlan(plan);
 }
 
 export function assertMigrationPlan(plan) {
@@ -93,8 +116,7 @@ export async function executeStagingRelease(env, manifest, archive, send, getHea
     || manifest.commit !== context.commit || manifest.run_id !== context.run_id
     || manifest.attempt !== context.attempt) throw new Error("Staging release identity is invalid");
   await assertCurrentHead(env, getHead);
-  const plan = await send(migrationPlanRequest(env, manifest));
-  assertMigrationPlan(plan);
+  await planMigrationsWithRecovery(env, manifest, send, getHead);
   await assertCurrentHead(env, getHead);
   await send({ op: "upload", environment: "staging", manifest }, archive);
   await assertCurrentHead(env, getHead);
@@ -107,7 +129,7 @@ export async function executeProductionRelease(env, source, send, getHead) {
     throw new Error("Production promotion source does not match this workflow commit");
   }
   await assertCurrentHead(env, getHead);
-  assertMigrationPlan(await send(migrationPlanRequest(env, source)));
+  await planMigrationsWithRecovery(env, source, send, getHead);
   await assertCurrentHead(env, getHead);
   return send(promotionRequest(env, source.tree));
 }
@@ -121,7 +143,9 @@ export async function checkReadiness(env, request) {
     && status.active.eligible_for_promotion === false && sha.test(manifest.tree ?? "")
     && /^[0-9a-f]{64}$/.test(manifest.migrations ?? "")
     && ["api", "web"].every(component => imageId.test(manifest.images?.[component]?.id ?? ""));
-  if (status?.pending !== null || (manifest?.schema !== 1 && !baseline)
+  const recoverableMigration = status?.pending !== null && status?.pending?.phase === "migrating";
+  if ((status?.pending !== null && !recoverableMigration)
+    || (![1, 2].includes(manifest?.schema) && !baseline)
     || !sha.test(manifest?.commit ?? "")) {
     throw new Error("Release state needs operator inspection before building or deploying");
   }

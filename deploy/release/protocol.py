@@ -204,6 +204,10 @@ def validate_request(value, forced_environment):
         identity(value["tree"], SHA)
         run_identity(value["run_id"], value["attempt"])
         validate_migration_inventory(value["migration_inventory"], value["migrations"])
+    elif op == "reconcile-migrations":
+        exact(value, {"op", "environment", "commit", "run_id", "attempt"})
+        identity(value["commit"], SHA)
+        run_identity(value["run_id"], value["attempt"])
     else:
         raise ValueError("Unknown release operation")
     return value

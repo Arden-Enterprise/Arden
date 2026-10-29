@@ -197,7 +197,7 @@ def run_migration_sql(image, network, env_file, sql):
         raise ValueError("The approved database image has no non-root client identity")
     shell = ('exec psql --dbname="$ARDEN_MIGRATION_DATABASE_URL" --no-psqlrc '
              '--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align --field-separator="|"')
-    return run(["/usr/bin/docker", "run", "--rm", "--pull=never", "--network", network,
+    return run(["/usr/bin/docker", "run", "--interactive", "--rm", "--pull=never", "--network", network,
                 "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
                 "--memory", "128m", "--cpus", "0.50", "--pids-limit", "32",
                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
@@ -335,6 +335,58 @@ def database_peer(api, values):
     return next(iter(matches))
 
 
+def ensure_migration_target_config(environment, result, journal_path):
+    """Repair a legacy root-owned bootstrap record before it can enter cutover."""
+    config = result.get("config")
+    if (environment not in {"staging", "production"} or not isinstance(config, dict)
+            or config.get("environment") != environment):
+        raise ValueError("Bootstrap migration repair target is invalid")
+
+    config_path = CONFIG / f"{environment}.json"
+    persisted = None
+    if config_path.exists() or config_path.is_symlink():
+        if config_path.is_symlink() or not config_path.is_file():
+            raise ValueError("Protected release configuration is not a regular file")
+        secure_file(config_path)
+        persisted = read_json(config_path)
+        if (persisted.get("environment") != environment
+                or persisted.get("service_uuid") != config.get("service_uuid")):
+            raise ValueError("Bootstrap journal and protected release configuration disagree")
+
+    journal_target = config.get("migration")
+    persisted_target = persisted.get("migration") if persisted is not None else None
+    if journal_target is not None and persisted_target is not None and journal_target != persisted_target:
+        raise ValueError("Bootstrap journal and protected migration targets disagree")
+    migration = journal_target if journal_target is not None else persisted_target
+    if migration is None:
+        api = result.get("original_api")
+        values = result.get("values")
+        if not isinstance(api, dict) or not isinstance(values, dict) or not isinstance(values.get("DATABASE_URL"), str):
+            raise ValueError("Legacy bootstrap record lacks a verifiable database target")
+        database = database_peer(api, values)
+        protected_ids = result.get("protected_ids")
+        protected_names = config.get("protected_containers")
+        if (not isinstance(protected_ids, dict) or not isinstance(protected_names, list)
+                or database not in protected_names or not isinstance(protected_ids.get(database), str)):
+            raise ValueError("Legacy database is not in the protected bootstrap inventory")
+        database_info = inspect(database)
+        if database_info.get("Id") != protected_ids[database]:
+            raise ValueError("Database container changed since the bootstrap snapshot")
+        migration = build_migration_target_config(
+            environment, api.get("NetworkSettings", {}).get("Networks", {}).keys(),
+            database_info.get("NetworkSettings", {}).get("Networks", {}).keys(),
+            database_info.get("Image"), values["DATABASE_URL"])
+
+    config["migration"] = migration
+    if persisted is not None:
+        persisted["migration"] = migration
+    # Persist the journal first so a later retry can finish syncing the protected config.
+    write_json(journal_path, result)
+    if persisted is not None and persisted_target != migration:
+        write_json(config_path, persisted)
+    return result
+
+
 def prepare(environment, settings, management):
     directory = STATE / "bootstrap"
     directory.mkdir(mode=0o700, exist_ok=True)
@@ -343,6 +395,7 @@ def prepare(environment, settings, management):
         result = read_json(journal_path)
         if result["phase"] == "creating":
             raise RuntimeError("Reconcile the uncertain Coolify create before retrying")
+        result = ensure_migration_target_config(environment, result, journal_path)
         if result["phase"] == "created":
             return finish_prepare(result, journal_path)
         return result

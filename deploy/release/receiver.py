@@ -22,7 +22,7 @@ class MigrationBlocked(ValueError):
 
     def __init__(self, status, migration_ids=None):
         allowed = {"NO_PENDING", "READY", "REQUIRES_OPERATOR", "DRIFT", "BACKUP_NOT_READY",
-                   "BASELINE_REQUIRED", "OUTCOME_UNKNOWN", "STALE_RUN"}
+                   "BASELINE_REQUIRED", "OUTCOME_UNKNOWN", "STALE_RUN", "RECOVERY_REQUIRED"}
         ids = migration_ids if type(migration_ids) is list else []
         invalid_ids = (len(ids) > 1000 or any(type(item) is not str
                        or not re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", item) for item in ids))
@@ -91,7 +91,8 @@ class ReleaseEngine:
         with release_lock(self.root.parent):
             state = self._validate_state(read_json(self.path)) if self.path.exists() else None
             if state and state.get("pending"):
-                return {"status": "OUTCOME_UNKNOWN", "migration_ids": []}
+                status = "RECOVERY_REQUIRED" if state["pending"].get("phase") == "migrating" else "OUTCOME_UNKNOWN"
+                return {"status": status, "migration_ids": []}
             highest = tuple(state.get("highest", [0, 0])) if state else (0, 0)
             if run_identity(request["run_id"], request["attempt"]) < highest:
                 return {"status": "STALE_RUN", "migration_ids": []}
@@ -116,6 +117,27 @@ class ReleaseEngine:
                            for item in result["migration_ids"])):
                 return {"status": "OUTCOME_UNKNOWN", "migration_ids": []}
             return {"status": result["status"], "migration_ids": result["migration_ids"]}
+
+    def reconcile_migrations(self, request, provenance=None):
+        validate_request(request, self.environment)
+        if request["op"] != "reconcile-migrations" or not trusted_provenance(provenance, request):
+            raise ValueError("Migration recovery requires an exact authenticated request")
+        with release_lock(self.root.parent):
+            state = self._validate_state(read_json(self.path)) if self.path.exists() else None
+            if not state or not state.get("pending"):
+                return {"status": "NO_PENDING"}
+            pending = state["pending"]
+            if pending.get("phase") != "migrating":
+                return {"status": "OUTCOME_UNKNOWN"}
+            if run_identity(request["run_id"], request["attempt"]) <= tuple(state["highest"]):
+                return {"status": "STALE_RUN"}
+            try:
+                self._recover(state)
+            except Exception:
+                return {"status": "OUTCOME_UNKNOWN"}
+            if state.get("pending"):
+                return {"status": "OUTCOME_UNKNOWN"}
+            return {"status": "RECONCILED"}
 
     def _receipt(self, manifest):
         identity = hashlib.sha256(json.dumps(manifest, sort_keys=True,
@@ -253,6 +275,7 @@ class ReleaseEngine:
         before = pending["before"]
         if pending.get("phase") == "migrating":
             try:
+                self.manager.reconcile_migration_execution(pending["target"])
                 self.manager.verify(before["manifest"])
                 plan = self.manager.plan_migrations(pending["target"])
             except Exception as error:

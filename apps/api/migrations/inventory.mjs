@@ -20,6 +20,10 @@ function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+export function migrationSqlChecksum(content) {
+  return sha256(Buffer.from(content));
+}
+
 function validateEntry(entry, index) {
   exactKeys(entry, migrationKeys, `migration policy row ${index + 1}`);
   if (typeof entry.id !== "string" || !/^\d{4}$/.test(entry.id)
@@ -64,7 +68,7 @@ export function loadMigrationInventory(migrationDirectory, policyPath = join(mig
     ids.add(id);
     const path = join(directory, filename);
     if (!lstatSync(path).isFile()) throw new Error(`Migration is not a regular file: ${filename}`);
-    actual.set(id, { id, filename, sha256: sha256(readFileSync(path)) });
+    actual.set(id, { id, filename, sha256: migrationSqlChecksum(readFileSync(path)) });
   }
 
   const policyById = new Map();
@@ -134,6 +138,7 @@ function removeSqlComments(sql) {
 
 const destructiveSql = [
   /\bDROP\s+(?:TABLE|COLUMN|SCHEMA|TYPE|INDEX|CONSTRAINT|FUNCTION|TRIGGER|DATABASE|SEQUENCE|VIEW|MATERIALIZED\s+VIEW|OWNED|POLICY|ROLE|EXTENSION)\b/i,
+  /\bALTER\s+TABLE\b[^;]*\bDROP\b/i,
   /\bTRUNCATE(?:\s+TABLE)?\b/i,
   /\bDELETE\s+FROM\b/i,
 ];

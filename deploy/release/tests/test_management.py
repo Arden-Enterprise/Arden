@@ -225,7 +225,8 @@ class ManagementTests(unittest.TestCase):
              patch.object(manager, "plan_migrations", side_effect=[
                  {"status": "READY", "migration_ids": ["0001_example"]},
                  {"status": "NO_PENDING", "migration_ids": []}]), \
-             patch.object(manager, "_migration_settings", return_value=config["migration"]):
+             patch.object(manager, "_migration_settings", return_value=config["migration"]), \
+             patch.object(manager, "_assert_migration_lock_free"):
             result = manager.apply_migrations(manifest)
         self.assertEqual(result["status"], "APPLIED")
         self.assertEqual(len(calls), 1)
@@ -237,11 +238,121 @@ class ManagementTests(unittest.TestCase):
         self.assertTrue(all(option in arguments for option in ["--rm", "--pull=never", "--read-only",
                          "--memory", "512m", "--cpus", "0.75", "--pids-limit", "64",
                          "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true"]))
+        name_index = arguments.index("--name")
+        self.assertEqual(arguments[name_index + 1], "arden-release-migration-staging-12345-1")
         entrypoint = arguments.index("--entrypoint")
         self.assertEqual(arguments[entrypoint + 1:], ["node", manifest["images"]["api"]["id"],
                                                        "dist/db/migrate.js", "--apply-safe"])
         self.assertNotIn("--privileged", arguments)
         self.assertNotIn("--network", arguments[arguments.index("--entrypoint") + 2:])
+
+    def test_timed_out_migration_stops_and_verifies_its_named_container(self):
+        import management
+        config = migration_configuration()
+        name = "arden-release-migration-staging-12345-1"
+        calls = []
+        states = iter(["true\n", "false\n"])
+
+        def docker(arguments):
+            calls.append(arguments)
+            if arguments[0] == "inspect":
+                return next(states)
+            if arguments[0] == "stop":
+                return name + "\n"
+            if arguments[0] == "ps":
+                return ""
+            self.fail("Unexpected Docker recovery command")
+
+        manager = CoolifyManager(config, command=docker)
+        with patch.object(management.subprocess, "run", side_effect=management.subprocess.TimeoutExpired(
+                ["/usr/bin/docker", "run"], timeout=900)):
+            with self.assertRaisesRegex(RuntimeError, "requires reconciliation"):
+                manager.migration_command(["/usr/bin/docker", "run", "--name", name], timeout=900)
+        self.assertEqual([call[0] for call in calls], ["inspect", "stop", "inspect"])
+
+    def test_migration_reconciliation_proves_the_database_lock_is_free_after_stop(self):
+        config = migration_configuration()
+        manifest, _ = fixture()
+        name = "arden-release-migration-staging-12345-1"
+        image = config["migration"]["database_image"]
+        events = []
+        states = iter(["true\n", "false\n"])
+
+        def docker(arguments):
+            if arguments[0] == "inspect" and "{{.State.Running}}" in arguments:
+                events.append("container-state")
+                return next(states)
+            if arguments[0] == "stop":
+                events.append("container-stop")
+                return name + "\n"
+            if arguments[0] == "image" and "{{.Id}}" in arguments:
+                return image
+            if arguments[0] == "image" and "{{.Config.User}}" in arguments:
+                return "1000:1000"
+            self.fail("Unexpected Docker reconciliation command")
+
+        def migration_command(arguments, timeout):
+            events.append("lock-probe")
+            self.assertEqual(timeout, 30)
+            self.assertIn(config["migration"]["env_file"], arguments)
+            self.assertIn("arden:migrations", arguments[-1])
+            self.assertIn("pg_try_advisory_lock", arguments[-1])
+            self.assertIn("pg_advisory_unlock", arguments[-1])
+            return "t\n"
+
+        manager = CoolifyManager(config, command=docker, migration_command=migration_command)
+        settings = {**config["migration"], "migration_database_user": "arden_migrator"}
+        with patch.object(manager, "_migration_settings", return_value=settings):
+            manager.reconcile_migration_execution(manifest)
+        self.assertLess(events.index("container-stop"), events.index("lock-probe"))
+
+    def test_migration_apply_checks_the_database_lock_before_replanning(self):
+        config = migration_configuration()
+        manifest, _ = fixture()
+        events = []
+        migration_result = json.dumps({"status": "APPLIED", "migration_ids": ["0001_example"]})
+
+        def plan(_manifest):
+            events.append("plan")
+            return {"status": "READY", "migration_ids": ["0001_example"]} if events.count("plan") == 1 else {
+                "status": "NO_PENDING", "migration_ids": []}
+
+        def migration_command(arguments, timeout):
+            events.append("runner" if "dist/db/migrate.js" in arguments else "lock-probe")
+            return migration_result if "dist/db/migrate.js" in arguments else "t\n"
+
+        manager = CoolifyManager(config, migration_command=migration_command)
+        settings = {**config["migration"], "migration_database_user": "arden_migrator"}
+        with patch.object(manager, "plan_migrations", side_effect=plan), \
+             patch.object(manager, "_migration_settings", return_value=settings), \
+             patch.object(manager, "ensure_images"), \
+             patch.object(manager, "image_id", side_effect=lambda release, component: release["images"][component]["id"]), \
+             patch.object(manager, "_assert_migration_lock_free", side_effect=lambda _settings: events.append("lock-check")):
+            result = manager.apply_migrations(manifest)
+
+        self.assertEqual(result["status"], "APPLIED")
+        self.assertLess(events.index("runner"), events.index("lock-check"))
+        self.assertLess(events.index("lock-check"), events.index("plan", 1))
+
+    def test_migration_reconciliation_refuses_to_clear_pending_while_database_lock_is_held(self):
+        config = migration_configuration()
+        manifest, _ = fixture()
+        image = config["migration"]["database_image"]
+
+        def docker(arguments):
+            if arguments[0] == "inspect" and "{{.State.Running}}" in arguments:
+                return "false\n"
+            if arguments[0] == "image" and "{{.Id}}" in arguments:
+                return image
+            if arguments[0] == "image" and "{{.Config.User}}" in arguments:
+                return "1000:1000"
+            self.fail("Unexpected Docker reconciliation command")
+
+        manager = CoolifyManager(config, command=docker, migration_command=lambda *args, **kwargs: "f\n")
+        settings = {**config["migration"], "migration_database_user": "arden_migrator"}
+        with patch.object(manager, "_migration_settings", return_value=settings), \
+                self.assertRaisesRegex(RuntimeError, "advisory lock"):
+            manager.reconcile_migration_execution(manifest)
 
     def test_migration_runner_failure_reconciles_without_leaking_command_output(self):
         config = migration_configuration()
@@ -253,7 +364,8 @@ class ManagementTests(unittest.TestCase):
              patch.object(manager, "plan_migrations", side_effect=[
                  {"status": "READY", "migration_ids": ["0001_example"]},
                  {"status": "READY", "migration_ids": ["0001_example"]}]), \
-             patch.object(manager, "_migration_settings", return_value=config["migration"]):
+             patch.object(manager, "_migration_settings", return_value=config["migration"]), \
+             patch.object(manager, "_assert_migration_lock_free"):
             with self.assertRaises(RuntimeError) as caught:
                 manager.apply_migrations(manifest)
         self.assertNotIn("synthetic database password", str(caught.exception))

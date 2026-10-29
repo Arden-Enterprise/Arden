@@ -15,15 +15,15 @@ class EntrypointDispatchTests(unittest.TestCase):
         calls = []
 
         class Engine:
-            def plan_migrations(self, request):
-                calls.append(("plan", request))
+            def plan_migrations(self, request, provenance=None):
+                calls.append(("plan", request, provenance))
                 return {"status": "READY", "migration_ids": ["0001_example"]}
 
         request = {"op": "plan-migrations", "environment": "staging"}
         proof = {"provider": "github-actions-oidc"}
         result = entrypoint.dispatch_request(Engine(), request, io.BytesIO(), proof)
         self.assertEqual(result, {"status": "READY", "migration_ids": ["0001_example"]})
-        self.assertEqual(calls, [("plan", request)])
+        self.assertEqual(calls, [("plan", request, proof)])
 
     def test_plan_dispatch_rejects_an_appended_body_before_database_access(self):
         import io

@@ -126,6 +126,21 @@ class ProtocolTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 protocol.validate_request(bad, "staging")
 
+    def test_migration_reconciliation_is_exact_and_bound_to_a_new_workflow_attempt(self):
+        request = {"op": "reconcile-migrations", "environment": "staging",
+                   "commit": self.manifest["commit"], "run_id": self.manifest["run_id"],
+                   "attempt": self.manifest["attempt"]}
+        self.assertEqual(protocol.validate_request(request, "staging"), request)
+        with self.assertRaises(ValueError):
+            protocol.validate_request(request, "production")
+        for mutate in [lambda value: value.update(extra="not-allowed"),
+                       lambda value: value.update(commit="x" * 40),
+                       lambda value: value.update(attempt=0)]:
+            bad = copy.deepcopy(request)
+            mutate(bad)
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                protocol.validate_request(bad, "staging")
+
     def test_new_release_manifest_requires_canonical_ordered_inventory_and_matching_fingerprint(self):
         data = copy.deepcopy(self.manifest)
         self.assertEqual(protocol.validate_manifest(data), data)

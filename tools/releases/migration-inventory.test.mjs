@@ -24,7 +24,7 @@ function withFixture(files, policyFactory, run) {
   }
   const records = Object.entries(files).map(([filename, content]) => ({
     id: filename.slice(0, 4), filename,
-    sha256: createHash("sha256").update(content).digest("hex"), rollout: "operator",
+    sha256: migrationChecksum(content), rollout: "operator",
   }));
   const policyPath = join(root, "release-policy.json");
   writeFileSync(policyPath, JSON.stringify(policyFactory ? policyFactory(records) : {
@@ -32,6 +32,11 @@ function withFixture(files, policyFactory, run) {
   }));
   try { return run({ root, migrationDirectory, policyPath }); }
   finally { rmSync(root, { recursive: true, force: true }); }
+}
+
+function migrationChecksum(content) {
+  const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function git(root, args) {
@@ -56,7 +61,7 @@ test("migration inventory implementation is present", () => {
 });
 
 if (inventory && releaseMigrations) {
-  test("loader returns exact ordered entries and hashes raw SQL bytes", () => {
+  test("loader returns exact ordered entries and hashes the exact SQL bytes", () => {
     withFixture({
       "0002_second.sql": "-- second\r\nSELECT 2;\n",
       "0001_first.sql": "-- first\nSELECT 1;\n",
@@ -66,7 +71,23 @@ if (inventory && releaseMigrations) {
         ["0001", "0001_first.sql", "operator"],
         ["0002", "0002_second.sql", "operator"],
       ]);
-      assert.equal(rows[1].sha256, createHash("sha256").update(readFileSync(join(migrationDirectory, "0002_second.sql"))).digest("hex"));
+      assert.equal(rows[1].sha256, migrationChecksum(readFileSync(join(migrationDirectory, "0002_second.sql"))));
+    });
+  });
+
+  test("policy refresh records exact SQL bytes and detects an unreviewed line-ending change", () => {
+    withFixture({ "0001_first.sql": "SELECT 1;\r\n" }, null, ({ migrationDirectory, policyPath }) => {
+      writeFileSync(join(migrationDirectory, "0001_first.sql"), "SELECT 2;\r\n");
+      releaseMigrations.refreshMigrationPolicy(migrationDirectory, policyPath);
+      const policy = JSON.parse(readFileSync(policyPath, "utf8"));
+      assert.equal(policy.migrations[0].sha256, migrationChecksum("SELECT 2;\r\n"));
+      assert.equal(inventory.loadMigrationInventory(migrationDirectory, policyPath)[0].sha256, policy.migrations[0].sha256);
+      writeFileSync(join(migrationDirectory, "0001_first.sql"), "SELECT 2;\n");
+      assert.throws(() => inventory.loadMigrationInventory(migrationDirectory, policyPath), /checksum|hash|digest/i);
+      releaseMigrations.refreshMigrationPolicy(migrationDirectory, policyPath);
+      const lfPolicy = JSON.parse(readFileSync(policyPath, "utf8"));
+      assert.equal(lfPolicy.migrations[0].sha256, migrationChecksum("SELECT 2;\n"));
+      assert.notEqual(lfPolicy.migrations[0].sha256, policy.migrations[0].sha256);
     });
   });
 
@@ -132,7 +153,7 @@ if (inventory && releaseMigrations) {
       releaseMigrations.refreshMigrationPolicy(migrationDirectory, policyPath);
       const refreshed = JSON.parse(readFileSync(policyPath, "utf8"));
       assert.equal(refreshed.migrations[0].rollout, before.migrations[0].rollout);
-      assert.equal(refreshed.migrations[0].sha256, createHash("sha256").update("SELECT 2;\n").digest("hex"));
+      assert.equal(refreshed.migrations[0].sha256, migrationChecksum("SELECT 2;\n"));
       writeFileSync(join(migrationDirectory, "0002_second.sql"), "SELECT 3;\n");
       const unchanged = readFileSync(policyPath, "utf8");
       assert.throws(() => releaseMigrations.refreshMigrationPolicy(migrationDirectory, policyPath), /unreviewed|unregistered|new migration/i);
@@ -173,6 +194,7 @@ if (inventory && releaseMigrations) {
       const rows = inventory.loadMigrationInventory(migrationDirectory, policyPath);
       assert.doesNotThrow(() => inventory.assertSafeExpandMigrations(rows, migrationDirectory));
       for (const destructive of ["DELETE FROM item WHERE id = 1;", "ALTER TABLE item DROP COLUMN old_value;",
+        "ALTER TABLE item DROP old_value;",
         "TRUNCATE item;", "DROP MATERIALIZED VIEW old_item_view;"]) {
         writeFileSync(join(migrationDirectory, rows[0].filename), `${destructive}\n`);
         assert.throws(() => inventory.assertSafeExpandMigrations(rows, migrationDirectory), /destructive|operator|expand/i);

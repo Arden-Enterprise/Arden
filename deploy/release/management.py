@@ -12,7 +12,7 @@ import time
 from urllib import request as http, error as http_error
 from urllib.parse import unquote, urlsplit
 
-from protocol import (strict_json, DIGEST, IMAGE_ID, compare_migration_ledger,
+from protocol import (strict_json, DIGEST, IMAGE_ID, compare_migration_ledger, run_identity,
                       validate_migration_inventory)
 from state import read_json, write_json
 
@@ -90,13 +90,103 @@ class CoolifyManager:
         self.protected = None
 
     @staticmethod
-    def _migration_command(arguments, timeout=900):
+    def _migration_container_from_arguments(arguments):
+        try:
+            index = arguments.index("--name")
+        except ValueError:
+            return None
+        if index + 1 >= len(arguments):
+            raise RuntimeError("Migration container identity is invalid")
+        name = arguments[index + 1]
+        if not re.fullmatch(r"arden-release-migration-(?:staging|production)-[1-9][0-9]{0,19}-[1-9][0-9]{0,3}", name):
+            raise RuntimeError("Migration container identity is invalid")
+        return name
+
+    def _migration_container_running(self, name):
+        try:
+            result = self.command(["inspect", "--format", "{{.State.Running}}", name]).strip()
+        except Exception:
+            result = None
+        if result == "true":
+            return True
+        if result == "false":
+            return False
+        if result is not None:
+            raise RuntimeError("Migration container state is invalid")
+        # The name filter is substring-based; any match keeps the outcome uncertain.
+        if self.command(["ps", "--all", "--quiet", "--filter", f"name={name}"]).strip():
+            raise RuntimeError("Migration container could not be identified exactly")
+        return False
+
+    def _stop_migration_container(self, name):
+        if not self._migration_container_running(name):
+            return
+        try:
+            self.command(["stop", "--time", "10", name])
+        except Exception:
+            # A concurrent clean exit may remove the --rm container before stop reaches it.
+            pass
+        if self._migration_container_running(name):
+            raise RuntimeError("Migration container could not be stopped; database state requires reconciliation")
+
+    def migration_container_name(self, manifest):
+        run_id, attempt = manifest.get("run_id"), manifest.get("attempt")
+        run_identity(run_id, attempt)
+        return f"arden-release-migration-{self.config['environment']}-{run_id}-{attempt}"
+
+    def reconcile_migration_execution(self, manifest):
+        """Stop only the named migration process recorded by the pending release attempt."""
+        self._stop_migration_container(self.migration_container_name(manifest))
+        settings = self._migration_settings()
+        if settings is None:
+            raise RuntimeError("Migration configuration is unavailable; database state requires reconciliation")
+        self._assert_migration_lock_free(settings)
+
+    def _assert_migration_lock_free(self, settings):
+        """Prove the migration session lock is free before any retry or ledger reconciliation."""
+        image = settings["database_image"]
+        actual = self.command(["image", "inspect", "--format", "{{.Id}}", image]).strip()
+        user = self.command(["image", "inspect", "--format", "{{.Config.User}}", image]).strip()
+        if actual != image or not user or user.lower() in {"root", "0", "0:0", "root:root"}:
+            raise RuntimeError("Protected database client image is unavailable")
+        query = ("SELECT CASE WHEN pg_try_advisory_lock(hashtext('arden:migrations')) "
+                 "THEN pg_advisory_unlock(hashtext('arden:migrations')) ELSE false END")
+        script = ("set -eu; psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
+                  "--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align "
+                  f"--command=\"{query}\"")
+        arguments = ["/usr/bin/docker", "run", "--rm", "--pull=never", "--network", settings["network"],
+                     "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+                     "--memory", "128m", "--cpus", "0.50", "--pids-limit", "32",
+                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                     "--log-driver", "none", "--env-file", settings["env_file"],
+                     "--env", "PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=2000",
+                     "--entrypoint", "/bin/sh", image, "-c", script]
+        try:
+            output = self.migration_command(arguments, timeout=30)
+        except Exception as error:
+            raise RuntimeError("Migration database lock could not be verified; database state requires reconciliation") from error
+        if output.strip() != "t":
+            raise RuntimeError("Migration database advisory lock is still held; database state requires reconciliation")
+
+    def _migration_command(self, arguments, timeout=900):
         try:
             result = subprocess.run(arguments, capture_output=True, text=True,
                                     timeout=timeout, check=False)
         except (OSError, subprocess.TimeoutExpired) as error:
+            name = self._migration_container_from_arguments(arguments)
+            if name:
+                try:
+                    self._stop_migration_container(name)
+                except Exception as cleanup_error:
+                    raise RuntimeError("Migration timed out and its container state is uncertain") from cleanup_error
             raise RuntimeError("Migration command outcome requires reconciliation") from error
         if result.returncode:
+            name = self._migration_container_from_arguments(arguments)
+            if name:
+                try:
+                    self._stop_migration_container(name)
+                except Exception as cleanup_error:
+                    raise RuntimeError("Migration failed and its container state is uncertain") from cleanup_error
             raise RuntimeError("Migration command failed; database state requires reconciliation")
         if len(result.stdout) > 64 * 1024:
             raise RuntimeError("Migration command response exceeds its limit")
@@ -410,7 +500,8 @@ class CoolifyManager:
             raise ValueError("Migration configuration is unavailable")
         self.ensure_images(manifest)
         image = self.image_id(manifest, "api")
-        arguments = ["/usr/bin/docker", "run", "--rm", "--pull=never", "--network", settings["network"],
+        container_name = self.migration_container_name(manifest)
+        arguments = ["/usr/bin/docker", "run", "--name", container_name, "--rm", "--pull=never", "--network", settings["network"],
                      "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
                      "--memory", "512m", "--cpus", "0.75", "--pids-limit", "64",
                      "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
@@ -423,6 +514,7 @@ class CoolifyManager:
             failed = result["status"] not in {"APPLIED", "NO_PENDING"}
         except Exception:
             failed = True
+        self._assert_migration_lock_free(settings)
         reconciled = self.plan_migrations(manifest)
         if reconciled["status"] == "NO_PENDING":
             return {"status": "APPLIED" if plan["status"] == "READY" else "NO_PENDING",

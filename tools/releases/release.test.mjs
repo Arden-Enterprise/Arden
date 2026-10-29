@@ -96,6 +96,34 @@ test("staging plans the exact source before upload and fences every mutating cal
   assert.equal(heads.length, 3);
 });
 
+test("a previous migration attempt is reconciled and replanned before upload", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const source = inventorySource(environment.GITHUB_SHA, "b".repeat(40));
+  const manifest = { schema: 2, ...source, run_id: environment.GITHUB_RUN_ID,
+    attempt: 1, images: { api: { id: "sha256:" + "1".repeat(64) }, web: { id: "sha256:" + "2".repeat(64) } },
+    archive_sha256: "c".repeat(64), archive_size: 10 };
+  const calls = [], heads = [];
+  const send = async (request, archive) => {
+    calls.push({ request, archive });
+    if (request.op === "plan-migrations") {
+      return calls.filter(call => call.request.op === "plan-migrations").length === 1
+        ? { status: "RECOVERY_REQUIRED", migration_ids: [] }
+        : { status: "READY", migration_ids: ["0001_example"] };
+    }
+    if (request.op === "reconcile-migrations") return { status: "RECONCILED" };
+    return { status: "ok" };
+  };
+  const result = await release.executeStagingRelease(environment, manifest, "temporary-archive", send,
+    async () => { heads.push(true); return environment.GITHUB_SHA; });
+  assert.deepEqual(result, { status: "ok" });
+  assert.deepEqual(calls.map(call => call.request.op), [
+    "plan-migrations", "reconcile-migrations", "plan-migrations", "upload", "deploy",
+  ]);
+  assert.equal(calls[1].request.commit, environment.GITHUB_SHA);
+  assert.equal(calls[1].request.attempt, 1);
+  assert.equal(heads.length, 5);
+});
+
 test("a blocked or malformed staging plan stops before any upload", async () => {
   assert.ok(release, "Release client is not implemented");
   const source = inventorySource(environment.GITHUB_SHA, "b".repeat(40));
@@ -166,12 +194,19 @@ test("preflight checks each environment with a read-only status request", async 
     });
     assert.deepEqual(calls, [{ op: "status", environment: branch === "main" ? "production" : "staging" }]);
   }
+  await release.checkReadiness(environment, async () => ({
+    active: { manifest: { schema: 2, commit: "b".repeat(40) } }, pending: null,
+  }));
+  await release.checkReadiness(environment, async () => ({
+    active: { manifest: { schema: 2, commit: "b".repeat(40) } },
+    pending: { phase: "migrating" },
+  }));
 });
 
 test("preflight refuses unavailable, incomplete or unresolved release state", async () => {
   const active = { manifest: { schema: 1, commit: "b".repeat(40) } };
   for (const status of [undefined, {}, { active }, { active, pending: {} },
-    { active: { manifest: { schema: 2, commit: "b".repeat(40) } }, pending: null }]) {
+    { active: { manifest: { schema: 3, commit: "b".repeat(40) } }, pending: null }]) {
     await assert.rejects(() => release.checkReadiness(environment, async () => status));
   }
   await assert.rejects(() => release.checkReadiness(environment, async () => { throw new Error("unreachable"); }), /unreachable/);
