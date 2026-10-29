@@ -412,7 +412,13 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.decideReview(ids.organizationReviewer, ids.organization, limited.id,
       "REJECT", limited.snapshotVersionId, limited.contentHash, "Wrong reviewer scope",
       randomUUID(), "integration-organization-reviewer-limited-denied"))
-      .resolves.toEqual({ kind: "unavailable" });
+      .resolves.toEqual({ kind: "denied", reason: "NOT_AUTHORIZED" });
+    await expect(pool.query(
+      "SELECT status FROM arden.shared_submission WHERE submission_id = $1", [limited.id]))
+      .resolves.toMatchObject({ rows: [{ status: "PENDING_REVIEW" }] });
+    await expect(pool.query(
+      "SELECT count(*)::text AS count FROM arden.review_decision WHERE submission_id = $1", [limited.id]))
+      .resolves.toMatchObject({ rows: [{ count: "0" }] });
     await expect(repository.decideReview(ids.organizationReviewer, ids.organization,
       organizationWide.id, "REJECT", organizationWide.snapshotVersionId,
       organizationWide.contentHash, "Organization review completed", randomUUID(),
