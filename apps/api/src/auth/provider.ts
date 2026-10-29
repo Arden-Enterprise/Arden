@@ -37,12 +37,23 @@ export interface AuthProvider {
 }
 
 export class SupabaseAuthProvider implements AuthProvider {
-  constructor(url: string, publishableKey: string) {
+  constructor(
+    url: string,
+    publishableKey: string,
+    publicAuthUrl?: string,
+    options: { requirePublicAuthUrl?: boolean } = {},
+  ) {
     this.url = url;
+    this.publicAuthUrlConfigured = publicAuthUrl !== undefined;
+    this.publicAuthUrl = publicAuthUrl === undefined ? url : validateSupabaseAuthPublicUrl(publicAuthUrl);
+    this.requirePublicAuthUrl = options.requirePublicAuthUrl ?? false;
     this.publishableKey = publishableKey;
   }
 
   private readonly url: string;
+  private readonly publicAuthUrlConfigured: boolean;
+  private readonly publicAuthUrl: string;
+  private readonly requirePublicAuthUrl: boolean;
   private readonly publishableKey: string;
 
   private createAuthClient(): SupabaseClient {
@@ -51,12 +62,12 @@ export class SupabaseAuthProvider implements AuthProvider {
     });
   }
 
-  private createPkceClient(storage: MapStorage): SupabaseClient {
-    return createClient(this.url, this.publishableKey, {
+  private createPkceClient(storage: MapStorage, url = this.url): SupabaseClient {
+    return createClient(url, this.publishableKey, {
       auth: {
         autoRefreshToken: false,
         detectSessionInUrl: false,
-        persistSession: false,
+        persistSession: true,
         flowType: "pkce",
         storage,
         storageKey: "arden-google-pkce",
@@ -148,8 +159,11 @@ export class SupabaseAuthProvider implements AuthProvider {
   }
 
   async startGoogleSignIn(redirectTo: string): Promise<GoogleOAuthStart> {
+    if (this.requirePublicAuthUrl && !this.publicAuthUrlConfigured) {
+      throw new Error("SUPABASE_AUTH_PUBLIC_URL_REQUIRED");
+    }
     const storage = new MapStorage();
-    const { data, error } = await this.createPkceClient(storage).auth.signInWithOAuth({
+    const { data, error } = await this.createPkceClient(storage, this.publicAuthUrl).auth.signInWithOAuth({
       provider: "google",
       options: { redirectTo, skipBrowserRedirect: true },
     });
@@ -230,17 +244,49 @@ export class SupabaseAuthProvider implements AuthProvider {
   }
 }
 
+export function resolveSupabaseAuthPublicUrl(
+  publicUrl: string | undefined,
+  privateUrl: string | undefined,
+): string | undefined {
+  if (publicUrl === undefined || publicUrl === "") {
+    return undefined;
+  }
+  if (!privateUrl) throw new Error("SUPABASE_AUTH_PUBLIC_URL requires SUPABASE_URL");
+  return validateSupabaseAuthPublicUrl(publicUrl);
+}
+
+function validateSupabaseAuthPublicUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("SUPABASE_AUTH_PUBLIC_URL must be an exact HTTPS origin without credentials, path, query, or fragment");
+  }
+  if (parsed.protocol !== "https:" || parsed.origin !== value || parsed.pathname !== "/" ||
+    parsed.username || parsed.password || parsed.search || parsed.hash) {
+    throw new Error("SUPABASE_AUTH_PUBLIC_URL must be an exact HTTPS origin without credentials, path, query, or fragment");
+  }
+  return parsed.origin;
+}
+
 class MapStorage {
   private readonly values = new Map<string, string>();
   getItem(key: string): string | null { return this.values.get(key) ?? null; }
   setItem(key: string, value: string): void { this.values.set(key, value); }
   removeItem(key: string): void { this.values.delete(key); }
   findVerifier(flowId: string): string | null {
-    return this.values.get(`arden-google-pkce-flow-${flowId}-code-verifier`) ??
-      [...this.values.entries()].find(([key]) => key.endsWith(`-flow-${flowId}-code-verifier`))?.[1] ?? null;
+    const stored = this.values.get(`arden-google-pkce-flow-${flowId}-code-verifier`) ??
+      [...this.values.entries()].find(([key]) => key.endsWith(`-flow-${flowId}-code-verifier`))?.[1];
+    if (!stored) return null;
+    try {
+      const verifier: unknown = JSON.parse(stored);
+      return typeof verifier === "string" ? verifier : null;
+    } catch {
+      return null;
+    }
   }
   setVerifier(flowId: string, verifier: string): void {
-    this.values.set(`arden-google-pkce-flow-${flowId}-code-verifier`, verifier);
+    this.values.set(`arden-google-pkce-flow-${flowId}-code-verifier`, JSON.stringify(verifier));
   }
 }
 
