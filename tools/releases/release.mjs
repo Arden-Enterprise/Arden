@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
-import { createReadStream, createWriteStream, readFileSync, writeFileSync, readdirSync,
+import { createReadStream, createWriteStream, readFileSync, writeFileSync,
   statSync, mkdirSync, chmodSync, existsSync, unlinkSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -8,6 +8,7 @@ import { createGzip } from "node:zlib";
 import { pathToFileURL } from "node:url";
 import { exchange } from "./transport.mjs";
 import { requestIdentity } from "./identity.mjs";
+import { assertSafeExpandMigrations, fingerprintMigrationInventory, loadMigrationInventory } from "../../apps/api/migrations/inventory.mjs";
 
 const sha = /^[0-9a-f]{40}$/;
 const imageId = /^sha256:[0-9a-f]{64}$/;
@@ -64,16 +65,15 @@ export async function checkReadiness(env, request) {
   }
 }
 
-function metadata() {
+export function metadata() {
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
   if (!sha.test(commit) || !sha.test(tree)) throw new Error("Invalid source revision");
   const directory = "apps/api/migrations";
-  const files = readdirSync(directory).filter(name => /^\d{4}_[a-z0-9_]+\.sql$/.test(name)).sort();
-  if (!files.length) throw new Error("Missing migration inventory");
-  const inventory = files.map(name => ({ name, sha256: createHash("sha256").update(readFileSync(join(directory, name))).digest("hex") }));
-  const migrations = createHash("sha256").update(JSON.stringify(inventory)).digest("hex");
-  return { commit, tree, migrations };
+  const migration_inventory = loadMigrationInventory(directory);
+  assertSafeExpandMigrations(migration_inventory, directory);
+  const migrations = fingerprintMigrationInventory(migration_inventory);
+  return { commit, tree, migrations, migration_inventory };
 }
 
 function workspace(env) {
@@ -139,7 +139,7 @@ async function bundle(env, root, context = releaseContext(env)) {
   if (size <= 0 || size > maxArchive) throw new Error("Release archive exceeds approved size limit");
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(archive)) hash.update(chunk);
-  const manifest = { schema: 1, ...source, run_id: context.run_id, attempt: context.attempt,
+  const manifest = { schema: 2, ...source, run_id: context.run_id, attempt: context.attempt,
     images, archive_sha256: hash.digest("hex"), archive_size: size };
   writeFileSync(join(root, "manifest.json"), JSON.stringify(manifest), { mode: 0o600 });
   execFileSync("python3", ["-I", "deploy/release/archive.py", "verify", archive, join(root, "manifest.json")],
@@ -152,7 +152,7 @@ async function main(mode, env) {
     if (env.GITHUB_SHA && value.commit !== env.GITHUB_SHA) throw new Error("Checkout identity mismatch");
     if (env.GITHUB_OUTPUT) {
       const { appendFileSync } = await import("node:fs");
-      appendFileSync(env.GITHUB_OUTPUT, Object.entries(value).map(([key, data]) => `${key}=${data}\n`).join(""));
+      appendFileSync(env.GITHUB_OUTPUT, ["commit", "tree", "migrations"].map(key => `${key}=${value[key]}\n`).join(""));
     }
     console.log(JSON.stringify(value));
     return;

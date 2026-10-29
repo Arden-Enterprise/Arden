@@ -36,6 +36,11 @@ jobs:
         with:
           node-version: 24.22.1
           package-manager-cache: false
+      - name: Validate migration inventory and immutable history
+        shell: bash
+        env:
+          ARDEN_MIGRATION_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: node tools/releases/migrations.mjs check --base "$ARDEN_MIGRATION_BASE_SHA"
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test

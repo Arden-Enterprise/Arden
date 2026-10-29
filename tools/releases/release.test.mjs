@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 let release;
+let migrationInventory;
 try { release = await import("./release.mjs"); } catch (error) {
+  if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
+}
+try { migrationInventory = await import("../../apps/api/migrations/inventory.mjs"); } catch (error) {
   if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
 }
 
@@ -13,6 +17,15 @@ const environment = {
 };
 
 test("release code is present", () => assert.ok(release, "Release client is not implemented"));
+
+test("release metadata binds the complete migration policy inventory", () => {
+  assert.ok(release && migrationInventory, "Release migration inventory is not implemented");
+  assert.equal(typeof release.metadata, "function", "Release metadata must be available to the bundle builder");
+  const source = release.metadata();
+  assert.equal(source.migrations, migrationInventory.fingerprintMigrationInventory(source.migration_inventory));
+  assert.ok(source.migration_inventory.length >= 23);
+  assert.ok(source.migration_inventory.every(row => row.rollout === "operator"));
+});
 
 test("only public canonical push targets can obtain a deployment environment", () => {
   assert.ok(release, "Release client is not implemented");

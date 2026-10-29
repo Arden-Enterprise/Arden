@@ -1,0 +1,143 @@
+{
+  "schema": 1,
+  "migrations": [
+    {
+      "id": "0001",
+      "filename": "0001_initial_schema.sql",
+      "sha256": "bcb5f3e7a86f5e77cfbdd801312288b4082961df4797d34656b80de2fae7c9eb",
+      "rollout": "operator"
+    },
+    {
+      "id": "0002",
+      "filename": "0002_mainflow_1_organization_roles_invites.sql",
+      "sha256": "11e759c32afcb704af012e849758bdd721c1a8e539d24f72b9821fa79f717015",
+      "rollout": "operator"
+    },
+    {
+      "id": "0003",
+      "filename": "0003_break_role_assignment_rls_recursion.sql",
+      "sha256": "666a07443a6cad46b8c72f3b4066fd5057768a215c5afabe3d11b06ab66211eb",
+      "rollout": "operator"
+    },
+    {
+      "id": "0004",
+      "filename": "0004_remove_role_assignment_policy_recursion.sql",
+      "sha256": "049f1687a12d5e63d252c823c1f1bce0778f1477b680a093158ea36c7dd1e44f",
+      "rollout": "operator"
+    },
+    {
+      "id": "0005",
+      "filename": "0005_allow_accepted_invitation_token_read.sql",
+      "sha256": "a6863ec9cde12ffba8d47288f0f062bdb4a0edc1fbb168bd58a7bfb87f77e7c4",
+      "rollout": "operator"
+    },
+    {
+      "id": "0006",
+      "filename": "0006_mainflow_2_shared_draft_foundation.sql",
+      "sha256": "8587f7db5086be8d4ad359852aa98c5d5afd969c35a285eabecd41b4eb0bc1c9",
+      "rollout": "operator"
+    },
+    {
+      "id": "0007",
+      "filename": "0007_protect_shared_draft_provenance.sql",
+      "sha256": "1e353be49cfcdf07ab83fef2e9912991bb97906a04b48bdec83e835e33f6cf4a",
+      "rollout": "operator"
+    },
+    {
+      "id": "0008",
+      "filename": "0008_enable_private_shared_draft_creation.sql",
+      "sha256": "a542b82d8ce75fc700354b9408350a968021579c7e863cdaad024261eb093ea5",
+      "rollout": "operator"
+    },
+    {
+      "id": "0009",
+      "filename": "0009_mainflow_2_authoring.sql",
+      "sha256": "ac4a1944096f164c5a3386807130dd0bd6e2ca689a649ac2c643c582fc6c14e2",
+      "rollout": "operator"
+    },
+    {
+      "id": "0010",
+      "filename": "0010_mainflow_2_submission_review.sql",
+      "sha256": "7e0df9ea4dc045227e7233dde14a63b7d5dd94395f9b397ea1333c27ccf5aca9",
+      "rollout": "operator"
+    },
+    {
+      "id": "0011",
+      "filename": "0011_custom_role_policy_foundation.sql",
+      "sha256": "e72d3aebebf4fdbe0345452bcf5a19addb4a0539e281d8e12bdcc80defa60d9c",
+      "rollout": "operator"
+    },
+    {
+      "id": "0012",
+      "filename": "0012_all_members_organization_audience.sql",
+      "sha256": "ed908ffed98f4333c1ca23219b739c2f39cb00a24b5c8d0e8867b51c8bfca416",
+      "rollout": "operator"
+    },
+    {
+      "id": "0013",
+      "filename": "0013_pdf_shared_drafts.sql",
+      "sha256": "3d01831e2285b8a383b2fc54191208ac1c90d82d0ab0d016648adfd419a27c2a",
+      "rollout": "operator"
+    },
+    {
+      "id": "0014",
+      "filename": "0014_pdf_snapshot_mime_not_null.sql",
+      "sha256": "a144c12fde5d9496daa991f4920ec7ba812c65fa5266d51b2bdefa6235ce1af1",
+      "rollout": "operator"
+    },
+    {
+      "id": "0015",
+      "filename": "0015_org_admin_member_profiles.sql",
+      "sha256": "7a4ff40971051cced9f1ec059741363665c2e9457d3bfcca873710ae42524946",
+      "rollout": "operator"
+    },
+    {
+      "id": "0016",
+      "filename": "0016_fix_flow2_cross_actor_validation.sql",
+      "sha256": "a8f53bbda6f04d4ebd587b0c61ef149985d4fb4e77135ab871560dbc5ec51e85",
+      "rollout": "operator"
+    },
+    {
+      "id": "0017",
+      "filename": "0017_audience_and_instance_admin_foundation.sql",
+      "sha256": "442b0310cb79d22a9a20046841116ed784582c59d9776d25d77f0a26cfa74629",
+      "rollout": "operator"
+    },
+    {
+      "id": "0018",
+      "filename": "0018_flow3_contract_and_test_content_reset.sql",
+      "sha256": "fa1a4ab2425e9098dff131a82e0fc5a38f16e85e54bf83a3b5ee7d14f7bf2796",
+      "rollout": "operator"
+    },
+    {
+      "id": "0019",
+      "filename": "0019_flow3_durable_index_generations.sql",
+      "sha256": "6dcd61ccb72cecfde34f92c3b8174aa9051c164064a260515d82124c29b6781b",
+      "rollout": "operator"
+    },
+    {
+      "id": "0020",
+      "filename": "0020_permission_aware_answer_sources.sql",
+      "sha256": "2d9873a236c700b76200c548cb17e3a1154ac2146cedd0117b7f3425d5c89f33",
+      "rollout": "operator"
+    },
+    {
+      "id": "0021",
+      "filename": "0021_monotonic_publication_activation.sql",
+      "sha256": "e0945335a0772b6354f9de306636748c90eb227e9d95fd009d78149136e5bdfd",
+      "rollout": "operator"
+    },
+    {
+      "id": "0022",
+      "filename": "0022_organization_reviewer_grants.sql",
+      "sha256": "87cb4cb6b3c26ae87d74978c76fa45291d64542db891ea9386163ab442c5f18b",
+      "rollout": "operator"
+    },
+    {
+      "id": "0023",
+      "filename": "0023_invitation_optional_department.sql",
+      "sha256": "6266cbf3dde3c00b32c3d9b522c38168b84cdebab17a4f2d1dac0be0650d6786",
+      "rollout": "operator"
+    }
+  ]
+}
