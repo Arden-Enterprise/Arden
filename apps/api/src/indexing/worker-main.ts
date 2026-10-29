@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { Pool } from "pg";
 import { HttpArdenAiClient } from "./ai-client.js";
 import { PgIndexGenerationStore } from "./store.js";
-import { IndexingWorker } from "./worker.js";
+import { IndexingWorker, indexWorkerLeaseSeconds } from "./worker.js";
 import { LocalPrivateContentStorage } from "../private-notes/content-storage.js";
 
 const databaseUrl = requiredEnvironment("DATABASE_URL");
@@ -14,8 +14,8 @@ const storageRoot = process.env.ARDEN_PRIVATE_STORAGE_ROOT
 if (!storageRoot) throw new Error("ARDEN_PRIVATE_STORAGE_ROOT is required in production");
 
 const pollMilliseconds = boundedInteger("ARDEN_INDEX_POLL_MS", 1_000, 100, 30_000);
-const leaseSeconds = boundedInteger("ARDEN_INDEX_LEASE_SECONDS", 180, 15, 600);
-const pool = new Pool({ connectionString: databaseUrl, max: 2 });
+const leaseSeconds = indexWorkerLeaseSeconds(process.env.ARDEN_INDEX_LEASE_SECONDS);
+const pool = new Pool({ connectionString: databaseUrl, max: 2, connectionTimeoutMillis: 10_000 });
 const worker = new IndexingWorker(
   randomUUID(),
   leaseSeconds,

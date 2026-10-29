@@ -11,7 +11,11 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5180,
       strictPort: true,
-      proxy: { "/api": `http://127.0.0.1:${apiPort}` }
+      proxy: {
+        "/api": `http://127.0.0.1:${apiPort}`,
+        "/auth": `http://127.0.0.1:${apiPort}`,
+        "/verify": `http://127.0.0.1:${apiPort}`,
+      }
     }
   };
 });

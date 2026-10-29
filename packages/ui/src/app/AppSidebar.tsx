@@ -46,7 +46,7 @@ export const knowledgeNavigation: NavigationItem[] = [
 
 export const adminNavigation: NavigationItem = { label: "Administration", shortLabel: "Admin", icon: "organization", view: "organization-access" };
 
-/** Server-backed sessions also expose the honest, local-only Ask Arden interface preview. */
+/** Server-backed sessions expose Ask Arden through the authenticated Core API. */
 export function navigationDisabled(item: NavigationItem, authenticated: boolean): boolean {
   if (item.planned) return true;
   return authenticated && item.view === "my-work";

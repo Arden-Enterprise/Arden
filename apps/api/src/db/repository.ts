@@ -93,7 +93,7 @@ export type SharedKnowledgeSubmission = {
   audienceRoleIds: string[];
   contentHash: string;
   status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
-  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED";
+  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED";
   submittedAt: Date;
   publishedVersionId: string | null;
   decisionComment: string | null;
@@ -146,6 +146,18 @@ export type PublishedKnowledge = {
   publishedAt: Date;
   validFrom: Date;
   validUntil: Date | null;
+};
+export type AuthorizedAiSource = {
+  chunks: unknown;
+  generationId: string;
+  snapshotVersionId: string;
+  snapshotContentHash: string;
+  publishedVersionId: string;
+  draftId: string;
+  title: string;
+  versionNo: number;
+  classification: KnowledgeClassification;
+  targetScopeType: "ORGANIZATION" | "DEPARTMENT";
 };
 type SharedDraftRow = {
   shared_draft_id: string;
@@ -326,6 +338,18 @@ type PublishedKnowledgeRow = {
   valid_from: Date;
   valid_until: Date | null;
 };
+type AuthorizedAiSourceRow = {
+  chunks: unknown;
+  generation_id: string;
+  snapshot_version_id: string;
+  snapshot_content_hash: string;
+  published_version_id: string;
+  shared_draft_id: string;
+  title: string;
+  version_no: number;
+  classification: KnowledgeClassification;
+  target_scope_type: "ORGANIZATION" | "DEPARTMENT";
+};
 const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
          pv.responsible_department_id, pv.content_hash, pv.content_uri,
@@ -421,6 +445,7 @@ export interface ArdenDataRepository {
     idempotencyKey: string, requestId: string): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
+  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null>;
 }
 
 function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): string {
@@ -1502,6 +1527,41 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
+  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null> {
+    if ((generationIds && generationIds.length > 12) || (chunkIds && chunkIds.length > 12)) throw new Error("Too many citation locations");
+    return this.withActorContext(userId, organizationId, async (client) => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      const result = await client.query<AuthorizedAiSourceRow>(`
+        SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
+               pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
+               pv.classification, cp.target_scope_type,
+               CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
+                 (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
+                   WHERE $3::text[] IS NULL OR chunk->>'chunkId' = ANY($3::text[])) END AS chunks
+          FROM knowledge_current_publication cp
+          JOIN published_knowledge_version pv
+            ON pv.published_version_id = cp.published_version_id
+          JOIN knowledge_index_generation g
+            ON g.submission_id = pv.submission_id AND g.status = 'READY'
+         WHERE cp.organization_id = $1
+           AND ($2::uuid[] IS NULL OR g.generation_id = ANY($2::uuid[]))
+         ORDER BY pv.published_at DESC, pv.published_version_id DESC
+         LIMIT 500`, [organizationId, generationIds ?? null, chunkIds ?? null]);
+      return result.rows.map((row) => ({
+        generationId: row.generation_id,
+        chunks: row.chunks,
+        snapshotVersionId: row.snapshot_version_id,
+        snapshotContentHash: row.snapshot_content_hash,
+        publishedVersionId: row.published_version_id,
+        draftId: row.shared_draft_id,
+        title: row.title,
+        versionNo: row.version_no,
+        classification: row.classification,
+        targetScopeType: row.target_scope_type,
+      }));
+    });
+  }
+
   async canCreateDraft(userId: string, organizationId: string): Promise<boolean> {
     return this.withActorContext(userId, organizationId, async (client) =>
       Boolean(await this.findMembership(userId, organizationId, "PRIVATE_WORKSPACE_WRITE", client)));
@@ -1565,6 +1625,17 @@ export class ArdenRepository implements ArdenDataRepository {
 
   async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }> {
     return this.withActorContext(userId, organizationId, async (client) => {
+      // Lock the mutable document before reading its version join. Under READ
+      // COMMITTED, a waiter otherwise rechecks the new document against an old
+      // joined-version snapshot and can incorrectly report an owned draft missing.
+      const locked = await client.query(`SELECT d.draft_id FROM draft_document d
+        JOIN private_workspace w ON w.workspace_id = d.workspace_id
+        JOIN organization_membership om ON om.membership_id = w.membership_id
+        WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
+          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
+          AND ${membershipPermissionSql("$4")}
+        FOR UPDATE OF d`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
+      if (!locked.rowCount) return { kind: "not-found" };
       const currentResult = await client.query<{
         membership_id: string;
         title: string;
@@ -1584,8 +1655,7 @@ export class ArdenRepository implements ArdenDataRepository {
           JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
          WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
            AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
-           AND ${membershipPermissionSql("$4")}
-         FOR UPDATE OF d`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
+           AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
       const current = currentResult.rows[0];
       if (!current) return { kind: "not-found" };
       if (current.current_version_no !== expectedVersion) return { kind: "conflict", currentVersion: current.current_version_no };

@@ -1,0 +1,101 @@
+{
+  "name": "Arden approved final artwork",
+  "algorithm": "SHA-256",
+  "assets": [
+    {
+      "file": ".gitattributes",
+      "bytes": 89,
+      "sha256": "eb73d03f06f800509feea87667390132129d2f3930a122ab5cebf1be516ddb77"
+    },
+    {
+      "file": "arden-lockup.png",
+      "bytes": 48575,
+      "sha256": "615ddc19da8fb459c3c49fdaafd71ead34e02943af9a9b14efa940a49e85ee1d"
+    },
+    {
+      "file": "arden-lockup.svg",
+      "bytes": 80993,
+      "sha256": "065c35131e45c5abb41be1fd0bca8b7703436c1fc5a7b153adc085b67839a605"
+    },
+    {
+      "file": "arden-logo.png",
+      "bytes": 61148,
+      "sha256": "8ff8b474f89bb3943719fbf060e81d6a4c449e18acb2f11861eeb915482368c9"
+    },
+    {
+      "file": "arden-logo.svg",
+      "bytes": 78181,
+      "sha256": "02a788e3c420e0ebf75a36f89f354403b71ec0266b5bbe1898012db87a95d8b7"
+    },
+    {
+      "file": "png/arden-lockup-black.png",
+      "bytes": 38653,
+      "sha256": "6d0d09dfebba725d723d371afc0f356332aef34ad49a9acc631b43139c569560"
+    },
+    {
+      "file": "png/arden-lockup-white.png",
+      "bytes": 37142,
+      "sha256": "643b9c0eb6c88a4e183618002847502e0bbf3f926171f54a31f72ff7d181eeb1"
+    },
+    {
+      "file": "png/arden-logo-black.png",
+      "bytes": 48444,
+      "sha256": "9ea5c8ce620e1afbce850152157c61560a6c8c0c7c17cd713ba0946dacac51d3"
+    },
+    {
+      "file": "png/arden-logo-white.png",
+      "bytes": 42201,
+      "sha256": "f635215166c1e902e49dced233cfc35dec64bfb62d754508b85dd51e2bdf5b88"
+    },
+    {
+      "file": "preview.png",
+      "bytes": 63904,
+      "sha256": "5b16c6139dc698930c65b1aee59cb36336818575ae8b9a27e369a1c46bb79d2c"
+    },
+    {
+      "file": "README.md",
+      "bytes": 1553,
+      "sha256": "14dbed185e4a902de56c1d2bac4ba77ca11e13aa37cb4aee6843f2d95c8de8ce"
+    },
+    {
+      "file": "selection.json",
+      "bytes": 398,
+      "sha256": "8e3df0851af683f76d139542535fe0e5af45438a7c0498b78e953e41cce9ed99"
+    },
+    {
+      "file": "Sora-OFL.txt",
+      "bytes": 4384,
+      "sha256": "855bd3bf8c48eaa45d3c0bbc077a12c977f3ca9a8efb3124e049b9300d56837f"
+    },
+    {
+      "file": "svg/arden-lockup-black.svg",
+      "bytes": 80993,
+      "sha256": "f3414d25c8bf6d0e0db6bc26c0ab1f682949c0ef7b25956f053542047798e0b0"
+    },
+    {
+      "file": "svg/arden-lockup-current-color.svg",
+      "bytes": 80971,
+      "sha256": "96042801dda05c5402a10179189647e8e1da6fb9e41cf14fce23448a2ac2a660"
+    },
+    {
+      "file": "svg/arden-lockup-white.svg",
+      "bytes": 80993,
+      "sha256": "bbbeb267de1f833edf8c09ab603b312a556dfe003b025c3d02800620d8914326"
+    },
+    {
+      "file": "svg/arden-logo-black.svg",
+      "bytes": 78181,
+      "sha256": "5205fd90b0c601504f6a7f17a481918190997510c6e006cc764454adb789cac0"
+    },
+    {
+      "file": "svg/arden-logo-current-color.svg",
+      "bytes": 78159,
+      "sha256": "425aa1e377a3cec07d6bbdd65b77f2dbc80b925f90ebb81ee7fd2bf5f79481f8"
+    },
+    {
+      "file": "svg/arden-logo-white.svg",
+      "bytes": 78181,
+      "sha256": "c312c158ebe57337bc462d60e3533b7189a0049761ae2e795e1f90bb794d8904"
+    }
+  ]
+}

@@ -62,4 +62,38 @@ describe("SMTP runtime configuration", () => {
       requireTLS: false,
     }));
   });
+
+  it("sends both text and embedded professional HTML when dispatching an invitation", async () => {
+    const fakeSendMail = vi.fn().mockResolvedValue({ messageId: "test-id" });
+    const fakeTransporter = { sendMail: fakeSendMail, close: vi.fn() } as unknown as Transporter;
+    vi.spyOn(nodemailer, "createTransport").mockReturnValue(fakeTransporter);
+
+    const mailer = createSmtpMailer({
+      host: "smtp.example.test", port: 587, secure: false,
+      user: "arden@example.test", password: "private-secret", from: "Arden <arden@example.test>",
+    });
+
+    const expiresAt = new Date("2026-10-25T12:00:00.000Z");
+    await mailer.sendInvitation({
+      to: "newmember@example.com",
+      organizationName: "FPT Digital <Security & Innovation>",
+      invitationUrl: "https://arden.example.com/invite/tok123_abc",
+      expiresAt,
+    });
+
+    expect(fakeSendMail).toHaveBeenCalledTimes(1);
+    const sentArgs = fakeSendMail.mock.calls[0][0];
+    expect(sentArgs.from).toBe("Arden <arden@example.test>");
+    expect(sentArgs.to).toBe("newmember@example.com");
+    expect(sentArgs.subject).toBe("Invitation to join FPT Digital <Security & Innovation> on Arden");
+    expect(sentArgs.text).toContain("https://arden.example.com/invite/tok123_abc");
+
+    // HTML assertions
+    expect(sentArgs.html).toContain("<!DOCTYPE html>");
+    expect(sentArgs.html).toContain("FPT Digital &lt;Security &amp; Innovation&gt;");
+    expect(sentArgs.html).toContain('href="https://arden.example.com/invite/tok123_abc"');
+    expect(sentArgs.html).toContain("Accept Invitation &rarr;");
+    expect(sentArgs.html).toContain("Your personal notes stay private");
+    expect(sentArgs.html).toContain(expiresAt.toUTCString());
+  });
 });

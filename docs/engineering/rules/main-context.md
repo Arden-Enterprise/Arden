@@ -31,6 +31,7 @@ Read these from the fetched main revision, even when local copies exist:
 
 - [AGENTS.md](../../../AGENTS.md), [CONTRIBUTING.md](../../../CONTRIBUTING.md), and this module.
 - [Technology guide](../technology-guide.md), [decision guidance](../../decisions/README.md), and every accepted decision relevant to the task. For stack, identity and database work, include [decision 0001](../../decisions/0001-supabase-and-hybrid-development.md); check whether a later accepted record supersedes it.
+- [Specification rule](specifications.md), the relevant [feature/flow index](../../product/README.md) entries and their owning specifications/acceptance IDs. Inspect referenced in-flight contract changes where relevant; a branch-only accepted record is not proof of integration into main. Use the rule's comparison/decision boundary for conflicts rather than silently choosing the newest document.
 - Task-specific product, blueprint, design, security, operations and setup documents required by those entry points. Read applicable local/nested `AGENTS.md` files for affected paths as well.
 
 For example, these commands read main without replacing a dirty checkout:

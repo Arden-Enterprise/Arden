@@ -1,6 +1,6 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
-import { createHash, randomBytes } from "node:crypto";
-import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument } from "@arden/domain";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
@@ -8,6 +8,9 @@ import type { InvitationMailer } from "./email/smtp-mailer.js";
 import { allKnowledgeClassifications, defaultKnowledgeClassification, type KnowledgeClassification } from "./knowledge/policy.js";
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
+import type { AskArdenClient } from "./answers/ai-client.js";
+import { citationPage } from "./answers/citation-page.js";
+import { citationMatchesManifest } from "./answers/contracts.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -27,6 +30,7 @@ type AppDependencies = {
   publicWebOrigin?: string | null;
   publicApiOrigin?: string | null;
   invitationDeliveryMode?: "email" | "local-test-no-email";
+  askArden?: AskArdenClient | null;
   testActor?: SessionContext;
 };
 
@@ -215,10 +219,109 @@ export function buildApp(dependencies: AppDependencies) {
         message: "If account setup can proceed, check your email for confirmation. Then return to this invitation and sign in to accept it.",
       });
     } catch (error) {
+      if (error instanceof Error && error.message === "USER_ALREADY_EXISTS") {
+        return reply.code(409).send(safeError("ACCOUNT_ALREADY_EXISTS", "An account with this email address already exists. Please sign in instead.", request.id));
+      }
       if (error instanceof Error && error.message === "SIGNUP_REJECTED") {
         return reply.code(400).send(safeError("ACCOUNT_SETUP_UNAVAILABLE", "Account setup could not be completed. Check the password requirements or sign in.", request.id));
       }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Supabase sign-up failed");
+      return authUnavailable(reply, request);
+    }
+  });
+
+  app.post<{ Body: { email: string } }>("/api/v1/auth/forgot-password", {
+    schema: {
+      body: {
+        type: "object", additionalProperties: false, required: ["email"],
+        properties: {
+          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!dependencies.auth) return authUnavailable(reply, request);
+    try {
+      if (dependencies.auth.resetPasswordForEmail) {
+        const origin = request.headers.origin || dependencies.publicWebOrigin || "http://127.0.0.1:5180";
+        await dependencies.auth.resetPasswordForEmail(request.body.email.trim().toLowerCase(), `${origin}/reset-password`);
+      }
+      return reply.code(202).send({
+        status: "recovery_sent",
+        message: "If an account with this email exists, a password reset email has been sent.",
+      });
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password reset request failed");
+      return authUnavailable(reply, request);
+    }
+  });
+
+  const handleVerify = async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!dependencies.auth || !dependencies.auth.verifyLink) {
+      return reply.redirect("/?error=verify_unavailable", 303);
+    }
+    const query = new URL(request.url, "http://localhost").search.slice(1);
+    try {
+      const location = await dependencies.auth.verifyLink(query);
+      if (location) {
+        return reply.redirect(location, 303);
+      }
+      return reply.redirect("/?error=verification_failed", 303);
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Auth verification failed");
+      return reply.redirect("/?error=verification_failed", 303);
+    }
+  };
+
+  app.get("/auth/v1/verify", handleVerify);
+  app.get("/api/v1/auth/verify", handleVerify);
+  app.get("/verify", handleVerify);
+
+  app.post<{ Body: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string } }>("/api/v1/auth/reset-password", {
+    schema: {
+      body: {
+        type: "object", additionalProperties: false, required: ["newPassword"],
+        properties: {
+          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          token: { type: "string", minLength: 1, maxLength: 100 },
+          accessToken: { type: "string", minLength: 10 },
+          refreshToken: { type: "string", minLength: 10 },
+          newPassword: { type: "string", minLength: 6, maxLength: 1024 },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    if (!dependencies.auth || !dependencies.auth.updateUserPassword) return authUnavailable(reply, request);
+    try {
+      let tokens: AuthSessionTokens | null = null;
+      if (request.body.accessToken && request.body.refreshToken) {
+        tokens = { accessToken: request.body.accessToken, refreshToken: request.body.refreshToken, expiresIn: 3600 };
+      } else if (request.body.email && request.body.token && dependencies.auth.verifyOtp) {
+        const verified = await dependencies.auth.verifyOtp({
+          email: request.body.email.trim().toLowerCase(),
+          token: request.body.token.trim(),
+          type: "recovery",
+        });
+        tokens = verified.tokens;
+      } else {
+        tokens = readAuthCookies(request.headers.cookie, dependencies.secureCookies);
+      }
+
+      if (!tokens) {
+        return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid reset token or session is required.", request.id));
+      }
+
+      await dependencies.auth.updateUserPassword(tokens, request.body.newPassword);
+      setAuthCookies(reply, tokens, dependencies.secureCookies);
+      return reply.code(200).send({ status: "password_updated" });
+    } catch (error) {
+      if (error instanceof Error && (error.message === "INVALID_OTP" || error.message === "INVALID_SESSION")) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link or code is invalid or has expired.", request.id));
+      }
+      if (error instanceof Error && error.message === "PASSWORD_UPDATE_REJECTED") {
+        return reply.code(400).send(safeError("PASSWORD_REJECTED", "Password does not meet requirements.", request.id));
+      }
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password update failed");
       return authUnavailable(reply, request);
     }
   });
@@ -1091,6 +1194,87 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  app.post<{ Params: { organizationId: string }; Body: { query: string } }>(
+    "/api/v1/organizations/:organizationId/ai/answers", {
+      schema: {
+        params: { type: "object", required: ["organizationId"], additionalProperties: false, properties: {
+          organizationId: { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", required: ["query"], additionalProperties: false, properties: {
+          query: { type: "string", minLength: 1, maxLength: 4_000 },
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      const query = request.body.query.trim();
+      if (!query) return reply.code(400).send(safeError("INVALID_REQUEST", "The question is empty.", request.id));
+      if (!dependencies.askArden) {
+        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
+      }
+      try {
+        const { organizationId } = request.params;
+        const before = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId);
+        if (!before) return reply.code(404).send(resourceNotAvailable(request.id));
+        if (before.length === 0) {
+          reply.header("Cache-Control", "no-store");
+          return { status: "INSUFFICIENT_EVIDENCE", answer: "I could not find any indexed published knowledge you are allowed to read.", citations: [] };
+        }
+        const requestId = randomUUID();
+        const aiResponse = await dependencies.askArden.answer({
+          contractVersion: 1,
+          requestId,
+          organizationId,
+          query,
+          allowedGenerationIds: before.map((source) => source.generationId),
+        });
+        const after = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId,
+          [...new Set(aiResponse.citations.map((citation) => citation.generationId))],
+          [...new Set(aiResponse.citations.map((citation) => citation.chunkId))]);
+        if (!after) return reply.code(404).send(resourceNotAvailable(request.id));
+        const beforeByGeneration = new Map(before.map((source) => [source.generationId, source]));
+        const afterByGeneration = new Map(after.map((source) => [source.generationId, source]));
+        const citations = aiResponse.citations.map((citation) => {
+          const initial = beforeByGeneration.get(citation.generationId);
+          const current = afterByGeneration.get(citation.generationId);
+          if (!initial || !current || initial.publishedVersionId !== current.publishedVersionId
+            || current.snapshotVersionId !== citation.snapshotVersionId
+            || current.snapshotContentHash !== citation.snapshotContentHash
+            || !citationMatchesManifest(citation, current.chunks)) {
+            return null;
+          }
+          return {
+            documentId: current.draftId,
+            versionId: current.publishedVersionId,
+            blockId: citation.sourceBlockIds[0] ?? citation.parentSectionBlockId ?? undefined,
+            page: citationPage(citation.sourceBlockIds, citation.parentSectionBlockId),
+            excerpt: citation.excerpt,
+            title: current.title,
+            version: `v${current.versionNo}`,
+            scope: current.targetScopeType === "ORGANIZATION" ? "Company-wide" : "Department",
+            classification: current.classification,
+          };
+        });
+        if (citations.some((citation) => citation === null)) {
+          return reply.code(409).send(safeError("KNOWLEDGE_ACCESS_CHANGED",
+            "Knowledge access changed while the answer was being prepared. Please ask again.", request.id));
+        }
+        const authorizedCitations = citations.filter((citation): citation is NonNullable<typeof citation> => citation !== null);
+        const uniqueCitations = authorizedCitations.filter((citation, index, all) => {
+          const location = citation.page === undefined ? citation.blockId ?? "source" : `page-${citation.page}`;
+          return all.findIndex((candidate) => {
+            const candidateLocation = candidate.page === undefined ? candidate.blockId ?? "source" : `page-${candidate.page}`;
+            return candidate.versionId === citation.versionId && candidateLocation === location;
+          }) === index;
+        });
+        reply.header("Cache-Control", "no-store");
+        return { status: aiResponse.status, answer: aiResponse.answer, citations: uniqueCitations };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Ask Arden answer failed");
+        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
+      }
+    });
+
   app.get<{ Params: { organizationId: string; publishedVersionId: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/published/:publishedVersionId", {
       schema: { params: { type: "object", required: ["organizationId", "publishedVersionId"], properties: {
@@ -1471,10 +1655,13 @@ function etag(version: number): string { return `"${version}"`; }
 
 function normalizeSharedDraftBody(body: string): string | null {
   const parsed = parseSemanticDocument(body);
-  if (parsed.ok) return serializeSemanticDocument(parsed.document);
-  if (body.startsWith("arden-document:")) return null;
+  if (!parsed.ok && body.startsWith("arden-document:")) return null;
   const digest = createHash("sha256").update(body).digest("hex").slice(0, 16);
-  return serializeSemanticDocument(plainTextToSemanticDocument(body, (index) => `import-${digest}-${index}`));
+  const converted = parsed.ok ? parsed.document : plainTextToSemanticDocument(body, (index) => `import-${digest}-${index}`);
+  const validated = validateSemanticDocument(converted);
+  if (!validated) return null;
+  const serialized = serializeSemanticDocument(validated);
+  return isValidText(serialized, maxBodyBytes, maxBodyBytes) ? serialized : null;
 }
 
 function encodeCursor(cursor: DraftCursor): string {

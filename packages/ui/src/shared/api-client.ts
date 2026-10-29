@@ -92,7 +92,7 @@ export type KnowledgeSubmission = {
   audienceIds: string[];
   contentHash: string;
   status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
-  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED";
+  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED";
   submittedAt: string;
   publishedVersionId: string | null;
   decisionComment: string | null;
@@ -144,6 +144,21 @@ export type ReviewerGrant = {
   validFrom: string;
   validUntil: string | null;
   status: "ACTIVE" | "INACTIVE";
+};
+export type AskArdenAnswer = {
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
+  answer: string;
+  citations: Array<{
+    documentId: string;
+    versionId: string;
+    blockId?: string;
+    page?: number;
+    excerpt: string;
+    title: string;
+    version: string;
+    scope: string;
+    classification: KnowledgeClassification;
+  }>;
 };
 
 function knowledgePath(organizationId: string): string {
@@ -236,6 +251,12 @@ export function loadPublishedKnowledge(platform: Platform, organizationId: strin
   return request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}`);
 }
 
+export function askArden(platform: Platform, organizationId: string, query: string): Promise<AskArdenAnswer> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/answers`, {
+    method: "POST", body: JSON.stringify({ query }),
+  });
+}
+
 export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {
   const result = await request<{ items: ReviewerGrant[] }>(platform, `${knowledgePath(organizationId)}/reviewer-grants`);
   return result.items;
@@ -278,6 +299,21 @@ export async function setAccountPassword(platform: Platform, password: string): 
     method: "POST", body: JSON.stringify({ password }),
   });
   return currentSession(platform);
+}
+
+export async function requestPasswordReset(platform: Platform, email: string): Promise<void> {
+  await request(platform, "/api/v1/auth/forgot-password", {
+    method: "POST", body: JSON.stringify({ email }),
+  });
+}
+
+export async function resetPasswordWithToken(
+  platform: Platform,
+  params: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string }
+): Promise<void> {
+  await request(platform, "/api/v1/auth/reset-password", {
+    method: "POST", body: JSON.stringify(params),
+  });
 }
 
 export async function restoreSession(platform: Platform): Promise<CurrentSession | null> {

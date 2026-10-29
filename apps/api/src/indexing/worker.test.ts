@@ -2,11 +2,12 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { PrivateContentStorage } from "../private-notes/content-storage.js";
 import type { IndexGenerationClient } from "./ai-client.js";
-import type { IndexGenerationJob, IndexGenerationManifest } from "./contracts.js";
+import { IndexGenerationSupersededError, type IndexGenerationJob, type IndexGenerationManifest } from "./contracts.js";
 import type { IndexGenerationStore } from "./store.js";
-import { IndexingWorker } from "./worker.js";
+import { IndexingWorker, indexWorkerLeaseSeconds } from "./worker.js";
 
 const snapshot = "arden-document:application/vnd.arden.semantic-blocks+json;version=1\n{\"schemaVersion\":1,\"blocks\":[]}";
+const pdfSnapshot = Buffer.from("%PDF-1.7\nsynthetic test payload\n%%EOF", "utf8");
 
 function makeJob(patch: Partial<IndexGenerationJob> = {}): IndexGenerationJob {
   return {
@@ -64,12 +65,31 @@ const storage: PrivateContentStorage = {
 const logger = { info() {}, error() {} };
 
 describe("indexing worker", () => {
+  it("rejects leases shorter than the bounded AI request plus completion margin", () => {
+    expect(indexWorkerLeaseSeconds(undefined)).toBe(300);
+    expect(indexWorkerLeaseSeconds("180")).toBe(180);
+    for (const value of ["90", "179", "601", "180.5", "NaN"]) {
+      expect(() => indexWorkerLeaseSeconds(value)).toThrow("ARDEN_INDEX_LEASE_SECONDS");
+    }
+  });
+
+  it("does not retry a generation superseded by an already published snapshot", async () => {
+    const job = makeJob();
+    const store = new FakeStore(job);
+    store.complete = async () => { throw new IndexGenerationSupersededError("superseded"); };
+    const worker = new IndexingWorker("10000000-0000-4000-8000-000000000008", 300,
+      store, storage, { index: async () => makeManifest(job) }, logger);
+    await worker.runOnce();
+    expect(store.completed).toBe(false);
+    expect(store.failure).toEqual({ code: "INDEX_GENERATION_SUPERSEDED", retryable: false });
+  });
+
   it("indexes one claimed snapshot and delegates atomic activation to core storage", async () => {
     const job = makeJob();
     const store = new FakeStore(job);
     let receivedSnapshot = "";
     const ai: IndexGenerationClient = { index: async (request) => {
-      receivedSnapshot = request.snapshotContent;
+      receivedSnapshot = request.snapshotMimeType === "text/plain" ? request.snapshotContent : "";
       return makeManifest(job);
     } };
     const worker = new IndexingWorker("10000000-0000-4000-8000-000000000008", 90,
@@ -81,17 +101,26 @@ describe("indexing worker", () => {
     expect(store.failure).toBeNull();
   });
 
-  it("fails unsupported immutable snapshots closed without calling Arden AI", async () => {
-    const job = makeJob({ mimeType: "application/pdf" });
+  it("passes an integrity-checked PDF snapshot to Arden AI as base64", async () => {
+    const job = makeJob({
+      mimeType: "application/pdf",
+      sourceUri: "arden-private-object://10000000-0000-4000-8000-000000000006.pdf",
+      snapshotContentHash: createHash("sha256").update(pdfSnapshot).digest("hex"),
+    });
     const store = new FakeStore(job);
-    let called = false;
-    const ai: IndexGenerationClient = { index: async () => { called = true; return makeManifest(job); } };
+    const pdfStorage: PrivateContentStorage = { ...storage, async readPdf() { return pdfSnapshot; } };
+    let received = "";
+    const ai: IndexGenerationClient = { index: async (request) => {
+      received = request.snapshotMimeType === "application/pdf" ? request.snapshotContentBase64 : "";
+      return makeManifest(job);
+    } };
     const worker = new IndexingWorker("10000000-0000-4000-8000-000000000008", 90,
-      store, storage, ai, logger);
+      store, pdfStorage, ai, logger);
 
     await worker.runOnce();
-    expect(called).toBe(false);
-    expect(store.failure).toEqual({ code: "UNSUPPORTED_SNAPSHOT_MIME_TYPE", retryable: false });
+    expect(Buffer.from(received, "base64")).toEqual(pdfSnapshot);
+    expect(store.completed).toBe(true);
+    expect(store.failure).toBeNull();
   });
 
   it("returns idle without side effects when no job is ready", async () => {

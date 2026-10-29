@@ -63,6 +63,18 @@ describe("Arden document model", () => {
     });
   });
 
+  it("preserves styled text when an editor link has an unsupported scheme", () => {
+    const stored = serializeArdenDocument([{
+      id: "paragraph-1", type: "paragraph", props: {}, children: [],
+      content: [{ type: "link", href: "ftp://example.test/file", content: [
+        { type: "text", text: "Keep this text", styles: { bold: true } },
+      ] }],
+    }]);
+    expect(parseArdenDocument(stored).blocks[0]).toMatchObject({
+      content: [{ type: "text", text: "Keep this text", styles: { bold: true } }],
+    });
+  });
+
   it("rejects malformed or unsupported versioned content", () => {
     const unsupported = `${ARDEN_DOCUMENT_PREFIX}${JSON.stringify({
       schemaVersion: 1,

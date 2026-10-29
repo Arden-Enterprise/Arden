@@ -120,6 +120,24 @@ function tokenFromInvitationPath(pathname: string): string | null {
   return match?.[1] ?? null;
 }
 
+function parseRecoveryHash(location: Location): { accessToken: string; refreshToken: string } | null {
+  const hash = location.hash;
+  if (hash && hash.includes("type=recovery")) {
+    const params = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (accessToken && refreshToken) return { accessToken, refreshToken };
+  }
+  const search = location.search;
+  if (search && search.includes("type=recovery")) {
+    const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    const accessToken = params.get("access_token");
+    const refreshToken = params.get("refresh_token");
+    if (accessToken && refreshToken) return { accessToken, refreshToken };
+  }
+  return null;
+}
+
 export function ArdenShell({ platform }: ArdenShellProps) {
   return (
     <>
@@ -136,6 +154,14 @@ export function ArdenShell({ platform }: ArdenShellProps) {
 function ArdenShellContent({ platform }: ArdenShellProps) {
   const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
   const [invitationToken, setInvitationToken] = useState<string | null>(() => tokenFromInvitationPath(window.location.pathname));
+  const [recoveryTokens, setRecoveryTokens] = useState<{ accessToken: string; refreshToken: string } | null>(() => {
+    if (typeof window === "undefined") return null;
+    const parsed = parseRecoveryHash(window.location);
+    if (parsed) {
+      try { window.history.replaceState(null, "", window.location.pathname); } catch {}
+    }
+    return parsed;
+  });
   const [entryView, setEntryView] = useState<EntryView>(() => invitationToken ? "invite-link" : "sign-in");
   const [previewMemberId, setPreviewMemberId] = useState("sample-employee");
   const [invitationId, setInvitationId] = useState("");
@@ -187,6 +213,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (invitationToken) {
       window.history.replaceState(null, "", "/");
       setInvitationToken(null);
+    }
+    if (recoveryTokens) {
+      setRecoveryTokens(null);
     }
     const allowed = current.memberships.filter((membership) => membership.status === "active" && membership.canUsePrivateWorkspace);
     if (allowed.length === 1) enterServerOrganization(allowed[0]);
@@ -272,6 +301,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     return (
       <SignInPage
         platform={platform}
+        initialMode={recoveryTokens || (typeof window !== "undefined" && window.location.pathname === "/reset-password") ? "reset-password" : "sign-in"}
+        recoveryTokens={recoveryTokens}
         onAuthenticated={acceptServerSession}
         onEnterPreview={() => {
           setServerSession(null);
@@ -449,10 +480,12 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={(previewRole === "admin" && !serverSession) || liveAdmin}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined} onNavigate={navigate} />
 
+      <div className="workspace-feature-slot" hidden={activeView !== "ask-arden"}>
+        <AskArdenPage key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`}
+          active={activeView === "ask-arden"} platform={platform} organizationId={serverOrganizationId} onOpenCitation={openKnowledgeCitation} />
+      </div>
       {activeView === "my-work" ? (
         <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
-      ) : activeView === "ask-arden" ? (
-        <AskArdenPage onOpenCitation={openKnowledgeCitation} />
       ) : activeView === "organization-access" && serverOrganizationId && activeMembership && liveAdmin ? (
         <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} {...contextControl} />
       ) : activeView === "organization-access" && organization && previewRole === "admin" ? (

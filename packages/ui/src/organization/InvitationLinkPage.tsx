@@ -68,8 +68,15 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       await signUp(platform, email, password, fullName);
       setMessage("If account setup can proceed, check your email to complete verification. Then return to this invitation and sign in to accept it.");
       setMode("sign-in");
-    } catch {
-      setError("Account setup could not be completed. Check the password requirements or try signing in.");
+    } catch (cause) {
+      if (cause instanceof ApiError && (cause.code === "ACCOUNT_ALREADY_EXISTS" || cause.status === 409)) {
+        setError("An account with this email address already exists. Please sign in to accept the invitation.");
+        setMode("sign-in");
+      } else if (cause instanceof ApiError && cause.message) {
+        setError(cause.message);
+      } else {
+        setError("Account setup could not be completed. Check the password requirements or try signing in.");
+      }
     } finally { setBusy(false); }
   };
 

@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-26
-Decision owner/approval: requested by the repository user in the working session on 2026-10-26 ("người up lên là người chịu trách nhiệm"). Record the project lead's confirmation in the pull request.
+Decision owner/approval: originally requested by the repository user on 2026-10-26 ("người up lên là người chịu trách nhiệm"); explicitly confirmed by the requesting maintainer on 2026-10-29 after comparison with main `be27d2c`. No separate team consultation is claimed.
 Implementation: partial — API rule, options field and UI implemented; real-PostgreSQL integration evidence not yet obtained
 Supersedes: in [0010](0010-audiences-and-system-administration.md), the author *selecting* the responsible department at Share/Prepare Submission
 

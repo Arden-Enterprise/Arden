@@ -2,6 +2,7 @@ import {
   ARDEN_DOCUMENT_PREFIX,
   parseSemanticDocument,
   serializeSemanticDocument,
+  isAllowedSemanticLinkHref,
   type SemanticBlock,
   type SemanticInline,
   type SemanticText,
@@ -69,25 +70,26 @@ function stylesFromEditor(value: unknown): SemanticText["styles"] {
   return styles;
 }
 
-function inlineFromEditor(value: unknown): SemanticInline {
+function inlineFromEditor(value: unknown): SemanticInline[] {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("BlockNote produced invalid inline content.");
   }
   const item = value as Record<string, unknown>;
   if (item.type === "text" && typeof item.text === "string") {
-    return { type: "text", text: item.text, styles: stylesFromEditor(item.styles) };
+    return [{ type: "text", text: item.text, styles: stylesFromEditor(item.styles) }];
   }
   if (item.type === "link" && typeof item.href === "string" && Array.isArray(item.content)) {
-    const content = item.content.map((child) => inlineFromEditor(child));
+    const content = item.content.flatMap((child) => inlineFromEditor(child));
     if (content.some((child) => child.type !== "text")) throw new Error("Nested links are not supported.");
-    return { type: "link", href: item.href, content: content as SemanticText[] };
+    return isAllowedSemanticLinkHref(item.href)
+      ? [{ type: "link", href: item.href, content: content as SemanticText[] }] : content;
   }
   throw new Error("BlockNote produced unsupported inline content.");
 }
 
 function blockFromEditor(block: ArdenDocumentBlock): SemanticBlock {
   if (!block.id) throw new Error("Every Semantic Document block requires a stable id.");
-  const content = block.content.map((item) => inlineFromEditor(item));
+  const content = block.content.flatMap((item) => inlineFromEditor(item));
   const children = block.children.map(blockFromEditor);
   switch (block.type) {
     case "heading": return { id: block.id, type: "heading", props: { level: block.props.level as 2 | 3 }, content, children };

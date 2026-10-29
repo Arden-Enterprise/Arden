@@ -20,11 +20,17 @@ const ids = {
   organizationReviewerMembership: randomUUID(),
   department: randomUUID(),
   organizationAudience: randomUUID(),
+  readerAudience: randomUUID(),
 };
-const roleCodes = [`ARDEN_TEST_OWNER_${ids.owner.slice(0, 8).toUpperCase()}`,
-  `ARDEN_TEST_MANAGER_${ids.manager.slice(0, 8).toUpperCase()}`];
+const roleCodes = [
+  `ARDEN_TEST_OWNER_${ids.owner.replaceAll("-", "").toUpperCase()}`,
+  `ARDEN_TEST_MANAGER_${ids.manager.replaceAll("-", "").toUpperCase()}`,
+];
 const repository = pool ? new ArdenRepository(pool) : null;
 let fixtureReady = false;
+let indexPool: Pool | null = null;
+const indexLogin = `arden_test_indexer_${ids.owner.replaceAll("-", "")}`;
+const indexPassword = randomUUID();
 
 describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => {
   beforeAll(async () => {
@@ -69,7 +75,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       [ids.ownerMembership, ids.department, ids.managerMembership]);
       await client.query(`INSERT INTO audience (audience_id, organization_id, kind, name, is_managed,
         created_by_membership_id, legacy_role_id)
-        VALUES ($1, $2, 'GROUP', 'Synthetic readers', false, $3, $1)`,
+        VALUES ($1, $2, 'GROUP', 'Synthetic owners', false, $3, $1)`,
       [ids.ownerRole, ids.organization, ids.ownerMembership]);
       await client.query(`INSERT INTO audience_group_membership
         (audience_id, organization_id, membership_id, assigned_by_membership_id)
@@ -87,8 +93,31 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
          WHERE code IN ('PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE', 'PUBLISHED_CONTENT_VIEW')`, [ids.ownerRole]);
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission WHERE code = 'PRIVATE_WORKSPACE_READ'`, [ids.managerRole]);
+      // Canonical audience with the bounded role projection required by legacy snapshot FKs.
+      // A post-0017 fixture cannot rely on the migration's one-time role backfill.
+      await client.query(`INSERT INTO role(role_id, organization_id, code, name)
+        VALUES ($1, $2, $3, 'Synthetic readers')`,
+      [ids.readerAudience, ids.organization, `AUDIENCE_${ids.readerAudience.replaceAll("-", "").toUpperCase()}`]);
+      await client.query(`INSERT INTO role_permission(role_id, permission_id)
+        SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`, [ids.readerAudience]);
+      await client.query(`INSERT INTO audience(audience_id, organization_id, kind, name, is_managed,
+        created_by_membership_id, legacy_role_id) VALUES ($1, $2, 'GROUP', 'Synthetic readers', false, $3, $1)`,
+      [ids.readerAudience, ids.organization, ids.ownerMembership]);
+      await client.query(`INSERT INTO audience_group_membership(audience_id, organization_id, membership_id,
+        assigned_by_membership_id) VALUES ($1, $2, $3, $3)`,
+      [ids.readerAudience, ids.organization, ids.ownerMembership]);
+      await client.query(`INSERT INTO role_assignment(membership_id, role_id, access_scope_id) VALUES ($1, $2, $3)`,
+        [ids.ownerMembership, ids.readerAudience, ids.organizationScope]);
+      // Identifiers/password are generated UUIDs, never caller input. This role
+      // belongs only to this already verified disposable test target.
+      await client.query(`CREATE ROLE ${indexLogin} LOGIN PASSWORD '${indexPassword}' NOSUPERUSER NOBYPASSRLS NOINHERIT`);
+      await client.query(`GRANT arden_indexer TO ${indexLogin}`);
       await client.query("COMMIT");
       fixtureReady = true;
+      const workerUrl = new URL(databaseUrl!);
+      workerUrl.username = indexLogin;
+      workerUrl.password = indexPassword;
+      indexPool = new Pool({ connectionString: workerUrl.href, max: 2, connectionTimeoutMillis: 5000 });
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -100,6 +129,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
   afterAll(async () => {
     if (!pool) return;
     try {
+      await indexPool?.end();
       if (fixtureReady) {
         const client = await pool.connect();
         try {
@@ -134,15 +164,15 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM department_membership WHERE membership_id = ANY($1::uuid[])",
             [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM role_assignment WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
-          await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
-          await client.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])",
-            [[ids.ownerMembership, ids.managerMembership, ids.organizationReviewerMembership]]);
+          await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.readerAudience]]);
+          await client.query("DELETE FROM organization_membership WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership, ids.organizationReviewerMembership]]);
           await client.query("DELETE FROM department WHERE department_id = $1", [ids.department]);
-          await client.query("DELETE FROM role WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole]]);
+          await client.query("DELETE FROM role WHERE role_id = ANY($1::uuid[])", [[ids.ownerRole, ids.managerRole, ids.readerAudience]]);
           await client.query("DELETE FROM access_scope WHERE access_scope_id = $1", [ids.organizationScope]);
           await client.query("DELETE FROM user_account WHERE user_id = ANY($1::uuid[])",
             [[ids.owner, ids.manager, ids.organizationReviewer]]);
           await client.query("DELETE FROM organization WHERE organization_id = $1", [ids.organization]);
+          await client.query(`DROP ROLE ${indexLogin}`);
           await client.query("ALTER TABLE draft_version ENABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_draft_version ENABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_submission ENABLE TRIGGER USER");
@@ -163,7 +193,15 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     }
   });
 
-  it("scopes owner writes, manager reads, conflicts, and audit records through RLS", async () => {
+  it("uses a non-superuser worker login without API private-content access", async () => {
+    if (!indexPool) throw new Error("Worker fixture is unavailable");
+    const identity = await indexPool.query("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user");
+    expect(identity.rows).toEqual([{ rolsuper: false, rolbypassrls: false }]);
+    await expect(indexPool.query("SELECT * FROM arden.draft_document LIMIT 1")).rejects.toMatchObject({ code: "42501" });
+    await expect(new PgIndexGenerationStore(indexPool).claim(randomUUID(), 300)).resolves.toBeNull();
+  });
+
+  it("enforces owner-only drafts, member creation, conflicts, and audit records through RLS", async () => {
     if (!repository || !pool) throw new Error("Test database is unavailable");
     await expect(repository.requireActiveMembership(ids.owner, ids.organization)).resolves.toEqual({
       membershipId: ids.ownerMembership, organizationId: ids.organization, userId: ids.owner,
@@ -182,6 +220,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.getDraft(ids.owner, ids.organization, created.id)).resolves.toMatchObject({ title: "Private" });
     await expect(repository.getDraft(ids.manager, ids.organization, created.id)).resolves.toBeNull();
     await expect(repository.listDrafts(ids.manager, ids.organization, 10, null)).resolves.toMatchObject({ items: [] });
+    // Decision0010 makes private-workspace creation an active Member capability.
+    // It never gives the Member access to somebody else's private originals.
     await expect(repository.canCreateDraft(ids.manager, ids.organization)).resolves.toBe(true);
     await expect(repository.updateDraft(ids.owner, ids.organization, created.id, 0, { title: "Stale" }, null, "integration-stale"))
       .resolves.toEqual({ kind: "conflict", currentVersion: 1 });
@@ -200,6 +240,14 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const connectionContext = await pool.query<{ role_name: string; actor_id: string | null }>(`SELECT current_user AS role_name, current_setting('arden.actor_id', true) AS actor_id`);
     expect(connectionContext.rows[0]?.role_name).not.toBe("arden_runtime");
     expect([null, ""]).toContain(connectionContext.rows[0]?.actor_id);
+    const managerPrivate = await repository.createDraft(ids.manager, ids.organization, { title: "Manager private", body: "Separate" }, {
+      sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain", contentHash: "d".repeat(64),
+    }, "integration-manager-private");
+    expect(managerPrivate).not.toBeNull();
+    if (managerPrivate) {
+      await expect(repository.getDraft(ids.manager, ids.organization, managerPrivate.id)).resolves.toMatchObject({ title: "Manager private" });
+      await expect(repository.getDraft(ids.owner, ids.organization, managerPrivate.id)).resolves.toBeNull();
+    }
   });
 
   it("copies only an authorized private version and keeps shared rows invisible to another member", async () => {
@@ -437,7 +485,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
       responsibleDepartmentId: ids.department,
       targetScopeType: "ORGANIZATION",
-      audienceRoleIds: [ids.ownerRole],
+      audienceRoleIds: [ids.readerAudience],
     }, null, "integration-flow2-configure");
     expect(configured).toMatchObject({ kind: "updated", draft: { currentVersion: 2 } });
     if (configured.kind !== "updated") return;
@@ -476,7 +524,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const beforeActivation = await repository.listPublishedKnowledge(ids.owner, ids.organization);
     expect(beforeActivation).toEqual([]);
     const workerId = randomUUID();
-    const generationStore = new PgIndexGenerationStore(pool);
+    if (!indexPool) throw new Error("Worker fixture is unavailable");
+    const generationStore = new PgIndexGenerationStore(indexPool);
     const job = await generationStore.claim(workerId, 90);
     expect(job).toMatchObject({
       organizationId: ids.organization,
@@ -562,5 +611,46 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const stillPublished = await repository.listPublishedKnowledge(ids.owner, ids.organization);
     expect(stillPublished).toHaveLength(1);
     expect(stillPublished?.[0]).toMatchObject({ title: "Cross-actor publication regression" });
+
+    let draftVersion = revised.draft.currentVersion;
+    const candidate = async (title: string) => {
+      const update = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
+        created.draft.id, draftVersion, { title }, null, "ordering-update");
+      if (update.kind !== "updated") throw new Error("Expected candidate edit");
+      draftVersion = update.draft.currentVersion;
+      const submission = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
+        created.draft.id, draftVersion, randomUUID(), "ordering-submit");
+      if (submission.kind !== "submitted") throw new Error("Expected candidate submission");
+      const decision = await repository.decideReview(ids.manager, ids.organization, submission.submission.id,
+        "APPROVE", submission.submission.snapshotVersionId, submission.submission.contentHash,
+        null, randomUUID(), "ordering-approve");
+      expect(decision.kind).toBe("decided");
+      const claimed = await generationStore.claim(workerId, 300);
+      if (!claimed || claimed.submissionId !== submission.submission.id) throw new Error("Expected exact candidate job");
+      return claimed;
+    };
+    const older = await candidate("Older approved candidate");
+    const newer = await candidate("Newest active publication");
+    const completedManifest = (job: typeof older): IndexGenerationManifest => ({ ...manifest,
+      jobId: job.jobId, generationId: job.generationId, snapshotVersionId: job.snapshotVersionId,
+      snapshotContentHash: job.snapshotContentHash });
+    await generationStore.complete(newer, workerId, completedManifest(newer));
+    await expect(generationStore.complete(older, workerId, completedManifest(older)))
+      .rejects.toMatchObject({ code: "INDEX_GENERATION_SUPERSEDED" });
+    await expect(generationStore.fail(older, workerId, "INDEX_GENERATION_SUPERSEDED", false)).resolves.toBe("FAILED");
+    const completedSubmissions = await repository.listKnowledgeSubmissions(ids.owner, ids.organization);
+    expect(completedSubmissions?.find((item) => item.id === older.submissionId)?.publicationState)
+      .toBe("SUPERSEDED");
+    expect(completedSubmissions?.filter((item) => item.publicationState === "ACTIVE").map((item) => item.id))
+      .toEqual([newer.submissionId]);
+    const legacyAccess = await pool.query("SELECT has_function_privilege('arden_indexer', 'arden.complete_knowledge_index_job_unordered_v1(uuid, uuid, jsonb)', 'EXECUTE') AS allowed");
+    expect(legacyAccess.rows).toEqual([{ allowed: false }]);
+    await expect(repository.listPublishedKnowledge(ids.owner, ids.organization)).resolves.toEqual([
+      expect.objectContaining({ title: "Newest active publication" }),
+    ]);
+    const sources = await repository.listAuthorizedAiSources(ids.owner, ids.organization, [newer.generationId], [manifest.chunks[0].chunkId]);
+    expect(sources).toEqual([expect.objectContaining({ generationId: newer.generationId, chunks: manifest.chunks })]);
+    await expect(repository.listAuthorizedAiSources(ids.owner, ids.organization, [older.generationId])).resolves.toEqual([]);
+
   });
 });

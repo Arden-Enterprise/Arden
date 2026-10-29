@@ -1,6 +1,6 @@
 # Contributing to Arden
 
-Read [AGENTS.md](AGENTS.md) first. It is the repository-wide rules entry point, not an optional agent-only note. Detailed guides cover [code quality/testability](docs/engineering/code-quality.md), [technologies](docs/engineering/technology-guide.md), [security/data](docs/engineering/security-and-data.md), and [operations](docs/engineering/operations.md).
+Read [AGENTS.md](AGENTS.md) first. It is the repository-wide rules entry point, not an optional agent-only note. The [rules index](docs/engineering/rules/README.md) routes task, Git, PR, security, design, verification and server rules. Detailed guides cover [code quality/testability](docs/engineering/code-quality.md), [technologies](docs/engineering/technology-guide.md), [security/data](docs/engineering/security-and-data.md), and [operations](docs/engineering/operations.md).
 
 ## Before every task
 
@@ -8,25 +8,9 @@ Follow [current main context](docs/engineering/rules/main-context.md) before pla
 
 ## Branch convention
 
-Use `<type>/<specific-kebab-case-description>`. The type must match the purpose:
+Follow [Git workflow](docs/engineering/rules/git-workflow.md) for allowed types and meaningful `<type>/<short-kebab-description>` names, or the `release/<semver>` exception. Do not prepend `codex/`, a tool/agent name, or an individual's name. Read inspected current main's contract, then create ordinary delivery branches from safely refreshed `staging` and compare its pending changes; preserve existing branches and work.
 
-| Type | Purpose | Example |
-| --- | --- | --- |
-| `feat` | New user-facing capability | `feat/private-notes` |
-| `fix` | Correct a defect | `fix/graph-selection` |
-| `docs` | Documentation/rules only | `docs/developer-setup` |
-| `refactor` | Restructure without intended behavior change | `refactor/policy-functions` |
-| `perf` | Measurable performance improvement | `perf/authorized-search` |
-| `test` | Tests or fixtures | `test/publication-versions` |
-| `chore` | Maintenance not covered by another type | `chore/dependency-review` |
-| `build` | Build system/package tooling | `build/desktop-packaging` |
-| `ci` | CI automation | `ci/branch-validation` |
-| `release` | Prepare a specific release | `release/0.1.0` |
-| `hotfix` | Urgent production correction | `hotfix/session-revocation` |
-
-An issue number may lead the description (`fix/123-upload-limit`). Use plain `feat/` and `fix/` by default. If an execution tool explicitly requires a namespace, `codex/feat/private-notes` is allowed; the work type is still mandatory. Avoid generic names such as `updates`, `task`, `final`, or `new-branch`.
-
-Start a coherent change from current `main` after inspecting existing work. Do not switch/rename a user's branch or discard/stash changes automatically. For an initial repository with no commit, handle bootstrap explicitly rather than pretending a remote base exists. Do not push directly to `main` except for an explicitly authorized bootstrap/emergency procedure.
+The exact reserved deployment branches `staging` and `main` are additional owner-approved exceptions. Feature PRs normally enter staging; main promotes the matching staging-tested source tree to production. Do not infer that release automation is active from these names alone; consult the [release design](docs/engineering/release-pipeline-design.md) and current operator evidence.
 
 ## Local development
 
@@ -45,6 +29,10 @@ Run `pnpm dev:desktop` in another terminal for the Windows desktop shell. Web is
 Use synthetic seed data and separate local credentials/volumes. Follow [operations.md](docs/engineering/operations.md) for multiple checkouts, isolation, production configuration, and backup obligations. The current Compose file is not a complete production application.
 
 For local frontend development against a hosted API/database, follow the beginner [teammate setup walkthrough](docs/engineering/teammate-setup.md), including the administrator handoff, then use `pnpm dev:remote`. Choose your assigned slot; do not overwrite an active writer or connect development code to a release database. The [hosted development reference](docs/engineering/remote-development.md) covers implementation and operator details.
+
+## Specifications and decision changes
+
+Read the [feature/flow index](docs/product/README.md) and [specification rule](docs/engineering/rules/specifications.md). Record explicitly agreed brainstorm outcomes in the owning spec with originator, decision owner, approval evidence and exact source revision. Link complete acceptance paths and save a usable resume checkpoint. Before replacing a conflicting accepted requirement, present the current/proposed comparison and consequences, recommend original-owner/team input, and obtain an explicit informed decision. Unknown attribution stays explicit; do not infer approval from another chat or a newer branch.
 
 ## Changes and commits
 
@@ -71,11 +59,13 @@ pnpm test:remote
 pnpm build
 ```
 
-CI performs a frozen-lockfile install and these checks on Ubuntu and Windows. UI tests cover pure session-preview models for private drafts, organization invitations/access and knowledge review/publication. API tests cover health routes. Passing these checks does not prove server authorization, persistence, native installers or end-to-end coverage. Add the relevant evidence as features grow.
+CI performs a frozen-lockfile install and these checks on Ubuntu and Windows. UI tests cover pure session-preview models for private drafts, organization invitations/access and knowledge review/publication. API tests include health, authentication, private-note and knowledge request contracts; real database and external-provider checks have separate gates. Passing these checks does not prove server authorization, persistence, native installers or end-to-end coverage. Add the relevant evidence as features grow.
 
 UI changes also need actual web/desktop visual and interaction checks where applicable. Database changes need disposable PostgreSQL migration/constraint/authorization tests. Security and governance changes need denial/revocation/exact-version tests. Docs-only changes need links and consistency checks; do not imply application tests ran when they did not.
 
 ## Pull requests and review
+
+Application release flow is feature branch → PR into `staging` → verified staging → promotion PR into `main`. See the [release guide](docs/engineering/release-pipeline.md) for setup, activation status, automatic production deployment, migration gates and recovery. Hosted development slots remain independent.
 
 Describe the purpose, changed behavior, tests actually run, and risks. Include screenshots for visual changes, migration/compatibility steps for data or contract changes, and configuration/data-flow details for infrastructure/security changes. Mark irrelevant checklist items as not applicable rather than asserting they were tested.
 
@@ -89,10 +79,14 @@ Review specifically for:
 - Version-matched APIs, dependency/license risks, config/secrets, migrations, reproducible deployment, and restoration.
 - Updated rules/docs and explicit unresolved decisions or unverified checks.
 
-Intended `main` protections are reviewed PRs, required CI checks on both OS jobs, resolved review conversations, and restricted force-push/deletion. Security-sensitive changes should receive a reviewer familiar with the affected boundary. These are policy requirements; a maintainer must separately configure/verify GitHub protections. This documentation does not configure remote settings or add mechanical branch-name enforcement.
+Intended `main` protections are reviewed PRs, required CI checks on both OS jobs, resolved review conversations, and restricted force-push/deletion. Security-sensitive changes should receive a reviewer familiar with the affected boundary. These are policy requirements; a maintainer must separately configure/verify GitHub protections. This documentation does not configure remote settings. The separate PR conventions workflow checks branch names and PR titles; it does not enforce GitHub branch protections.
 
 ## Private configuration and public documentation
 
 This repository is public. Follow the [private files guide](docs/engineering/private-files.md) before adding configuration, operational notes, or data files. Keep private or security-critical values in excluded local files or approved secret storage, and document setup with placeholders. Check exclusions and existing tracking before committing; never force-add private files. Share actual values through an approved private channel.
 
 For authorized server work, follow the [private server setup guide](docs/engineering/server-access.md). Keep connection profiles in local Git metadata and personal SSH configuration.
+
+## Review and task tracking
+
+Follow [task workflow](docs/engineering/rules/task-workflow.md) for scoped acceptance, existing Linear issue reuse, the workspace issue budget and the PR offer when publication is not already authorized. Use [pull requests](docs/engineering/rules/pull-requests.md) for reviewer capacity/coverage and authorized merge readiness; human review is optional. [Quality metrics](docs/engineering/quality-metrics.md) define written targets, not collected results. Preserve the [product contract](docs/engineering/rules/product-contract.md) and [knowledge maintenance](docs/engineering/rules/knowledge-maintenance.md).

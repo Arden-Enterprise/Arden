@@ -99,3 +99,11 @@ If a credential reached GitHub, revoke or rotate it promptly through the respons
 Document how to obtain access in the public guide. Share actual values only through the approved private channel, and give each contributor their own credentials where supported. CI and deployments use their platform's secret storage; public examples and logs contain no secret values.
 
 Maintainers should configure available secret scanning and push protection in the repository's GitHub security settings; see [GitHub's security features](https://docs.github.com/en/code-security/tutorials/secure-your-organization/protect-against-threats). Exclusion rules and reviews remain necessary because scanners do not detect every kind of private material.
+
+
+Per-developer connection packets belong in ignored `.private/`, not a public directory named for
+a teammate. The root `/*-local/` exclusion additionally protects historical developer-packet folders
+across all checkouts. It is a project-wide privacy safeguard, not a user-specific machine path.
+Shared, sanitized setup templates remain versioned under `deploy/hosted/`; do not put them in a
+packet folder or force-add live settings. Removing an already tracked packet does not erase its
+past Git history; inspect for credentials and coordinate appropriate remediation separately.

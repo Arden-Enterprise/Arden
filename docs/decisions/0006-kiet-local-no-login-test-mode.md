@@ -6,6 +6,8 @@ Decision owner/approval: task owner requested skipping login to test organizatio
 Implementation: partial; exact dev-slot detection, fixed test actor, optional SMTP delivery when all six runtime settings are configured, remote sync/tunnel CLI, and synthetic API tests are implemented; migrations 0003/0004 and organization-bootstrap rollback rehearsal were verified on Kiet Local; SMTP credentials/delivery and manual browser workflow remain unverified
 Supersedes / superseded by: none
 
+Operational note (29 October 2026): the old no-login slot is inactive in the current authenticated development layout. The personal setup packet paths below are historical and have been removed from public source. Use the [current teammate guide](../engineering/teammate-setup.md) and ignored private configuration with the [shared remote template](../../deploy/hosted/remote.example.json). Do not recreate live connection packets in public folders.
+
 ## Context and requirement
 
 Supabase is not deployed to Kiet Local yet. The user needs to exercise Mainflow 1 organization setup, department management, and invitation creation from the local frontend against the hosted development API/database. Requiring a real account would prevent this limited development check.
@@ -32,10 +34,10 @@ Synthetic request tests verify the no-cookie `/api/v1/me` response, organization
 - [Operations guide](../engineering/operations.md)
 - [Security and data rules](../engineering/security-and-data.md)
 - [Technology guide](../engineering/technology-guide.md)
-- [Kiet Local setup packet](../../kiet-local/SETUP.md)
+- Kiet Local setup packet (historical `kiet-local/SETUP.md`)
 
 ## References
 
 - [Remote development CLI](../../scripts/remote-development.mjs)
 - [Remote test-mode startup fence](../../apps/api/src/auth/remote-flow1-test.ts)
-- [Kiet Local server slot configuration](../../kiet-local/remote.json)
+- Kiet Local server slot configuration (historical `kiet-local/remote.json`)

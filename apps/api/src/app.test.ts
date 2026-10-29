@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, CreateSharedDraftResult, DecideReviewResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreateSharedDraftResult, DecideReviewResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -13,6 +13,8 @@ import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.
 import { AudienceGroupError, type AudienceGroup, type AudienceGroupStore } from "./audiences/store.js";
 import { SystemAdministrationError, type SystemAdministrator, type SystemAdministrationStore } from "./system-administration/store.js";
 import { parseSemanticDocument } from "@arden/domain";
+import type { AskArdenClient } from "./answers/ai-client.js";
+import type { AiAnswerRequest, AiAnswerResponse } from "./answers/contracts.js";
 
 const ownerId = "11111111-1111-4111-8111-111111111111";
 const otherId = "22222222-2222-4222-8222-222222222222";
@@ -24,6 +26,7 @@ const sharedDraftId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const sharedVersionId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const createKey = "99999999-9999-4999-8999-999999999999";
 const systemAdminCandidateId = "33333333-3333-4333-8333-333333333333";
+const generationId = "44444444-4444-4444-8444-444444444444";
 
 function semanticDocumentText(body: string): string {
   const parsed = parseSemanticDocument(body);
@@ -42,6 +45,7 @@ describe("API auth and private draft routes", () => {
   let repository: MemoryRepository;
   let authProvider: FakeAuthProvider;
   let invitationMailer: FakeInvitationMailer;
+  let askArden: FakeAskArdenClient;
   let app: ReturnType<typeof buildApp>;
 
   beforeEach(async () => {
@@ -50,6 +54,7 @@ describe("API auth and private draft routes", () => {
     repository = new MemoryRepository();
     authProvider = new FakeAuthProvider();
     invitationMailer = new FakeInvitationMailer();
+    askArden = new FakeAskArdenClient();
     app = buildApp({
       checkDatabase: async () => undefined,
       auth: authProvider,
@@ -58,6 +63,7 @@ describe("API auth and private draft routes", () => {
       repository,
       storage,
       invitationMailer,
+      askArden,
       publicWebOrigin: "https://arden.example.test",
     });
   });
@@ -83,6 +89,75 @@ describe("API auth and private draft routes", () => {
     } finally {
       await unavailable.close();
     }
+  });
+
+  it("answers only from the caller's authorized generation and maps a live citation", async () => {
+    repository.authorizedAiSources = [{
+      generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
+      publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
+    }];
+    askArden.sourceBlockIds = ["pdf-page-2", "pdf-page-2-heading"];
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({
+      method: "POST", url: `/api/v1/organizations/${organizationId}/ai/answers`,
+      headers: { cookie: session, origin: "http://localhost:5180" }, payload: { query: "How is MFA used?" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(askArden.lastRequest?.allowedGenerationIds).toEqual([generationId]);
+    expect(response.json()).toMatchObject({ status: "ANSWERED", citations: [{
+      documentId: sharedDraftId, versionId, blockId: "pdf-page-2", page: 2, title: "Security policy",
+      version: "v3", scope: "Company-wide", classification: "INTERNAL",
+    }] });
+  });
+
+  it("drops the answer when publication access changes before citations are returned", async () => {
+    repository.authorizedAiSources = [{
+      generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
+      publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
+    }];
+    askArden.onAnswer = () => { repository.authorizedAiSources = []; };
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({
+      method: "POST", url: `/api/v1/organizations/${organizationId}/ai/answers`,
+      headers: { cookie: session, origin: "http://localhost:5180" }, payload: { query: "How is MFA used?" },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("KNOWLEDGE_ACCESS_CHANGED");
+  });
+
+  it.each([
+    { name: "unlisted chunk", patch: { chunkId: "c".repeat(64) } },
+    { name: "invented block", patch: { sourceBlockIds: ["other-block"] } },
+    { name: "wrong parent section", patch: { parentSectionBlockId: "actual-heading" } },
+  ])("rejects an AI citation with $name even when snapshot permission is valid", async ({ patch }) => {
+    repository.authorizedAiSources = [{
+      generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
+      publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null, ...patch }],
+    }];
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({ method: "POST",
+      url: `/api/v1/organizations/${organizationId}/ai/answers`,
+      headers: { cookie: session, origin: "http://localhost:5180" }, payload: { query: "MFA policy?" } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().answer).toBeUndefined();
+  });
+
+  it.each(["x\n".repeat(2001), "x\n".repeat(1500)])("rejects text exceeding semantic block or serialized-envelope limits", async (body) => {
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({ method: "POST",
+      url: `/api/v1/organizations/${organizationId}/knowledge/drafts/new`,
+      headers: { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey },
+      payload: { title: "Too many paragraphs", classification: "INTERNAL", body },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error.code).toBe("INVALID_DOCUMENT");
+    expect(repository.sharedCreates).toBe(0);
   });
 
   it("signs in through the Supabase adapter and returns only the caller's membership context", async () => {
@@ -136,6 +211,73 @@ describe("API auth and private draft routes", () => {
     expect(updated.statusCode).toBe(204);
     const after = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
     expect(after.json().account).toEqual({ passwordSetupRequired: false });
+  });
+
+  it("handles sign-up validation and duplicate account rejection", async () => {
+    authProvider.signUpBehavior = "already_exists";
+    const conflict = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "existing@example.test", password: "secure-password", fullName: "Existing User" },
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error).toMatchObject({
+      code: "ACCOUNT_ALREADY_EXISTS",
+      message: "An account with this email address already exists. Please sign in instead.",
+    });
+
+    authProvider.signUpBehavior = "rejected";
+    const rejected = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "weak@example.test", password: "123", fullName: "Weak User" },
+    });
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json().error).toMatchObject({
+      code: "ACCOUNT_SETUP_UNAVAILABLE",
+    });
+    authProvider.signUpBehavior = "success";
+  });
+
+  it("handles forgot password requests, verification proxy, and password reset", async () => {
+    const forgot = await app.inject({
+      method: "POST", url: "/api/v1/auth/forgot-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test" },
+    });
+    expect(forgot.statusCode).toBe(202);
+    expect(forgot.json().status).toBe("recovery_sent");
+    expect(authProvider.lastResetEmail).toBe("owner@example.test");
+
+    const verify = await app.inject({
+      method: "GET", url: "/auth/v1/verify?token=valid-link&type=recovery",
+    });
+    expect(verify.statusCode).toBe(303);
+    expect(verify.headers.location).toContain("reset-password");
+
+    const rootVerify = await app.inject({
+      method: "GET", url: "/verify?token=valid-link&type=recovery",
+    });
+    expect(rootVerify.statusCode).toBe(303);
+    expect(rootVerify.headers.location).toContain("reset-password");
+
+    const resetWithOtp = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "new-secure-password" },
+    });
+    expect(resetWithOtp.statusCode).toBe(200);
+    expect(resetWithOtp.json()).toEqual({ status: "password_updated" });
+    expect(authProvider.lastUpdatedPassword?.password).toBe("new-secure-password");
+    expect(cookieHeader(resetWithOtp.headers["set-cookie"])).toContain("arden_access=access-recovery");
+
+    const invalidOtp = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "wrong-token", newPassword: "new-secure-password" },
+    });
+    expect(invalidOtp.statusCode).toBe(401);
+    expect(invalidOtp.json().error.code).toBe("INVALID_TOKEN");
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
@@ -840,6 +982,9 @@ function cookieHeader(setCookie: string | string[] | undefined): string {
 
 class FakeAuthProvider implements AuthProvider {
   readonly revokedSessions: string[] = [];
+  signUpBehavior: "success" | "already_exists" | "rejected" = "success";
+  lastResetEmail: string | null = null;
+  lastUpdatedPassword: { token: string; password: string } | null = null;
   private readonly usersByAccessToken = new Map<string, { userId: string; email: string; passwordSetupRequired: boolean }>();
 
   async signIn(credentials: { email: string; password: string }) {
@@ -854,7 +999,11 @@ class FakeAuthProvider implements AuthProvider {
     return { userId, email, fullName: null, tokens };
   }
 
-  async signUp() { return { tokens: null, emailVerified: false }; }
+  async signUp() {
+    if (this.signUpBehavior === "already_exists") throw new Error("USER_ALREADY_EXISTS");
+    if (this.signUpBehavior === "rejected") throw new Error("SIGNUP_REJECTED");
+    return { tokens: null, emailVerified: false };
+  }
 
   async resolveSession(tokens: { accessToken: string }) {
     const user = this.usersByAccessToken.get(tokens.accessToken);
@@ -880,6 +1029,29 @@ class FakeAuthProvider implements AuthProvider {
     const user = this.usersByAccessToken.get(tokens.accessToken);
     if (!user) throw new Error("UNAUTHENTICATED");
     user.passwordSetupRequired = false;
+  }
+
+  async resetPasswordForEmail(email: string) {
+    this.lastResetEmail = email;
+  }
+
+  async verifyOtp(params: { email: string; token: string }) {
+    if (params.token !== "valid-token") throw new Error("INVALID_OTP");
+    const tokens = { accessToken: "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
+    this.usersByAccessToken.set(tokens.accessToken, { userId: ownerId, email: params.email, passwordSetupRequired: false });
+    return { tokens };
+  }
+
+  async updateUserPassword(tokens: { accessToken: string }, newPassword: string) {
+    if (newPassword.length < 6) throw new Error("PASSWORD_UPDATE_REJECTED");
+    this.lastUpdatedPassword = { token: tokens.accessToken, password: newPassword };
+  }
+
+  async verifyLink(searchParams: string) {
+    if (searchParams.includes("token=valid-link")) {
+      return "http://localhost:5180/reset-password#access_token=access-recovery&refresh_token=refresh-recovery&type=recovery";
+    }
+    return null;
   }
 }
 
@@ -990,6 +1162,32 @@ class MemorySystemAdministrationStore implements SystemAdministrationStore {
   }
 }
 
+class FakeAskArdenClient implements AskArdenClient {
+  lastRequest: AiAnswerRequest | null = null;
+  onAnswer: (() => void) | null = null;
+  sourceBlockIds = ["mfa"];
+
+  async answer(request: AiAnswerRequest): Promise<AiAnswerResponse> {
+    this.lastRequest = request;
+    this.onAnswer?.();
+    return {
+      contractVersion: 1,
+      requestId: request.requestId,
+      status: "ANSWERED",
+      answer: "MFA is required by the security policy.",
+      citations: [{
+        generationId,
+        snapshotVersionId: sharedVersionId,
+        snapshotContentHash: "a".repeat(64),
+        chunkId: "b".repeat(64),
+        sourceBlockIds: this.sourceBlockIds,
+        parentSectionBlockId: null,
+        excerpt: "All team members must use MFA.",
+      }],
+    };
+  }
+}
+
 class MemoryRepository implements ArdenDataRepository {
   readonly audienceGroups: AudienceGroupStore = new MemoryAudienceGroupStore();
   readonly systemAdministration: SystemAdministrationStore = new MemorySystemAdministrationStore();
@@ -1002,6 +1200,7 @@ class MemoryRepository implements ArdenDataRepository {
   sharedSubmission: SharedKnowledgeSubmission | null = null;
   reviewerGrant: ReviewerGrantRecord | null = null;
   publication: PublishedKnowledge | null = null;
+  authorizedAiSources: AuthorizedAiSource[] = [];
   private reviewRequestKey: string | null = null;
   sharedCreates = 0;
   failSharedCreate = false;
@@ -1268,6 +1467,11 @@ class MemoryRepository implements ArdenDataRepository {
   async getPublishedKnowledge(userId: string, requestedOrganization: string, publishedVersionId: string): Promise<PublishedKnowledge | null> {
     return userId === ownerId && requestedOrganization === organizationId && this.publication?.id === publishedVersionId
       ? this.publication : null;
+  }
+
+  async listAuthorizedAiSources(userId: string, requestedOrganization: string): Promise<AuthorizedAiSource[] | null> {
+    if (requestedOrganization !== organizationId) return null;
+    return userId === ownerId ? this.authorizedAiSources : [];
   }
 
   async canCreateDraft(userId: string, requestedOrganization: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }

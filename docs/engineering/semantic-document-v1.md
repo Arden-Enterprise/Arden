@@ -24,4 +24,3 @@ The current BlockNote adapter authors paragraph, heading levels 2–3, list item
 ## Limits
 
 V1 permits at most 2,000 blocks, nesting depth 8 and 131,072 text code points. Links are limited to 2,048 characters, asset labels/references to 512 characters, and tables to 32 columns. HTTP request byte limits remain an additional boundary.
-

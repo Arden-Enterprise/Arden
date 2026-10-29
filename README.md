@@ -10,6 +10,10 @@ Start with [AGENTS.md](AGENTS.md), which applies to agents and human contributor
 
 Accepted product, architecture, technology, security, and deployment decisions must update these documents in the same change; they must not live only in chat. Installed capabilities and future plans must remain clearly distinguished.
 
+Use the [feature and flow index](docs/product/README.md) to locate owning specifications, complete-path acceptance cases and known reconciliation gaps. The [specification rule](docs/engineering/rules/specifications.md) records agreed brainstorm decisions and requires an informed comparison before conflicting accepted requirements change. The index separates current main from newer branch-only contracts and does not certify every roadmap item as implemented.
+
+The [modular rules index](docs/engineering/rules/README.md) gives each task, Git, security, PR, engineering, design, verification and server rule one home. [AI reviewer guidance](docs/engineering/ai-reviewers.md) distinguishes vendor limits and actual coverage from Arden's [review-size policy](docs/engineering/rules/git-workflow.md#reviewable-pr-size).
+
 ## Local development
 
 Prerequisites: Node.js 24+, pnpm 11+, and Docker Desktop or Docker Engine with Compose.
@@ -26,6 +30,8 @@ The web shell runs at `http://127.0.0.1:5180`; the API runs at `http://127.0.0.1
 
 ## Current UI foundation
 
+Historical preview description: the paragraphs below predate current authenticated/server-backed slices. Read [DESIGN.md](DESIGN.md), the [implementation inventory](docs/engineering/implementation-status.md) and the feature index for current source boundaries; do not treat the older sample/scaffold claims below as the current product contract.
+
 The shared React package implements the [Living Archive Figma redesign](https://www.figma.com/design/UmW5qb5cTWo6lwMYZ4Z9bC/Arden?node-id=147-2) for web and desktop, using dark surfaces and locally bundled Sora/DM Sans fonts on authentication screens. The signed-in workspace uses the accepted Island system (graphite tones, one violet accent, locally bundled Inter/Inter Tight, floating navigation and status islands) described in [DESIGN.md](DESIGN.md):
 
 - a minimal sign-in boundary with no public registration;
@@ -35,11 +41,11 @@ The shared React package implements the [Living Archive Figma redesign](https://
 - a guided first-run organization setup preview (SCR-02) covering template, departments, members/roles and access review;
 - organization, department and member administration with reviewed access assignments;
 - invitation creation, renew/revoke, acceptance, pending membership and access readiness states;
-- sample knowledge library/editor, exact-version review with approval-to-preparation, handover, and an Ask Arden interface preview with a clearly labelled sample answer and sample citations.
+- sample knowledge library/editor, exact-version review with approval-to-preparation, handover, and a live Ask Arden client for indexed, authorized publications.
 
 Open the member preview for workspace selection, the admin preview for Administration, or first-run setup from sign-in. Completing setup enters Administration. For [Mainflow 1](docs/engineering/mainflow-1-preview.md), create an invitation, preview acceptance, return to assign the member's primary department/role, then preview their access and workspace. The template catalogue and member records are synthetic; a configuration needs at least one department and an active organization-scoped System Admin.
 
-This is a labeled frontend preview. Sign-in does not authenticate, invitations do not send email, and organization, notes and knowledge transitions are held only in memory. Ask Arden does not perform retrieval or generation yet; arbitrary prompts remain local and return an explicit preview-boundary message. Private drafts survive navigation; refresh or confirmed exit clears them. Switching demo members clears private notes after guarding unsaved changes. Real authentication, authorization, audit events, persistence, conflict handling and server governance still require API/data-model implementation. Hidden UI is never an authorization boundary.
+Some workspace areas still expose labelled sample state. In a server-backed session, Ask Arden calls the Core API, which derives the caller's authorized index generations, invokes the private Arden-AI service, rechecks every returned evidence identity, and exposes only exact-version citations that remain readable. Hidden UI is never an authorization boundary.
 ## Hosted backend development
 
 **New teammate? Start with [Start coding on Arden](docs/engineering/teammate-setup.md).** It covers installing tools, obtaining individual access, SSH/private settings, your first edit, Coolify, troubleshooting, and GitHub review. The guide records the remaining administrator onboarding requirements and the approved source branch while the setup PR is unmerged.
@@ -55,7 +61,7 @@ pnpm test:remote
 pnpm build
 ```
 
-The API exposes `/api/health/live` and `/api/health/ready`; readiness checks PostgreSQL. This is a scaffold, not a deployable Arden release: authentication, the data model, ingestion, graph data, AI, installers, and Coolify production configuration are not implemented yet.
+The API exposes `/api/health/live` and `/api/health/ready`; readiness checks PostgreSQL. This remains an MVP scaffold rather than a finished release: graph data, connectors, installers, durable chat history, and complete Coolify production/recovery evidence remain outstanding.
 
 ## Private local configuration and server access
 

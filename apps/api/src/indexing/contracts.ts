@@ -25,8 +25,15 @@ export type IndexGenerationRequest = {
   generationId: string;
   snapshotVersionId: string;
   snapshotContentHash: string;
+} & ({
+  snapshotMimeType: "text/plain";
   snapshotContent: string;
-};
+  snapshotContentBase64?: never;
+} | {
+  snapshotMimeType: "application/pdf";
+  snapshotContent?: never;
+  snapshotContentBase64: string;
+});
 
 export type ChunkManifestEntry = {
   chunkId: string;
@@ -57,20 +64,34 @@ export class IndexContractError extends Error {
   readonly code = "INVALID_INDEX_MANIFEST";
 }
 
-export function buildIndexGenerationRequest(job: IndexGenerationJob, snapshotContent: string): IndexGenerationRequest {
-  if (createHash("sha256").update(snapshotContent, "utf8").digest("hex") !== job.snapshotContentHash) {
+export class IndexGenerationSupersededError extends Error {
+  readonly code = "INDEX_GENERATION_SUPERSEDED";
+}
+
+export function buildIndexGenerationRequest(
+  job: IndexGenerationJob,
+  snapshot: string | Buffer,
+): IndexGenerationRequest {
+  const bytes = typeof snapshot === "string" ? Buffer.from(snapshot, "utf8") : snapshot;
+  if (createHash("sha256").update(bytes).digest("hex") !== job.snapshotContentHash) {
     throw new IndexContractError("Snapshot content no longer matches its immutable hash");
   }
-  return {
-    contractVersion: 1,
+  const identity = {
+    contractVersion: 1 as const,
     jobId: job.jobId,
     organizationId: job.organizationId,
     submissionId: job.submissionId,
     generationId: job.generationId,
     snapshotVersionId: job.snapshotVersionId,
     snapshotContentHash: job.snapshotContentHash,
-    snapshotContent,
   };
+  if (job.mimeType === "text/plain" && typeof snapshot === "string") {
+    return { ...identity, snapshotMimeType: "text/plain", snapshotContent: snapshot };
+  }
+  if (job.mimeType === "application/pdf" && Buffer.isBuffer(snapshot)) {
+    return { ...identity, snapshotMimeType: "application/pdf", snapshotContentBase64: snapshot.toString("base64") };
+  }
+  throw new IndexContractError("Snapshot MIME type does not match its stored representation");
 }
 
 export function parseIndexGenerationManifest(value: unknown, job: IndexGenerationJob): IndexGenerationManifest {

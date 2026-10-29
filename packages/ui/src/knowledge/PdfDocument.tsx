@@ -21,7 +21,7 @@ export function usePdfObjectUrl(base64: string | null | undefined): string | nul
 
 /** The embedded browser PDF viewer only, for layouts that show the title and download elsewhere. */
 export function PdfViewer({ url, title, page }: { url: string; title: string; page?: number }) {
-  return <object data={page ? `${url}#page=${page}` : url} type="application/pdf" aria-label={`PDF preview: ${title}${page ? `, page ${page}` : ""}`}>
+  return <object key={`${url}:${page ?? 1}`} data={page ? `${url}#page=${page}` : url} type="application/pdf" aria-label={`PDF preview: ${title}${page ? `, page ${page}` : ""}`}>
     <p>PDF preview is unavailable here. Use Download PDF to open the original file.</p>
   </object>;
 }

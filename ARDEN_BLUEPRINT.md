@@ -115,7 +115,6 @@ Every object has a stable ID and owning organization. Versions are immutable onc
 ```text
 private original ──explicit copy──▶ shared draft
 shared draft ──submit snapshot──▶ in review
-in review ──changes requested──▶ new draft
 in review ──reject───────────────▶ closed
 in review ──final approve────────▶ system publishes approved snapshot ──▶ current publication
 current publication ──revise─────▶ new shared draft
@@ -140,7 +139,7 @@ Pipeline:
 
 ```text
 note/file/Jira/GitHub → scope + source ID → raw revision → safe extraction
-  → normalized document + provenance → policy classification
+  → normalized document + provenance → frozen readers + derived reviewer scope
   → chunks + full-text index + embeddings → suggested graph links
   → query-time authorization and freshness checks → UI/AI
 ```

@@ -2,7 +2,7 @@
 
 Status: accepted
 Date: 2026-10-25
-Decision owner/approval: implementation of the API change was requested by the repository user in the working session on 2026-10-25. Record the project lead's confirmation in the pull request.
+Decision owner/approval: implementation was requested by the repository user on 2026-10-25. On 2026-10-29 the requesting maintainer explicitly approved adopting Khoi's audience-breadth, primary-department and disjoint reviewer-scope rules after comparison with inspected main `be27d2c`. Earlier brainstorm attribution is unchanged; separate team consultation was recommended but is not claimed.
 Implementation: partial — interim phase 1a (server-side breadth rule, optional classification in the API, classification inputs removed from the UI). Phase 1b (database rule) and phase 2 (schema contraction) are not started.
 Supersedes: [0008](0008-three-level-knowledge-classification.md); the classification parts of [0010](0010-audiences-and-system-administration.md) (reviewer grants scoped by classification; the author selecting a classification at Share/Prepare Submission)
 Superseded in part by: [0015](0015-organization-wide-reviewer-grants.md), which replaces the Specialist/Senior responsible-department rule for organization-wide snapshots with a disjoint Organization grant and removes reviewer levels from the product UI. The old level and classification rules remain only for `LEGACY` submissions until schema contraction.
@@ -131,7 +131,7 @@ The database still enforces the classification rule: `actor_has_reviewer_grant` 
 - Phase 1 is reversible: the columns still exist and the old rule remains in code for version 1.
 - Phase 2 is not reversible without a backup; take one before applying it on any shared environment.
 
-Evidence obtained so far: none. This record is a proposal.
+The phase descriptions above retain the earlier implementation checkpoints. The audience-breadth replacement is now explicitly confirmed; its final grant-scope rule is owned by decision 0015. Acceptance does not establish live migration or deployment.
 
 ## Rules and documentation updates (on acceptance)
 

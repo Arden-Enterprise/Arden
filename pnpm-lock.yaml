@@ -17,9 +17,6 @@ importers:
 
   apps/api:
     dependencies:
-      '@arden/domain':
-        specifier: workspace:*
-        version: link:../../packages/domain
       '@supabase/supabase-js':
         specifier: 2.117.2
         version: 2.117.2
@@ -36,6 +33,9 @@ importers:
         specifier: 8.23.0
         version: 8.23.0
     devDependencies:
+      '@arden/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.6
@@ -45,6 +45,9 @@ importers:
       '@types/pg':
         specifier: ^8.0.0
         version: 8.23.1
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       tsx:
         specifier: 4.23.15
         version: 4.23.15
