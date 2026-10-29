@@ -1,9 +1,9 @@
 # GitHub-hosted staging and production releases
 
-Status: owner-approved design on 28 October 2026; implementation, staging rollout/rollback and initial schema/app cutovers verified through 29 October. Per-release activation evidence belongs to [GitHub deployments](https://github.com/Arden-Enterprise/Arden/deployments) and ARD-65; the bootstrap checkpoint below is historical.
+Status: the branch-based app release was implemented and its recorded staging/bootstrap checks were verified through 29 October. On 30 October, [Decision 0016](../decisions/0016-github-hosted-server-side-migrations.md) approved a fixed server-side runner for reviewed expand migrations. Its code and documentation are being implemented on a local feature branch; it is not published or configured on the server. Per-release activation evidence belongs to [GitHub deployments](https://github.com/Arden-Enterprise/Arden/deployments) and ARD-65; the bootstrap checkpoint below is historical.
 Design baseline: Arden main `ce912b703fe71d1fb1c52b34f5e5c12a2157efe9`, inspected 28 October 2026.
 Accountable decision owner: project lead. Record author: coding agent at the owner's request.
-Related task: ARD-65. The deployment-settings review scheduled for 2 November remains separate.
+Related tasks: ARD-65 (base release pipeline) and [ARD-73](https://linear.app/ardenknowledge/issue/ARD-73/add-safe-server-side-database-migrations-to-release-cicd) (safe migration extension). The deployment-settings review scheduled for 2 November remains separate.
 
 ## Requested outcome and accepted decisions
 
@@ -78,7 +78,7 @@ Subsequent Coolify activations may recreate the two app containers only. Verify 
 
 - Accept a bounded upload into protected temporary storage, validate it completely, then load the built images. The receiver performs no package installation, source build, image scan or general-purpose runner work on the application server.
 - Lock each environment. Keep a protected before-state record of the current web/API image pair and affected Coolify configuration before an update. Do not hold database credentials in GitHub or emit rendered Compose/environment content into logs.
-- Preflight available disk, approved migration fingerprint, exact target identity and existing health before replacing app containers. Unknown or incompatible schema state blocks release; no automatic privileged database migrations or restore operations are introduced by this pipeline.
+- Bind the exact ordered SQL/checksum/rollout inventory into the signed release. Before staging upload, request a read-only plan against the selected target's ledger. After the bounded archive is validated, the server recomputes the plan under the release lock and may run only explicitly reviewed `expand` migrations using its fixed one-shot API-image runner, a separate least-privilege migration login and the private database network. Production independently plans against its own ledger and requires the matching successful staging migration receipt. Operator-class, unknown, drifted, unbaselined, backup-unready or uncertain state blocks SQL and app activation. There is no automatic SQL rollback or database restore. See [Decision 0016](../decisions/0016-github-hosted-server-side-migrations.md).
 - Update only the environment's web/API images and retain its runtime hardening and resource limits. Keep production and staging data/secrets separate. Do not recreate databases, Auth, SMTP or unrelated workloads as a normal application update.
 - Verify actual running image IDs, local readiness, public HTTPS, frontend version and anonymous API denial. Only then mark a deployment successful. Bound the rollout deadline and retries; reconcile an uncertain deployment request rather than submitting duplicate operations blindly.
 - On an application rollout failure, attempt to restore the previous known image pair/configuration, verify recovery and leave GitHub red with a clear outcome. If recovery fails, report it distinctly; do not claim success because a rollback request was sent. No database rollback is implied.
@@ -98,7 +98,7 @@ Subsequent Coolify activations may recreate the two app containers only. Verify 
 | REL-07 | Oversized/truncated/tampered uploads, obsolete runs and concurrent releases cannot activate incorrectly |
 | REL-08 | Failed checks/builds/scans never deploy; failed rollouts recover the prior app pair or clearly report failed recovery |
 | REL-09 | Existing databases, Auth, storage, runtime secrets and unrelated services remain intact |
-| REL-10 | Unknown migration/compatibility state blocks release without automatic schema changes |
+| REL-10 | Only reviewed `expand` migrations can run automatically after per-environment checksum baseline and backup/restore readiness; unknown, destructive, incompatible or uncertain state blocks activation |
 | REL-11 | Operator/bootstrap, daily branch flow, rollback, credential rotation and retention guides match verified behavior |
 | REL-12 | Local implementation, tests, GitHub publication and live activation are reported separately with actual evidence |
 
@@ -147,6 +147,10 @@ Database/configuration recovery copies are protected on the server and copied
 with verified checksums to the operator's excluded local recovery storage. Old
 image exports remain in root-only server recovery storage. The grouped SQL
 renderer is exercised by disposable upgrade/failure/repeated-apply rejection/restore
-tests. No automatic SQL capability was added to the CI credential. Current
+tests. As of that 29 October cutover, no automatic SQL capability had been added
+to the CI credential. Decision 0016 now approves a narrowly scoped server-side
+runner; its code remains unpublished and its per-environment private migration
+credentials, baseline receipts and backup/restore-readiness records have not been
+installed or verified for this change. Current
 automatic main promotions and later source versions must be checked in the linked
 GitHub deployment records and ARD-65, rather than inferred from this dated record.
