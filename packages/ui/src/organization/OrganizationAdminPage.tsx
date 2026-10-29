@@ -5,6 +5,7 @@ import { ActionToast } from "../shared/ActionToast";
 import { IslandConfirm } from "../shared/IslandConfirm";
 import {
   ApiError, changePrimaryDepartment, createDepartment, createReviewerGrant, deactivateReviewerGrant,
+  deleteDepartment,
   inviteOrganizationMember, listReviewerGrants, loadAudienceGroups, loadOrganizationAdministration,
   removeAudienceGroupMember, resendOrganizationInvitation, revokeOrganizationInvitation,
   type OrganizationAdministration, type ReviewerGrant,
@@ -56,7 +57,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [grantFilter, setGrantFilter] = useState<"ACTIVE" | "INACTIVE">("ACTIVE");
   const [departmentNameInput, setDepartmentNameInput] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteDepartmentId, setInviteDepartmentId] = useState("");
   const [inviteError, setInviteError] = useState("");
   const [departmentError, setDepartmentError] = useState("");
   const [grantSubmitted, setGrantSubmitted] = useState(false);
@@ -79,15 +79,14 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       loadOrganizationAdministration(platform, organizationId), listReviewerGrants(platform, organizationId),
     ]);
     setData(administration); setReviewerGrants(grants);
-    setInviteDepartmentId((current) => current || administration.departments[0]?.id || "");
   }, [platform, organizationId]);
 
   useEffect(() => {
     let active = true;
     void Promise.all([loadOrganizationAdministration(platform, organizationId), listReviewerGrants(platform, organizationId)])
-      .then(([administration, grants]) => { if (!active) return;
+      .then(([administration, grants]) => {
+        if (!active) return;
         setData(administration); setReviewerGrants(grants);
-        setInviteDepartmentId(administration.departments[0]?.id ?? "");
       }).catch(() => { if (active) setError("Organization administration is unavailable for this account."); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
@@ -131,11 +130,18 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     document.querySelector(".organization-live-admin .workspace-scroll-region")?.scrollTo(0, 0);
   };
   const departmentName = (id: string | null) => data?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
-  const selectedMember = data?.members.find((member) => member.id === selectedMemberId);
-  const matchingMembers = data?.members.filter((member) => {
+  const isOrgAdmin = (member: { roleIds: string[]; roleNames?: string[] }) =>
+    Boolean(member.roleNames?.some((name) => {
+      const lower = name.toLowerCase();
+      return lower === "organization admin" || lower === "org admin" || lower.includes("admin");
+    }))
+    || Boolean(data?.roles.some((role) => role.code === "ORG_ADMIN" && member.roleIds.includes(role.id)));
+  const regularMembers = data?.members.filter((member) => !isOrgAdmin(member)) ?? [];
+  const selectedMember = regularMembers.find((member) => member.id === selectedMemberId);
+  const matchingMembers = regularMembers.filter((member) => {
     const query = memberQuery.trim().toLowerCase();
     return (!query || `${member.name} ${member.email}`.toLowerCase().includes(query))
-      && (memberStatus === "ALL" || (memberStatus === "INACTIVE" ? member.status === "SUSPENDED" || member.status === "LEFT" : member.status === memberStatus))
+      && (memberStatus === "ALL" || (memberStatus === "INVITED" ? !member.departmentId || member.status === "INVITED" : memberStatus === "INACTIVE" ? member.status === "SUSPENDED" || member.status === "LEFT" : member.status === memberStatus))
       && (memberDepartment === "ALL" || (member.departmentIds ?? [member.departmentId]).includes(memberDepartment));
   }) ?? [];
   const canGrant = Boolean(reviewerId && (reviewScope === "ORGANIZATION" || reviewDepartmentId));
@@ -148,6 +154,24 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     setDepartmentError("");
     void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentNameInput(""); }, "Department created with its managed audience.");
   };
+  const handleDeleteDepartment = (department: OrganizationAdministration["departments"][number]) => {
+    if (!data) return;
+    const inDepartment = regularMembers.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
+    setError("");
+    setConfirmation({
+      title: `Delete department “${department.name}”?`,
+      description: inDepartment.length > 0
+        ? `This department currently has ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}. Deleting it will move them to the waiting room until assigned to another department, and revoke their access to “Everyone in ${department.name}”.`
+        : `This archives the department and deactivates its managed audience “Everyone in ${department.name}”.`,
+      action: inDepartment.length > 0 ? `Delete and unassign ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}` : "Delete department",
+      run: async () => {
+        await deleteDepartment(platform, organizationId, department.id);
+        if (selectedDepartmentId === department.id) {
+          setSelectedDepartmentId(null);
+        }
+      },
+    });
+  };
   const submitInvite = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const email = inviteEmail.trim();
@@ -159,7 +183,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     if (validation) { setInviteError(validation); document.getElementById("admin-invite-email")?.focus(); return; }
     setInviteError(""); setInviteSuccess("");
     void perform(async () => {
-      const result = await inviteOrganizationMember(platform, organizationId, inviteDepartmentId, email);
+      const result = await inviteOrganizationMember(platform, organizationId, null, email);
       setInviteEmail("");
       const success = result.deliveryMode === "local-test-no-email" ? `Invitation for ${email} saved locally. No email was sent.` : `Invitation email sent to ${email}.`;
       setInviteSuccess(success);
@@ -182,7 +206,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     void perform(confirmation.run, `${confirmation.action} completed.`).then((succeeded) => { if (succeeded) setConfirmation(null); });
   };
   const tabCount: Record<AdminTab, number> = {
-    members: data?.members.length ?? 0, departments: data?.departments.length ?? 0,
+    members: regularMembers.length, departments: data?.departments.length ?? 0,
     audiences: memberAudienceGroups.length,
     invitations: data?.invitations.filter((item) => item.status === "PENDING" && new Date(item.expiresAt).getTime() > Date.now()).length ?? 0,
     reviewers: reviewerGrants.filter((grant) => grant.status === "ACTIVE").length,
@@ -201,7 +225,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     ? `, for ${teamTag.trim() ? `team “${teamTag.trim()}”` : "all teams"} in ${projectTag.trim() ? `project “${projectTag.trim()}”` : "all projects"}.`
     : ", across all teams and projects."}` : "Choose a reviewer and review scope to preview the grant.";
 
-  const isOrgAdmin = (member: { roleIds: string[] }) => Boolean(data?.roles.some((role) => role.code === "ORG_ADMIN" && member.roleIds.includes(role.id)));
   const now = Date.now();
   const invitationCounts = countInvitations(data?.invitations ?? [], now);
   const shownInvitations = visibleInvitations(data?.invitations ?? [], invitationFilter, now);
@@ -232,10 +255,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           <div className="island-main">
             {matchingMembers.length ? <IslandTable label="Members" minWidth={700} columns="minmax(200px, 1.7fr) minmax(110px, .9fr) minmax(180px, 1.2fr) minmax(120px, .8fr) 84px"
               headers={["MEMBER", "DEPARTMENT", "ACCESS", "STATUS", <span className="sr-only">Actions</span>]}
-              footer={<span aria-live="polite">Showing {matchingMembers.length} of {data.members.length} members</span>}>
+              footer={<span aria-live="polite">Showing {matchingMembers.length} of {regularMembers.length} members</span>}>
               {matchingMembers.map((member) => {
                 const grants = reviewerGrants.filter((grant) => grant.reviewerMembershipId === member.id && grant.status === "ACTIVE");
-                const status = describeMemberStatus(member.status);
+                const status = describeMemberStatus(member.status, member.departmentId);
                 const otherDepartments = (member.departmentIds ?? []).filter((id) => id !== member.departmentId);
                 return <IslandRow key={member.id} selected={selectedMemberId === member.id}>
                   <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedMemberId(member.id)} aria-label={`Open details for ${member.name}`}>
@@ -247,7 +270,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                   <IslandCell className="island-row-actions"><button type="button" className="secondary-button" onClick={() => setSelectedMemberId(member.id)} aria-label={`Manage ${member.name}`}>Manage</button></IslandCell>
                 </IslandRow>;
               })}
-            </IslandTable> : <div className="island island-empty"><h3>{data.members.length ? "No matching members" : "No members yet"}</h3><p>{data.members.length ? "Try a different search or clear the filters." : "Invite a member to start building your organization."}</p><button type="button" className="secondary-button" onClick={() => { setMemberQuery(""); setMemberStatus("ALL"); setMemberDepartment("ALL"); }}>{data.members.length ? "Clear filters" : "Reset"}</button></div>}
+            </IslandTable> : <div className="island island-empty"><h3>{regularMembers.length ? "No matching members" : "No members yet"}</h3><p>{regularMembers.length ? "Try a different search or clear the filters." : "Invite a member to start building your organization."}</p><button type="button" className="secondary-button" onClick={() => { setMemberQuery(""); setMemberStatus("ALL"); setMemberDepartment("ALL"); }}>{regularMembers.length ? "Clear filters" : "Reset"}</button></div>}
           </div>
           {selectedMember && <MemberDetailIsland key={selectedMember.id} member={selectedMember} organizationName={organizationName} isAdmin={isOrgAdmin(selectedMember)}
             departmentName={departmentName} departments={data.departments} audienceGroups={memberAudienceGroups} groupsLoading={memberGroupsLoading}
@@ -265,19 +288,28 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         {tab === "departments" && <div role="tabpanel" aria-label="Departments" className="island-split">
           <div className="island-main">
             <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || "Arden also creates its managed “Everyone in …” audience."}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
-            {data.departments.length ? <IslandTable label="Departments" minWidth={560} columns="minmax(220px, 1.6fr) 120px 120px 110px"
-              headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS"]}>
-              {data.departments.map((department) => <IslandRow key={department.id} selected={selectedDepartmentId === department.id}>
-                <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedDepartmentId(department.id)} aria-label={`Open ${department.name}`}>
-                  <span><strong>{department.name}</strong><small>Everyone in {department.name}</small></span></button></IslandCell>
-                <IslandCell className="island-row-cell is-number">{data.members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id)).length}</IslandCell>
-                <IslandCell className="island-row-cell is-number">{data.members.filter((member) => member.departmentId === department.id).length}</IslandCell>
-                <IslandCell className="island-row-cell is-number">{new Set(reviewerGrants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId)).size}</IslandCell>
-              </IslandRow>)}
+            {data.departments.length ? <IslandTable label="Departments" minWidth={600} columns="minmax(220px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) 96px"
+              headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS", <span className="sr-only">Actions</span>]}>
+              {data.departments.map((department) => {
+                const inDepartment = regularMembers.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
+                return <IslandRow key={department.id} selected={selectedDepartmentId === department.id} className="is-clickable" onClick={() => setSelectedDepartmentId(department.id)}>
+                  <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedDepartmentId(department.id)} aria-label={`Open ${department.name}`}>
+                    <span><strong>{department.name}</strong><small>Everyone in {department.name}</small></span></button></IslandCell>
+                  <IslandCell className="island-row-cell is-number">{inDepartment.length}</IslandCell>
+                  <IslandCell className="island-row-cell is-number">{regularMembers.filter((member) => member.departmentId === department.id).length}</IslandCell>
+                  <IslandCell className="island-row-cell is-number">{new Set(reviewerGrants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId)).size}</IslandCell>
+                  <IslandCell className="island-row-actions">
+                    <button type="button" className="secondary-button is-danger" disabled={busy} onClick={(event) => { event.stopPropagation(); handleDeleteDepartment(department); }} aria-label={`Delete ${department.name}`}>Delete</button>
+                  </IslandCell>
+                </IslandRow>;
+              })}
             </IslandTable> : <div className="island island-empty"><h3>No departments yet</h3><p>Create one before inviting members. Every member needs a primary department.</p></div>}
           </div>
-          {selectedDepartment && <DepartmentDetailIsland key={selectedDepartment.id} department={selectedDepartment} members={data.members} grants={reviewerGrants}
-            onClose={() => setSelectedDepartmentId(null)} onViewMembers={() => { setMemberDepartment(selectedDepartment.id); setSelectedDepartmentId(null); selectTab("members"); }} />}
+          {selectedDepartment && <DepartmentDetailIsland key={selectedDepartment.id} department={selectedDepartment} members={regularMembers} grants={reviewerGrants}
+            busy={busy} deleteError={error}
+            onClose={() => setSelectedDepartmentId(null)}
+            onViewMembers={() => { setMemberDepartment(selectedDepartment.id); setSelectedDepartmentId(null); selectTab("members"); }}
+            onDelete={() => handleDeleteDepartment(selectedDepartment)} />}
         </div>}
         {tab === "audiences" && <div role="tabpanel" aria-label="Audiences" className="admin-roles"><ServerAudienceGroupPanel platform={platform} organizationId={organizationId} organizationName={organizationName}
           members={data.members} departments={data.departments}
@@ -310,13 +342,12 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           </div>
           <aside className="island island-panel island-side admin-form-island" aria-labelledby="admin-invite-title">
             <h2 id="admin-invite-title">Invite people</h2>
-            {data.departments.length ? <form className="admin-side-form" noValidate onSubmit={submitInvite}>
+            <form className="admin-side-form" noValidate onSubmit={submitInvite}>
               <label className="organization-field"><span>Work email</span><input id="admin-invite-email" type="email" maxLength={320} placeholder="name@company.com" value={inviteEmail} disabled={busy} aria-invalid={Boolean(inviteError)} aria-describedby="admin-invite-help" onChange={(event) => { setInviteEmail(event.target.value); setInviteError(""); setInviteSuccess(""); }} /><small id="admin-invite-help" className={inviteError ? "field-error" : ""}>{inviteError || `They’ll receive a link to join ${organizationName}.`}</small></label>
-              <label className="organization-field"><span>Primary department</span><select required value={inviteDepartmentId} disabled={busy} onChange={(event) => setInviteDepartmentId(event.target.value)}>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
               <button className="primary-button" type="submit" disabled={busy}>{busy ? "Sending…" : "Send invitation"}</button>
               {inviteSuccess && <p className="admin-inline-success" role="status">{inviteSuccess}</p>}
-            </form> : <div className="island-box"><strong>Create a department first</strong><p>Invitations need a primary department.</p><button type="button" className="secondary-button" onClick={() => selectTab("departments")}>Go to Departments</button></div>}
-            <p className="island-meta">Each link is single-use and expires. New members join as Members; access changes happen after they accept.</p>
+            </form>
+            <p className="island-meta">Each link is single-use and expires. Invited members join the organization waiting room until assigned to a department.</p>
           </aside>
           </div>
         </div>}

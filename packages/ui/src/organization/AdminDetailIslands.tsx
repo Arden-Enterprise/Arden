@@ -10,7 +10,10 @@ export function memberInitials(name: string): string {
   return name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 }
 
-export function memberStatus(status: string): { label: string; tone: string } {
+export function memberStatus(status: string, departmentId?: string | null): { label: string; tone: string } {
+  if (status === "ACTIVE" && !departmentId) {
+    return { label: "Awaiting assignment", tone: "tone-info" };
+  }
   return status === "ACTIVE" ? { label: "Active", tone: "tone-success" }
     : status === "INVITED" ? { label: "Awaiting assignment", tone: "tone-info" }
       : { label: "Inactive", tone: "" };
@@ -47,7 +50,7 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
   const heading = useDetailFocus();
   const titleId = useId();
   const [moving, setMoving] = useState(false);
-  const status = memberStatus(member.status);
+  const status = memberStatus(member.status, member.departmentId);
   const otherDepartments = (member.departmentIds ?? []).filter((id) => id !== member.departmentId);
   const groupMemberships = audienceGroups.flatMap((group) => group.members
     .filter((groupMember) => groupMember.membershipId === member.id && groupMember.status === "ACTIVE")
@@ -70,6 +73,7 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
       {moving ? <label className="island-property"><span><small>Primary department</small>
         <select value={member.departmentId ?? ""} disabled={busy} autoFocus onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setMoving(false); } }}
           onChange={(event) => { onDepartmentChange(event.target.value); setMoving(false); }}>
+          {!member.departmentId && <option value="">Choose department…</option>}
           {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></span>
         <button type="button" className="island-link-button" onClick={() => setMoving(false)}>Cancel</button></label>
         : <div className="island-property"><span><small>Department</small><strong>{departmentName(member.departmentId)}</strong></span>
@@ -104,8 +108,9 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
   </aside>;
 }
 
-export function DepartmentDetailIsland({ department, members, grants, onClose, onViewMembers }: {
-  department: Department; members: Member[]; grants: ReviewerGrant[]; onClose: () => void; onViewMembers: () => void;
+export function DepartmentDetailIsland({ department, members, grants, busy, deleteError, onClose, onViewMembers, onDelete }: {
+  department: Department; members: Member[]; grants: ReviewerGrant[]; busy?: boolean; deleteError?: string;
+  onClose: () => void; onViewMembers: () => void; onDelete?: () => void;
 }) {
   const heading = useDetailFocus();
   const titleId = useId();
@@ -120,6 +125,7 @@ export function DepartmentDetailIsland({ department, members, grants, onClose, o
       <button type="button" className="island-icon-button" disabled aria-label="Rename department (not available yet)" title="Renaming is not available yet"><Icon name="edit" size={16} /></button>
       <button type="button" className="island-icon-button" onClick={onClose} aria-label="Close department details"><Icon name="close" size={16} /></button>
     </div>
+    {deleteError && <p className="admin-feedback is-error" role="alert">{deleteError}</p>}
     <dl className="island-kv">
       <dt>Members</dt><dd>{inDepartment.length} in department · {primary.length} primary</dd>
       <dt>Reviewers</dt><dd>{reviewers.size} with active grants here</dd>
@@ -137,9 +143,16 @@ export function DepartmentDetailIsland({ department, members, grants, onClose, o
       </div> : <p className="island-meta">No members yet.</p>}
       <button type="button" className="island-link-button" onClick={onViewMembers}>View all</button>
     </section>
-    <div className="island-detail-section island-side-footer">
-      <button type="button" className="secondary-button is-danger" disabled>Deactivate department</button>
-      <small className="island-meta">{inDepartment.length ? `Move its ${inDepartment.length} ${inDepartment.length === 1 ? "member" : "members"} to another department first.` : "Deactivating departments is not available yet."}</small>
-    </div>
-  </aside>;
-}
+    {onDelete ? (
+      <section className="island-detail-section" aria-label="Department lifecycle">
+        <h3>Department lifecycle</h3>
+        {inDepartment.length > 0 ? (
+          <p className="island-meta">Deleting this department will move {inDepartment.length} member{inDepartment.length > 1 ? "s" : ""} to the waiting room until reassigned.</p>
+        ) : (
+          <p className="island-meta">This department has no members and can be deleted safely.</p>
+        )}
+        <button type="button" className="secondary-button is-danger" disabled={busy} onClick={onDelete}>Delete department</button>
+      </section>
+    ) : null}
+  </aside>;}
+

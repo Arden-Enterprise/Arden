@@ -7,6 +7,8 @@ import { isKnowledgeClassification, type KnowledgeClassification } from "./knowl
 export type OrganizationMembership = {
   organization: { id: string; name: string };
   status: string;
+  departmentId?: string | null;
+  departmentName?: string | null;
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
 };
@@ -17,10 +19,10 @@ export type CurrentSession = {
   testMode?: boolean;
 };
 export type OrganizationAdministration = {
-  departments: Array<{ id: string; name: string; defaultRoleId: string; defaultRoleName: string }>;
+  departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
   members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; departmentIds?: string[]; roleIds: string[]; roleNames: string[] }>;
-  invitations: Array<{ id: string; email: string; departmentId: string; status: string; expiresAt: string }>;
+  invitations: Array<{ id: string; email: string; departmentId: string | null; status: string; expiresAt: string }>;
 };
 
 export type CreatedKnowledgeDraft = {
@@ -344,9 +346,9 @@ export async function currentSession(platform: Platform): Promise<CurrentSession
   };
 }
 
-export async function createOrganization(platform: Platform, name: string, departmentName: string): Promise<void> {
+export async function createOrganization(platform: Platform, name: string, departmentName?: string): Promise<void> {
   await request(platform, "/api/v1/organizations", {
-    method: "POST", body: JSON.stringify({ name, departmentName }),
+    method: "POST", body: JSON.stringify({ name, ...(departmentName ? { departmentName } : {}) }),
   });
 }
 
@@ -354,6 +356,16 @@ export async function signUp(platform: Platform, email: string, password: string
   await request(platform, "/api/v1/auth/sign-up", {
     method: "POST", body: JSON.stringify({ email, password, fullName }),
   });
+}
+
+export type InvitationPreview = {
+  organizationName: string;
+  email: string;
+  expiresAt: string;
+};
+
+export async function getInvitationPreview(platform: Platform, token: string): Promise<InvitationPreview> {
+  return request<InvitationPreview>(platform, `/api/v1/invitations/${encodeURIComponent(token)}`);
 }
 
 export async function acceptInvitation(platform: Platform, token: string): Promise<void> {
@@ -368,6 +380,13 @@ export async function loadOrganizationAdministration(platform: Platform, organiz
 
 export async function createDepartment(platform: Platform, organizationId: string, name: string): Promise<void> {
   await request(platform, `/api/v1/organizations/${organizationId}/departments`, { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export async function deleteDepartment(platform: Platform, organizationId: string, departmentId: string): Promise<void> {
+  await request(platform, `/api/v1/organizations/${organizationId}/departments/${departmentId}/delete`, {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export async function loadAudienceGroups(platform: Platform, organizationId: string): Promise<AudienceGroupRecord[]> {
@@ -406,8 +425,11 @@ export async function changePrimaryDepartment(platform: Platform, organizationId
   await request(platform, `/api/v1/organizations/${organizationId}/members/${membershipId}/department`, { method: "POST", body: JSON.stringify({ departmentId }) });
 }
 
-export async function inviteOrganizationMember(platform: Platform, organizationId: string, departmentId: string, email: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
-  return request(platform, `/api/v1/organizations/${organizationId}/invitations`, { method: "POST", body: JSON.stringify({ departmentId, email }) });
+export async function inviteOrganizationMember(platform: Platform, organizationId: string, departmentId: string | null | undefined, email: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
+  return request(platform, `/api/v1/organizations/${organizationId}/invitations`, {
+    method: "POST",
+    body: JSON.stringify({ email, ...(departmentId ? { departmentId } : {}) }),
+  });
 }
 
 export async function resendOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {

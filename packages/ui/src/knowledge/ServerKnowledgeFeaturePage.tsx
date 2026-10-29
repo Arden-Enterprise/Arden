@@ -335,7 +335,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           : `Version ${draft?.currentVersion.version ?? 1} is ready to submit.`;
   const chooseFile = (file: File | null) => { setNewFile(file); setNewFileError(file ? validatePdfFile(file) : ""); createRequestKey.current = null; };
 
-  const audienceNames = (ids: string[] | null | undefined) => (ids ?? []).map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? "Inactive audience").join(", ") || "None";
+  const audienceNames = (ids?: string[] | null) => (Array.isArray(ids) ? ids : []).map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? "Inactive audience").join(", ") || "None";
   const selectedContribution = drafts.find((item) => item.id === selectedContributionId) ?? null;
   const selectedContributionLatest = selectedContribution ? latestByDraft.get(selectedContribution.id) : undefined;
   const activeReview = review ? reviews.find((item) => item.submissionId === review.id) : undefined;

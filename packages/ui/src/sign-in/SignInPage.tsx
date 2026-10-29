@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { Platform } from "../shared/types";
 import {
   beginGoogleSignIn,
@@ -12,6 +12,40 @@ import {
 import { AuthLayout } from "./AuthLayout";
 
 export type SignInMode = "sign-in" | "register" | "forgot-password" | "reset-password";
+
+function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    dialog.current?.showModal();
+    return () => {
+      dialog.current?.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={dialog}
+      className="organization-dialog admin-confirm"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="unconfirmed-email-title"
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+    >
+      <div className="organization-dialog-heading">
+        <h2 id="unconfirmed-email-title">Email chưa được xác nhận</h2>
+      </div>
+      <p className="organization-dialog-description">
+        Tài khoản với email <strong>{email}</strong> chưa được xác nhận. Vui lòng kiểm tra hộp thư đến (hoặc thư mục Spam / Junk) và nhấn vào liên kết xác nhận trước khi đăng nhập.
+      </p>
+      <div className="organization-dialog-actions">
+        <button type="button" className="auth-primary" autoFocus onClick={onClose}>
+          Đã hiểu
+        </button>
+      </div>
+    </dialog>
+  );
+}
 
 export function SignInPage({
   platform,
@@ -41,9 +75,13 @@ export function SignInPage({
     return status === "error" ? { text: "Sign in could not be completed." } : null;
   });
   const [busy, setBusy] = useState<"submit" | "google" | null>(null);
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
   const showPreview = new URLSearchParams(window.location.search).get("preview") === "1";
 
   const switchMode = (newMode: SignInMode) => {
+    if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
+      try { window.history.replaceState(null, "", "/"); } catch {}
+    }
     setMode(newMode);
     setNotice(null);
     setPassword("");
@@ -57,7 +95,12 @@ export function SignInPage({
     try {
       await onAuthenticated(await signIn(platform, email.trim(), password));
     } catch (error) {
-      setNotice({ text: error instanceof Error ? error.message : "Sign in could not be completed." });
+      if (error instanceof ApiError && error.code === "EMAIL_NOT_CONFIRMED") {
+        setUnconfirmedEmail(email.trim());
+        setNotice({ text: "Email chưa được xác nhận. Vui lòng kiểm tra hộp thư để kích hoạt tài khoản." });
+      } else {
+        setNotice({ text: error instanceof Error ? error.message : "Sign in could not be completed." });
+      }
     } finally {
       setBusy(null);
       setPassword("");
@@ -130,6 +173,9 @@ export function SignInPage({
           token: resetToken.trim(),
           newPassword: password,
         });
+      }
+      if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
+        try { window.history.replaceState(null, "", "/"); } catch {}
       }
       setNotice({
         text: "Password updated successfully. You can now sign in with your new password.",
@@ -426,6 +472,12 @@ export function SignInPage({
           )}
         </div>
       </section>
+      {unconfirmedEmail && (
+        <UnconfirmedEmailDialog
+          email={unconfirmedEmail}
+          onClose={() => setUnconfirmedEmail(null)}
+        />
+      )}
     </AuthLayout>
   );
 }

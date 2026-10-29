@@ -10,6 +10,7 @@ type AppSidebarProps = {
   organizationLabel?: string;
   authenticated?: boolean;
   showAdmin?: boolean;
+  isUnassigned?: boolean;
   memberName?: string;
   memberRole?: string;
   memberDepartment?: string;
@@ -46,9 +47,12 @@ export const knowledgeNavigation: NavigationItem[] = [
 
 export const adminNavigation: NavigationItem = { label: "Administration", shortLabel: "Admin", icon: "organization", view: "organization-access" };
 
-/** Server-backed sessions expose Ask Arden through the authenticated Core API. */
-export function navigationDisabled(item: NavigationItem, authenticated: boolean): boolean {
+/** Server-backed sessions expose Ask Arden through the authenticated Core API and restrict destinations with connected server workflows. */
+export function navigationDisabled(item: NavigationItem, authenticated: boolean, isUnassigned?: boolean): boolean {
   if (item.planned) return true;
+  if (isUnassigned && (item.view === "personal-workspace" || item.view === "review-queue" || item.view === "knowledge-handover")) {
+    return true;
+  }
   return authenticated && item.view === "my-work";
 }
 
@@ -64,6 +68,7 @@ export function AppSidebar({
   organizationLabel,
   authenticated = false,
   showAdmin = false,
+  isUnassigned = false,
   memberName = "Lan Nguyen",
   memberRole = "Member",
   memberDepartment = "Product Engineering",
@@ -82,7 +87,9 @@ export function AppSidebar({
   const navButton = (item: NavigationItem) => {
     const active = item.view === activeView;
     const reviewCount = item.view === "review-queue" ? assignedReviewCount : undefined;
-    const disabled = navigationDisabled(item, authenticated);
+    const disabled = navigationDisabled(item, authenticated, isUnassigned);
+    const unassignedNotice = isUnassigned && (item.view === "personal-workspace" || item.view === "review-queue")
+      ? "Available once assigned to a department" : undefined;
     return (
       <button
         key={item.label}
@@ -92,7 +99,7 @@ export function AppSidebar({
         disabled={disabled}
         aria-label={reviewCount !== undefined ? `${item.label}, ${reviewCount} assigned` : item.planned ? `${item.label} — not connected` : item.label}
         aria-current={active ? "page" : undefined}
-        title={item.planned ? `${item.label} is not connected yet` : item.label}
+        title={unassignedNotice ?? (item.planned ? `${item.label} is not connected yet` : item.label)}
       >
         <Icon name={item.icon} size={18} />
         <span className="sidebar-nav-label"><span className="nav-label-full">{item.label}</span><span className="nav-label-short" aria-hidden="true">{item.shortLabel}</span></span>

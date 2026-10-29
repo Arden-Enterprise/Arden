@@ -114,6 +114,9 @@ export function buildApp(dependencies: AppDependencies) {
       setAuthCookies(reply, result.tokens, dependencies.secureCookies);
       return { authenticated: true };
     } catch (error) {
+      if (error instanceof Error && error.message === "EMAIL_NOT_CONFIRMED") {
+        return reply.code(403).send(safeError("EMAIL_NOT_CONFIRMED", "Your email address has not been confirmed yet. Please check your inbox for the confirmation link.", request.id));
+      }
       if (error instanceof Error && error.message === "INVALID_CREDENTIALS") {
         return reply.code(401).send(safeError("INVALID_CREDENTIALS", "Email or password is incorrect.", request.id));
       }
@@ -353,6 +356,8 @@ export function buildApp(dependencies: AppDependencies) {
         memberships: memberships.map((membership) => ({
           organization: { id: membership.organizationId, name: membership.organizationName },
           status: membership.status.toLowerCase(),
+          departmentId: membership.departmentId ?? null,
+          departmentName: membership.departmentName ?? null,
           roleCodes: membership.roleCodes,
           canUsePrivateWorkspace: membership.canUsePrivateWorkspace,
         })),
@@ -363,10 +368,10 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Body: { name: string; departmentName: string } }>("/api/v1/organizations", {
+  app.post<{ Body: { name: string; departmentName?: string } }>("/api/v1/organizations", {
     schema: {
       body: {
-        type: "object", additionalProperties: false, required: ["name", "departmentName"],
+        type: "object", additionalProperties: false, required: ["name"],
         properties: {
           name: { type: "string", minLength: 1, maxLength: 120 },
           departmentName: { type: "string", minLength: 1, maxLength: 80 },
@@ -377,7 +382,7 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     const name = request.body.name.trim();
-    const departmentName = request.body.departmentName.trim();
+    const departmentName = request.body.departmentName?.trim() || "General";
     if (!isValidLabel(name, 120) || !isValidLabel(departmentName, 80) || !context.emailVerified || !isNormalizedEmail(context.email)) {
       return reply.code(400).send(safeError("INVALID_ORGANIZATION", "Verified account details and non-empty names are required.", request.id));
     }
@@ -431,6 +436,31 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  app.post<{ Params: { organizationId: string; departmentId: string } }>("/api/v1/organizations/:organizationId/departments/:departmentId/delete", {
+    schema: {
+      params: {
+        type: "object", required: ["organizationId", "departmentId"],
+        properties: { organizationId: { type: "string", pattern: uuidPattern }, departmentId: { type: "string", pattern: uuidPattern } },
+      },
+    },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const result = await dependencies.repository.deleteDepartment(context.userId, request.params.organizationId, request.params.departmentId, request.id);
+      if (!result.success) {
+        if (result.errorReason === "BASE_DEPARTMENT") {
+          return reply.code(409).send(safeError("CANNOT_DELETE_BASE_DEPARTMENT", "The base department of the organization cannot be deleted.", request.id));
+        }
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      return reply.code(200).send({ departmentId: request.params.departmentId, status: "archived", unassignedCount: result.unassignedCount ?? 0, reassignedCount: result.reassignedCount ?? 0 });
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Department deletion failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
   app.post<{ Params: { organizationId: string; membershipId: string }; Body: { departmentId: string } }>("/api/v1/organizations/:organizationId/members/:membershipId/department", {
     schema: {
       params: {
@@ -452,11 +482,11 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: { departmentId: string; email: string } }>("/api/v1/organizations/:organizationId/invitations", {
+  app.post<{ Params: { organizationId: string }; Body: { departmentId?: string | null; email: string } }>("/api/v1/organizations/:organizationId/invitations", {
     schema: {
       params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
       body: {
-        type: "object", additionalProperties: false, required: ["departmentId", "email"],
+        type: "object", additionalProperties: false, required: ["email"],
         properties: {
           departmentId: { type: "string", pattern: uuidPattern },
           email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
@@ -473,10 +503,11 @@ export function buildApp(dependencies: AppDependencies) {
     const token = randomBytes(32).toString("base64url");
     const tokenHash = hashInvitationToken(token);
     const email = request.body.email.trim().toLowerCase();
+    const departmentId = request.body.departmentId ? request.body.departmentId.trim() : null;
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     try {
       const invitation = await dependencies.repository.createInvitation(
-        context.userId, request.params.organizationId, request.body.departmentId, email, tokenHash, expiresAt, request.id,
+        context.userId, request.params.organizationId, departmentId, email, tokenHash, expiresAt, request.id,
       );
       if (!invitation) return reply.code(404).send(resourceNotAvailable(request.id));
       try {
@@ -558,6 +589,30 @@ export function buildApp(dependencies: AppDependencies) {
       return reply.code(204).send();
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation revoke failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.get<{ Params: { token: string } }>("/api/v1/invitations/:token", {
+    schema: {
+      params: {
+        type: "object", additionalProperties: false, required: ["token"],
+        properties: { token: { type: "string", minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]+$" } },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const invitation = await dependencies.repository.getInvitationByToken(hashInvitationToken(request.params.token));
+      if (!invitation) {
+        return reply.code(404).send(safeError("INVITATION_NOT_AVAILABLE", "This invitation is invalid, has expired, or has already been accepted.", request.id));
+      }
+      return reply.code(200).send({
+        organizationName: invitation.organizationName,
+        email: invitation.email,
+        expiresAt: invitation.expiresAt.toISOString(),
+      });
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation lookup failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
   });
@@ -823,7 +878,7 @@ export function buildApp(dependencies: AppDependencies) {
       const drafts = await dependencies.repository.listKnowledgeDrafts(context.userId, request.params.organizationId);
       if (!drafts) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
-      return { items: drafts.map(({ sourceUri: _sourceUri, sourcePrivateVersionId: _privateSource, ...draft }) => draft) };
+      return { items: drafts.map(representSharedDraftSummary) };
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft list failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
@@ -1185,7 +1240,8 @@ export function buildApp(dependencies: AppDependencies) {
       const items = await dependencies.repository.listPublishedKnowledge(context.userId, request.params.organizationId);
       if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
-      return { items: items.map(({ sourceUri: _sourceUri, ...item }) => ({ ...item,
+      return { items: items.map(({ sourceUri: _sourceUri, audienceRoleIds, ...item }) => ({ ...item,
+        audienceIds: audienceRoleIds ?? [],
         publishedAt: item.publishedAt.toISOString(), validFrom: item.validFrom.toISOString(),
         validUntil: item.validUntil?.toISOString() ?? null })) };
     } catch (error) {
@@ -1618,6 +1674,28 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
       mimeType: draft.mimeType,
       contentHash: draft.contentHash,
     },
+    createdAt: draft.createdAt.toISOString(),
+    updatedAt: draft.updatedAt.toISOString(),
+  };
+}
+
+function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
+  return {
+    id: draft.id,
+    organizationId: draft.organizationId,
+    title: draft.title,
+    classification: draft.classification,
+    status: "ACTIVE" as const,
+    responsibleDepartmentId: draft.responsibleDepartmentId,
+    targetScopeType: draft.targetScopeType,
+    teamTag: draft.teamTag,
+    projectTag: draft.projectTag,
+    hasPendingSubmission: draft.hasPendingSubmission,
+    versionId: draft.versionId,
+    mimeType: draft.mimeType,
+    contentHash: draft.contentHash,
+    currentVersion: draft.currentVersion,
+    audienceIds: draft.audienceRoleIds ?? [],
     createdAt: draft.createdAt.toISOString(),
     updatedAt: draft.updatedAt.toISOString(),
   };

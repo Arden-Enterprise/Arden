@@ -66,7 +66,10 @@ export class SupabaseAuthProvider implements AuthProvider {
 
   async signIn(credentials: SupabaseCredentials): Promise<{ userId: string; email: string; fullName: string | null; tokens: AuthSessionTokens }> {
     const { data, error } = await this.createAuthClient().auth.signInWithPassword(credentials);
-    if (error) throw new Error(isClientAuthFailure(error) ? "INVALID_CREDENTIALS" : "SUPABASE_AUTH_UNAVAILABLE");
+    if (error) {
+      if (isEmailNotConfirmed(error)) throw new Error("EMAIL_NOT_CONFIRMED");
+      throw new Error(isClientAuthFailure(error) ? "INVALID_CREDENTIALS" : "SUPABASE_AUTH_UNAVAILABLE");
+    }
     if (!data.user || !data.session) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
     const tokens = toTokens(data.session);
     if (!tokens || !userIdPattern.test(data.user.id)) throw new Error("INVALID_AUTH_RESPONSE");
@@ -265,6 +268,12 @@ function isClientAuthFailure(error: { status?: number }): boolean {
 function isUserAlreadyRegistered(error: { code?: string; message?: string }): boolean {
   if (error.code === "user_already_exists") return true;
   if (typeof error.message === "string" && /user already (registered|exists)|already registered/i.test(error.message)) return true;
+  return false;
+}
+
+function isEmailNotConfirmed(error: { code?: string; message?: string }): boolean {
+  if (error.code === "email_not_confirmed") return true;
+  if (typeof error.message === "string" && /email not confirmed/i.test(error.message)) return true;
   return false;
 }
 
