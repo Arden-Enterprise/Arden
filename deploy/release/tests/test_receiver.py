@@ -132,6 +132,36 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(self.manager.current["commit"], "f" * 40)
         self.assertIn(self.manifest["images"]["api"]["id"], self.manager.loaded)
 
+    def test_status_preserves_operator_rollback_receipt_in_existing_state(self):
+        from state import write_json
+        state = self.engine.status()
+        receipt = {"action": "rollback", "verified_at": 1_700_000_000.0}
+        state["operator_action"] = receipt
+        write_json(self.engine.path, state)
+
+        self.assertEqual(self.engine.status()["operator_action"], receipt)
+
+    def test_status_rejects_malformed_operator_rollback_receipt(self):
+        from state import write_json
+        state = self.engine.status()
+        malformed_receipts = [
+            {"action": "rollback", "verified_at": "not-a-time"},
+            {"action": "deploy", "verified_at": 1_700_000_000.0},
+            {"action": "rollback", "verified_at": True},
+            {"action": "rollback", "verified_at": 0},
+            {"action": "rollback", "verified_at": 1_700_000_000.0, "extra": "unexpected"},
+        ]
+        for receipt in malformed_receipts:
+            with self.subTest(receipt=receipt):
+                state["operator_action"] = receipt
+                write_json(self.engine.path, state)
+                with self.assertRaisesRegex(ValueError, "Stored operator action"):
+                    self.engine.status()
+
+        state["operator_action"] = {"action": "rollback", "verified_at": float("inf")}
+        with self.assertRaisesRegex(ValueError, "Stored operator action"):
+            ReleaseEngine._validate_state(state)
+
     def test_interrupted_load_has_durable_intent_but_no_deploy_receipt(self):
         def interrupted(path, manifest, proof):
             intents = list((self.engine.root / "upload-intents").glob("*.json"))

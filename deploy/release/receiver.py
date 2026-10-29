@@ -4,6 +4,7 @@
 import copy
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import shutil
@@ -59,8 +60,16 @@ class ReleaseEngine:
     @staticmethod
     def _validate_state(value):
         if (type(value) is not dict or not {"active", "previous", "pending", "highest"}.issubset(value)
-                or set(value) - {"active", "previous", "pending", "highest", "last_failure"}):
+                or set(value) - {"active", "previous", "pending", "highest", "last_failure",
+                                 "operator_action"}):
             raise ValueError("Stored release state is malformed")
+        if "operator_action" in value:
+            action = value["operator_action"]
+            verified_at = action.get("verified_at") if type(action) is dict else None
+            if (type(action) is not dict or set(action) != {"action", "verified_at"}
+                    or action["action"] != "rollback" or type(verified_at) not in {int, float}
+                    or not math.isfinite(verified_at) or verified_at <= 0):
+                raise ValueError("Stored operator action receipt is malformed")
         if type(value["active"]) is not dict:
             raise ValueError("Stored release state is malformed")
         releases = [value["active"], value["previous"]]
