@@ -51,6 +51,39 @@ class EntrypointDispatchTests(unittest.TestCase):
             "migration_ids": []})
 
 
+class BootstrapResumeTests(unittest.TestCase):
+    def test_prepared_resource_resume_finishes_runtime_configuration(self):
+        from test_migration_baseline import load_operator
+        operator = load_operator()
+        from state import write_json, read_json
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            journal = root / "bootstrap" / "staging.json"
+            migration = {"network": "arden-database-private", "database_image": "sha256:" + "a" * 64,
+                         "database_host": "arden-db", "database_name": "arden",
+                         "runtime_database_user": "arden_runtime",
+                         "env_file": "/etc/arden/releases/staging.migration.env"}
+            write_json(journal, {"phase": "created", "config": {"service_uuid": "synthetic12345",
+                                                                  "environment": "staging",
+                                                                  "migration": migration},
+                                 "values": {"SYNTHETIC": "test-only"}})
+            calls = []
+
+            class Manager:
+                def __init__(self, config):
+                    pass
+
+                def request(self, *arguments):
+                    calls.append(arguments)
+
+            with patch.object(operator, "STATE", root), patch.object(operator, "CONFIG", root / "config"), \
+                    patch.object(operator, "CoolifyManager", Manager):
+                result = operator.prepare("staging", {}, {})
+            self.assertEqual(result["phase"], "prepared")
+            self.assertEqual(read_json(journal)["phase"], "prepared")
+            self.assertEqual(calls[0][:2], ("PATCH", "/services/synthetic12345/envs/bulk"))
+
+
 @unittest.skipUnless(os.name == "posix" and os.geteuid() == 0, "Requires isolated Linux root fixtures")
 class PrivilegeTests(unittest.TestCase):
     def test_public_key_directories_remain_searchable_under_private_operator_umask(self):
@@ -170,26 +203,6 @@ class PrivilegeTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 entrypoint.secure_file(config)
             root.chmod(0o700)
-
-    def test_prepared_resource_resume_finishes_runtime_configuration(self):
-        import bootstrap_operator as operator
-        from state import write_json, read_json
-        with tempfile.TemporaryDirectory(dir="/root") as temporary:
-            root = Path(temporary)
-            journal = root / "bootstrap" / "staging.json"
-            write_json(journal, {"phase": "created", "config": {"service_uuid": "synthetic12345"},
-                                 "values": {"SYNTHETIC": "test-only"}})
-            calls = []
-            class Manager:
-                def __init__(self, config):
-                    pass
-                def request(self, *arguments):
-                    calls.append(arguments)
-            with patch.object(operator, "STATE", root), patch.object(operator, "CoolifyManager", Manager):
-                result = operator.prepare("staging", {}, {})
-            self.assertEqual(result["phase"], "prepared")
-            self.assertEqual(read_json(journal)["phase"], "prepared")
-            self.assertEqual(calls[0][:2], ("PATCH", "/services/synthetic12345/envs/bulk"))
 
     def test_retirement_removes_only_original_apps_without_starting_infrastructure(self):
         import bootstrap_operator as operator
