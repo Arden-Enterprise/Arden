@@ -22,7 +22,7 @@ from bootstrap import (build_app_template, deployment_key_line, verify_migration
                        migration_baseline_statements, build_migration_target_config)
 from entrypoint import secure_file, secure_directory
 from management import (CoolifyManager, migration_role_name, migration_role_probe_sql,
-                        valid_migration_role_probe)
+                        valid_migration_role_probe, verify_migration_client_user)
 from protocol import validate_migration_inventory, validate_stored_manifest
 from receiver import ReleaseEngine
 from state import read_json, write_json, release_lock
@@ -194,16 +194,15 @@ def private_database_aliases(container):
 
 
 def run_migration_sql(image, network, env_file, sql):
-    runtime = docker("image", "inspect", "--format", "{{.Config.User}}", image).strip()
-    if not runtime or runtime in {"0", "root", "0:0", "root:root"}:
-        raise ValueError("The approved database image has no non-root client identity")
+    verify_migration_client_user(image, lambda arguments: docker(*arguments))
     shell = ('exec psql --dbname="$ARDEN_MIGRATION_DATABASE_URL" --no-psqlrc '
              '--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align --field-separator="|"')
     return run(["/usr/bin/docker", "run", "--interactive", "--rm", "--pull=never", "--network", network,
                 "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
                 "--memory", "128m", "--cpus", "0.50", "--pids-limit", "32",
                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-                "--env-file", str(env_file), "--entrypoint", "/bin/sh", image, "-c", shell],
+                "--env-file", str(env_file), "--user", "postgres", "--entrypoint", "/bin/sh",
+                image, "-c", shell],
                data=sql, timeout=90)
 
 
@@ -230,6 +229,17 @@ def migration_inventory_fingerprint(inventory):
                    "rollout": row["rollout"]} for row in inventory]
     return hashlib.sha256(json.dumps(normalized, separators=(",", ":"), ensure_ascii=False)
                           .encode("utf-8")).hexdigest()
+
+
+def verify_active_api_container(api, manifest, manager, service_uuid):
+    labels = api.get("Config", {}).get("Labels", {})
+    expected_image = manager.image_id(manifest, "api")
+    if (not api.get("State", {}).get("Running")
+            or api.get("State", {}).get("Health", {}).get("Status") != "healthy"
+            or api.get("Image") != expected_image
+            or labels.get("com.docker.compose.project") != service_uuid
+            or labels.get("com.docker.compose.service") != "arden-api"):
+        raise ValueError("The active API container does not match the protected migration source")
 
 
 def active_migration_inventory(manifest, image_rows, ledger_rows, policy=None):
@@ -301,13 +311,7 @@ def baseline_migrations(environment):
 
     api_name = f"arden-api-{config['service_uuid']}"
     api = inspect(api_name)
-    labels = api.get("Config", {}).get("Labels", {})
-    if (not api.get("State", {}).get("Running")
-            or api.get("State", {}).get("Health", {}).get("Status") != "healthy"
-            or api.get("Image") != manifest.get("images", {}).get("api", {}).get("id")
-            or labels.get("com.docker.compose.project") != config["service_uuid"]
-            or labels.get("com.docker.compose.service") != "arden-api"):
-        raise ValueError("The active API container does not match the protected migration source")
+    verify_active_api_container(api, manifest, manager, config["service_uuid"])
     app_values = {}
     for entry in api.get("Config", {}).get("Env", []):
         key, separator, value = entry.partition("=")
