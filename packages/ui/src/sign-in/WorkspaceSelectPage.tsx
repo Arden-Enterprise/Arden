@@ -1,7 +1,7 @@
 import { WelcomePanel } from "./WelcomePanel";
 import { entryAssets } from "./entryAssets";
 import type { OrganizationMembership } from "../shared/api-client";
-import { needsDepartmentAssignment } from "../shared/membershipAssignment";
+import { membershipAccessDescription, needsDepartmentAssignment } from "../shared/membershipAssignment";
 import { useState } from "react";
 
 export function WorkspaceSelectPage({ organizationName, memberships, onContinue, onBack, onCreateOrganization, testMode = false }: {
@@ -39,7 +39,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
                   <span>
                     {isAwaiting
                       ? "Organization joined · Awaiting department assignment"
-                      : `${membership.departmentName ? `${membership.departmentName} · ` : ""}${membership.roleCodes.length ? membership.roleCodes.join(", ") : "Active membership"} · Private workspace access`}
+                      : membershipAccessDescription(membership)}
                   </span>
                 </button>
               );

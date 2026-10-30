@@ -18,7 +18,7 @@ import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { countInvitations, invitationFilters, invitationState, visibleInvitations, type InvitationFilter, type InvitationState } from "./invitationStatus";
 import { DepartmentDetailIsland, grantCoverageLabel, grantValidity, MemberDetailIsland, memberInitials, memberStatus as describeMemberStatus } from "./AdminDetailIslands";
-import { filterOrganizationMembers, isOrganizationAdminMember, membersInDepartment } from "./memberAdministration";
+import { departmentDeletionSummary, filterOrganizationMembers, isOrganizationAdminMember, membersInDepartment } from "./memberAdministration";
 
 type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void } & ContextControlProps;
 type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers";
@@ -132,9 +132,9 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const departmentName = (id: string | null) => data?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
   const members = data?.members ?? [];
-  const isOrgAdmin = (member: OrganizationAdministration["members"][number]) => isOrganizationAdminMember(member, data?.roles ?? []);
+  const isOrgAdmin = (member: OrganizationAdministration["members"][number]) => isOrganizationAdminMember(member);
   const selectedMember = members.find((member) => member.id === selectedMemberId);
-  const matchingMembers = filterOrganizationMembers(members, data?.roles ?? [], {
+  const matchingMembers = filterOrganizationMembers(members, {
     query: memberQuery, status: memberStatus, department: memberDepartment,
   });
   const canGrant = Boolean(reviewerId && (reviewScope === "ORGANIZATION" || reviewDepartmentId));
@@ -154,7 +154,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     setConfirmation({
       title: `Delete department “${department.name}”?`,
       description: inDepartment.length > 0
-        ? `This department currently has ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}. Deleting it will move them to the waiting room until assigned to another department, and revoke their access to “Everyone in ${department.name}”.`
+        ? `${departmentDeletionSummary(inDepartment.length)} Deleting it will revoke their access to “Everyone in ${department.name}”.`
         : `This archives the department and deactivates its managed audience “Everyone in ${department.name}”.`,
       action: inDepartment.length > 0 ? `Delete and unassign ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}` : "Delete department",
       run: async () => {

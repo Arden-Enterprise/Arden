@@ -1,24 +1,19 @@
 import type { OrganizationAdministration } from "../shared/api-client";
 
 type Member = OrganizationAdministration["members"][number];
-type Role = OrganizationAdministration["roles"][number];
 
-export function isOrganizationAdminMember(member: Member, roles: Role[]): boolean {
-  return Boolean(member.roleNames?.some((name) => {
-    const lower = name.toLowerCase();
-    return lower === "organization admin" || lower === "org admin" || lower.includes("admin");
-  })) || roles.some((role) => role.code === "ORG_ADMIN" && member.roleIds.includes(role.id));
+export function isOrganizationAdminMember(member: Member): boolean {
+  return member.isOrganizationAdmin;
 }
 
 export function filterOrganizationMembers(
   members: Member[],
-  roles: Role[],
   filters: { query: string; status: string; department: string },
 ): Member[] {
   return members.filter((member) => {
     const query = filters.query.trim().toLowerCase();
     const isAwaitingAssignment = member.status === "INVITED"
-      || (member.status === "ACTIVE" && !member.departmentId && !isOrganizationAdminMember(member, roles));
+      || (member.status === "ACTIVE" && !member.departmentId && !isOrganizationAdminMember(member));
     const matchesStatus = (() => {
       switch (filters.status) {
         case "ALL": return true;
@@ -36,4 +31,9 @@ export function filterOrganizationMembers(
 
 export function membersInDepartment(members: Member[], departmentId: string): Member[] {
   return members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(departmentId));
+}
+
+export function departmentDeletionSummary(memberCount: number): string {
+  const members = `${memberCount} member${memberCount === 1 ? "" : "s"}`;
+  return `Deleting this department will unassign ${members}. Members who still need a department will enter the waiting room; organization administrators remain active.`;
 }

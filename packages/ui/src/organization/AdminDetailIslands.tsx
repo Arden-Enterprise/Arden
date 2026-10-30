@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../shared/Icon";
 import type { OrganizationAdministration, ReviewerGrant } from "../shared/api-client";
 import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
+import { departmentDeletionSummary } from "./memberAdministration";
 
 type Member = OrganizationAdministration["members"][number];
 type Department = OrganizationAdministration["departments"][number];
@@ -147,7 +148,7 @@ export function DepartmentDetailIsland({ department, members, grants, busy, dele
       <section className="island-detail-section" aria-label="Department lifecycle">
         <h3>Department lifecycle</h3>
         {inDepartment.length > 0 ? (
-          <p className="island-meta">Deleting this department will move {inDepartment.length} member{inDepartment.length > 1 ? "s" : ""} to the waiting room until reassigned.</p>
+          <p className="island-meta">{departmentDeletionSummary(inDepartment.length)}</p>
         ) : (
           <p className="island-meta">This department has no members and can be deleted safely.</p>
         )}

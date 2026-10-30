@@ -5,6 +5,7 @@
   },
   "include": [
     "tests/invitationFeedback.test.ts",
+    "tests/memberAdministration.test.ts",
     "tests/membershipAssignment.test.ts"
   ]
 }
