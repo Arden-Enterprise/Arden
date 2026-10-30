@@ -64,6 +64,23 @@ Every migration plan, upload, deployment and production promotion carries a shor
 
 ## Cost and storage boundary
 
+### Ownership handoff must preserve application execution
+
+The DDL migration role owns schema/tables, invoker routines and the ledger, but
+reviewed `SECURITY DEFINER` routines retain their trusted `postgres` owner. The
+ownership template skips these routines and the role probe verifies this split.
+CI transfers the actual full schema before its runtime/worker integration tests;
+the separate synthetic privilege probe is not a substitute for that workflow test.
+
+For the known ownership regression, an authorized operator may use
+`deploy/release/security-definer-owner-repair.sql` only after reviewing the exact
+database, fixed environment role, 12-function inventory, protected backup and
+disposable rehearsal. It only restores function owners and is idempotent. Do not
+replay migration SQL, edit ledger checksums or disable RLS to recover. Existing
+restricted migration logins cannot replace these trusted functions; future body or
+owner changes stay operator-reviewed. Keep the installed release verifier in sync
+with the repaired ownership contract before requesting another deployment.
+
 The owner approved **standard free runners for this public repository**, with temporary build storage only. GitHub currently documents standard public-repository runner use as free; [provider pricing can change](https://docs.github.com/en/billing/concepts/product-billing/github-actions). The jobs fail closed if the canonical repository is no longer public.
 
 There are no Actions build artifacts, persistent package/Docker caches, registry pushes or paid/larger runners. Trivy's database and build files are on the disposable runner disk. Normal Git history, job logs, statuses and deployment records remain on GitHub. Historical Actions caches from older workflows are separate; an operator may remove only confirmed obsolete caches. Old branches can recreate caches until their workflows are updated.

@@ -36,4 +36,6 @@ Read the applicable detailed guidance before changing its subject:
 5. Mainflow 3 AI processing belongs in the separate Python `Arden-AI` service under [decision 0012](docs/decisions/0012-separate-python-ai-service-and-chromadb.md). Core owns AccessPolicy, durable generation state and atomic activation; do not add a second RAG implementation here.
 6. Report implementation, verification, publication and deployment separately, with checks actually executed and remaining limitations. Publishing, requesting reviews, merging and deploying are separate authorized actions. Human PR review is optional; actual GitHub protections still apply.
 
+Ownership maintenance must preserve the [internal function execution contract](docs/engineering/security-and-data.md#database-ownership-is-an-execution-contract): never bulk-transfer SECURITY DEFINER owners or relax RLS to make an operator probe pass. Test real runtime/worker workflows after the full ownership handoff, not only a synthetic schema.
+
 The [rules index](docs/engineering/rules/README.md) assigns each detailed rule one home. Keep this entry point concise and update the owning module and related guides together.

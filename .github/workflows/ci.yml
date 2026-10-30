@@ -111,7 +111,11 @@ jobs:
         run: pnpm --filter @arden/api db:migrate
         env:
           ARDEN_MIGRATION_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci
-      - name: Exercise actual PostgreSQL isolation and permission rules
+      - name: Transfer real schema ownership before exercising application workflows
+        run: python3 tools/verification/migration-owner.py --full-schema
+        env:
+          ARDEN_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Exercise actual PostgreSQL isolation and permission rules after ownership transfer
         run: pnpm --filter @arden/api test
         env:
           ARDEN_TEST_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci

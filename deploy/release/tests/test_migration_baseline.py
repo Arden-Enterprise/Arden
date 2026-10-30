@@ -296,5 +296,25 @@ class MigrationBaselineTests(unittest.TestCase):
         self.assertIn("format('GRANT USAGE ON SCHEMA public TO %I'", template)
         self.assertIn("format('GRANT CONNECT ON DATABASE %I TO %I'", template)
 
+    def test_ownership_handoff_preserves_definer_execution_and_probe_checks_both_owners(self):
+        from management import migration_role_probe_sql
+        template = (Path(__file__).resolve().parents[1] / "migration-owner-template.sql").read_text(encoding="utf-8")
+        routine_transfer = template[template.index("SELECT p.oid::regprocedure AS signature"):]
+        self.assertIn("AND NOT p.prosecdef", routine_transfer)
+        probe = migration_role_probe_sql()
+        self.assertIn("p.prosecdef AND p.proowner <>", probe)
+        self.assertIn("rolname = 'postgres' AND rolsuper", probe)
+        self.assertIn("NOT p.prosecdef AND p.proowner <> r.oid", probe)
+
+    def test_recovery_changes_only_the_reviewed_function_owners(self):
+        repair = (Path(__file__).resolve().parents[1] / "security-definer-owner-repair.sql").read_text(encoding="utf-8")
+        self.assertIn("__EXPECTED_DATABASE__", repair)
+        self.assertIn("__MIGRATION_ROLE__", repair)
+        self.assertIn("pg_advisory_xact_lock", repair)
+        self.assertIn("p.prosecdef", repair)
+        self.assertIn("ALTER FUNCTION %s OWNER TO postgres", repair)
+        for forbidden in ("DISABLE ROW LEVEL SECURITY", "NO FORCE", "ALTER ROLE", "INSERT INTO", "DELETE FROM", "CREATE POLICY"):
+            self.assertNotIn(forbidden, repair)
+
 if __name__ == "__main__":
     unittest.main()

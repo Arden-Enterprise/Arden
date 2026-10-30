@@ -43,6 +43,16 @@ If the one-time baseline or backup/restore prerequisite is not ready, releases r
 
 ## Verification and rollout
 
+Ownership clarification (30 October 2026, maintainer-authorized regression recovery):
+DDL ownership and SECURITY DEFINER execution identity are distinct. Existing reviewed
+definer functions retain their trusted postgres owner; transferring them to the
+restricted migration login broke FORCE-RLS validation. The operator template and
+role probe must enforce this split, and real application/worker tests must run after
+the complete ownership handoff. This restores the prior function behavior without
+giving the API BYPASSRLS or changing audience/private-content rules. Future changes
+to those trusted routines require operator review; ordinary expand migrations cannot
+assume ownership of them. Production repair is not authorized by the staging recovery.
+
 Required evidence is recorded separately from this accepted policy:
 
 - Inventory and SQL classification checks; disposable fresh-install and supported-upgrade tests.
