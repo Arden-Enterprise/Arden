@@ -14,6 +14,8 @@ The existing release workflow builds and scans immutable web/API images on free 
 
 Migration selection must reflect the target database's actual ledger and the exact candidate image. A PR file list is not evidence that a migration is pending on staging or production. Existing migration `0018_flow3_contract_and_test_content_reset.sql` is destructive and remains an operator-only migration; it must never run as an automatic release migration.
 
+Migration IDs are sortable identifiers, not a required uninterrupted counter. A missing number is a valid gap. The release runner selects absent migrations from the ordered candidate inventory and verified applied ledger; it does not calculate `max(applied_id) + 1`. Applied migrations still must form an exact prefix of the candidate inventory, so a genuinely missing, reordered, or unknown applied migration fails closed.
+
 ## Options and tradeoffs
 
 1. Connect GitHub runners directly to each PostgreSQL database. This is easy to script, but puts database credentials and a network path in GitHub and increases the impact of a compromised workflow. Rejected.
