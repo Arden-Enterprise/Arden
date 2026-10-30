@@ -62,8 +62,6 @@ The candidate's migrations missing from the target ledger are the pending set. I
 
 Every migration plan, upload, deployment and production promotion carries a short-lived GitHub Actions identity proof bound to that exact request. The server checks GitHub's signature and the repository/owner IDs, workflow, environment, branch, commit, run and hosted-runner claims. Only the release job gets `id-token: write`; PR/check jobs get no identity permission or deployment secret. Status inspection still works with the restricted SSH key alone. Stored receipts contain verified metadata, never the bearer token. Production rejects legacy or unauthenticated staging eligibility. Protecting the reviewed workflow is part of this trust boundary; the identity proves which job authorized the request, rather than independently proving its compilation/scanning logic.
 
-## Cost and storage boundary
-
 ### Ownership handoff must preserve application execution
 
 The DDL migration role owns schema/tables, invoker routines and the ledger, but
@@ -80,6 +78,8 @@ replay migration SQL, edit ledger checksums or disable RLS to recover. Existing
 restricted migration logins cannot replace these trusted functions; future body or
 owner changes stay operator-reviewed. Keep the installed release verifier in sync
 with the repaired ownership contract before requesting another deployment.
+
+## Cost and storage boundary
 
 The owner approved **standard free runners for this public repository**, with temporary build storage only. GitHub currently documents standard public-repository runner use as free; [provider pricing can change](https://docs.github.com/en/billing/concepts/product-billing/github-actions). The jobs fail closed if the canonical repository is no longer public.
 

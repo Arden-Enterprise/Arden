@@ -34,8 +34,6 @@ Manual local Mainflow 1 testing may use the dedicated local adapter in `apps/api
 
 The organization, session-context, and owner-private note contract for the first backend slice is accepted and partially implemented. SQL authorization has a gated real-PostgreSQL test that has not run in this environment; API request tests use a synthetic Supabase adapter rather than a live project. See [first-slice permission and API contracts](first-slice-permission-and-api-contracts.md), [decision 0002](../decisions/0002-first-slice-private-notes-contract.md), and the active [Supabase decision 0001](../decisions/0001-supabase-and-hybrid-development.md).
 
-## 3. Knowledge ownership and governance
-
 ### Database ownership is an execution contract
 
 The release migration login owns Arden DDL and its migration ledger; it is not the
@@ -59,6 +57,8 @@ does not modify data, policies, EXECUTE grants, actor roles or function bodies.
 Never repair this regression by granting BYPASSRLS to API users or letting Org Admin
 read another user's private drafts/notes. These restrictions apply to every
 contributor and agent, not to one named tool.
+
+## 3. Knowledge ownership and governance
 
 - Personal originals remain private. Sharing/contributing is explicit, with a preview of copied text/files, audience, and authority. A separate copy is not an implicit live mirror.
 - The first shared-draft API permits only an authenticated author to copy an owned private-note version into a separate protected object. It does not expose the private source ID/URI to shared readers, grant audience access, or submit the copy for review. See [Group 1 create contract](mainflow-2-group-1-create.md).
