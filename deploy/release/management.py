@@ -128,8 +128,8 @@ def migration_role_probe_sql():
 def valid_migration_role_probe(value, database, username):
     """Require a dedicated login owning Arden objects and only the public ledger."""
     fields = value.split("|") if isinstance(value, str) else []
-    return (len(fields) == 23 and fields[:2] == [database, username]
-            and fields[2:] == ["false"] * 6 + ["true"] * 15)
+    return (len(fields) == 21 and fields[:2] == [database, username]
+            and fields[2:] == ["false"] * 6 + ["true"] * 13)
 
 
 def valid_migration_baseline_receipt(receipt, environment):

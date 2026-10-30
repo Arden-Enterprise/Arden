@@ -75,7 +75,7 @@ class ManagementTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             migration_role_name("unknown")
 
-        good = ["postgres", "arden_release_migration_staging"] + ["false"] * 6 + ["true"] * 15
+        good = ["postgres", "arden_release_migration_staging"] + ["false"] * 6 + ["true"] * 13
         self.assertTrue(valid_migration_role_probe("|".join(good), "postgres", good[1]))
         for index in range(2, len(good)):
             invalid = good.copy()
@@ -485,7 +485,7 @@ class ManagementTests(unittest.TestCase):
         def migration_command(arguments, timeout):
             commands.append((arguments, timeout))
             role = "|".join(["postgres", "arden_release_migration_staging"]
-                            + ["false"] * 6 + ["true"] * 15)
+                            + ["false"] * 6 + ["true"] * 13)
             return (f"READY\nROLE|{role}\n"
                     "0001_example|" + "d" * 64 + "\n")
 
