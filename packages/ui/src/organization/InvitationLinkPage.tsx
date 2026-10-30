@@ -12,6 +12,7 @@ import {
   type InvitationPreview,
 } from "../shared/api-client";
 import type { Platform } from "../shared/types";
+import { invitationFeedback } from "./invitationFeedback";
 
 type InvitationLinkPageProps = {
   platform: Platform;
@@ -237,6 +238,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
   }
 
   const isAccountMismatch = Boolean(currentAccountEmail && invitation && currentAccountEmail.toLowerCase() !== invitation.email.toLowerCase());
+  const feedback = invitationFeedback(error, message);
 
   return (
     <AuthLayout>
@@ -252,6 +254,11 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
             <p style={{ margin: "0 0 16px", textAlign: "center", fontSize: "12px", color: "var(--arden-text-secondary)" }}>
               Invitation for <strong style={{ color: "var(--arden-warm)" }}>{invitation.email}</strong>
             </p>
+          )}
+          {feedback && (
+            <div className={feedback.className} role={feedback.role}>
+              {feedback.text}
+            </div>
           )}
 
           {signedIn ? (
@@ -337,17 +344,6 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                   </>
                 )}
               </p>
-
-              {message && (
-                <div className="auth-message is-success" role="status">
-                  {message}
-                </div>
-              )}
-              {error && (
-                <div className="auth-message" role="alert">
-                  {error}
-                </div>
-              )}
 
               {mode === "sign-in" ? (
                 <form onSubmit={(event) => void handleSignIn(event)}>

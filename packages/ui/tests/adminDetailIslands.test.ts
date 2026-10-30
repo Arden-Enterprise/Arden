@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { grantCoverageLabel, grantValidity } from "../src/organization/AdminDetailIslands";
+import { grantCoverageLabel, grantValidity, memberStatus } from "../src/organization/AdminDetailIslands";
 
 const isoDate = (iso: string) => iso.slice(0, 10);
 
@@ -17,5 +17,11 @@ describe("reviewer grant coverage (decision 0015)", () => {
   it("describes department and organization scopes", () => {
     expect(grantCoverageLabel("DEPARTMENT")).toBe("Department and group snapshots");
     expect(grantCoverageLabel("ORGANIZATION")).toBe("Organization-wide snapshots");
+  });
+});
+
+describe("organization administrator membership status", () => {
+  it("does not label an unassigned organization administrator as awaiting assignment", () => {
+    expect(memberStatus("ACTIVE", null, true)).toEqual({ label: "Active", tone: "tone-success" });
   });
 });

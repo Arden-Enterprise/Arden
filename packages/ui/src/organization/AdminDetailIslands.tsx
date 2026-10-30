@@ -10,8 +10,8 @@ export function memberInitials(name: string): string {
   return name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 }
 
-export function memberStatus(status: string, departmentId?: string | null): { label: string; tone: string } {
-  if (status === "ACTIVE" && !departmentId) {
+export function memberStatus(status: string, departmentId?: string | null, isOrganizationAdmin = false): { label: string; tone: string } {
+  if (status === "ACTIVE" && !departmentId && !isOrganizationAdmin) {
     return { label: "Awaiting assignment", tone: "tone-info" };
   }
   return status === "ACTIVE" ? { label: "Active", tone: "tone-success" }
@@ -50,7 +50,7 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
   const heading = useDetailFocus();
   const titleId = useId();
   const [moving, setMoving] = useState(false);
-  const status = memberStatus(member.status, member.departmentId);
+  const status = memberStatus(member.status, member.departmentId, isAdmin);
   const otherDepartments = (member.departmentIds ?? []).filter((id) => id !== member.departmentId);
   const groupMemberships = audienceGroups.flatMap((group) => group.members
     .filter((groupMember) => groupMember.membershipId === member.id && groupMember.status === "ACTIVE")

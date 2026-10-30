@@ -18,6 +18,7 @@ import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { countInvitations, invitationFilters, invitationState, visibleInvitations, type InvitationFilter, type InvitationState } from "./invitationStatus";
 import { DepartmentDetailIsland, grantCoverageLabel, grantValidity, MemberDetailIsland, memberInitials, memberStatus as describeMemberStatus } from "./AdminDetailIslands";
+import { filterOrganizationMembers, isOrganizationAdminMember, membersInDepartment } from "./memberAdministration";
 
 type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void } & ContextControlProps;
 type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers";
@@ -130,20 +131,12 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     document.querySelector(".organization-live-admin .workspace-scroll-region")?.scrollTo(0, 0);
   };
   const departmentName = (id: string | null) => data?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
-  const isOrgAdmin = (member: { roleIds: string[]; roleNames?: string[] }) =>
-    Boolean(member.roleNames?.some((name) => {
-      const lower = name.toLowerCase();
-      return lower === "organization admin" || lower === "org admin" || lower.includes("admin");
-    }))
-    || Boolean(data?.roles.some((role) => role.code === "ORG_ADMIN" && member.roleIds.includes(role.id)));
-  const regularMembers = data?.members.filter((member) => !isOrgAdmin(member)) ?? [];
-  const selectedMember = regularMembers.find((member) => member.id === selectedMemberId);
-  const matchingMembers = regularMembers.filter((member) => {
-    const query = memberQuery.trim().toLowerCase();
-    return (!query || `${member.name} ${member.email}`.toLowerCase().includes(query))
-      && (memberStatus === "ALL" || (memberStatus === "INVITED" ? !member.departmentId || member.status === "INVITED" : memberStatus === "INACTIVE" ? member.status === "SUSPENDED" || member.status === "LEFT" : member.status === memberStatus))
-      && (memberDepartment === "ALL" || (member.departmentIds ?? [member.departmentId]).includes(memberDepartment));
-  }) ?? [];
+  const members = data?.members ?? [];
+  const isOrgAdmin = (member: OrganizationAdministration["members"][number]) => isOrganizationAdminMember(member, data?.roles ?? []);
+  const selectedMember = members.find((member) => member.id === selectedMemberId);
+  const matchingMembers = filterOrganizationMembers(members, data?.roles ?? [], {
+    query: memberQuery, status: memberStatus, department: memberDepartment,
+  });
   const canGrant = Boolean(reviewerId && (reviewScope === "ORGANIZATION" || reviewDepartmentId));
   const submitDepartment = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); const name = departmentNameInput.trim();
@@ -156,7 +149,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const handleDeleteDepartment = (department: OrganizationAdministration["departments"][number]) => {
     if (!data) return;
-    const inDepartment = regularMembers.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
+    const inDepartment = membersInDepartment(members, department.id);
     setError("");
     setConfirmation({
       title: `Delete department “${department.name}”?`,
@@ -206,7 +199,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     void perform(confirmation.run, `${confirmation.action} completed.`).then((succeeded) => { if (succeeded) setConfirmation(null); });
   };
   const tabCount: Record<AdminTab, number> = {
-    members: regularMembers.length, departments: data?.departments.length ?? 0,
+    members: members.length, departments: data?.departments.length ?? 0,
     audiences: memberAudienceGroups.length,
     invitations: data?.invitations.filter((item) => item.status === "PENDING" && new Date(item.expiresAt).getTime() > Date.now()).length ?? 0,
     reviewers: reviewerGrants.filter((grant) => grant.status === "ACTIVE").length,
@@ -255,10 +248,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           <div className="island-main">
             {matchingMembers.length ? <IslandTable label="Members" minWidth={700} columns="minmax(200px, 1.7fr) minmax(110px, .9fr) minmax(180px, 1.2fr) minmax(120px, .8fr) 84px"
               headers={["MEMBER", "DEPARTMENT", "ACCESS", "STATUS", <span className="sr-only">Actions</span>]}
-              footer={<span aria-live="polite">Showing {matchingMembers.length} of {regularMembers.length} members</span>}>
+              footer={<span aria-live="polite">Showing {matchingMembers.length} of {members.length} members</span>}>
               {matchingMembers.map((member) => {
                 const grants = reviewerGrants.filter((grant) => grant.reviewerMembershipId === member.id && grant.status === "ACTIVE");
-                const status = describeMemberStatus(member.status, member.departmentId);
+                const status = describeMemberStatus(member.status, member.departmentId, isOrgAdmin(member));
                 const otherDepartments = (member.departmentIds ?? []).filter((id) => id !== member.departmentId);
                 return <IslandRow key={member.id} selected={selectedMemberId === member.id}>
                   <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedMemberId(member.id)} aria-label={`Open details for ${member.name}`}>
@@ -270,7 +263,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                   <IslandCell className="island-row-actions"><button type="button" className="secondary-button" onClick={() => setSelectedMemberId(member.id)} aria-label={`Manage ${member.name}`}>Manage</button></IslandCell>
                 </IslandRow>;
               })}
-            </IslandTable> : <div className="island island-empty"><h3>{regularMembers.length ? "No matching members" : "No members yet"}</h3><p>{regularMembers.length ? "Try a different search or clear the filters." : "Invite a member to start building your organization."}</p><button type="button" className="secondary-button" onClick={() => { setMemberQuery(""); setMemberStatus("ALL"); setMemberDepartment("ALL"); }}>{regularMembers.length ? "Clear filters" : "Reset"}</button></div>}
+            </IslandTable> : <div className="island island-empty"><h3>{members.length ? "No matching members" : "No members yet"}</h3><p>{members.length ? "Try a different search or clear the filters." : "Invite a member to start building your organization."}</p><button type="button" className="secondary-button" onClick={() => { setMemberQuery(""); setMemberStatus("ALL"); setMemberDepartment("ALL"); }}>{members.length ? "Clear filters" : "Reset"}</button></div>}
           </div>
           {selectedMember && <MemberDetailIsland key={selectedMember.id} member={selectedMember} organizationName={organizationName} isAdmin={isOrgAdmin(selectedMember)}
             departmentName={departmentName} departments={data.departments} audienceGroups={memberAudienceGroups} groupsLoading={memberGroupsLoading}
@@ -291,12 +284,12 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             {data.departments.length ? <IslandTable label="Departments" minWidth={600} columns="minmax(220px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) 96px"
               headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS", <span className="sr-only">Actions</span>]}>
               {data.departments.map((department) => {
-                const inDepartment = regularMembers.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
+                const inDepartment = membersInDepartment(members, department.id);
                 return <IslandRow key={department.id} selected={selectedDepartmentId === department.id} className="is-clickable" onClick={() => setSelectedDepartmentId(department.id)}>
                   <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name" onClick={() => setSelectedDepartmentId(department.id)} aria-label={`Open ${department.name}`}>
                     <span><strong>{department.name}</strong><small>Everyone in {department.name}</small></span></button></IslandCell>
                   <IslandCell className="island-row-cell is-number">{inDepartment.length}</IslandCell>
-                  <IslandCell className="island-row-cell is-number">{regularMembers.filter((member) => member.departmentId === department.id).length}</IslandCell>
+                  <IslandCell className="island-row-cell is-number">{members.filter((member) => member.departmentId === department.id).length}</IslandCell>
                   <IslandCell className="island-row-cell is-number">{new Set(reviewerGrants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId)).size}</IslandCell>
                   <IslandCell className="island-row-actions">
                     <button type="button" className="secondary-button is-danger" disabled={busy} onClick={(event) => { event.stopPropagation(); handleDeleteDepartment(department); }} aria-label={`Delete ${department.name}`}>Delete</button>
@@ -305,7 +298,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               })}
             </IslandTable> : <div className="island island-empty"><h3>No departments yet</h3><p>Create one before inviting members. Every member needs a primary department.</p></div>}
           </div>
-          {selectedDepartment && <DepartmentDetailIsland key={selectedDepartment.id} department={selectedDepartment} members={regularMembers} grants={reviewerGrants}
+          {selectedDepartment && <DepartmentDetailIsland key={selectedDepartment.id} department={selectedDepartment} members={members} grants={reviewerGrants}
             busy={busy} deleteError={error}
             onClose={() => setSelectedDepartmentId(null)}
             onViewMembers={() => { setMemberDepartment(selectedDepartment.id); setSelectedDepartmentId(null); selectTab("members"); }}
