@@ -64,10 +64,12 @@ def main():
         if "__EXPECTED_DATABASE__" in template or "__MIGRATION_ROLE__" in template:
             raise ValueError("Migration ownership template contains an unresolved placeholder")
         sql(template)
+        docker("exec", container, "psql", "--no-psqlrc", "-U", "postgres", "-d", "postgres", "-v",
+               "ON_ERROR_STOP=1", "-c", f"ALTER ROLE {role} LOGIN")
 
         probe = sql("SET ROLE " + role + ";\n" + migration_role_probe_sql())
         if not valid_migration_role_probe(probe, database, role):
-            raise AssertionError("Migration role does not match the exact approved privilege scope")
+            raise AssertionError("Migration role probe did not match the approved scope: " + probe)
 
         sql("SET ROLE " + role + ";"
             "CREATE TABLE arden.created_by_migration(id integer PRIMARY KEY);"
