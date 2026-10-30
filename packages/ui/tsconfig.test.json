@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["react", "vitest/globals"]
+  },
+  "include": [
+    "tests/invitationFeedback.test.ts",
+    "tests/membershipAssignment.test.ts"
+  ]
+}
