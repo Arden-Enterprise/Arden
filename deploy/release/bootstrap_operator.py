@@ -21,7 +21,9 @@ from bootstrap import (build_app_template, deployment_key_line, verify_migration
                        candidate_template, plan_migration_checksum_baseline,
                        migration_baseline_statements, build_migration_target_config)
 from entrypoint import secure_file, secure_directory
-from management import CoolifyManager
+from management import (CoolifyManager, migration_role_name, migration_role_probe_sql,
+                        valid_migration_role_probe)
+from protocol import validate_migration_inventory, validate_stored_manifest
 from receiver import ReleaseEngine
 from state import read_json, write_json, release_lock
 
@@ -143,7 +145,7 @@ def private_migration_url(environment):
     parsed = urlsplit(value)
     database = unquote(parsed.path.lstrip("/"))
     if (parsed.scheme not in {"postgres", "postgresql"} or not parsed.hostname
-            or not parsed.username or not parsed.password
+            or unquote(parsed.username or "") != migration_role_name(environment) or not parsed.password
             or parsed.query or parsed.fragment or (parsed.port and parsed.port != 5432)
             or not re.fullmatch(r"[a-zA-Z0-9_]{1,63}", database)):
         raise ValueError("The protected migration connection is invalid")
@@ -205,6 +207,79 @@ def run_migration_sql(image, network, env_file, sql):
                data=sql, timeout=90)
 
 
+def active_manifest_for_baseline(state, environment):
+    """Select the protected current release, not the immutable bootstrap snapshot."""
+    if (environment not in {"staging", "production"} or type(state) is not dict
+            or "pending" not in state or state["pending"] is not None
+            or type(state.get("active")) is not dict):
+        raise ValueError("A release is in progress; no migration baseline was changed")
+    active = state["active"]
+    manifest = active.get("manifest")
+    try:
+        validate_stored_manifest(manifest)
+    except (TypeError, ValueError) as error:
+        raise ValueError("The protected active release manifest is invalid") from error
+    if (not re.fullmatch(r"[a-f0-9]{40}", active.get("deployment_commit", ""))
+            or type(active.get("eligible_for_promotion")) is not bool):
+        raise ValueError("The protected active deployment identity is invalid")
+    return manifest
+
+
+def migration_inventory_fingerprint(inventory):
+    normalized = [{"id": row["id"], "filename": row["filename"], "sha256": row["sha256"],
+                   "rollout": row["rollout"]} for row in inventory]
+    return hashlib.sha256(json.dumps(normalized, separators=(",", ":"), ensure_ascii=False)
+                          .encode("utf-8")).hexdigest()
+
+
+def active_migration_inventory(manifest, image_rows, ledger_rows, policy=None):
+    """Bind a baseline inventory to the exact active image, including legacy manifests."""
+    if (not isinstance(manifest, dict) or not isinstance(image_rows, list)
+            or not isinstance(ledger_rows, list)):
+        raise ValueError("Active migration inventory is malformed")
+    ledger_ids = []
+    for row in ledger_rows:
+        if (not isinstance(row, dict) or set(row) != {"migration_id", "checksum"}
+                or not isinstance(row.get("migration_id"), str)):
+            raise ValueError("Active migration ledger is malformed")
+        ledger_ids.append(row["migration_id"])
+    legacy_fingerprint = verify_migration_inventory(image_rows, ledger_ids)
+
+    inventory = manifest.get("migration_inventory")
+    if inventory is not None:
+        fingerprint = manifest.get("migrations")
+        try:
+            validate_migration_inventory(inventory, fingerprint)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Active release migration inventory is invalid") from error
+    else:
+        if manifest.get("migrations") != legacy_fingerprint:
+            raise ValueError("Legacy active release fingerprint differs from the exact image SQL files")
+        if (not isinstance(policy, dict) or set(policy) != {"schema", "migrations"}
+                or type(policy.get("schema")) is not int or policy.get("schema") != 1
+                or not isinstance(policy.get("migrations"), list)):
+            raise ValueError("The protected migration release policy is invalid")
+        policy_rows = policy["migrations"]
+        try:
+            validate_migration_inventory(policy_rows, migration_inventory_fingerprint(policy_rows))
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError("The protected migration release policy is malformed") from error
+        if len(image_rows) > len(policy_rows):
+            raise ValueError("The active image contains migrations absent from the protected policy")
+        inventory = policy_rows[:len(image_rows)]
+        fingerprint = migration_inventory_fingerprint(inventory)
+        try:
+            validate_migration_inventory(inventory, fingerprint)
+        except (TypeError, ValueError) as error:
+            raise ValueError("The active image inventory cannot be derived from the protected policy") from error
+
+    expected_image_rows = [{"name": row["filename"], "sha256": row["sha256"]}
+                           for row in inventory]
+    if expected_image_rows != image_rows:
+        raise ValueError("Active image SQL files do not match its migration inventory")
+    return inventory, fingerprint
+
+
 def baseline_migrations(environment):
     if environment not in {"staging", "production"}:
         raise ValueError("Select the exact migration baseline environment")
@@ -218,12 +293,11 @@ def baseline_migrations(environment):
     state_path = Path(config["state_dir"]) / "state.json"
     secure_file(state_path)
     state = read_json(state_path)
-    active = state.get("active", {})
-    manifest = active.get("manifest", {})
     manager = CoolifyManager(config)
-    if (state.get("pending") or manifest != manager.baseline()
-            or active.get("deployment_commit") != manifest.get("commit")):
-        raise ValueError("The active application release no longer matches its approved baseline")
+    manifest = active_manifest_for_baseline(state, environment)
+    # The bootstrap baseline is the original app-only cutover reference. It remains
+    # immutable; a checksum baseline is bound to the currently verified active pair.
+    manager.verify(manifest)
 
     api_name = f"arden-api-{config['service_uuid']}"
     api = inspect(api_name)
@@ -256,30 +330,30 @@ def baseline_migrations(environment):
             or migration_database != unquote(app_target.path.lstrip("/"))
             or migration_target.hostname in {"localhost", "127.0.0.1", "::1"}):
         raise ValueError("The protected migration connection does not target the active private database")
-    role_query = (
-        "SELECT current_database() || '|' || current_user || '|' || r.rolsuper::text || '|' || "
-        "r.rolbypassrls::text || '|' || r.rolcreatedb::text || '|' || r.rolcreaterole::text || '|' || "
-        "r.rolreplication::text || '|' || has_schema_privilege(current_user, 'arden', 'CREATE')::text || '|' || "
-        "(SELECT pg_get_userbyid(relowner) = current_user FROM pg_class "
-        "WHERE oid = 'public.arden_schema_migrations'::regclass)::text "
-        "FROM pg_roles r WHERE r.rolname = current_user"
-    )
+    role_query = migration_role_probe_sql()
     role_result = run_migration_sql(db_image, shared_networks[0], env_file, role_query).strip()
-    role = role_result.split("|")
-    if (len(role) != 9 or role[0] != migration_database or role[1] in {"", "postgres"}
-            or role[2:7] != ["false"] * 5 or role[7:] != ["true", "true"]):
+    migration_user = unquote(migration_target.username or "")
+    if not valid_migration_role_probe(role_result, migration_database, migration_user):
         raise ValueError("The server-side migration role is not the approved least-privilege owner")
 
     image_rows = migration_image_rows(api_name)
     ledger_rows = read_migration_ledger(database, app_url)
+    policy = None
+    if "migration_inventory" not in manifest:
+        policy_path = Path(__file__).with_name("release-policy.json")
+        secure_file(policy_path)
+        policy = read_json(policy_path)
+    migration_inventory, migration_fingerprint = active_migration_inventory(
+        manifest, image_rows, ledger_rows, policy)
     expected_source = {
         "commit": manifest.get("commit"),
         "tree": manifest.get("tree"),
         "api_image": manifest.get("images", {}).get("api", {}).get("id"),
-        "migrations": manifest.get("migrations"),
+        "migrations": migration_fingerprint,
     }
     plan = plan_migration_checksum_baseline(environment, environment, expected_source,
-                                             expected_source, image_rows, ledger_rows)
+                                             expected_source, image_rows, ledger_rows,
+                                             migration_inventory)
     ddl_path = Path(__file__).with_name("migration-ledger.sql")
     if ddl_path.is_symlink() or not ddl_path.is_file():
         raise ValueError("The versioned migration ledger DDL is unavailable")
@@ -295,9 +369,10 @@ def baseline_migrations(environment):
     if result_rows != plan["checksums"]:
         raise ValueError("Migration checksum baseline does not match the active image")
     receipt = {
-        "schema": 1,
+        "schema": 2,
         "environment": environment,
         "source": plan["source"],
+        "migration_inventory": plan["migration_inventory"],
         "checksums": plan["checksums"],
         "verified_at": int(time.time()),
     }
@@ -305,8 +380,10 @@ def baseline_migrations(environment):
     if receipt_path.exists() or receipt_path.is_symlink():
         secure_file(receipt_path)
         previous = read_json(receipt_path)
-        if (previous.get("schema") != 1 or previous.get("environment") != environment
-                or previous.get("source") != plan["source"] or previous.get("checksums") != plan["checksums"]):
+        if (previous.get("schema") != 2 or previous.get("environment") != environment
+                or previous.get("source") != plan["source"]
+                or previous.get("migration_inventory") != plan["migration_inventory"]
+                or previous.get("checksums") != plan["checksums"]):
             raise ValueError("An existing migration baseline receipt has a different source")
         receipt = previous
     else:

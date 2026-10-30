@@ -1,4 +1,6 @@
 import copy
+import hashlib
+import json
 from importlib.util import module_from_spec, spec_from_file_location
 import sys
 import tempfile
@@ -9,6 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import bootstrap
+from test_protocol import fixture
 
 
 def load_operator():
@@ -30,14 +33,41 @@ class MigrationBaselineTests(unittest.TestCase):
             {"migration_id": "0001_first", "checksum": None},
             {"migration_id": "0002_second", "checksum": None},
         ]
+        self.migration_inventory = [
+            {"id": "0001", "filename": "0001_first.sql", "sha256": "a" * 64, "rollout": "operator"},
+            {"id": "0002", "filename": "0002_second.sql", "sha256": "b" * 64, "rollout": "operator"},
+        ]
         self.source = {
             "commit": "1" * 40,
             "tree": "2" * 40,
             "api_image": "sha256:" + "3" * 64,
-            "migrations": bootstrap.verify_migration_inventory(
-                self.rows, [row["migration_id"] for row in self.applied]),
+            "migrations": hashlib.sha256(json.dumps(self.migration_inventory, separators=(",", ":"),
+                                                     ensure_ascii=False).encode()).hexdigest(),
         }
         self.prepare = getattr(bootstrap, "plan_migration_checksum_baseline", None)
+
+    def test_checksum_baseline_uses_verified_active_release_not_immutable_bootstrap_snapshot(self):
+        operator = load_operator()
+        manifest, _ = fixture()
+        state = {"pending": None, "active": {
+            "manifest": manifest,
+            "deployment_commit": "f" * 40,
+            "eligible_for_promotion": False,
+        }}
+
+        selected = operator.active_manifest_for_baseline(state, "production")
+        self.assertIs(selected, manifest)
+        self.assertNotEqual(state["active"]["deployment_commit"], manifest["commit"])
+
+        for change in [
+            lambda value: value.update(pending={"phase": "migrating"}),
+            lambda value: value["active"].update(deployment_commit="invalid"),
+            lambda value: value["active"].update(manifest={"commit": "0" * 40}),
+        ]:
+            invalid = copy.deepcopy(state)
+            change(invalid)
+            with self.subTest(state=invalid), self.assertRaises(ValueError):
+                operator.active_manifest_for_baseline(invalid, "production")
 
     def test_prepare_repairs_legacy_journal_and_existing_config_before_cutover(self):
         operator = load_operator()
@@ -90,14 +120,43 @@ class MigrationBaselineTests(unittest.TestCase):
             "active_source": copy.deepcopy(self.source),
             "image_rows": copy.deepcopy(self.rows),
             "ledger_rows": copy.deepcopy(self.applied),
+            "migration_inventory": copy.deepcopy(self.migration_inventory),
         }
         values.update(changes)
         return self.prepare(**values)
+
+    def test_legacy_active_manifest_derives_policy_inventory_from_exact_image_sql(self):
+        operator = load_operator()
+        future = {"id": "0005", "filename": "0005_later_change.sql",
+                  "sha256": "c" * 64, "rollout": "operator"}
+        policy = {"schema": 1, "migrations": self.migration_inventory + [future]}
+        legacy_fingerprint = bootstrap.verify_migration_inventory(
+            self.rows, [row["migration_id"] for row in self.applied])
+        manifest = {"commit": self.source["commit"], "tree": self.source["tree"],
+                    "migrations": legacy_fingerprint,
+                    "images": {"api": {"id": self.source["api_image"]}}}
+
+        inventory, fingerprint = operator.active_migration_inventory(
+            manifest, self.rows, self.applied, policy)
+
+        self.assertEqual(inventory, self.migration_inventory)
+        self.assertEqual(fingerprint, self.source["migrations"])
+        self.assertNotEqual(fingerprint, legacy_fingerprint)
+        for invalid_manifest, invalid_rows, invalid_policy in [
+            ({**manifest, "migrations": "0" * 64}, self.rows, policy),
+            (manifest, [{**self.rows[0], "sha256": "d" * 64}, self.rows[1]], policy),
+            (manifest, self.rows, {"schema": 1, "migrations": [future]}),
+        ]:
+            with self.subTest(manifest=invalid_manifest, rows=invalid_rows, policy=invalid_policy), \
+                    self.assertRaises(ValueError):
+                operator.active_migration_inventory(
+                    invalid_manifest, invalid_rows, self.applied, invalid_policy)
 
     def test_accepts_the_exact_active_image_and_plans_only_checksums_for_applied_rows(self):
         result = self.run_plan()
         self.assertEqual(result["environment"], "staging")
         self.assertEqual(result["source"], self.source)
+        self.assertEqual(result["migration_inventory"], self.migration_inventory)
         self.assertEqual(result["updates"], [
             {"migration_id": "0001_first", "checksum": "a" * 64},
             {"migration_id": "0002_second", "checksum": "b" * 64},
@@ -121,6 +180,12 @@ class MigrationBaselineTests(unittest.TestCase):
         changed["migrations"] = "f" * 64
         with self.assertRaises(ValueError):
             self.run_plan(active_source=changed)
+        changed_inventory = copy.deepcopy(self.migration_inventory)
+        changed_inventory[0]["sha256"] = "e" * 64
+        with self.assertRaises(ValueError):
+            self.run_plan(migration_inventory=changed_inventory)
+        with self.assertRaises(ValueError):
+            self.run_plan(image_rows=[{**self.rows[0], "sha256": "e" * 64}, self.rows[1]])
 
     def test_refuses_unknown_duplicate_or_checksum_conflicting_ledger_rows(self):
         unknown = copy.deepcopy(self.applied)
@@ -166,6 +231,34 @@ class MigrationBaselineTests(unittest.TestCase):
         arguments = execute.call_args.args[0]
         self.assertIn("--interactive", arguments)
         self.assertEqual(execute.call_args.kwargs, {"data": "SELECT 1;", "timeout": 90})
+
+    def test_migration_owner_transfer_temporarily_grants_and_revokes_required_create_privileges(self):
+        template = (Path(__file__).resolve().parents[1] / "migration-owner-template.sql").read_text(
+            encoding="utf-8")
+        grant = template.index("GRANT CREATE ON DATABASE")
+        transfer = template.index("ALTER SCHEMA arden OWNER TO")
+        database_revoke = template.rindex("REVOKE CREATE ON DATABASE")
+        public_grant = template.index("GRANT CREATE ON SCHEMA public")
+        ledger_transfer = template.index("ALTER TABLE public.arden_schema_migrations OWNER TO")
+        public_revoke = template.rindex("REVOKE CREATE ON SCHEMA public")
+        commit = template.rindex("COMMIT;")
+        self.assertLess(grant, transfer)
+        self.assertLess(transfer, database_revoke)
+        self.assertLess(database_revoke, commit)
+        self.assertLess(public_grant, ledger_transfer)
+        self.assertLess(ledger_transfer, public_revoke)
+        self.assertLess(public_revoke, commit)
+        self.assertIn("current_database()", template)
+        self.assertIn("__EXPECTED_DATABASE__", template)
+        self.assertIn("objects outside its approved scope", template)
+        self.assertIn("rolcanlogin", template)
+        self.assertIn("t.typrelid = 'public.arden_schema_migrations'::regclass", template)
+        self.assertIn("ledger_type.typarray", template)
+        self.assertIn("format('GRANT CREATE ON DATABASE %I TO %I'", template)
+        self.assertIn("format('REVOKE CREATE ON DATABASE %I FROM %I'", template)
+        self.assertIn("format('GRANT CREATE ON SCHEMA public TO %I'", template)
+        self.assertIn("format('REVOKE CREATE ON SCHEMA public FROM %I'", template)
+        self.assertIn("format('GRANT USAGE ON SCHEMA public TO %I'", template)
 
 if __name__ == "__main__":
     unittest.main()

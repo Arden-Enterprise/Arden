@@ -75,6 +75,95 @@ def validate_config(config, environment):
     return config
 
 
+def migration_role_name(environment):
+    if environment not in {"staging", "production"}:
+        raise ValueError("Select the exact migration environment")
+    return f"arden_release_migration_{environment}"
+
+
+def migration_role_probe_sql():
+    """Verify a schema-scoped owner without granting it authority over other services."""
+    return (
+        "SELECT current_database() || '|' || current_user || '|' || "
+        "r.rolsuper::text || '|' || r.rolbypassrls::text || '|' || "
+        "r.rolcreatedb::text || '|' || r.rolcreaterole::text || '|' || "
+        "r.rolreplication::text || '|' || r.rolinherit::text || '|' || r.rolcanlogin::text || '|' || "
+        "has_schema_privilege(current_user, 'arden', 'CREATE')::text || '|' || "
+        "(NOT has_database_privilege(current_user, current_database(), 'CREATE'))::text || '|' || "
+        "has_schema_privilege(current_user, 'public', 'USAGE')::text || '|' || "
+        "(NOT has_schema_privilege(current_user, 'public', 'CREATE'))::text || '|' || "
+        "(SELECT n.nspowner = r.oid FROM pg_namespace n WHERE n.nspname = 'arden')::text || '|' || "
+        "(SELECT c.relowner = r.oid FROM pg_class c "
+        "WHERE c.oid = 'public.arden_schema_migrations'::regclass)::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'arden' AND c.relkind IN ('r','p','v','m','S','f','c') "
+        "AND c.relowner <> r.oid AND NOT EXISTS (SELECT 1 FROM pg_depend d "
+        "WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = 'arden' AND p.proowner <> r.oid AND NOT EXISTS (SELECT 1 FROM pg_depend d "
+        "WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "WHERE n.nspname = 'arden' AND t.typtype IN ('c','d','e','r','m') AND t.typowner <> r.oid "
+        "AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_type'::regclass "
+        "AND d.objid = t.oid AND d.deptype = 'e')))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspowner = r.oid AND n.nspname <> 'arden'))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE c.relowner = r.oid AND n.nspname NOT IN ('arden','public','pg_catalog','information_schema') "
+        "AND c.relkind IN ('r','p','v','m','S','f','c')) AND NOT EXISTS "
+        "(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE c.relowner = r.oid AND n.nspname = 'public' AND c.relname <> 'arden_schema_migrations' "
+        "AND c.relkind IN ('r','p','v','m','S','f','c')) AND NOT EXISTS "
+        "(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE p.proowner = r.oid AND n.nspname NOT IN ('arden','pg_catalog','information_schema')) AND NOT EXISTS "
+        "(SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "WHERE t.typowner = r.oid AND n.nspname NOT IN ('arden','pg_catalog','information_schema') "
+        "AND NOT (n.nspname = 'public' AND (t.typrelid = 'public.arden_schema_migrations'::regclass "
+        "OR t.oid = (SELECT ledger_type.typarray FROM pg_type ledger_type "
+        "WHERE ledger_type.typrelid = 'public.arden_schema_migrations'::regclass)))))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid OR m.roleid = r.oid))::text "
+        "FROM pg_roles r WHERE r.rolname = current_user"
+    )
+
+
+def valid_migration_role_probe(value, database, username):
+    """Require a dedicated login owning Arden objects and only the public ledger."""
+    fields = value.split("|") if isinstance(value, str) else []
+    return (len(fields) == 21 and fields[:2] == [database, username]
+            and fields[2:] == ["false"] * 6 + ["true"] * 13)
+
+
+def valid_migration_baseline_receipt(receipt, environment):
+    if (type(receipt) is not dict or set(receipt) != {
+            "schema", "environment", "source", "migration_inventory", "checksums", "verified_at"}
+            or receipt.get("schema") != 2 or receipt.get("environment") != environment
+            or type(receipt.get("verified_at")) is not int
+            or not 0 < receipt["verified_at"] <= int(time.time()) + 60
+            or type(receipt.get("checksums")) is not list or not receipt["checksums"]):
+        return False
+    source = receipt.get("source")
+    if (type(source) is not dict or set(source) != {"commit", "tree", "api_image", "migrations"}
+            or type(source.get("commit")) is not str or not re.fullmatch(r"[a-f0-9]{40}", source["commit"])
+            or type(source.get("tree")) is not str or not re.fullmatch(r"[a-f0-9]{40}", source["tree"])
+            or type(source.get("api_image")) is not str or not IMAGE_ID.fullmatch(source["api_image"])
+            or type(source.get("migrations")) is not str or not DIGEST.fullmatch(source["migrations"])):
+        return False
+    try:
+        validate_migration_inventory(receipt["migration_inventory"], source["migrations"])
+    except (TypeError, ValueError):
+        return False
+    ids = []
+    for row in receipt["checksums"]:
+        if (type(row) is not dict or set(row) != {"migration_id", "checksum"}
+                or type(row.get("migration_id")) is not str
+                or not re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", row["migration_id"])
+                or type(row.get("checksum")) is not str or not DIGEST.fullmatch(row["checksum"])):
+            return False
+        ids.append(row["migration_id"])
+    expected_checksums = [{"migration_id": row["filename"][:-4], "checksum": row["sha256"]}
+                          for row in receipt["migration_inventory"]]
+    return ids == sorted(set(ids)) and receipt["checksums"] == expected_checksums
+
+
 class NoRedirect(http.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -333,7 +422,8 @@ class CoolifyManager:
             return None
         if (url.scheme not in {"postgres", "postgresql"} or not url.hostname
                 or url.hostname != settings["database_host"] or database != settings["database_name"]
-                or username in {"", settings["runtime_database_user"]} or not password
+                or username != migration_role_name(self.config["environment"])
+                or username == settings["runtime_database_user"] or not password
                 or url.query or url.fragment or (port is not None and port != 5432)):
             return None
         return {**settings, "migration_database_user": username}
@@ -348,25 +438,7 @@ class CoolifyManager:
             receipt = read_json(path)
         except (OSError, ValueError):
             return False
-        baseline = self.config["baseline"]
-        expected = {"commit": baseline.get("commit"), "tree": baseline.get("tree"),
-                    "api_image": baseline.get("images", {}).get("api", {}).get("id"),
-                    "migrations": baseline.get("migrations")}
-        if (type(receipt) is not dict or set(receipt) != {"schema", "environment", "source", "checksums", "verified_at"}
-                or receipt.get("schema") != 1 or receipt.get("environment") != self.config["environment"]
-                or receipt.get("source") != expected or type(receipt.get("verified_at")) is not int
-                or not 0 < receipt["verified_at"] <= int(time.time()) + 60
-                or type(receipt.get("checksums")) is not list or not receipt["checksums"]):
-            return False
-        ids = []
-        for row in receipt["checksums"]:
-            if (type(row) is not dict or set(row) != {"migration_id", "checksum"}
-                    or type(row.get("migration_id")) is not str
-                    or not re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", row["migration_id"])
-                    or type(row.get("checksum")) is not str or not DIGEST.fullmatch(row["checksum"])):
-                return False
-            ids.append(row["migration_id"])
-        return ids == sorted(set(ids))
+        return valid_migration_baseline_receipt(receipt, self.config["environment"])
 
     def _backup_ready(self, settings):
         path = Path(f"/etc/arden/releases/{self.config['environment']}.backup-readiness.json")
@@ -400,6 +472,7 @@ class CoolifyManager:
         user = self.command(["image", "inspect", "--format", "{{.Config.User}}", image]).strip()
         if actual != image or not user or user.lower() in {"root", "0", "0:0", "root:root"}:
             raise RuntimeError("Protected database client image is unavailable")
+        role_probe = migration_role_probe_sql()
         script = ("set -eu; "
                   "status=$(psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
                   "--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align "
@@ -411,13 +484,7 @@ class CoolifyManager:
                   "if [ \"$status\" = READY ]; then "
                   "role=$(psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
                   "--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align "
-                  "--command=\"SELECT current_database() || '|' || current_user || '|' || "
-                  "r.rolsuper::text || '|' || r.rolbypassrls::text || '|' || r.rolcreatedb::text || '|' || "
-                  "r.rolcreaterole::text || '|' || r.rolreplication::text || '|' || "
-                  "has_schema_privilege(current_user, 'arden', 'CREATE')::text || '|' || "
-                  "(SELECT pg_get_userbyid(relowner)=current_user FROM pg_class "
-                  "WHERE oid='public.arden_schema_migrations'::regclass)::text "
-                  "FROM pg_roles r WHERE r.rolname=current_user\"); "
+                  "--command=\"" + role_probe + "\"); "
                   "printf 'ROLE|%s\\n' \"$role\"; "
                   "psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
                   "--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align "
@@ -439,9 +506,8 @@ class CoolifyManager:
         if len(lines) < 2 or not lines[1].startswith("ROLE|"):
             raise RuntimeError("Protected migration role could not be verified")
         role = lines[1][len("ROLE|"):].split("|")
-        if (len(role) != 9 or role[0] != settings["database_name"]
-                or role[1] != settings["migration_database_user"] or role[1] in {"", "postgres"}
-                or role[2:7] != ["false"] * 5 or role[7:] != ["true", "true"]):
+        if not valid_migration_role_probe(
+                "|".join(role), settings["database_name"], settings["migration_database_user"]):
             raise RuntimeError("Protected migration role is not the approved least-privilege owner")
         rows = []
         for line in lines[2:]:

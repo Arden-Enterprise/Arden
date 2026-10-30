@@ -39,6 +39,16 @@ if (planner) {
       expect(result).toEqual({ status: "READY", pending: safe.slice(1) });
     });
 
+    it("accepts gaps in migration numbers without inventing a missing migration", () => {
+      const sparse = [rows[0]!, { ...rows[2]!, rollout: "expand" as const }];
+      expect(planner?.planMigrations(sparse, ledger("0001_first"))).toEqual({
+        status: "READY", pending: [sparse[1]!],
+      });
+      expect(planner?.planMigrations(sparse, ledger("0001_first", "0003_third"))).toEqual({
+        status: "NO_PENDING", pending: [],
+      });
+    });
+
     it("returns no pending work when all checksums match", () => {
       const result = planner?.planMigrations(rows, ledger("0001_first", "0002_second", "0003_third"));
       expect(result).toEqual({ status: "NO_PENDING", pending: [] });

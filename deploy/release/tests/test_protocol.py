@@ -190,6 +190,16 @@ class ProtocolTests(unittest.TestCase):
         expand_inventory[1]["rollout"] = "expand"
         self.assertEqual(compare(expand_inventory, []), {"status": "READY",
                                                          "migration_ids": ["0001_example", "0002_review"]})
+        gapped_inventory = [
+            {"id": "0001", "filename": "0001_example.sql", "sha256": "d" * 64, "rollout": "expand"},
+            {"id": "0003", "filename": "0003_review.sql", "sha256": "e" * 64, "rollout": "expand"},
+        ]
+        self.assertEqual(compare(gapped_inventory, [{"migration_id": "0001_example", "checksum": "d" * 64}]),
+                         {"status": "READY", "migration_ids": ["0003_review"]})
+        self.assertEqual(compare(gapped_inventory, [
+            {"migration_id": "0001_example", "checksum": "d" * 64},
+            {"migration_id": "0003_review", "checksum": "e" * 64},
+        ]), {"status": "NO_PENDING", "migration_ids": []})
         self.assertEqual(compare(inventory, None), {"status": "BASELINE_REQUIRED", "migration_ids": []})
         self.assertEqual(compare(inventory, [{"migration_id": "0001_example", "checksum": None}]),
                          {"status": "BASELINE_REQUIRED", "migration_ids": []})

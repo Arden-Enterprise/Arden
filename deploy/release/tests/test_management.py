@@ -11,9 +11,12 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from test_protocol import fixture
 try:
-    from management import validate_config, CoolifyManager
+    from management import (validate_config, CoolifyManager, migration_role_name,
+                            migration_role_probe_sql, valid_migration_role_probe,
+                            valid_migration_baseline_receipt)
 except ModuleNotFoundError:
-    validate_config = CoolifyManager = None
+    validate_config = CoolifyManager = migration_role_name = migration_role_probe_sql = None
+    valid_migration_role_probe = valid_migration_baseline_receipt = None
 
 
 def configuration():
@@ -66,6 +69,62 @@ class ManagementTests(unittest.TestCase):
             change(c)
             with self.subTest(change=change), self.assertRaises(ValueError):
                 validate_config(c, "staging")
+
+    def test_migration_login_is_a_noninheriting_owner_only_for_arden_and_its_ledger(self):
+        self.assertEqual(migration_role_name("staging"), "arden_release_migration_staging")
+        with self.assertRaises(ValueError):
+            migration_role_name("unknown")
+
+        good = ["postgres", "arden_release_migration_staging"] + ["false"] * 6 + ["true"] * 13
+        self.assertTrue(valid_migration_role_probe("|".join(good), "postgres", good[1]))
+        for index in range(2, len(good)):
+            invalid = good.copy()
+            invalid[index] = "false" if good[index] == "true" else "true"
+            with self.subTest(index=index):
+                self.assertFalse(valid_migration_role_probe("|".join(invalid), "postgres", good[1]))
+        self.assertFalse(valid_migration_role_probe("|".join(good), "arden", good[1]))
+
+        query = migration_role_probe_sql()
+        self.assertEqual(query.count("|| '|' ||") + 1, len(good))
+        self.assertIn("n.nspname = 'arden'", query)
+        self.assertIn("public.arden_schema_migrations", query)
+        self.assertIn("pg_auth_members", query)
+        self.assertIn("'public', 'CREATE'", query)
+        self.assertIn("'public', 'USAGE'", query)
+        self.assertIn("has_database_privilege(current_user, current_database(), 'CREATE')", query)
+        self.assertIn("t.typrelid = 'public.arden_schema_migrations'::regclass", query)
+        self.assertIn("ledger_type.typarray", query)
+        self.assertNotIn("REASSIGN OWNED", query)
+
+    def test_checksum_baseline_receipt_tracks_verified_active_image_not_bootstrap_snapshot(self):
+        active, _ = fixture()
+        config = configuration()
+        config["baseline"] = copy.deepcopy(active)
+        config["baseline"]["commit"] = "f" * 40
+        self.assertNotEqual(config["baseline"]["commit"], active["commit"])
+        checksums = [{"migration_id": row["filename"][:-4], "checksum": row["sha256"]}
+                     for row in active["migration_inventory"]]
+        receipt = {
+            "schema": 2,
+            "environment": "staging",
+            "source": {"commit": active["commit"], "tree": active["tree"],
+                       "api_image": active["images"]["api"]["id"],
+                       "migrations": active["migrations"]},
+            "migration_inventory": active["migration_inventory"],
+            "checksums": checksums,
+            "verified_at": 1,
+        }
+        self.assertTrue(valid_migration_baseline_receipt(receipt, "staging"))
+        for change in [
+            lambda value: value.update(environment="production"),
+            lambda value: value["source"].update(migrations="0" * 64),
+            lambda value: value["checksums"].pop(),
+            lambda value: value["migration_inventory"][0].update(rollout="unknown"),
+        ]:
+            invalid = copy.deepcopy(receipt)
+            change(invalid)
+            with self.subTest(receipt=invalid):
+                self.assertFalse(valid_migration_baseline_receipt(invalid, "staging"))
 
     def test_image_update_preserves_all_runtime_and_storage_configuration(self):
         self.config["template"]["services"]["arden-api"].update(
@@ -301,7 +360,7 @@ class ManagementTests(unittest.TestCase):
             return "t\n"
 
         manager = CoolifyManager(config, command=docker, migration_command=migration_command)
-        settings = {**config["migration"], "migration_database_user": "arden_migrator"}
+        settings = {**config["migration"], "migration_database_user": "arden_release_migration_staging"}
         with patch.object(manager, "_migration_settings", return_value=settings):
             manager.reconcile_migration_execution(manifest)
         self.assertLess(events.index("container-stop"), events.index("lock-probe"))
@@ -322,7 +381,7 @@ class ManagementTests(unittest.TestCase):
             return migration_result if "dist/db/migrate.js" in arguments else "t\n"
 
         manager = CoolifyManager(config, migration_command=migration_command)
-        settings = {**config["migration"], "migration_database_user": "arden_migrator"}
+        settings = {**config["migration"], "migration_database_user": "arden_release_migration_staging"}
         with patch.object(manager, "plan_migrations", side_effect=plan), \
              patch.object(manager, "_migration_settings", return_value=settings), \
              patch.object(manager, "ensure_images"), \
@@ -349,7 +408,7 @@ class ManagementTests(unittest.TestCase):
             self.fail("Unexpected Docker reconciliation command")
 
         manager = CoolifyManager(config, command=docker, migration_command=lambda *args, **kwargs: "f\n")
-        settings = {**config["migration"], "migration_database_user": "arden_migrator"}
+        settings = {**config["migration"], "migration_database_user": "arden_release_migration_staging"}
         with patch.object(manager, "_migration_settings", return_value=settings), \
                 self.assertRaisesRegex(RuntimeError, "advisory lock"):
             manager.reconcile_migration_execution(manifest)
@@ -414,7 +473,7 @@ class ManagementTests(unittest.TestCase):
     def test_read_only_ledger_probe_uses_pinned_database_image_and_fixed_private_query(self):
         config = migration_configuration()
         image = config["migration"]["database_image"]
-        settings = {**config["migration"], "migration_database_user": "arden_migrator"}
+        settings = {**config["migration"], "migration_database_user": "arden_release_migration_staging"}
         commands = []
 
         def docker(arguments):
@@ -426,7 +485,9 @@ class ManagementTests(unittest.TestCase):
 
         def migration_command(arguments, timeout):
             commands.append((arguments, timeout))
-            return ("READY\nROLE|postgres|arden_migrator|false|false|false|false|false|true|true\n"
+            role = "|".join(["postgres", "arden_release_migration_staging"]
+                            + ["false"] * 6 + ["true"] * 13)
+            return (f"READY\nROLE|{role}\n"
                     "0001_example|" + "d" * 64 + "\n")
 
         manager = CoolifyManager(config, command=docker, migration_command=migration_command)

@@ -99,6 +99,10 @@ jobs:
         run: python3 tools/verification/schema-recovery.py
         env:
           ARDEN_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Verify release migration role ownership and denial boundaries
+        run: python3 tools/verification/migration-owner.py
+        env:
+          ARDEN_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
       - name: Apply all migrations only to the disposable runner database
         run: pnpm --filter @arden/api db:migrate
         env:
