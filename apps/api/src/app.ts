@@ -280,6 +280,31 @@ export function buildApp(dependencies: AppDependencies) {
   app.get("/api/v1/auth/verify", handleVerify);
   app.get("/verify", handleVerify);
 
+  const consumedResetTokens = new Map<string, number>();
+  const RESET_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+  const isResetTokenConsumed = (tokenKey: string): boolean => {
+    const consumedAt = consumedResetTokens.get(tokenKey);
+    if (consumedAt === undefined) return false;
+    if (Date.now() - consumedAt > RESET_TOKEN_TTL_MS) {
+      consumedResetTokens.delete(tokenKey);
+      return false;
+    }
+    return true;
+  };
+
+  const markResetTokenConsumed = (tokenKey: string) => {
+    if (consumedResetTokens.size > 1000) {
+      const now = Date.now();
+      for (const [key, timestamp] of consumedResetTokens) {
+        if (now - timestamp > RESET_TOKEN_TTL_MS) {
+          consumedResetTokens.delete(key);
+        }
+      }
+    }
+    consumedResetTokens.set(tokenKey, Date.now());
+  };
+
   app.post<{ Body: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string } }>("/api/v1/auth/reset-password", {
     schema: {
       body: {
@@ -296,13 +321,22 @@ export function buildApp(dependencies: AppDependencies) {
   }, async (request, reply) => {
     if (!dependencies.auth || !dependencies.auth.updateUserPassword) return authUnavailable(reply, request);
     try {
+      const email = request.body.email ? request.body.email.trim().toLowerCase() : undefined;
+      const token = request.body.token ? request.body.token.trim() : undefined;
+      const accessToken = request.body.accessToken ? request.body.accessToken.trim() : undefined;
+      const tokenKey = email && token ? `otp:${email}:${token}` : (accessToken ? `access:${accessToken}` : null);
+
+      if (tokenKey && isResetTokenConsumed(tokenKey)) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
+      }
+
       let tokens: AuthSessionTokens | null = null;
-      if (request.body.accessToken && request.body.refreshToken) {
-        tokens = { accessToken: request.body.accessToken, refreshToken: request.body.refreshToken, expiresIn: 3600 };
-      } else if (request.body.email && request.body.token && dependencies.auth.verifyOtp) {
+      if (accessToken && request.body.refreshToken) {
+        tokens = { accessToken, refreshToken: request.body.refreshToken, expiresIn: 3600 };
+      } else if (email && token && dependencies.auth.verifyOtp) {
         const verified = await dependencies.auth.verifyOtp({
-          email: request.body.email.trim().toLowerCase(),
-          token: request.body.token.trim(),
+          email,
+          token,
           type: "recovery",
         });
         tokens = verified.tokens;
@@ -314,7 +348,19 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid reset token or session is required.", request.id));
       }
 
+      if (tokens.accessToken && isResetTokenConsumed(`access:${tokens.accessToken}`)) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
+      }
+
       await dependencies.auth.updateUserPassword(tokens, request.body.newPassword);
+
+      if (tokenKey) {
+        markResetTokenConsumed(tokenKey);
+      }
+      if (tokens.accessToken) {
+        markResetTokenConsumed(`access:${tokens.accessToken}`);
+      }
+
       setAuthCookies(reply, tokens, dependencies.secureCookies);
       return reply.code(200).send({ status: "password_updated" });
     } catch (error) {

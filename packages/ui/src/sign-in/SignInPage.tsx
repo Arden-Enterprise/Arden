@@ -86,6 +86,7 @@ export function SignInPage({
     setNotice(null);
     setPassword("");
     setConfirmPassword("");
+    setResetToken("");
   };
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
@@ -140,9 +141,10 @@ export function SignInPage({
     try {
       await requestPasswordReset(platform, email.trim());
       setNotice({
-        text: "If an account with this email exists, a password reset link has been sent to your email.",
+        text: "A verification code has been sent to your email. Enter the code and your new password below.",
         isSuccess: true,
       });
+      setMode("reset-password");
     } catch (cause) {
       setNotice({
         text: cause instanceof ApiError ? cause.message : "Password reset could not be requested. Try again later.",
@@ -181,6 +183,7 @@ export function SignInPage({
         text: "Password updated successfully. You can now sign in with your new password.",
         isSuccess: true,
       });
+      setResetToken("");
       setMode("sign-in");
     } catch (cause) {
       setNotice({
@@ -354,13 +357,6 @@ export function SignInPage({
                   >
                     ← Back to sign in
                   </button>
-                  <button
-                    type="button"
-                    className="auth-text-link"
-                    onClick={() => switchMode("reset-password")}
-                  >
-                    Have a reset code?
-                  </button>
                 </div>
               </form>
             </>
@@ -440,6 +436,13 @@ export function SignInPage({
                     onClick={() => switchMode("sign-in")}
                   >
                     ← Back to sign in
+                  </button>
+                  <button
+                    type="button"
+                    className="auth-text-link"
+                    onClick={() => switchMode("forgot-password")}
+                  >
+                    Request new code
                   </button>
                 </div>
               </form>

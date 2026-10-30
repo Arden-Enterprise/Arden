@@ -342,6 +342,14 @@
   width: min(100%, 390px);
 }
 
+.auth-entry-panel.is-wide {
+  width: min(100%, 420px);
+}
+
+.auth-card.auth-workspace-card {
+  width: min(100%, 420px);
+}
+
 .auth-card {
   position: relative;
   width: min(100%, 390px);
@@ -428,6 +436,96 @@
   color: var(--arden-text-muted);
   font-size: 11px;
   line-height: 1.45;
+}
+
+.workspace-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin: 18px 0 14px;
+}
+
+.workspace-choice-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid rgba(244, 243, 239, .14);
+  border-radius: 12px;
+  background: rgba(12, 14, 15, .45);
+  color: var(--arden-warm);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, transform 120ms ease;
+}
+
+.workspace-choice-card:hover:not(:disabled) {
+  border-color: rgba(231, 185, 112, .45);
+  background: rgba(231, 185, 112, .08);
+  transform: translateY(-1px);
+}
+
+.workspace-choice-card.is-selected {
+  border-color: var(--arden-accent);
+  background: rgba(231, 185, 112, .1);
+}
+
+.workspace-choice-card.is-unavailable {
+  opacity: .5;
+  cursor: not-allowed;
+  border-color: rgba(244, 243, 239, .08);
+}
+
+.workspace-choice-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-choice-header strong {
+  font-family: "Sora", sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--arden-warm);
+}
+
+.workspace-choice-desc {
+  font-size: 12px;
+  color: var(--arden-text-secondary);
+  line-height: 1.4;
+}
+
+.workspace-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-family: "Sora", sans-serif;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.workspace-status-badge.is-active {
+  border: 1px solid rgba(128, 197, 184, .35);
+  color: #a5dcd0;
+  background: rgba(128, 197, 184, .08);
+}
+
+.workspace-status-badge.is-warning {
+  border: 1px solid rgba(231, 185, 112, .35);
+  color: var(--arden-accent);
+  background: rgba(231, 185, 112, .08);
+}
+
+.workspace-status-badge.is-muted {
+  border: 1px solid rgba(244, 243, 239, .12);
+  color: var(--arden-text-muted);
+  background: rgba(244, 243, 239, .04);
 }
 
 @media (max-width: 920px) {
