@@ -88,8 +88,9 @@
 .review-document:focus-visible { outline-offset: -2px; }
 .review-document-text { max-width: 640px; font-size: 15px; line-height: 1.75; }
 .review-document.is-pdf { padding: 0; }
-.review-document.is-pdf .knowledge-pdf-document { height: 100%; }
-.review-document.is-pdf .knowledge-pdf-document object { height: 100%; min-height: 420px; border: 0; }
+/* Keep the toolbar content-sized; implicit auto rows stretch it into the PDF reading area. */
+.review-document.is-pdf .knowledge-pdf-document { height: 100%; grid-template-rows: auto minmax(0, 1fr); }
+.review-document.is-pdf .knowledge-pdf-document object { height: 100%; min-height: 0; border: 0; }
 .review-submission-empty { flex: 1; align-content: center; }
 
 /* 3. Decision island with a pinned footer */
