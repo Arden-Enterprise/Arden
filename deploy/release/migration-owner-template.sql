@@ -154,6 +154,10 @@ BEGIN
         SELECT p.oid::regprocedure AS signature
           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
          WHERE n.nspname = 'arden' AND p.proowner <> '__MIGRATION_ROLE__'::regrole
+           -- SECURITY DEFINER ownership is an execution capability, not DDL bookkeeping.
+           -- Preserve the reviewed internal executor; FORCE RLS would otherwise hide
+           -- the rows used by validation triggers and the indexing capability.
+           AND NOT p.prosecdef
            AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass
                             AND d.objid = p.oid AND d.deptype = 'e')
          ORDER BY p.oid::regprocedure::text

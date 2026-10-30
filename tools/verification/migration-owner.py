@@ -10,6 +10,36 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy" / "release
 from management import migration_role_name, migration_role_probe_sql, valid_migration_role_probe
 
 
+def verify_full_schema(container):
+    """Leave the disposable real schema transferred before the API/RLS suite runs."""
+    role = migration_role_name("staging")
+
+    def sql(text):
+        result = subprocess.run(
+            ["docker", "exec", "-i", container, "psql", "--no-psqlrc", "-U", "postgres",
+             "-d", "arden_test_ci", "-Atq", "-v", "ON_ERROR_STOP=1"],
+            input=text, text=True, capture_output=True, timeout=90)
+        if result.returncode:
+            raise RuntimeError("Full-schema ownership rehearsal failed")
+        return result.stdout.strip()
+
+    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "23":
+        raise ValueError("Review the full-schema ownership fixture when migrations change")
+    sql(f"CREATE ROLE {role} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS "
+        "NOCREATEDB NOCREATEROLE NOREPLICATION")
+    template = Path("deploy/release/migration-owner-template.sql").read_text(encoding="utf-8")
+    sql(template.replace("__EXPECTED_DATABASE__", "arden_test_ci").replace("__MIGRATION_ROLE__", role))
+    sql(f"ALTER ROLE {role} LOGIN")
+    if not valid_migration_role_probe(sql(f"SET ROLE {role};" + migration_role_probe_sql()),
+                                      "arden_test_ci", role):
+        raise AssertionError("Full-schema migration owner is not scoped correctly")
+    preserved = sql("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+                    "WHERE n.nspname='arden' AND p.prosecdef AND p.proowner='postgres'::regrole")
+    if preserved != "12":
+        raise AssertionError("Reviewed SECURITY DEFINER execution identities were not preserved")
+    print("PASS: full schema transferred; API suite will run with the real post-transfer ownership")
+
+
 def main():
     container = os.environ.get("ARDEN_TEST_POSTGRES_CONTAINER", "")
     if (os.environ.get("GITHUB_ACTIONS") != "true"
@@ -24,6 +54,12 @@ def main():
     values = docker("inspect", "--format", "{{json .Config.Env}}", container).stdout.decode()
     if '"POSTGRES_DB=arden_test_ci"' not in values:
         raise ValueError("Refusing a container without the disposable test marker")
+
+    if sys.argv[1:] == ["--full-schema"]:
+        verify_full_schema(container)
+        return
+    if sys.argv[1:]:
+        raise ValueError("Unknown ownership verification mode")
 
     database = "arden_test_owner_" + uuid.uuid4().hex
     role = migration_role_name("staging")

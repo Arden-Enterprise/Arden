@@ -34,6 +34,30 @@ Manual local Mainflow 1 testing may use the dedicated local adapter in `apps/api
 
 The organization, session-context, and owner-private note contract for the first backend slice is accepted and partially implemented. SQL authorization has a gated real-PostgreSQL test that has not run in this environment; API request tests use a synthetic Supabase adapter rather than a live project. See [first-slice permission and API contracts](first-slice-permission-and-api-contracts.md), [decision 0002](../decisions/0002-first-slice-private-notes-contract.md), and the active [Supabase decision 0001](../decisions/0001-supabase-and-hybrid-development.md).
 
+### Database ownership is an execution contract
+
+The release migration login owns Arden DDL and its migration ledger; it is not the
+internal executor of reviewed `SECURITY DEFINER` functions. Preserve those functions'
+existing trusted `postgres` execution identity. Moving them to a non-bypass owner
+while their input tables use FORCE RLS and runtime-only policies silently changes
+validation and worker behavior. Never bulk-transfer routines as ordinary ownership
+housekeeping. The migration-role probe must reject that broken ownership split.
+
+Do not change FORCE RLS, actor/organization transaction settings, internal function
+owners, reviewer/audience gates or indexing execution privileges independently.
+Review them together and run the real runtime/worker workflow suite after the full
+schema ownership handoff. A synthetic ownership probe, readiness endpoint or green
+build does not prove submit/review/indexing still works. Changes to trusted function
+bodies/owners require an explicitly reviewed operator operation, not an automatic
+`expand` migration under the restricted DDL login.
+
+The operator-only `deploy/release/security-definer-owner-repair.sql` restores the
+known pre-transfer function owners after an exact-target backup and rehearsal. It
+does not modify data, policies, EXECUTE grants, actor roles or function bodies.
+Never repair this regression by granting BYPASSRLS to API users or letting Org Admin
+read another user's private drafts/notes. These restrictions apply to every
+contributor and agent, not to one named tool.
+
 ## 3. Knowledge ownership and governance
 
 - Personal originals remain private. Sharing/contributing is explicit, with a preview of copied text/files, audience, and authority. A separate copy is not an implicit live mirror.
