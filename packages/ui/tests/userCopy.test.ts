@@ -54,6 +54,7 @@ describe("concise user-facing copy", () => {
       active: true, createdDraftId: "draft", contextOpen: false, onToggleContext: vi.fn(),
     }));
     await screen.findByRole("heading", { name: "Before you submit" });
+    expect(screen.getByText("Reviewer: Engineering reviewer")).toBeTruthy();
     await waitFor(() => expect(screen.getAllByText(label)).toHaveLength(1));
     expect(screen.queryByText("private-hash")).toBeNull();
     expect(screen.queryByText(/atomic activation|governance metadata|active reviewer grant/i)).toBeNull();
@@ -66,6 +67,36 @@ describe("concise user-facing copy", () => {
     expect(screen.queryByText(/indexed|permission-aware/i)).toBeNull();
     expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Attachments aren’t available yet" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it.each(["DEPARTMENT", "ORGANIZATION"] as const)("shows the %s boundary before approving group readers", async (scope) => {
+    mockKnowledge();
+    vi.mocked(api.loadKnowledgeOptions).mockResolvedValue({
+      departments: [{ id: "dept", name: "Engineering" }], primaryDepartmentId: "dept",
+      audiences: [{ id: "readers", name: "Project group", kind: "GROUP", departmentId: null }],
+    });
+    vi.mocked(api.listAssignedKnowledgeReviews).mockResolvedValue([{
+      submissionId: "submission", snapshotId: "version", title: "Group guide", departmentId: "dept",
+      classification: "INTERNAL", submittedAt: "2026-10-01T00:00:00Z", approvalBlocked: false,
+    }]);
+    vi.spyOn(api, "loadKnowledgeReview").mockResolvedValue({
+      id: "submission", draftId: "draft", snapshotVersionId: "version", title: "Group guide",
+      classification: "INTERNAL", responsibleDepartmentId: "dept", targetScopeType: scope,
+      targetDepartmentId: scope === "DEPARTMENT" ? "dept" : null, audienceIds: ["readers"],
+      contentHash: "private-hash", status: "PENDING_REVIEW", publicationState: "NONE",
+      submittedAt: "2026-10-01T00:00:00Z", publishedVersionId: null, decisionComment: null,
+      body: "Document content", mimeType: "text/plain", submittedByMembershipId: "author", teamTag: null, projectTag: null,
+    });
+    render(createElement(ServerKnowledgeFeaturePage, {
+      platform: "web", organizationId: "org", organizationName: "Example", view: "review-queue",
+      active: true, contextOpen: false, onToggleContext: vi.fn(),
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: /Group guide/ }));
+    await screen.findByRole("button", { name: "Approve", exact: true });
+    const boundary = screen.getByText("Within").parentElement;
+    expect(boundary?.textContent).toBe(`Within${scope === "DEPARTMENT" ? "Engineering" : "Across departments"}`);
+    expect(screen.getByText("Project group")).toBeTruthy();
+    expect(screen.queryByText("private-hash")).toBeNull();
   });
 
   it("keeps the private-copy warning and reuses retry identity without showing request keys", async () => {

@@ -420,6 +420,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <dl className="review-frozen">
                 <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
                 <div><dt>Readers</dt><dd title={audienceNames(review.audienceIds)}>{audienceNames(review.audienceIds)}</dd></div>
+                <div><dt>Within</dt><dd>{review.targetScopeType === "DEPARTMENT" ? departmentName(review.targetDepartmentId ?? review.responsibleDepartmentId) : "Across departments"}</dd></div>
                 <div><dt>Team / project</dt><dd title={`${review.teamTag || "All teams"} · ${review.projectTag || "All projects"}`}>{review.teamTag || "All teams"} · {review.projectTag || "All projects"}</dd></div>
               </dl>
             </section>
@@ -531,6 +532,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                 <input type="checkbox" checked={editor.targetScopeType === "DEPARTMENT"} onChange={(event) => setEditor({ ...editor, targetScopeType: event.target.checked ? "DEPARTMENT" : "ORGANIZATION" })} />
                 <span>Only group members who are also in {departmentName(ownerDepartmentId)}</span></label>}
             </fieldset>
+            <p className="island-note">Reviewer: {editor.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
+              ? "Organization reviewer" : ownerDepartmentId ? `${departmentName(ownerDepartmentId)} reviewer` : "Department reviewer"}</p>
             {editor.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
               && options?.organizationReviewerAvailable === false
               && <p className="island-note is-warning" role="note"><Icon name="warning" size={14} />

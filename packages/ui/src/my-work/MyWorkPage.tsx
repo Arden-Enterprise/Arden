@@ -34,7 +34,7 @@ export function MyWorkPage({ onOpenPrivateNotes, onOpenKnowledge, onOpenReview, 
       search={<SearchField value={query} onChange={setQuery} placeholder="Search tasks…" />} searchActive={Boolean(query)} />
     <WorkspacePageContent className="my-work-content" header={<WorkspacePageHeader className="my-work-title-row"
       eyebrow="WORK" title="My Work" titleId="my-work-title"
-      description={`${actionCount} tasks · ${reviewCount} ${reviewCount === 1 ? "review" : "reviews"}`}
+      description={`Demo · ${actionCount} tasks · ${reviewCount} ${reviewCount === 1 ? "review" : "reviews"}`}
       action={<button type="button" className="primary-button" onClick={onOpenKnowledge} disabled={!onOpenKnowledge}><Icon name="plus" size={14} />New draft</button>}
     />}>
       <div className="my-work-dashboard">

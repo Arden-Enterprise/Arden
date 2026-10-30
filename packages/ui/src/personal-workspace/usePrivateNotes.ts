@@ -113,7 +113,7 @@ export function usePrivateNotes(initialNotes: PrivateNote[]) {
       setSaveMessage("Saved");
     } catch (cause) {
       if (cause instanceof ApiError && cause.code === "VERSION_CONFLICT") {
-        setError("This note has changed. Reopen it before saving.");
+        setError("This note has changed. Copy your edits, then refresh the page.");
       } else {
         setError(cause instanceof Error ? cause.message : "The note was not saved.");
       }

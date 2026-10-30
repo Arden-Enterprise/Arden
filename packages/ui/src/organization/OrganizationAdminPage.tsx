@@ -359,6 +359,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               <button type="button" aria-pressed={reviewScope === "DEPARTMENT"} disabled={busy} onClick={() => setReviewScope("DEPARTMENT")}>One department</button>
               <button type="button" aria-pressed={reviewScope === "ORGANIZATION"} disabled={busy} onClick={() => setReviewScope("ORGANIZATION")}>Whole organization</button>
             </div></div>
+            {reviewScope === "ORGANIZATION" && <p className="island-meta">Company-wide documents only. Assign department reviews separately.</p>}
             {reviewScope === "DEPARTMENT" && <label className="organization-field"><span>Department</span><select id="admin-review-department" disabled={busy} value={reviewDepartmentId} aria-invalid={grantSubmitted && !reviewDepartmentId} aria-describedby="admin-review-department-help" onChange={(event) => setReviewDepartmentId(event.target.value)}><option value="">Choose department</option>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small id="admin-review-department-help" className={grantSubmitted && !reviewDepartmentId ? "field-error" : ""}>{grantSubmitted && !reviewDepartmentId ? "Choose a department." : ""}</small></label>}
             <div className="admin-grant-tags">
               <label className="organization-field"><span>Team tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={teamTag} onChange={(event) => setTeamTag(event.target.value)} /></label>

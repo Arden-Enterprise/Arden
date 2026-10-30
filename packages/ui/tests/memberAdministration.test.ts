@@ -53,7 +53,7 @@ describe("organization member administration", () => {
 
   it("keeps the assignment and access consequences of department deletion", () => {
     expect(departmentDeletionSummary(2)).toBe(
-      "2 members will be unassigned. Department access will be removed.",
+      "2 members will be unassigned and lose department access. Non-admins must be reassigned to regain workspace access.",
     );
   });
 });

@@ -131,6 +131,8 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
         setError(`Invitation unavailable for ${email}.`);
       } else if (cause instanceof ApiError && cause.status >= 500) {
         setError("Couldn’t accept invitation.");
+      } else if (cause instanceof ApiError && cause.status === 0) {
+        setError("Couldn’t confirm invitation acceptance.");
       } else {
         setError("Invitation unavailable for this account.");
       }
@@ -174,7 +176,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       } else if (cause instanceof ApiError && cause.status >= 500) {
         setError("Couldn’t accept invitation.");
       } else if (cause instanceof ApiError && cause.status === 0) {
-        setError(cause.message || "Connection unavailable.");
+        setError("Couldn’t confirm invitation acceptance.");
       } else {
         setError("Invitation unavailable for this account.");
       }

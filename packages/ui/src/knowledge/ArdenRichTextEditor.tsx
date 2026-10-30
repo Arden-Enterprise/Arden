@@ -147,7 +147,7 @@ export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLe
     <BlockNoteView editor={editor} theme="dark" editable={!disabled} onChange={handleChange}
       onSelectionChange={() => setSelectionRevision((value) => value + 1)} className="arden-blocknote-editor"
       {...disabledBlockNoteUi} />
-    {limitReached && <p className="arden-document-limit" role="status">Document too long.</p>}
+    {limitReached && <p className="arden-document-limit" role="status">Edit not applied. Document limit: {maxLength.toLocaleString()} characters, including formatting.</p>}
   </div>;
 }
 
