@@ -12,6 +12,7 @@ type PrivateNoteEditorProps = {
   toolbar: ReactNode;
   onTitleChange: (value: string) => void;
   onBodyChange: (value: string) => void;
+  entering?: boolean;
 };
 
 export function PrivateNoteEditor({
@@ -23,11 +24,12 @@ export function PrivateNoteEditor({
   toolbar,
   onTitleChange,
   onBodyChange,
+  entering = false,
 }: PrivateNoteEditorProps) {
   const titleRef = useAutosizeTextarea(draftTitle, 40);
 
   return (
-    <section className="note-editor-card island" aria-label="Private note editor">
+    <section className={`note-editor-card island${entering ? " is-entering" : ""}`} aria-label="Private note editor">
       {selectedNote ? (
         <>
           <div className="private-editor-toolbar" role="toolbar" aria-label="Note actions">{toolbar}</div>

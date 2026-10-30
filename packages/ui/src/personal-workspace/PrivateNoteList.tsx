@@ -10,6 +10,7 @@ type PrivateNoteListProps = {
   search: ReactNode;
   onCreate: () => void;
   onSelect: (note: PrivateNote) => void;
+  enteringId?: string | null;
   onClearSearch: () => void;
   searching: boolean;
 };
@@ -21,6 +22,7 @@ export function PrivateNoteList({
   search,
   onCreate,
   onSelect,
+  enteringId,
   onClearSearch,
   searching,
 }: PrivateNoteListProps) {
@@ -39,7 +41,7 @@ export function PrivateNoteList({
             <button
               type="button"
               key={note.id}
-              className={note.id === selectedId ? "is-selected" : ""}
+              className={[note.id === selectedId ? "is-selected" : "", note.id === enteringId ? "is-entering" : ""].filter(Boolean).join(" ") || undefined}
               aria-current={note.id === selectedId ? "true" : undefined}
               onClick={() => onSelect(note)}
             >

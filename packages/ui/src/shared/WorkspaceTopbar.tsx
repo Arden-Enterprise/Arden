@@ -6,6 +6,8 @@ import { ToastContent } from "./ActionToast";
 
 export type ContextControlProps = { contextOpen: boolean; onToggleContext: () => void };
 
+const ardenMark = new URL("../../../../brand/arden-logo-final/png/arden-logo-white.png", import.meta.url).href;
+
 type IslandMode = "idle" | "search" | "toast" | "confirm" | "panel";
 
 function initials(label: string): string {
@@ -121,8 +123,8 @@ export function WorkspaceTopbar({ breadcrumb, previewLabel, contextOpen, onToggl
       </div>
       {!reader && <div className="topbar-actions">
         {previewLabel && <span className="preview-state">{previewLabel}</span>}
-        <button type="button" className="context-toggle" onClick={onToggleContext} aria-expanded={contextOpen} aria-controls="arden-context-panel">
-          <Icon name="knowledge" size={16} /><span>Context</span>
+        <button type="button" className="context-toggle" onClick={onToggleContext} aria-expanded={contextOpen} aria-controls="arden-context-panel" aria-label="Context" title="Context">
+          <img className="context-toggle-mark" src={ardenMark} alt="" />
         </button>
       </div>}
     </header>

@@ -1,7 +1,7 @@
 import type { BlockNoteEditor } from "@blocknote/core";
 import { BlockNoteView } from "@blocknote/ariakit";
 import { useCreateBlockNote } from "@blocknote/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { parseArdenDocument, serializeArdenDocument } from "./ardenDocumentModel";
 import { ardenDocumentSchema } from "./ardenDocumentSchema";
 
@@ -48,17 +48,59 @@ function toggleBlock(editor: ArdenEditor, type: BlockKind) {
   editor.focus();
 }
 
-function ToolbarButton({ label, active, disabled, children, onActivate }: {
+function ToolbarButton({ label, active, disabled, className, children, onActivate }: {
   label: string;
   active: boolean;
   disabled: boolean;
+  className?: string;
   children: string;
   onActivate: () => void;
 }) {
   return <button type="button" aria-label={label} title={label} aria-pressed={active} disabled={disabled}
-    className={active ? "is-active" : undefined} onMouseDown={(event) => event.preventDefault()} onClick={onActivate}>
+    className={[className, active ? "is-active" : ""].filter(Boolean).join(" ") || undefined}
+    onMouseDown={(event) => event.preventDefault()} onClick={onActivate}>
     {children}
   </button>;
+}
+
+const textSizes: { value: TextSize; label: string }[] = [
+  { value: "paragraph", label: "Normal" },
+  { value: "heading-3", label: "Large" },
+  { value: "heading-2", label: "Heading" },
+];
+
+function TextSizeMenu({ value, disabled, onChange }: { value: TextSize; disabled: boolean; onChange: (size: TextSize) => void }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const current = textSizes.find((option) => option.value === value) ?? textSizes[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return <div className={`arden-text-size${open ? " is-open" : ""}`} ref={rootRef}>
+    <button type="button" className="arden-text-size-trigger" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId}
+      disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen((currentOpen) => !currentOpen)}>
+      <span>{current.label}</span>
+    </button>
+    {open && <div className="arden-text-size-menu" id={menuId} role="listbox" aria-label="Text size">
+      {textSizes.map((option) => <button type="button" key={option.value} role="option" aria-selected={option.value === value}
+        className={option.value === value ? "is-selected" : undefined}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => { onChange(option.value); setOpen(false); }}>{option.label}</button>)}
+    </div>}
+  </div>;
 }
 
 function ArdenFormattingToolbar({ editor, disabled, revision }: { editor: ArdenEditor; disabled: boolean; revision: number }) {
@@ -71,12 +113,7 @@ function ArdenFormattingToolbar({ editor, disabled, revision }: { editor: ArdenE
   };
 
   return <div className="arden-format-toolbar" role="toolbar" aria-label="Document formatting">
-    <label><span className="sr-only">Text size</span><select aria-label="Text size" value={currentTextSize(editor)} disabled={disabled}
-      onChange={(event) => setTextSize(editor, event.target.value as TextSize)}>
-      <option value="paragraph">Normal</option>
-      <option value="heading-3">Large</option>
-      <option value="heading-2">Heading</option>
-    </select></label>
+    <TextSizeMenu value={currentTextSize(editor)} disabled={disabled} onChange={(size) => setTextSize(editor, size)} />
     <span className="arden-format-divider" aria-hidden="true" />
     <ToolbarButton label="Bold" active={styles.bold === true} disabled={disabled} onActivate={() => toggleStyle("bold")}>B</ToolbarButton>
     <ToolbarButton label="Italic" active={styles.italic === true} disabled={disabled} onActivate={() => toggleStyle("italic")}>I</ToolbarButton>
@@ -84,9 +121,11 @@ function ArdenFormattingToolbar({ editor, disabled, revision }: { editor: ArdenE
     <ToolbarButton label="Strikethrough" active={styles.strike === true} disabled={disabled} onActivate={() => toggleStyle("strike")}>S</ToolbarButton>
     <ToolbarButton label="Inline code" active={styles.code === true} disabled={disabled} onActivate={() => toggleStyle("code")}>&lt;/&gt;</ToolbarButton>
     <span className="arden-format-divider" aria-hidden="true" />
-    <ToolbarButton label="Bulleted list" active={block.type === "bulletListItem"} disabled={disabled} onActivate={() => toggleBlock(editor, "bulletListItem")}>• List</ToolbarButton>
-    <ToolbarButton label="Numbered list" active={block.type === "numberedListItem"} disabled={disabled} onActivate={() => toggleBlock(editor, "numberedListItem")}>1. List</ToolbarButton>
-    <ToolbarButton label="Quote" active={block.type === "quote"} disabled={disabled} onActivate={() => toggleBlock(editor, "quote")}>Quote</ToolbarButton>
+    <div className="arden-format-group" role="group" aria-label="Lists and quote">
+      <ToolbarButton className="arden-format-block" label="Bulleted list" active={block.type === "bulletListItem"} disabled={disabled} onActivate={() => toggleBlock(editor, "bulletListItem")}>•</ToolbarButton>
+      <ToolbarButton className="arden-format-block" label="Numbered list" active={block.type === "numberedListItem"} disabled={disabled} onActivate={() => toggleBlock(editor, "numberedListItem")}>1.</ToolbarButton>
+      <ToolbarButton className="arden-format-block" label="Quote" active={block.type === "quote"} disabled={disabled} onActivate={() => toggleBlock(editor, "quote")}>“</ToolbarButton>
+    </div>
   </div>;
 }
 

@@ -397,7 +397,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                 {item.approvalBlocked && <span className="review-blocked-dot" title="Approval blocked: an audience can no longer be enforced"><span className="sr-only">Approval blocked</span></span>}
               </span>
             </button>;
-          })}</div> : <div className="island-empty review-queue-empty"><h3>Nothing to review</h3></div>}
+          })}</div> : <div className="island-empty review-queue-empty"><h3>Nothing to review</h3><p>You’re caught up.</p></div>}
         </section>
         <article className="island review-pane review-submission" aria-label="Submission">
           {review ? <>
@@ -419,6 +419,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             </div>
           </> : <div className="island-empty review-submission-empty"><span className="island-tile" aria-hidden="true"><Icon name="review" size={16} /></span>
             <h3>{reviews.length ? "Select a submission" : "Nothing left to review"}</h3>
+            <p>{reviews.length ? "Choose one from the queue." : "Submissions waiting on you will show up here."}</p>
             </div>}
         </article>
         {review && <aside className="island review-pane review-decision" aria-labelledby="review-decision-title">

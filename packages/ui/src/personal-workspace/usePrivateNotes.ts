@@ -79,10 +79,12 @@ export function usePrivateNotes(initialNotes: PrivateNote[]) {
   const createNote = () => {
     setError("");
     setSaveMessage("");
-    dispatch({ type: "create", note: {
+    const note = {
       id: serverBacked ? `pending-${crypto.randomUUID()}` : `preview-${crypto.randomUUID()}`,
-      title: "Untitled private note", body: "", updatedLabel: serverBacked ? "Not saved" : "Not saved",
-    } });
+      title: "Untitled private note", body: "", updatedLabel: "Not saved",
+    };
+    dispatch({ type: "create", note });
+    return note.id;
   };
 
   const save = async (platform?: Platform, organizationId?: string) => {
