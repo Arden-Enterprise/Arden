@@ -89,6 +89,10 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
     setError(""); setMessage("");
   };
   const guard = (action: () => void) => { if (dirty) setDiscardAction(() => action); else action(); };
+  const closeDetails = () => guard(() => {
+    setCreating(false); setSelectedId(null); setManagedId(null); setDraft(emptyWrite());
+    setNameSubmitted(false); setError(""); setMessage(""); setMemberId("");
+  });
   const startNew = () => {
     setSelectedId(null); setManagedId(null); setCreating(true); setDraft(emptyWrite()); setSection("details");
     setError(""); setMessage("");
@@ -192,7 +196,8 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
     </aside>}
     {!loading && !managed && (selected || creating) && <aside className="island island-panel island-side" aria-label="Reader group details">
       <div className="island-side-header"><div><span className="meta-label">READER GROUP</span><h2>{draft.name || "New reader group"}</h2>
-        <p>{creating ? "Not saved yet" : `${activeMembers.length} readers · ${selected?.status === "INACTIVE" ? "Inactive" : "Active"}`}</p></div></div>
+        <p>{creating ? "Not saved yet" : `${activeMembers.length} readers · ${selected?.status === "INACTIVE" ? "Inactive" : "Active"}`}</p></div>
+        <button type="button" className="island-icon-button" disabled={busy} aria-label="Close reader group details" onClick={closeDetails}><Icon name="close" size={16} /></button></div>
       {message && <p className="admin-feedback" role="status">{message}</p>}
       <div className="island-seg" role="group" aria-label="Reader group sections">{(["members", "details"] as const).map(tab =>
         <button key={tab} type="button" disabled={creating && tab === "members"} aria-pressed={section === tab}
@@ -222,7 +227,7 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
         {creating && <p role="status" className="island-meta">Save the reader group before adding members.</p>}
       </>}
       {dirty && <footer className="audience-save"><strong>Unsaved changes</strong>
-        <button type="button" className="secondary-button" disabled={busy} onClick={() => { setCreating(false); setDraft(selected ? groupWrite(selected) : emptyWrite()); setNameSubmitted(false); }}>Reset</button>
+        <button type="button" className="secondary-button" disabled={busy} onClick={closeDetails}>Cancel</button>
         <button type="button" className="primary-button" disabled={busy} onClick={() => { setNameSubmitted(true); if (!draft.name.trim()) { setSection("details"); return; } void mutate(() => saveAudienceGroup(platform, organizationId, selected, draft), "Reader group saved."); }}>{busy ? "Saving…" : "Save group"}</button>
       </footer>}
     </aside>}

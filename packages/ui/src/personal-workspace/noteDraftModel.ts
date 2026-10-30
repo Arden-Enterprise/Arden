@@ -13,6 +13,7 @@ export type NotePreviewAction =
   | { type: "create"; note: PrivateNote }
   | { type: "edit"; field: keyof NoteDraft; value: string }
   | { type: "save" }
+  | { type: "discard" }
   | { type: "reset"; notes: PrivateNote[] };
 
 export function createNotePreview(notes: PrivateNote[]): NotePreviewState {
@@ -39,6 +40,13 @@ export function notePreviewReducer(state: NotePreviewState, action: NotePreviewA
   }
   const selectedNote = state.notes.find((note) => note.id === state.selectedId);
   if (!selectedNote) return state;
+  if (action.type === "discard") {
+    const drafts = { ...state.drafts };
+    delete drafts[selectedNote.id];
+    const notes = selectedNote.updatedLabel === "Not saved"
+      ? state.notes.filter((note) => note.id !== selectedNote.id) : state.notes;
+    return { ...state, notes, drafts, savedMessage: "", selectedId: notes.some((note) => note.id === selectedNote.id) ? selectedNote.id : notes[0]?.id ?? "" };
+  }
   if (action.type === "edit") {
     return {
       ...state,

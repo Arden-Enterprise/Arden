@@ -21,6 +21,7 @@ import { libraryDateLabel, libraryTitleParts } from "./libraryDisplay";
 import { ReaderPicker } from "./ReaderPicker";
 import { addReader, onlyGroupReaders, ownerDepartment, readerChoices, removeReader, scopeForReaders } from "./readerSelection";
 import { ActionToast } from "../shared/ActionToast";
+import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
 import { KnowledgeDocumentDetail, readerDocumentStatusAt } from "./KnowledgeDocumentDetail";
 import type { KnowledgeNavigationTarget } from "./knowledgeCitation";
@@ -118,6 +119,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [commentSubmitted, setCommentSubmitted] = useState(false);
   const [decisionToConfirm, setDecisionToConfirm] = useState<"APPROVE" | "REJECT" | null>(null);
   const createRequestKey = useRef<string | null>(null);
+  const newBodyBaseline = useRef(newBody);
+  const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
   const submitRequestKey = useRef<string | null>(null);
   const decisionRequest = useRef<{ action: "APPROVE" | "REJECT"; key: string } | null>(null);
   const openedCreatedDraftId = useRef<string | null>(null);
@@ -230,10 +233,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     await refresh();
   });
 
-  const openReview = (id: string) => void run(async () => {
+  const openReview = (id: string) => guardDiscard(Boolean(comment.trim()), () => { void run(async () => {
     const loaded = await loadKnowledgeReview(platform, organizationId, id);
     setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
-  });
+  }); });
 
   const requireDecisionReason = () => {
     setCommentSubmitted(true);
@@ -311,6 +314,21 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     if (!previous || Date.parse(submission.submittedAt) > Date.parse(previous.submittedAt)) latestByDraft.set(submission.draftId, submission);
   }
   const dirty = Boolean(draft && editor && JSON.stringify(editor) !== JSON.stringify(valuesFromDraft(draft)));
+  const creationDirty = Boolean(newTitle || newFile || newBody !== newBodyBaseline.current);
+  const guardDiscard = (changed: boolean, action: () => void) => {
+    if (busy) return;
+    if (changed) setDiscardAction(() => action); else action();
+  };
+  const resetCreation = () => {
+    const body = serializeSemanticDocument(plainTextToSemanticDocument("", () => crypto.randomUUID()));
+    newBodyBaseline.current = body; setNewBody(body); setNewTitle(""); setNewFile(null);
+    setNewFileError(""); setNewTitleError(""); setDragActive(false); createRequestKey.current = null;
+  };
+  const cancelCreation = () => guardDiscard(creationDirty, () => { resetCreation(); setError(""); setScreen("library"); });
+  const cancelEditing = () => guardDiscard(dirty, () => {
+    if (draft) setEditor(valuesFromDraft(draft));
+    setError(""); setLibraryTab("drafts"); setScreen("library"); void refresh();
+  });
   const latest = draft ? latestByDraft.get(draft.id) : undefined;
   const currentDraftStatus = draft ? draftStatus({ hasPendingSubmission: draft.hasPendingSubmission,
     responsibleDepartmentId: draft.responsibleDepartmentId, targetScopeType: draft.targetScopeType,
@@ -348,7 +366,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     pendingNextReview.current = neighbour?.submissionId ?? null;
     decide(action);
   };
-  const openCreate = (mode: "text" | "pdf") => { setCreateMode(mode); createRequestKey.current = null; setScreen("create"); };
+  const openCreate = (mode: "text" | "pdf") => { resetCreation(); setCreateMode(mode); setScreen("create"); };
   const readerPdfUrl = usePdfObjectUrl(screen === "document" && document?.mimeType === "application/pdf" ? document.pdfBase64 : null);
   const librarySearch = view === "knowledge" && screen === "library"
     ? <SearchField value={query} onChange={setQuery} placeholder={libraryTab === "drafts" ? "Filter my contributions…" : "Search title, code, owner or summary…"} /> : undefined;
@@ -446,6 +464,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                   onClick={() => decideAndAdvance(decisionToConfirm)}>{busy ? "Saving…" : decisionToConfirm === "APPROVE" ? "Approve" : "Reject"}</button>
               </div>
             </div> : <>
+              <button type="button" className="island-link-button" disabled={busy} onClick={() => guardDiscard(Boolean(comment.trim()), () => {
+                setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
+              })}>Back to queue</button>
               <div className="review-decision-actions">
                 <button type="button" className="secondary-button review-reject" disabled={busy} onClick={() => { if (requireDecisionReason()) setDecisionToConfirm("REJECT"); }}>Reject</button>
                 <button type="button" className="primary-button review-approve" disabled={busy || activeReview?.approvalBlocked} onClick={() => setDecisionToConfirm("APPROVE")}><Icon name="check" size={14} />Approve</button>
@@ -455,7 +476,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           </footer>
         </aside>}
       </div> : screen === "create" ? <>
-        <button type="button" className="knowledge-back-button knowledge-live-back" disabled={busy} onClick={() => setScreen("library")}>← Knowledge</button>
+        <button type="button" className="knowledge-back-button knowledge-live-back" disabled={busy} onClick={cancelCreation}>← Back to library</button>
         <KnowledgeHeading eyebrow="KNOWLEDGE" title="New draft" />
         <form className="island island-panel knowledge-create-island" onSubmit={(event) => { event.preventDefault(); createDraft(); }}>
           <fieldset className="knowledge-create-source" disabled={busy}><legend>Content source</legend>
@@ -477,11 +498,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               body={newBody} instanceKey="new-shared-knowledge" disabled={busy} onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
           </div>}
           <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button>
-            <button type="button" className="secondary-button" disabled={busy} onClick={() => { setScreen("library"); createRequestKey.current = null; }}>Cancel</button>
+            <button type="button" className="secondary-button" disabled={busy} onClick={cancelCreation}>Cancel</button>
           </div>
         </form>
       </> : screen === "editor" && draft && editor ? <>
-        <button type="button" className="knowledge-back-button knowledge-live-back" onClick={() => { setLibraryTab("drafts"); setScreen("library"); void refresh(); }}>← My Contributions</button>
+        <button type="button" className="knowledge-back-button knowledge-live-back" disabled={busy} onClick={cancelEditing}>← My Contributions</button>
         <h1 className="sr-only">{draft.title}</h1>
         <div className="draft-workspace">
           <article className="island draft-document" aria-label="Draft">
@@ -551,6 +572,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                 <li key={label} className={done ? "is-done" : ""}><Icon name={done ? "check" : "close"} size={12} />{label}<small>{done ? "Done" : "Missing"}</small></li>)}
             </ul>
             <div className="draft-actions" role="group" aria-label="Draft actions">
+              <button type="button" className="secondary-button" disabled={busy} onClick={cancelEditing}>{dirty ? "Cancel" : "Back"}</button>
               <button type="button" className="secondary-button" disabled={busy || !(dirty || ownerOutOfSync)} onClick={saveDraft}>{busy ? "Saving…" : "Save changes"}</button>
               <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || ownerOutOfSync || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit v{draft.currentVersion.version} for review</button>
               <span className="island-meta" aria-live="polite">{dirty ? "Unsaved changes · " : ""}{ownerOutOfSync && !dirty ? "Save changes before submitting." : submitHint}</span>
@@ -663,6 +685,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
       </>}
     </div>
     <ActionToast message={message} onDismiss={() => setMessage("")} />
+    {discardAction && <DiscardChangesDialog exiting={false} onCancel={() => setDiscardAction(null)} onDiscard={() => {
+      discardAction(); setDiscardAction(null);
+    }} />}
   </main>;
 }
 

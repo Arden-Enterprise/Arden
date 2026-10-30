@@ -11,11 +11,9 @@
 .ask-menu-button { display: none; }
 .ask-thread-title {
   display: inline-flex; align-items: center; gap: 5px; min-width: 0; padding: 0; border: 0; color: var(--arden-text-primary);
-  background: transparent; font-size: 13px; cursor: pointer;
+  background: transparent; font-size: 13px; flex: 1;
 }
-.ask-thread-title:disabled { cursor: default; }
 .ask-thread-title strong { overflow: hidden; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.ask-thread-title svg { color: var(--arden-text-muted); }
 .ask-thread-scroll { position: relative; min-height: 0; overflow: auto; scrollbar-gutter: stable; }
 .ask-arden-stage.is-empty .ask-thread-scroll { overflow: auto; }
 
@@ -74,13 +72,13 @@
 .ask-composer textarea::placeholder { color: #aaa6b4; }
 .ask-composer textarea:focus-visible { outline: 0; }
 .ask-composer:focus-within { outline: 2px solid #b7a7ef; outline-offset: 2px; }
-.ask-composer-tools { display: flex; align-items: center; gap: 6px; }
+.ask-composer-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ask-composer-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .ask-scope {
   display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 3px; border: 0; color: var(--arden-text-secondary);
-  background: transparent; font-size: 11px; font-weight: 500;
+  background: transparent; font-size: 11px; font-weight: 500; margin-right: auto;
 }
 .ask-scope svg:last-child { color: var(--arden-text-muted); }
-.ask-composer-boundary { flex: 1; color: var(--arden-text-disabled); font-size: 10px; text-align: right; }
 .ask-attach, .ask-send { display: grid; place-items: center; flex: none; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 999px; }
 .ask-attach { color: var(--arden-text-disabled); background: transparent; }
 .ask-send { color: var(--arden-on-accent); background: var(--arden-violet); cursor: pointer; }
@@ -133,7 +131,6 @@
   .ask-starter-grid > button svg { margin-bottom: 2px; }
   .ask-conversation { width: calc(100% - 28px); padding-top: 22px; padding-bottom: 132px; }
   .ask-composer.is-dock { width: calc(100% - 24px); margin-bottom: 86px; }
-  .ask-composer-boundary { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

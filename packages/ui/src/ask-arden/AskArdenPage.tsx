@@ -1,5 +1,6 @@
 import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Icon } from "../shared/Icon";
+import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { useWorkspaceNavigation } from "../shared/WorkspaceNavigationContext";
 import type { KnowledgeCitationReference } from "../knowledge/knowledgeCitation";
 import { ApiError, askArden } from "../shared/api-client";
@@ -21,6 +22,8 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
   const [examplesVisible, setExamplesVisible] = useState(true);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const pendingQuestion = useRef<{ id: string; query: string } | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const requestGeneration = useRef(0);
   const navigation = useWorkspaceNavigation();
@@ -33,6 +36,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
     if (!query || pending || !organizationId) return;
     const generation = ++requestGeneration.current;
     const questionId = crypto.randomUUID();
+    pendingQuestion.current = { id: questionId, query };
     setMessages((current) => [...current, { id: questionId, role: "member", body: query }]);
     setDraft("");
     setError(null);
@@ -46,7 +50,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
         setError(cause instanceof ApiError ? cause.message : "Ask Arden could not prepare an answer.");
       }
     } finally {
-      if (generation === requestGeneration.current) setPending(false);
+      if (generation === requestGeneration.current) { setPending(false); pendingQuestion.current = null; }
     }
   };
 
@@ -61,6 +65,20 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
     setDraft("");
     setMessages([]);
     setError(null);
+    pendingQuestion.current = null;
+    setResetting(false);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
+  const stopWaiting = () => {
+    // This dismisses the local wait, not the provider's already-started work or cost.
+    const question = pendingQuestion.current;
+    requestGeneration.current++; pendingQuestion.current = null;
+    setPending(false); setError(null);
+    if (question) {
+      setMessages((current) => current.filter((message) => message.id !== question.id));
+      setDraft((current) => current || question.query);
+    }
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
@@ -71,11 +89,14 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
       placeholder="Ask Arden…" />
     <div className="ask-composer-tools">
       <span className="ask-scope"><Icon name="knowledge" size={13} />Published documents<Icon name="chevron" size={10} /></span>
-      {pending && <span className="ask-composer-boundary">Searching…</span>}
+      <div className="ask-composer-actions">
+      {pending ? <button type="button" className="island-link-button" onClick={stopWaiting}>Stop waiting</button>
+        : draft && <button type="button" className="island-link-button" onClick={() => { setDraft(""); composerRef.current?.focus(); }}>Clear</button>}
       <button type="button" className="ask-attach" disabled title="Attachments aren’t available yet" aria-label="Attachments aren’t available yet">
         <Icon name="plus" size={15} />
       </button>
       <button type="submit" className="ask-send" disabled={!draft.trim() || pending || !organizationId} aria-label="Send message"><Icon name="arrow" size={15} /></button>
+      </div>
     </div>
   </form>;
 
@@ -87,9 +108,8 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
           aria-controls="arden-primary-navigation" aria-expanded={navigation.open} onClick={() => navigation.setOpen((open) => !open)}>
           <Icon name={navigation.open ? "close" : "menu"} size={17} />
         </button>}
-        <button type="button" className="ask-thread-title" onClick={reset} disabled={empty}>
-          <strong>{empty ? "New chat" : threadTitle}</strong><Icon name="chevron" size={11} />
-        </button>
+        <div className="ask-thread-title"><strong>{empty ? "New chat" : threadTitle}</strong></div>
+        {!empty && <button type="button" className="island-link-button" onClick={() => setResetting(true)}>New chat</button>}
       </header>
 
       <div className="ask-thread-scroll" aria-live="polite">
@@ -130,5 +150,10 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
 
       {!empty && composer("dock")}
     </div>
+    {resetting && <KnowledgeDialog confirmation title="Start a new chat?" onClose={() => setResetting(false)}>
+      <p>This clears the current conversation.</p>
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setResetting(false)}>Cancel</button>
+        <button type="button" className="primary-button" onClick={reset}>New chat</button></div>
+    </KnowledgeDialog>}
   </main>;
 }
