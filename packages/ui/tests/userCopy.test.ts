@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { createElement, useState } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { installTestDialogs } from "./dialogTestSupport";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import * as api from "../src/shared/api-client";
 import { ContributePrivateNoteDialog, type ContributionAttempt } from "../src/personal-workspace/ContributePrivateNoteDialog";
@@ -13,8 +14,11 @@ vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({
   ArdenDocumentView: () => createElement("div", null, "Document content"),
 }));
 
+let restoreDialogs: () => void;
+beforeEach(() => { restoreDialogs = installTestDialogs(); });
 afterEach(() => {
   cleanup();
+  restoreDialogs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -97,6 +101,15 @@ describe("concise user-facing copy", () => {
     expect(boundary?.textContent).toBe(`Within${scope === "DEPARTMENT" ? "Engineering" : "Across departments"}`);
     expect(screen.getByText("Project group")).toBeTruthy();
     expect(screen.queryByText("private-hash")).toBeNull();
+    const decide = vi.spyOn(api, "decideKnowledgeReview");
+    fireEvent.change(screen.getByRole("textbox", { name: /Note to the author/ }), { target: { value: "Unsent review note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Back to queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep working" }));
+    expect((screen.getByRole("textbox", { name: /Note to the author/ }) as HTMLTextAreaElement).value).toBe("Unsent review note");
+    fireEvent.click(screen.getByRole("button", { name: "Back to queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(screen.queryByRole("button", { name: "Approve", exact: true })).toBeNull();
+    expect(decide).not.toHaveBeenCalled();
   });
 
   it("keeps the private-copy warning and reuses retry identity without showing request keys", async () => {
@@ -130,5 +143,41 @@ describe("concise user-facing copy", () => {
     expect(screen.getByText("Couldn’t open this page.")).toBeTruthy();
     expect(screen.queryByText("internal database diagnostic")).toBeNull();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+  });
+
+  it("lets an author keep editing or discard unsaved document changes without a write", async () => {
+    mockKnowledge();
+    const save = vi.spyOn(api, "saveKnowledgeDraft");
+    render(createElement(ServerKnowledgeFeaturePage, {
+      platform: "web", organizationId: "org", organizationName: "Example", view: "knowledge",
+      active: true, createdDraftId: "draft", contextOpen: false, onToggleContext: vi.fn(),
+    }));
+    await screen.findByRole("heading", { name: "Before you submit" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep working" }));
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("Unsaved title");
+    fireEvent.click(screen.getByRole("button", { name: "← My Contributions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(screen.queryByRole("heading", { name: "Before you submit" })).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it("discards a new document form and starts the next form empty", async () => {
+    mockKnowledge();
+    const create = vi.spyOn(api, "createNewKnowledgeDraft");
+    render(createElement(ServerKnowledgeFeaturePage, {
+      platform: "web", organizationId: "org", organizationName: "Example", view: "knowledge",
+      active: true, createdDraftId: null, contextOpen: false, onToggleContext: vi.fn(),
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "New draft", exact: true }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Never saved" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    fireEvent.click(screen.getByRole("button", { name: "New draft", exact: true }));
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "← Back to library" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(create).not.toHaveBeenCalled();
   });
 });

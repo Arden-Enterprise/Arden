@@ -108,6 +108,14 @@ Approved by the requesting maintainer on 30 October 2026 (ARD-74). Prefer short 
 
 Keep essential consequences at the decision point: unsaved work being lost, a private original remaining private when copied, and access/assignment changes. Keep accessible names, concrete validation and file limits, and visible Demo/unavailable labels. Approval/preparation/publication and uncertain/failed/successful outcomes must remain distinct. Show errors without raw internal exception text. Apply the same copy to shared web/desktop UI; do not change permissions, immutable submissions or retry identity to shorten a message.
 
+## Cancellation and exit paths
+
+Maintainer correction accepted on 30 October 2026: concise copy must not remove or obscure the way out of a task.
+
+Editing and creation surfaces must offer a visible Cancel, Back or Discard action, not require refresh or sign-out. Explicitly discarding unsaved document/note/group content asks once and keeps a Keep working route; backing out must not delete saved content, withdraw a submission or change permissions. Discard only the selected note's edits (remove a never-saved local note), preserving every other note draft. Disable local discard while its save is in flight; an uncertain server result is not proof that a completed write was undone.
+
+Chat offers Clear for an unsent prompt, Stop waiting for the current response, and an explicit New chat action with confirmation before clearing the session-local conversation. Stop waiting dismisses the local wait and ignores late responses; it does not promise to cancel provider work or cost. Composer geometry must be independent of optional copy: keep send actions trailing even when status/help text is absent.
+
 ## Accessibility and verification
 
 Text meets 4.5:1 on its surface (text.muted is tuned to 5.1:1; border.strong gives inputs 3.1:1). Focus is a 2px accent-hover ring with 2px offset; inside the status island the island border shows focus. Use real buttons, links and labelled inputs; icon-only buttons have accessible names. Keep demo/unavailable labels visible so reduced copy never implies live functionality. Native dialogs keep focus inside and restore it on dismissal.

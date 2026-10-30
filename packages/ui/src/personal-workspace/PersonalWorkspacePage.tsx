@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Icon } from "../shared/Icon";
+import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { PrivateNoteEditor } from "./PrivateNoteEditor";
 import { PrivateNoteList } from "./PrivateNoteList";
 import { SearchField } from "../shared/SearchField";
@@ -22,6 +23,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   const [query, setQuery] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [contributionOpen, setContributionOpen] = useState(false);
+  const [discarding, setDiscarding] = useState(false);
   const revealSearch = useCallback(() => setEditorOpen(false), []);
   const searchRef = useSearchShortcut(revealSearch);
   const { state, selectedNote, draft, isDirty, serverBacked, loading, saving, error, saveMessage } = controller;
@@ -39,7 +41,8 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   };
   const backToNotes = () => {
     setEditorOpen(false);
-    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".note-list .is-selected")?.focus());
+    requestAnimationFrame(() => (document.querySelector<HTMLButtonElement>(".note-list .is-selected")
+      ?? document.querySelector<HTMLButtonElement>('[aria-label="New private note"]'))?.focus());
   };
 
   // Contributing a copy opens inside this page's status island rather than a modal dialog.
@@ -76,12 +79,17 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
               <span className="private-state" aria-live="polite">{isDirty ? "Unsaved changes" : serverBacked ? "Saved" : "Saved · Demo"}</span>
               <span className="note-toolbar-spacer" />
               <button type="button" className="secondary-button note-back-button" onClick={backToNotes}>Back to notes</button>
+              {isDirty && <button type="button" className="secondary-button" disabled={saving} onClick={() => setDiscarding(true)}>Discard changes</button>}
               {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}><Icon name="layers" size={14} />Create review draft</button>}
               <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : "Save"}</button>
             </>}
             onTitleChange={controller.editTitle} onBodyChange={controller.editBody} />
         </div>
       </WorkspacePageContent>
+      {discarding && <DiscardChangesDialog exiting={false} onCancel={() => setDiscarding(false)} onDiscard={() => {
+        controller.discardSelected(); setDiscarding(false);
+        if (selectedNote?.updatedLabel === "Not saved") backToNotes(); else openEditor();
+      }} />}
     </main>
   );
 }

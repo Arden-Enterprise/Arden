@@ -266,7 +266,9 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         </div>}
         {tab === "departments" && <div role="tabpanel" aria-label="Departments" className="island-split">
           <div className="island-main">
-            <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || ""}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
+            <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || ""}</small></label>
+              {(departmentNameInput || departmentError) && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setDepartmentNameInput(""); setDepartmentError(""); setError(""); }}>Cancel</button>}
+              <button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
             {data.departments.length ? <IslandTable label="Departments" minWidth={600} columns="minmax(220px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) 96px"
               headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS", <span className="sr-only">Actions</span>]}>
               {data.departments.map((department) => {
@@ -324,6 +326,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             <form className="admin-side-form" noValidate onSubmit={submitInvite}>
               <label className="organization-field"><span>Work email</span><input id="admin-invite-email" type="email" maxLength={320} placeholder="name@company.com" value={inviteEmail} disabled={busy} aria-invalid={Boolean(inviteError)} aria-describedby="admin-invite-help" onChange={(event) => { setInviteEmail(event.target.value); setInviteError(""); setInviteSuccess(""); }} /><small id="admin-invite-help" className={inviteError ? "field-error" : ""}>{inviteError || `They’ll receive a link to join ${organizationName}.`}</small></label>
               <button className="primary-button" type="submit" disabled={busy}>{busy ? "Sending…" : "Send invitation"}</button>
+              {(inviteEmail || inviteError) && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setInviteEmail(""); setInviteError(""); setInviteSuccess(""); setError(""); }}>Cancel</button>}
               {inviteSuccess && <p className="admin-inline-success" role="status">{inviteSuccess}</p>}
             </form>
           </aside>
@@ -366,7 +369,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               <label className="organization-field"><span>Project tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={projectTag} onChange={(event) => setProjectTag(event.target.value)} /></label>
             </div>
             {overlappingGrant && <p className="admin-feedback is-warning">Review permission already assigned.</p>}
-            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Assign reviewer"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); }}>Reset</button></div>
+            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Assign reviewer"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); setError(""); }}>Cancel</button></div>
           </form>
           </div>
         </div>}

@@ -138,6 +138,7 @@ export function usePrivateNotes(initialNotes: PrivateNote[]) {
     isDirty: selectedNote ? isNoteDirty(state, selectedNote) || selectedNote.updatedLabel === "Not saved" : false,
     selectNote: (note: PrivateNote) => { setError(""); setSaveMessage(""); dispatch({ type: "select", id: note.id }); },
     createNote,
+    discardSelected: () => { if (saving) return; setSaveMessage(""); dispatch({ type: "discard" }); },
     editTitle: (value: string) => { setSaveMessage(""); dispatch({ type: "edit", field: "title", value }); },
     editBody: (value: string) => { setSaveMessage(""); dispatch({ type: "edit", field: "body", value }); },
     save,
