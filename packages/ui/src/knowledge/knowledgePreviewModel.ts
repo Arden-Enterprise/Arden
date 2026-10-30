@@ -98,16 +98,16 @@ export function reduceKnowledgePreview(state: KnowledgePreviewState, action: Kno
     case "edit":
       return { ...state, draft: copyDraft(action.draft), message: "" };
     case "save":
-      return { ...state, savedDraft: copyDraft(state.draft), message: "Draft saved in this preview session. Nothing was sent to a server." };
+      return { ...state, savedDraft: copyDraft(state.draft), message: "Draft saved · Demo" };
     case "submit": {
       if (!draftReadyForReview(state.draft)) return { ...state, message: "Complete the content and both review checks before submitting a shared snapshot." };
       if (knowledgeDraftMatchesPublication(state)) return { ...state, message: "This sample is already published. Edit the working draft before submitting a new version." };
       const submitted: KnowledgeSnapshot = { version: state.nextVersion, draft: copyDraft(state.draft), decision: "pending" };
-      return { ...state, submitted, savedDraft: copyDraft(state.draft), nextVersion: state.nextVersion + 1, message: "An immutable sample snapshot is ready for review. The working draft remains separate." };
+      return { ...state, submitted, savedDraft: copyDraft(state.draft), nextVersion: state.nextVersion + 1, message: "Submitted for review · Demo" };
     }
     case "reject":
       if (!state.submitted || state.submitted.decision !== "pending") return state;
-      return { ...state, submitted: { ...state.submitted, decision: "rejected" }, message: "Sample snapshot rejected. The working draft remains editable and can be submitted again." };
+      return { ...state, submitted: { ...state.submitted, decision: "rejected" }, message: "Submission rejected · Demo" };
     case "approve":
       if (!state.submitted || state.submitted.version !== action.version || state.submitted.decision !== "pending" || !draftReadyForReview(state.submitted.draft)) return { ...state, message: "This snapshot is not ready for approval. Resolve the checks and submit a new snapshot." };
       {
@@ -115,7 +115,7 @@ export function reduceKnowledgePreview(state: KnowledgePreviewState, action: Kno
         return {
           ...state,
           submitted: approved,
-          message: "The sample snapshot was approved and entered publication preparation. It is not active or searchable yet.",
+          message: "Preparing publication · Demo",
         };
       }
     case "activate":
@@ -124,7 +124,7 @@ export function reduceKnowledgePreview(state: KnowledgePreviewState, action: Kno
       return {
         ...state,
         publication: { ...state.submitted, draft: copyDraft(state.submitted.draft) },
-        message: "Indexing completed and the approved sample snapshot became active atomically.",
+        message: "Published · Demo",
       };
   }
 }

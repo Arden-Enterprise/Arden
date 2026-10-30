@@ -23,6 +23,25 @@ afterEach(() => {
 });
 
 describe("Supabase session transport", () => {
+  it("keeps a lost write response uncertain, without claiming the write failed", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network closed")));
+    await expect(apiRequest("web", "/api/v1/example", { method: "POST", body: "{}" }))
+      .rejects.toThrow("Couldn’t confirm this action.");
+    await expect(apiRequest("web", "/api/v1/example"))
+      .rejects.toThrow("Connection unavailable.");
+  });
+
+  it("shows readable document errors while retaining the machine code", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: {
+      code: "INVALID_DOCUMENT", message: "Semantic Document violates schema version 1.",
+    } }, { status: 400 })));
+    await expect(apiRequest("web", "/api/v1/example")).rejects.toMatchObject({
+      status: 400, code: "INVALID_DOCUMENT", message: "Unsupported document format.",
+    });
+  });
+
   it("uses Arden's sign-in endpoint and HttpOnly web cookies", async () => {
     vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
     const fetchMock = vi.fn()
@@ -193,7 +212,7 @@ describe("shared knowledge draft transport", () => {
       .mockResolvedValueOnce(Response.json({ error: { code: "RESOURCE_NOT_AVAILABLE", message: "Not available." } }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, "CONFIDENTIAL", idempotencyKey)).rejects.toThrow("invalid shared draft");
+    await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, "CONFIDENTIAL", idempotencyKey)).rejects.toThrow("Couldn’t confirm draft creation.");
     await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, "CONFIDENTIAL", idempotencyKey)).rejects.toThrow("Not available.");
   });
 
@@ -202,7 +221,7 @@ describe("shared knowledge draft transport", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new TypeError("connection closed")));
 
     await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, "CONFIDENTIAL", idempotencyKey))
-      .rejects.toThrow("Could not confirm whether the shared draft was created");
+      .rejects.toThrow("Couldn’t confirm draft creation.");
   });
 });
 

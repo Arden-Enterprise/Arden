@@ -2,12 +2,14 @@
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup } from "@testing-library/react";
 import { InvitationLinkPage } from "../src/organization/InvitationLinkPage";
 import {
   acceptInvitation,
   getInvitationPreview,
   signIn,
+  ApiError,
   type CurrentSession,
   type InvitationPreview,
 } from "../src/shared/api-client";
@@ -36,10 +38,13 @@ const session: CurrentSession = {
 };
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.mocked(getInvitationPreview).mockResolvedValue(invitation);
   vi.mocked(signIn).mockResolvedValue(session);
   vi.mocked(acceptInvitation).mockRejectedValue(new Error("temporary acceptance failure"));
 });
+
+afterEach(cleanup);
 
 describe("invitation page feedback", () => {
   it("returns an acceptance error for the shared signed-in and signed-out page area", () => {
@@ -74,11 +79,23 @@ describe("invitation page feedback", () => {
     fireEvent.submit(form);
 
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("could not be accepted");
+    expect(alert.textContent).toBe("Invitation unavailable for this account.");
     expect(screen.getByRole("button", { name: "Accept invitation" })).toBeTruthy();
     expect(acceptInvitation).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Accept invitation" }));
     await waitFor(() => expect(acceptInvitation).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not call an invitation unavailable when its acceptance response is lost", async () => {
+    vi.mocked(acceptInvitation).mockRejectedValue(new ApiError(0, "Connection unavailable."));
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token", onAccepted: vi.fn() }));
+    const email = await screen.findByRole("textbox", { name: "Email address" });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "demo-password" } });
+    fireEvent.submit(email.closest("form")!);
+    expect((await screen.findByRole("alert")).textContent).toBe("Couldn’t confirm invitation acceptance.");
+    fireEvent.click(screen.getByRole("button", { name: "Accept invitation" }));
+    await waitFor(() => expect(acceptInvitation).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("alert").textContent).toBe("Couldn’t confirm invitation acceptance.");
   });
 });

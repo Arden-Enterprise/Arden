@@ -39,7 +39,6 @@ export function WaitingRoomPage({
             eyebrow="ORGANIZATION ACCESS"
             title={`Welcome to ${organizationName}`}
             titleId="waiting-room-title"
-            description="You have successfully joined the organization and are currently in the waiting room."
           />
         }
       >
@@ -50,9 +49,9 @@ export function WaitingRoomPage({
                 <Icon name="work" size={22} />
               </span>
               <div>
-                <h2 id="waiting-status-title" style={{ margin: 0, fontSize: "18px" }}>Awaiting Department Assignment</h2>
+                <h2 id="waiting-status-title" style={{ margin: 0, fontSize: "18px" }}>Awaiting department assignment</h2>
                 <p style={{ margin: "4px 0 0", color: "var(--arden-text-secondary)", fontSize: "13px" }}>
-                  Status: <span className="island-chip has-dot tone-info">Awaiting assignment</span>
+                  <span className="island-chip has-dot tone-info">Not assigned</span>
                 </p>
               </div>
             </div>
@@ -69,15 +68,12 @@ export function WaitingRoomPage({
             </div>
 
             <p style={{ fontSize: "14px", lineHeight: "1.6", margin: "0 0 14px", color: "var(--arden-text-secondary)" }}>
-              You do not belong to any department yet. To protect organization privacy, members in the waiting room cannot view other departments or department-specific documents.
-            </p>
-            <p style={{ fontSize: "14px", lineHeight: "1.6", margin: "0 0 24px", color: "var(--arden-text-secondary)" }}>
-              An organization administrator will assign you to your department soon. Once assigned, you will automatically gain access to your department’s workspace, private notes, and internal documents.
+              Ask an admin to assign your department.
             </p>
 
             <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center" }}>
               <button type="button" className="primary-button" onClick={onRefresh}>
-                Check assignment status
+                Check status
               </button>
               {onOpenLibrary && (
                 <button type="button" className="secondary-button" onClick={onOpenLibrary}>

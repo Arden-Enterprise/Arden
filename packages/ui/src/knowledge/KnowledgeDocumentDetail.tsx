@@ -107,14 +107,12 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
     </button>
     {activeVersion.status === "EXPIRED" && <div className="island-note is-warning knowledge-reader-expired" role="note">
       <Icon name="warning" size={16} />
-      <span><strong>This version is no longer effective.</strong> {hasEffectiveVersion
-        ? "Choose the current version before applying this guidance."
-        : "Confirm whether newer guidance is available before applying it."}</span>
+      <span><strong>This version has expired.</strong> {hasEffectiveVersion ? "Choose the current version." : ""}</span>
     </div>}
 
     {visibleFocus && <div className="knowledge-citation-focus" role="status">
       <span className="knowledge-citation-focus-icon"><Icon name="search" size={14} /></span>
-      <div><strong>Opened from Ask Arden</strong><mark>{visibleFocus.excerpt}</mark></div>
+      <div><strong>Cited passage</strong><mark>{visibleFocus.excerpt}</mark></div>
       {visibleFocus.page && <small>Page {visibleFocus.page}</small>}
     </div>}
 

@@ -62,7 +62,7 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
       setCreating(false); setDraft(loaded[0] ? groupWrite(loaded[0]) : emptyWrite());
     } catch (cause) {
       if (mounted.current && generation === requestGeneration.current) {
-        setError(cause instanceof Error ? cause.message : "Audience groups are unavailable.");
+        setError(cause instanceof Error ? cause.message : "Reader groups are unavailable.");
       }
     } finally {
       if (mounted.current && generation === requestGeneration.current) setLoading(false);
@@ -112,7 +112,7 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
       return true;
     } catch (cause) {
       if (mounted.current) setError(cause instanceof ApiError && cause.status === 412
-        ? "The audience group changed elsewhere. Reload before saving again."
+        ? "This group has changed. Reload before saving."
         : cause instanceof Error ? cause.message : "The change could not be saved.");
       return false;
     } finally {
@@ -138,7 +138,7 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
   const undoRemoval = () => {
     if (!removal) return;
     const { groupId, membershipId } = removal;
-    void mutate(() => addAudienceGroupMember(platform, organizationId, groupId, membershipId), "Member added back to the audience group.");
+    void mutate(() => addAudienceGroupMember(platform, organizationId, groupId, membershipId), "Member added back to the reader group.");
   };
   const eligibleMembers = members.filter(member => member.status === "ACTIVE"
     && !activeMembers.some(groupMember => groupMember.membershipId === member.id));
@@ -156,60 +156,58 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
     aria-pressed={managedId === audience.id} disabled={busy} onClick={() => guard(() => selectManaged(audience.id))}>
     <span className="island-tile" aria-hidden="true"><Icon name={audience.id === "organization" ? "building" : "people"} size={16} /></span>
     <span className="audience-row-copy"><strong>{audience.name}</strong><small>{audience.description}</small></span>
-    <span className="island-badge" aria-label={`${audience.count} readers`}>{audience.count}</span><span className="island-chip">Managed</span>
+    <span className="island-badge" aria-label={`${audience.count} readers`}>{audience.count}</span><span className="island-chip">Automatic</span>
   </button>;
 
-  return <div className="island-split audience-layout" aria-label="Audience configuration">
+  return <div className="island-split audience-layout" aria-label="Readers">
     <div className="island-main">
       {error && <div className="admin-feedback is-error audience-feedback" role="alert"><span>{error}</span><button className="secondary-button" type="button" disabled={busy || loading} onClick={() => guard(() => void load())}>Reload groups</button></div>}
-      {loading ? <div className="island island-empty" role="status">Loading audience groups…</div> : <>
-        <section className="island audience-list" aria-label="Organization audience">
+      {loading ? <div className="island island-empty" role="status">Loading reader groups…</div> : <>
+        <section className="island audience-list" aria-label="Organization readers">
           <div className="island-section-label"><span>ORGANIZATION</span><span>Managed by Arden</span></div>
           {managedAudiences.filter(audience => audience.section === "ORGANIZATION").map(managedRow)}
         </section>
-        {departments.length > 0 && <section className="island audience-list" aria-label="Department audiences">
+        {departments.length > 0 && <section className="island audience-list" aria-label="Department readers">
           <div className="island-section-label"><span>DEPARTMENTS</span><span>Managed by Arden</span></div>
           {managedAudiences.filter(audience => audience.section === "DEPARTMENTS").map(managedRow)}
         </section>}
-        <section className="island audience-list" aria-label="Audience groups">
+        <section className="island audience-list" aria-label="Reader groups">
           <div className="island-section-label"><span>GROUPS · {groups.length}</span><span>Managed by Org Admins</span></div>
           {groups.map(group => <button type="button" key={group.id} className="audience-row" disabled={busy}
             aria-pressed={!managedId && selectedId === group.id} onClick={() => guard(() => select(group))}>
             <span className="island-tile" aria-hidden="true"><Icon name="people" size={16} /></span>
-            <span className="audience-row-copy"><strong>{group.name}</strong><small>{group.description || "Audience group"}</small></span>
+            <span className="audience-row-copy"><strong>{group.name}</strong><small>{group.description || "Reader group"}</small></span>
             <span className="island-badge" aria-label={`${group.members.filter(member => member.status === "ACTIVE").length} readers`}>{group.members.filter(member => member.status === "ACTIVE").length}</span>
             <span className={`island-chip${group.status === "INACTIVE" ? "" : " tone-strong"}`}>{group.status === "INACTIVE" ? "Inactive" : "Group"}</span>
           </button>)}
-          {!groups.length && !creating && <div className="island-empty"><p>No audience groups yet. Organization and department audiences stay available automatically.</p>
-            <button className="secondary-button" type="button" onClick={() => guard(startNew)}>Create audience group</button></div>}
+          {!groups.length && !creating && <div className="island-empty"><p>No reader groups yet.</p>
+            <button className="secondary-button" type="button" onClick={() => guard(startNew)}>Create reader group</button></div>}
           {creating && <div className="audience-row is-pending" aria-current="true"><span className="island-tile" aria-hidden="true"><Icon name="plus" size={16} /></span>
-            <span className="audience-row-copy"><strong>{draft.name || "New audience group"}</strong><small>Not saved yet</small></span></div>}
+            <span className="audience-row-copy"><strong>{draft.name || "New reader group"}</strong><small>Not saved yet</small></span></div>}
         </section>
       </>}
     </div>
     {!loading && managed && <aside className="island island-panel island-side" aria-label="Audience details">
-      <div className="island-side-header"><div><span className="meta-label">MANAGED AUDIENCE</span><h2>{managed.name}</h2><p>{managed.count} readers · {managed.description}</p></div></div>
-      <div className="island-box">Arden keeps this audience in sync with {managed.syncWith}. It cannot be edited or deleted, and it never opens private notes.</div>
-      <p className="island-meta island-side-footer">Removing someone from the organization or department takes effect on their next request — search, citations and AI answers included.</p>
+      <div className="island-side-header"><div><span className="meta-label">AUTOMATIC GROUP</span><h2>{managed.name}</h2><p>{managed.count} readers · {managed.description}</p></div></div>
     </aside>}
-    {!loading && !managed && (selected || creating) && <aside className="island island-panel island-side" aria-label="Audience group details">
-      <div className="island-side-header"><div><span className="meta-label">AUDIENCE GROUP</span><h2>{draft.name || "New audience group"}</h2>
+    {!loading && !managed && (selected || creating) && <aside className="island island-panel island-side" aria-label="Reader group details">
+      <div className="island-side-header"><div><span className="meta-label">READER GROUP</span><h2>{draft.name || "New reader group"}</h2>
         <p>{creating ? "Not saved yet" : `${activeMembers.length} readers · ${selected?.status === "INACTIVE" ? "Inactive" : "Active"}`}</p></div></div>
       {message && <p className="admin-feedback" role="status">{message}</p>}
-      <div className="island-seg" role="group" aria-label="Audience group sections">{(["members", "details"] as const).map(tab =>
+      <div className="island-seg" role="group" aria-label="Reader group sections">{(["members", "details"] as const).map(tab =>
         <button key={tab} type="button" disabled={creating && tab === "members"} aria-pressed={section === tab}
           onClick={() => { setSection(tab); setQuery(""); }}>{tab === "details" ? "Details" : "Members"}{tab === "members" && <span className="island-badge">{activeMembers.length}</span>}</button>)}</div>
       {section === "details" && <div className="audience-details">
         <label className="organization-field"><span>Group name</span><input maxLength={80} value={draft.name} disabled={disabled}
           aria-invalid={nameSubmitted && !draft.name.trim()} aria-describedby="audience-group-name-help"
-          onChange={event => setDraft({ ...draft, name: event.target.value })}/><small id="audience-group-name-help" className={nameSubmitted && !draft.name.trim() ? "field-error" : ""}>{nameSubmitted && !draft.name.trim() ? "Enter a group name." : "Visible only to members who can target this audience."}</small></label>
+          onChange={event => setDraft({ ...draft, name: event.target.value })}/><small id="audience-group-name-help" className={nameSubmitted && !draft.name.trim() ? "field-error" : ""}>{nameSubmitted && !draft.name.trim() ? "Enter a group name." : ""}</small></label>
         <label className="organization-field"><span>Description (optional)</span><textarea maxLength={300} rows={3} value={draft.description} disabled={disabled} onChange={event => setDraft({ ...draft, description: event.target.value })}/></label>
-        {selected?.status === "ACTIVE" && <div className="role-config-danger-zone"><strong>Deactivate audience group</strong><p>Current publications or pending reviews prevent deactivation.</p><button className="admin-text-danger" type="button" disabled={busy || dirty} onClick={() => setDeactivationOpen(true)}>Deactivate…</button></div>}
+        {selected?.status === "ACTIVE" && <div className="role-config-danger-zone"><strong>Deactivate reader group</strong><button className="admin-text-danger" type="button" disabled={busy || dirty} onClick={() => setDeactivationOpen(true)}>Deactivate…</button></div>}
       </div>}
       {section === "members" && <>
         {selected?.status === "ACTIVE" && <form className="audience-add" onSubmit={event => {
           event.preventDefault(); if (!selected || !memberId || dirty) return;
-          void mutate(() => addAudienceGroupMember(platform, organizationId, selected.id, memberId), "Member added to audience group.").then(success => { if (success) setMemberId(""); });
+          void mutate(() => addAudienceGroupMember(platform, organizationId, selected.id, memberId), "Member added to reader group.").then(success => { if (success) setMemberId(""); });
         }}><label className="organization-field"><span className="sr-only">Add an active member</span><select required value={memberId} disabled={busy || dirty} onChange={event => setMemberId(event.target.value)}>
           <option value="">Add an active member</option>{eligibleMembers.map(member => <option key={member.id} value={member.id}>{member.name} · {member.email}</option>)}</select></label>
           <button type="submit" className="secondary-button" disabled={busy || dirty || !memberId}>Add</button></form>}
@@ -218,16 +216,15 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
           const member = members.find(item => item.id === groupMember.membershipId);
           return <li key={groupMember.id}><span className="island-avatar is-small" aria-hidden="true">{memberInitials(member?.name ?? "Member")}</span>
             <span><strong>{member?.name ?? "Member"}</strong><small>{member?.email}</small></span>
-            <button type="button" className="island-icon-button" disabled={busy || dirty} aria-label={`Remove ${member?.name ?? "member"} from audience group`} onClick={() => removeMember(groupMember)}><Icon name="close" size={14} /></button></li>;
+            <button type="button" className="island-icon-button" disabled={busy || dirty} aria-label={`Remove ${member?.name ?? "member"} from reader group`} onClick={() => removeMember(groupMember)}><Icon name="close" size={14} /></button></li>;
         })}</ul>
         {!visibleMembers.length && <p className="island-meta">{activeMembers.length ? "No matching members." : "No members yet."}</p>}
-        {creating && <p role="status" className="island-meta">Save the audience group before adding members.</p>}
+        {creating && <p role="status" className="island-meta">Save the reader group before adding members.</p>}
       </>}
       {dirty && <footer className="audience-save"><strong>Unsaved changes</strong>
         <button type="button" className="secondary-button" disabled={busy} onClick={() => { setCreating(false); setDraft(selected ? groupWrite(selected) : emptyWrite()); setNameSubmitted(false); }}>Reset</button>
-        <button type="button" className="primary-button" disabled={busy} onClick={() => { setNameSubmitted(true); if (!draft.name.trim()) { setSection("details"); return; } void mutate(() => saveAudienceGroup(platform, organizationId, selected, draft), "Audience group saved."); }}>{busy ? "Saving…" : "Save group"}</button>
+        <button type="button" className="primary-button" disabled={busy} onClick={() => { setNameSubmitted(true); if (!draft.name.trim()) { setSection("details"); return; } void mutate(() => saveAudienceGroup(platform, organizationId, selected, draft), "Reader group saved."); }}>{busy ? "Saving…" : "Save group"}</button>
       </footer>}
-      <p className="island-meta island-side-footer">Removing someone takes effect on their next request — search, citations and AI answers included.</p>
     </aside>}
     {discardAction && (
       <DiscardChangesDialog
@@ -237,9 +234,9 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
       />
     )}
     {deactivationOpen && <KnowledgeDialog confirmation title={`Deactivate ${selected?.name}?`} onClose={() => setDeactivationOpen(false)} dismissible={!busy}>
-      <p>Members will lose access granted by this group. Current publications and pending reviews must be moved first.</p>
+      <p>This group must not be used by published documents or pending reviews.</p>
       <div className="dialog-actions"><button className="secondary-button" type="button" autoFocus disabled={busy} onClick={() => setDeactivationOpen(false)}>Cancel</button>
-        <button className="admin-danger-button" type="button" disabled={busy} onClick={() => { if (selected) void mutate(() => deactivateAudienceGroup(platform, organizationId, selected), "Audience group deactivated.").then(success => { if (success) setDeactivationOpen(false); }); }}>{busy ? "Working…" : "Deactivate group"}</button></div>
+        <button className="admin-danger-button" type="button" disabled={busy} onClick={() => { if (selected) void mutate(() => deactivateAudienceGroup(platform, organizationId, selected), "Reader group deactivated.").then(success => { if (success) setDeactivationOpen(false); }); }}>{busy ? "Working…" : "Deactivate group"}</button></div>
     </KnowledgeDialog>}
     <ActionToast message={removal?.message ?? ""} onDismiss={() => setRemoval(null)} action={removal ? { label: "Undo", run: undoRemoval } : undefined} />
   </div>;

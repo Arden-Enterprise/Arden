@@ -70,12 +70,12 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
       onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) submit(); }}
       placeholder="Ask Arden…" />
     <div className="ask-composer-tools">
-      <span className="ask-scope"><Icon name="knowledge" size={13} />Published knowledge<Icon name="chevron" size={10} /></span>
-      <span className="ask-composer-boundary">{pending ? "Searching…" : "Permission-aware"}</span>
-      <button type="button" className="ask-attach" disabled title="Attachments are not connected yet" aria-label="Attachments are not connected yet">
+      <span className="ask-scope"><Icon name="knowledge" size={13} />Published documents<Icon name="chevron" size={10} /></span>
+      {pending && <span className="ask-composer-boundary">Searching…</span>}
+      <button type="button" className="ask-attach" disabled title="Attachments aren’t available yet" aria-label="Attachments aren’t available yet">
         <Icon name="plus" size={15} />
       </button>
-      <button type="submit" className="ask-send" disabled={!draft.trim() || pending || !organizationId} aria-label="Send prompt"><Icon name="arrow" size={15} /></button>
+      <button type="submit" className="ask-send" disabled={!draft.trim() || pending || !organizationId} aria-label="Send message"><Icon name="arrow" size={15} /></button>
     </div>
   </form>;
 
@@ -96,10 +96,9 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
         {empty ? <section className="ask-empty-state" aria-labelledby="ask-arden-title">
           <img className="ask-brand-watermark" src={ardenOrbSource} alt="" aria-hidden="true" />
           {composer("center")}
-          <span className="ask-index-state"><Icon name="knowledge" size={12} />Indexed published knowledge</span>
 
           {examplesVisible && <div className="ask-examples">
-            <div className="ask-examples-heading"><span>Get started with some examples</span><button type="button" aria-label="Hide examples" onClick={() => setExamplesVisible(false)}><Icon name="close" size={12} /></button></div>
+            <div className="ask-examples-heading"><span>Try asking</span><button type="button" aria-label="Hide examples" onClick={() => setExamplesVisible(false)}><Icon name="close" size={12} /></button></div>
             <div className="ask-starter-grid" aria-label="Starter prompts">
               {starterPrompts.map((prompt, index) => <button key={prompt} type="button" onClick={() => ask(prompt)}>
                 <Icon name={index === 0 ? "review" : index === 1 ? "search" : "people"} size={14} />
@@ -112,7 +111,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
         </section> : <section className="ask-conversation" aria-label="Conversation">
           {error && <div className="ask-thread-notice" role="alert"><Icon name="warning" size={14} /><span>{error}</span></div>}
           {messages.map((message) => <article key={message.id} className={`ask-message is-${message.role}`}>
-            <div className="ask-message-meta"><span>{message.role === "member" ? "You" : "Arden"}</span>{message.insufficientEvidence && <small>Insufficient evidence</small>}</div>
+            <div className="ask-message-meta"><span>{message.role === "member" ? "You" : "Arden"}</span>{message.insufficientEvidence && <small>Not enough information</small>}</div>
             <div className="ask-message-body"><p>{message.body}</p></div>
             {message.citations && <div className="ask-citations" aria-label="Sources">
               <span className="ask-citation-label">Sources</span>
@@ -125,7 +124,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
               </button>)}
             </div>}
           </article>)}
-          {pending && <div className="ask-answer-pending" role="status"><span />Searching authorized knowledge…</div>}
+          {pending && <div className="ask-answer-pending" role="status"><span />Searching documents…</div>}
         </section>}
       </div>
 

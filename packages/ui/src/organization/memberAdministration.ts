@@ -35,5 +35,5 @@ export function membersInDepartment(members: Member[], departmentId: string): Me
 
 export function departmentDeletionSummary(memberCount: number): string {
   const members = `${memberCount} member${memberCount === 1 ? "" : "s"}`;
-  return `Deleting this department will unassign ${members}. Members who still need a department will enter the waiting room; organization administrators remain active.`;
+  return `${members} will be unassigned and lose department access. Non-admins must be reassigned to regain workspace access.`;
 }

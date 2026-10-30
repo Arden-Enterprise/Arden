@@ -22,7 +22,7 @@ export function memberStatus(status: string, departmentId?: string | null, isOrg
 
 /** What a grant may review under decision 0015. */
 export function grantCoverageLabel(scope: ReviewerGrant["scope"]): string {
-  return scope === "ORGANIZATION" ? "Organization-wide snapshots" : "Department and group snapshots";
+  return scope === "ORGANIZATION" ? "Organization-wide documents" : "Department and group documents";
 }
 
 /** A grant with an end date shows when it ends; an open-ended grant shows when it started. */
@@ -71,16 +71,16 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
       {/* Changing Org Admin access has no server route yet, so the action is shown but unavailable. */}
       <div className="island-property"><span><small>Access</small><strong>{isAdmin ? "Organization Admin" : "Member"}</strong></span>
         <button type="button" className="island-link-button" disabled title="Changing access is not available yet">{isAdmin ? "Make Member" : "Make Org Admin"}</button></div>
-      {moving ? <label className="island-property"><span><small>Primary department</small>
+      {moving ? <label className="island-property"><span><small>Department</small>
         <select value={member.departmentId ?? ""} disabled={busy} autoFocus onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setMoving(false); } }}
           onChange={(event) => { onDepartmentChange(event.target.value); setMoving(false); }}>
           {!member.departmentId && <option value="">Choose department…</option>}
           {departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></span>
         <button type="button" className="island-link-button" onClick={() => setMoving(false)}>Cancel</button></label>
         : <div className="island-property"><span><small>Department</small><strong>{departmentName(member.departmentId)}</strong></span>
-          <span className="island-property-actions"><small className="island-property-hint" aria-live="polite">{busy ? "Saving…" : feedback === "Primary department updated." ? "Saved" : ""}</small>
+          <span className="island-property-actions"><small className="island-property-hint" aria-live="polite">{busy ? "Saving…" : feedback === "Department updated." ? "Saved" : ""}</small>
             <button type="button" className="island-link-button" disabled={busy || !departments.length} onClick={() => setMoving(true)}>Move</button></span></div>}
-      <div className="island-property"><span><small>Reviewer grant</small>
+      <div className="island-property"><span><small>Review permission</small>
         <strong>{grants.length ? grants.map((grant) => grant.scope === "ORGANIZATION"
           ? "Whole organization" : departmentName(grant.departmentId)).join(", ") : "None"}</strong></span>
         <button type="button" className="island-link-button" onClick={onGrant} disabled={member.status !== "ACTIVE"}>Manage</button></div>
@@ -89,19 +89,18 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
     {grants.length > 0 && <ul className="island-grant-summary">{grants.map((grant) => <li key={grant.id}>
       <strong>{grant.scope === "ORGANIZATION" ? "Whole organization" : departmentName(grant.departmentId)}</strong>
       <span>{grantCoverageLabel(grant.scope)}</span></li>)}</ul>}
-    <section className="island-detail-section" aria-label="Audiences">
-      <h3>Audiences</h3>
-      {groupsLoading ? <p className="island-meta" role="status">Loading audience groups…</p> : <div className="island-chip-row">
+    <section className="island-detail-section" aria-label="Readers">
+      <h3>Readers</h3>
+      {groupsLoading ? <p className="island-meta" role="status">Loading reader groups…</p> : <div className="island-chip-row">
         {member.status === "ACTIVE" && <span className="island-chip">Everyone in {organizationName}</span>}
         {member.status === "ACTIVE" && member.departmentId && <span className="island-chip">Everyone in {departmentName(member.departmentId)}</span>}
         {groupMemberships.map(({ group, groupMember }) => <span className="island-chip" key={groupMember.id}>{group.name}
           <button type="button" className="island-chip-remove" disabled={busy} aria-label={`Remove ${member.name} from ${group.name}`}
             onClick={() => onRemoveFromAudience(group, groupMember.id)}><Icon name="close" size={12} /></button></span>)}
-        {member.status !== "ACTIVE" && !groupMemberships.length && <span className="island-meta">No audiences until the membership is active.</span>}
+        {member.status !== "ACTIVE" && !groupMemberships.length && <span className="island-meta">No reader groups</span>}
       </div>}
-      <button type="button" className="secondary-button" onClick={onManageAudiences}>Manage audience groups</button>
+      <button type="button" className="secondary-button" onClick={onManageAudiences}>Manage reader groups</button>
     </section>
-    <p className="island-meta island-side-footer">Review authority does not grant reading access. Private notes stay owner-only, including for admins.</p>
     <div className="island-detail-section">
       <button type="button" className="secondary-button is-danger" disabled>Remove from organization</button>
       <small className="island-meta">Removing members is not available yet.</small>
@@ -116,7 +115,6 @@ export function DepartmentDetailIsland({ department, members, grants, busy, dele
   const heading = useDetailFocus();
   const titleId = useId();
   const inDepartment = members.filter((member) => (member.departmentIds ?? [member.departmentId]).includes(department.id));
-  const primary = members.filter((member) => member.departmentId === department.id);
   const reviewers = new Set(grants.filter((grant) => grant.status === "ACTIVE" && grant.departmentId === department.id).map((grant) => grant.reviewerMembershipId));
   return <aside className="island island-panel island-side" aria-labelledby={titleId}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
@@ -128,12 +126,11 @@ export function DepartmentDetailIsland({ department, members, grants, busy, dele
     </div>
     {deleteError && <p className="admin-feedback is-error" role="alert">{deleteError}</p>}
     <dl className="island-kv">
-      <dt>Members</dt><dd>{inDepartment.length} in department · {primary.length} primary</dd>
-      <dt>Reviewers</dt><dd>{reviewers.size} with active grants here</dd>
+      <dt>Members</dt><dd>{inDepartment.length}</dd>
+      <dt>Reviewers</dt><dd>{reviewers.size} assigned</dd>
     </dl>
     <div className="island-box">
-      <div className="island-box-title"><Icon name="people" size={15} /><strong>Everyone in {department.name}</strong><span className="island-chip">Managed</span></div>
-      <p>Follows department membership automatically. It grants read access only — no administration, review or edit rights.</p>
+      <div className="island-box-title"><Icon name="people" size={15} /><strong>Everyone in {department.name}</strong><span className="island-chip">Automatic</span></div>
     </div>
     <section className="island-detail-section" aria-label="People">
       <h3>People</h3>
@@ -146,11 +143,11 @@ export function DepartmentDetailIsland({ department, members, grants, busy, dele
     </section>
     {onDelete ? (
       <section className="island-detail-section" aria-label="Department lifecycle">
-        <h3>Department lifecycle</h3>
+        <h3>Delete department</h3>
         {inDepartment.length > 0 ? (
           <p className="island-meta">{departmentDeletionSummary(inDepartment.length)}</p>
         ) : (
-          <p className="island-meta">This department has no members and can be deleted safely.</p>
+          <p className="island-meta">No members assigned.</p>
         )}
         <button type="button" className="secondary-button is-danger" disabled={busy} onClick={onDelete}>Delete department</button>
       </section>

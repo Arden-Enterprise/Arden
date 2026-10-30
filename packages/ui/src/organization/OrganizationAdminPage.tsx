@@ -24,15 +24,7 @@ type Props = { platform: Platform; organizationId: string; organizationName: str
 type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers";
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
 const tabNames: Record<AdminTab, string> = {
-  members: "Members", departments: "Departments", audiences: "Audiences", invitations: "Invitations", reviewers: "Reviewer access",
-};
-const tabDescriptions: Record<AdminTab, (organizationName: string) => string> = {
-  // Kept to one line so the tab bar below never moves between tabs.
-  members: (name) => `People in ${name}, their department and access.`,
-  departments: () => "Each member has one primary department with its own managed audience.",
-  audiences: () => "Who can read a publication. Audiences grant no other rights.",
-  invitations: () => "People join after they sign in with the invited email and accept.",
-  reviewers: () => "Review authority for one department or the whole organization.",
+  members: "Members", departments: "Departments", audiences: "Readers", invitations: "Invitations", reviewers: "Review permissions",
 };
 const invitationTone: Record<InvitationState, string> = { PENDING: "tone-info", ACCEPTED: "tone-success", EXPIRED: "", REVOKED: "" };
 function titleCase(value: string): string { return value[0] + value.slice(1).toLowerCase(); }
@@ -145,7 +137,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       setDepartmentError("A department with this name already exists."); document.getElementById("admin-department-name")?.focus(); return;
     }
     setDepartmentError("");
-    void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentNameInput(""); }, "Department created with its managed audience.");
+    void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentNameInput(""); }, "Department created");
   };
   const handleDeleteDepartment = (department: OrganizationAdministration["departments"][number]) => {
     if (!data) return;
@@ -155,7 +147,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       title: `Delete department “${department.name}”?`,
       description: inDepartment.length > 0
         ? `${departmentDeletionSummary(inDepartment.length)} Deleting it will revoke their access to “Everyone in ${department.name}”.`
-        : `This archives the department and deactivates its managed audience “Everyone in ${department.name}”.`,
+        : `The “Everyone in ${department.name}” reader group will be removed.`,
       action: inDepartment.length > 0 ? `Delete and unassign ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}` : "Delete department",
       run: async () => {
         await deleteDepartment(platform, organizationId, department.id);
@@ -192,7 +184,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         departmentId: reviewScope === "DEPARTMENT" ? reviewDepartmentId : null,
         teamTag: teamTag.trim() || null, projectTag: projectTag.trim() || null, validUntil: null,
       }); setLastCreatedGrantId(created.id); setTeamTag(""); setProjectTag(""); setGrantFilter("ACTIVE"); setGrantSubmitted(false);
-    }, `Reviewer authority granted to ${data?.members.find((item) => item.id === reviewerId)?.name ?? "member"}. This grants scoped review, not reading access.`);
+    }, "Reviewer assigned");
   };
   const confirmAction = () => {
     if (!confirmation) return;
@@ -211,12 +203,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const overlappingGrant = reviewerGrants.some((grant) => grant.status === "ACTIVE" && grant.reviewerMembershipId === reviewerId
     && grant.scope === reviewScope
     && (reviewScope === "ORGANIZATION" || grant.departmentId === reviewDepartmentId));
-  const reviewerName = data?.members.find((item) => item.id === reviewerId)?.name;
-  const scopePreview = canGrant ? `${reviewerName} will review ${reviewScope === "ORGANIZATION"
-    ? "snapshots read by the whole organization"
-    : `department and group snapshots owned by ${departmentName(reviewDepartmentId)}`}${teamTag.trim() || projectTag.trim()
-    ? `, for ${teamTag.trim() ? `team “${teamTag.trim()}”` : "all teams"} in ${projectTag.trim() ? `project “${projectTag.trim()}”` : "all projects"}.`
-    : ", across all teams and projects."}` : "Choose a reviewer and review scope to preview the grant.";
 
   const now = Date.now();
   const invitationCounts = countInvitations(data?.invitations ?? [], now);
@@ -224,19 +210,19 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const selectedDepartment = data?.departments.find((item) => item.id === selectedDepartmentId);
   const headerAction = tab === "members" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => focusTabForm("invitations", "#admin-invite-email")}><Icon name="plus" size={14} />Invite member</button>
     : tab === "departments" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => focusTabForm("departments", "#admin-department-name")}><Icon name="plus" size={14} />New department</button>
-      : tab === "audiences" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => setAudienceCreateSignal((value) => value + 1)}><Icon name="plus" size={14} />New audience group</button>
+      : tab === "audiences" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => setAudienceCreateSignal((value) => value + 1)}><Icon name="plus" size={14} />New reader group</button>
         : undefined;
 
   return <main id="arden-main" className="workspace-page organization-live-admin" aria-labelledby="organization-live-admin-title" tabIndex={-1}>
-    <WorkspaceTopbar breadcrumb={`${organizationName} / Administration / ${tabNames[tab]}`} previewLabel="SERVER MANAGED" contextOpen={contextOpen} onToggleContext={onToggleContext} />
+    <WorkspaceTopbar breadcrumb={`${organizationName} / Administration / ${tabNames[tab]}`} contextOpen={contextOpen} onToggleContext={onToggleContext} />
     <WorkspacePageContent className="organization-access-content" header={<div className="admin-page-header">
       <WorkspacePageHeader className="organization-access-heading" eyebrow="MANAGE ORGANIZATION" title={tabNames[tab]}
-        description={tabDescriptions[tab](organizationName)} titleId="organization-live-admin-title" action={headerAction} />
+        titleId="organization-live-admin-title" action={headerAction} />
       <div className="island-seg admin-tabs" role="tablist" aria-label="Administration sections">{(Object.keys(tabNames) as AdminTab[]).map((name) => <button key={name}
         type="button" role="tab" aria-selected={tab === name} onClick={() => selectTab(name)}>{tabNames[name]}
         {name !== "audiences" && <span className="island-badge">{tabCount[name]}</span>}</button>)}</div>
     </div>}>
-      {loading ? <div role="status" className="admin-loading island"><span className="sr-only">Loading organization data…</span>{[0, 1, 2].map((index) => <div key={index} className="admin-skeleton-row" aria-hidden="true"><span /><div><span /><span /></div></div>)}</div> : error && !data ? <div className="organization-notice is-danger" role="alert"><strong>Organization data couldn't be loaded.</strong><span>The Arden server didn't respond. Check your connection, then try again.</span><button type="button" className="secondary-button" onClick={() => { setLoading(true); setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")).finally(() => setLoading(false)); }}>Try again</button></div> : data && <>
+      {loading ? <div role="status" className="admin-loading island"><span className="sr-only">Loading organization data…</span>{[0, 1, 2].map((index) => <div key={index} className="admin-skeleton-row" aria-hidden="true"><span /><div><span /><span /></div></div>)}</div> : error && !data ? <div className="organization-notice is-danger" role="alert"><strong>Couldn’t load members.</strong><span>Try again.</span><button type="button" className="secondary-button" onClick={() => { setLoading(true); setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")).finally(() => setLoading(false)); }}>Try again</button></div> : data && <>
         {error && !selectedMember && <p className="admin-feedback is-error" role="alert">{error}</p>}
         {tab === "members" && <div role="tabpanel" aria-label="Members" className="admin-tabpanel">
           <div className="admin-filters">
@@ -269,10 +255,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             departmentName={departmentName} departments={data.departments} audienceGroups={memberAudienceGroups} groupsLoading={memberGroupsLoading}
             feedback={message} feedbackError={error} busy={busy}
             grants={reviewerGrants.filter((grant) => grant.reviewerMembershipId === selectedMember.id && grant.status === "ACTIVE")}
-            onClose={() => setSelectedMemberId(null)} onDepartmentChange={(id) => void perform(() => changePrimaryDepartment(platform, organizationId, selectedMember.id, id), "Primary department updated.")}
+            onClose={() => setSelectedMemberId(null)} onDepartmentChange={(id) => void perform(() => changePrimaryDepartment(platform, organizationId, selectedMember.id, id), "Department updated.")}
             onManageAudiences={() => { setSelectedMemberId(null); selectTab("audiences"); }}
             onRemoveFromAudience={(group, groupMembershipId) => setConfirmation({
-              title: `Remove ${selectedMember.name} from ${group.name}?`, description: "This member will lose access granted by this audience group on their next request.", action: "Remove member",
+              title: `Remove ${selectedMember.name} from ${group.name}?`, description: "Access through this group will be removed.", action: "Remove member",
               run: async () => { const updated = await removeAudienceGroupMember(platform, organizationId, group.id, groupMembershipId); setMemberAudienceGroups((current) => current.map((item) => item.id === updated.id ? updated : item)); },
             })}
             onGrant={() => { setReviewerId(selectedMember.id); setReviewDepartmentId(selectedMember.departmentId ?? ""); setSelectedMemberId(null); focusTabForm("reviewers", "#admin-reviewer-select"); }} />}
@@ -280,7 +266,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         </div>}
         {tab === "departments" && <div role="tabpanel" aria-label="Departments" className="island-split">
           <div className="island-main">
-            <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || "Arden also creates its managed “Everyone in …” audience."}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
+            <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || ""}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
             {data.departments.length ? <IslandTable label="Departments" minWidth={600} columns="minmax(220px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) 96px"
               headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS", <span className="sr-only">Actions</span>]}>
               {data.departments.map((department) => {
@@ -296,7 +282,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                   </IslandCell>
                 </IslandRow>;
               })}
-            </IslandTable> : <div className="island island-empty"><h3>No departments yet</h3><p>Create one before inviting members. Every member needs a primary department.</p></div>}
+            </IslandTable> : <div className="island island-empty"><h3>No departments yet</h3></div>}
           </div>
           {selectedDepartment && <DepartmentDetailIsland key={selectedDepartment.id} department={selectedDepartment} members={members} grants={reviewerGrants}
             busy={busy} deleteError={error}
@@ -340,17 +326,16 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               <button className="primary-button" type="submit" disabled={busy}>{busy ? "Sending…" : "Send invitation"}</button>
               {inviteSuccess && <p className="admin-inline-success" role="status">{inviteSuccess}</p>}
             </form>
-            <p className="island-meta">Each link is single-use and expires. Invited members join the organization waiting room until assigned to a department.</p>
           </aside>
           </div>
         </div>}
-        {tab === "reviewers" && <div role="tabpanel" aria-label="Reviewer access" className="admin-tabpanel">
-          <div className="island-seg is-filter" role="group" aria-label="Filter grants">{(["ACTIVE", "INACTIVE"] as const).map((filter) => <button key={filter} type="button"
+        {tab === "reviewers" && <div role="tabpanel" aria-label="Review permissions" className="admin-tabpanel">
+          <div className="island-seg is-filter" role="group" aria-label="Filter review permissions">{(["ACTIVE", "INACTIVE"] as const).map((filter) => <button key={filter} type="button"
             aria-pressed={grantFilter === filter} onClick={() => setGrantFilter(filter)}>{titleCase(filter)}<span className="island-badge">{reviewerGrants.filter((item) => item.status === filter).length}</span></button>)}</div>
           <div className="island-split">
           <div className="island-main">
-            {reviewerGrants.filter((grant) => grant.status === grantFilter).length ? <IslandTable label="Reviewer grants" minWidth={680} columns="minmax(180px, 1.4fr) minmax(130px, .9fr) minmax(180px, 1.3fr) 124px 84px"
-              headers={["REVIEWER", "COVERS", "REVIEW SCOPE", "STATUS", <span className="sr-only">Actions</span>]}>
+            {reviewerGrants.filter((grant) => grant.status === grantFilter).length ? <IslandTable label="Review permissions" minWidth={680} columns="minmax(180px, 1.4fr) minmax(130px, .9fr) minmax(180px, 1.3fr) 124px 84px"
+              headers={["REVIEWER", "COVERS", "DOCUMENTS", "STATUS", <span className="sr-only">Actions</span>]}>
               {reviewerGrants.filter((grant) => grant.status === grantFilter).map((grant) => {
                 const reviewer = data.members.find((member) => member.id === grant.reviewerMembershipId);
                 const tags = grant.teamTag || grant.projectTag ? [grant.teamTag && `Team: ${grant.teamTag}`, grant.projectTag && `Project: ${grant.projectTag}`].filter(Boolean).join(" · ") : "All teams and projects";
@@ -361,28 +346,27 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                   <IslandCell>{grantCoverageLabel(grant.scope)}</IslandCell>
                   <IslandCell className="island-row-cell is-status"><span className={`island-chip has-dot${grant.status === "ACTIVE" ? " tone-success" : ""}`}>{titleCase(grant.status)}</span><small>{grantValidity(grant)}</small></IslandCell>
                   <IslandCell className="island-row-actions">{grant.status === "ACTIVE" ? <button type="button" className="secondary-button" disabled={busy} onClick={() => setConfirmation({
-                    title: `Deactivate ${reviewer?.name ?? "this member"}'s reviewer authority?`, description: "This grant will stop authorizing review decisions. Existing decisions remain recorded.", action: "Revoke", run: () => deactivateReviewerGrant(platform, organizationId, grant.id),
-                  })}>Revoke</button> : <span className="island-action-slot" aria-hidden="true" />}</IslandCell>
+                    title: `Remove ${reviewer?.name ?? "this member"}'s review permission?`, description: "Previous decisions will be kept.", action: "Remove permission", run: () => deactivateReviewerGrant(platform, organizationId, grant.id),
+                  })}>Remove</button> : <span className="island-action-slot" aria-hidden="true" />}</IslandCell>
                 </IslandRow>;
               })}
-            </IslandTable> : <div className="island island-empty"><h3>No {grantFilter.toLowerCase()} reviewer grants</h3><p>Use New grant to give an active member scoped review authority.</p></div>}
-            <p className="island-note"><Icon name="shield" size={16} /><span>Reviewers see only the exact submitted snapshot. Approving does not make them a reader of the published version, and no reviewer can approve their own submission.</span></p>
+            </IslandTable> : <div className="island island-empty"><h3>No {grantFilter.toLowerCase()} review permissions</h3></div>}
           </div>
           <form id="admin-grant-form" className="island island-panel island-side admin-form-island admin-grant-form" aria-labelledby="admin-grant-title" onSubmit={submitReviewerGrant}>
-            <h2 id="admin-grant-title">New grant</h2>
-            <label className="organization-field"><span>Reviewer</span><select id="admin-reviewer-select" disabled={busy} value={reviewerId} aria-invalid={grantSubmitted && !reviewerId} aria-describedby="admin-reviewer-help" onChange={(event) => setReviewerId(event.target.value)}><option value="">Choose an active member</option>{data.members.filter((member) => member.status === "ACTIVE").map((member) => <option key={member.id} value={member.id}>{member.name} · {member.email}</option>)}</select><small id="admin-reviewer-help" className={grantSubmitted && !reviewerId ? "field-error" : ""}>{grantSubmitted && !reviewerId ? "Choose a reviewer." : "Only active members can review."}</small></label>
-            <div className="organization-field admin-grant-scope"><span>Scope</span><div className="island-seg is-filter" role="group" aria-label="Review scope">
+            <h2 id="admin-grant-title">Assign reviewer</h2>
+            <label className="organization-field"><span>Reviewer</span><select id="admin-reviewer-select" disabled={busy} value={reviewerId} aria-invalid={grantSubmitted && !reviewerId} aria-describedby="admin-reviewer-help" onChange={(event) => setReviewerId(event.target.value)}><option value="">Choose an active member</option>{data.members.filter((member) => member.status === "ACTIVE").map((member) => <option key={member.id} value={member.id}>{member.name} · {member.email}</option>)}</select><small id="admin-reviewer-help" className={grantSubmitted && !reviewerId ? "field-error" : ""}>{grantSubmitted && !reviewerId ? "Choose a reviewer." : ""}</small></label>
+            <div className="organization-field admin-grant-scope"><span>Documents to review</span><div className="island-seg is-filter" role="group" aria-label="Review scope">
               <button type="button" aria-pressed={reviewScope === "DEPARTMENT"} disabled={busy} onClick={() => setReviewScope("DEPARTMENT")}>One department</button>
               <button type="button" aria-pressed={reviewScope === "ORGANIZATION"} disabled={busy} onClick={() => setReviewScope("ORGANIZATION")}>Whole organization</button>
-            </div><small>Scopes are separate; each grant covers only the selected kind of snapshot.</small></div>
-            {reviewScope === "DEPARTMENT" && <label className="organization-field"><span>Department</span><select id="admin-review-department" disabled={busy} value={reviewDepartmentId} aria-invalid={grantSubmitted && !reviewDepartmentId} aria-describedby="admin-review-department-help" onChange={(event) => setReviewDepartmentId(event.target.value)}><option value="">Choose department</option>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small id="admin-review-department-help" className={grantSubmitted && !reviewDepartmentId ? "field-error" : ""}>{grantSubmitted && !reviewDepartmentId ? "Choose a department." : "Submissions owned by this department."}</small></label>}
+            </div></div>
+            {reviewScope === "ORGANIZATION" && <p className="island-meta">Company-wide documents only. Assign department reviews separately.</p>}
+            {reviewScope === "DEPARTMENT" && <label className="organization-field"><span>Department</span><select id="admin-review-department" disabled={busy} value={reviewDepartmentId} aria-invalid={grantSubmitted && !reviewDepartmentId} aria-describedby="admin-review-department-help" onChange={(event) => setReviewDepartmentId(event.target.value)}><option value="">Choose department</option>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select><small id="admin-review-department-help" className={grantSubmitted && !reviewDepartmentId ? "field-error" : ""}>{grantSubmitted && !reviewDepartmentId ? "Choose a department." : ""}</small></label>}
             <div className="admin-grant-tags">
               <label className="organization-field"><span>Team tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={teamTag} onChange={(event) => setTeamTag(event.target.value)} /></label>
               <label className="organization-field"><span>Project tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={projectTag} onChange={(event) => setProjectTag(event.target.value)} /></label>
             </div>
-            <p className="admin-scope-preview" aria-live="polite">{scopePreview}</p>
-            {overlappingGrant && <p className="admin-feedback is-warning">This reviewer already has an active grant for this scope.</p>}
-            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Granting…" : "Create grant"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); }}>Reset</button></div>
+            {overlappingGrant && <p className="admin-feedback is-warning">Review permission already assigned.</p>}
+            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Assign reviewer"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); }}>Reset</button></div>
           </form>
           </div>
         </div>}

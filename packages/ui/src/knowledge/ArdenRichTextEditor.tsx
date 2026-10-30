@@ -122,7 +122,7 @@ export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLe
   useEffect(() => { acceptedBody.current = body; }, [body]);
 
   if (initialDocument.status === "invalid") {
-    return <p className="arden-document-error" role="alert">{initialDocument.message}</p>;
+    return <p className="arden-document-error" role="alert">Couldn’t open document.</p>;
   }
 
   const handleChange = () => {
@@ -147,14 +147,14 @@ export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLe
     <BlockNoteView editor={editor} theme="dark" editable={!disabled} onChange={handleChange}
       onSelectionChange={() => setSelectionRevision((value) => value + 1)} className="arden-blocknote-editor"
       {...disabledBlockNoteUi} />
-    {limitReached && <p className="arden-document-limit" role="status">Document text has reached the 128 KB storage limit.</p>}
+    {limitReached && <p className="arden-document-limit" role="status">Edit not applied. Document limit: {maxLength.toLocaleString()} characters, including formatting.</p>}
   </div>;
 }
 
 export function ArdenDocumentView({ body, instanceKey }: Pick<Props, "body" | "instanceKey">) {
   const { editor, initialDocument } = useArdenEditor(body, instanceKey);
   if (initialDocument.status === "invalid") {
-    return <p className="arden-document-error" role="alert">{initialDocument.message}</p>;
+    return <p className="arden-document-error" role="alert">Couldn’t open document.</p>;
   }
   return <BlockNoteView editor={editor} theme="dark" editable={false} className="arden-blocknote-document"
     {...disabledBlockNoteUi} />;

@@ -273,9 +273,18 @@ export function deactivateReviewerGrant(platform: Platform, organizationId: stri
   return request(platform, `${knowledgePath(organizationId)}/reviewer-grants/${grantId}/deactivate`, { method: "POST" });
 }
 
+const userErrorMessages: Record<string, string> = {
+  AUTH_UNAVAILABLE: "Sign-in unavailable.",
+  AI_UNAVAILABLE: "Ask Arden is unavailable.",
+  INVALID_DOCUMENT: "Unsupported document format.",
+  INVALID_METADATA: "Check document details.",
+  SOURCE_NOT_SUPPORTED: "Couldn’t copy this note.",
+  IDEMPOTENCY_CONFLICT: "Request changed. Reopen to try again.",
+};
+
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly code: string | null = null) {
-    super(message);
+    super(code && Object.hasOwn(userErrorMessages, code) ? userErrorMessages[code] : message);
     this.name = "ApiError";
   }
 }
@@ -451,11 +460,11 @@ export async function createKnowledgeDraft(platform: Platform, organizationId: s
     });
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 0) {
-      throw new ApiError(0, "Could not confirm whether the shared draft was created. Retry the same request to check safely.");
+      throw new ApiError(0, "Couldn’t confirm draft creation.");
     }
     throw cause;
   }
-  if (typeof response !== "object" || response === null || Array.isArray(response)) throw new ApiError(0, "The server returned an invalid shared draft.");
+  if (typeof response !== "object" || response === null || Array.isArray(response)) throw new ApiError(0, "Couldn’t confirm draft creation.");
   const draft = response as Record<string, unknown>;
   const currentVersion = draft.currentVersion;
   if (typeof draft.id !== "string" || draft.organizationId !== organizationId ||
@@ -464,7 +473,7 @@ export async function createKnowledgeDraft(platform: Platform, organizationId: s
     draft.status !== "ACTIVE" || typeof currentVersion !== "object" || currentVersion === null ||
     !("version" in currentVersion) || typeof currentVersion.version !== "number" ||
     !Number.isSafeInteger(currentVersion.version) || currentVersion.version < 1) {
-    throw new ApiError(0, "The server returned an invalid shared draft.");
+    throw new ApiError(0, "Couldn’t confirm draft creation.");
   }
   return {
     id: draft.id,
@@ -525,7 +534,7 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
     }
   } catch (cause) {
     if (cause instanceof ApiError) throw cause;
-    throw new ApiError(0, "Arden could not reach its server. Your changes have not been saved.");
+    throw new ApiError(0, method === "GET" ? "Connection unavailable." : "Couldn’t confirm this action.");
   }
 
   if (response.status < 200 || response.status >= 300) {
@@ -549,7 +558,7 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
   }
   if (response.status === 204 || response.body.length === 0) return undefined as T;
   try { return JSON.parse(response.body) as T; }
-  catch { throw new ApiError(response.status, "The server returned an invalid response."); }
+  catch { throw new ApiError(response.status, method === "GET" ? "Couldn’t load this information." : "Couldn’t confirm this action."); }
 }
 
 function requireDesktopBridge() {

@@ -37,7 +37,7 @@ export class ErrorBoundary extends Component<Props, State> {
         <main className="workspace-page" role="alert" style={{ padding: "2rem" }}>
           <div className="island island-empty">
             <h3>Something went wrong</h3>
-            <p>{this.state.error.message || "An unexpected error occurred."}</p>
+            <p>Couldn’t open this page.</p>
             <button type="button" className="secondary-button" onClick={this.reset}>
               Try again
             </button>

@@ -28,6 +28,13 @@ describe("hosted membership assignment status", () => {
       organization: { id: "org-1", name: "Test Organization" },
       status: "active", departmentId: null, departmentName: null,
       roleCodes: ["MEMBER"], canUsePrivateWorkspace: false,
-    })).toBe("MEMBER");
+    })).toBe("Member");
+  });
+
+  it("uses a readable administrator label without exposing role codes", () => {
+    expect(membershipAccessDescription({
+      organization: { id: "org-1", name: "Test Organization" },
+      status: "active", departmentId: null, roleCodes: ["ORG_ADMIN"], canUsePrivateWorkspace: true,
+    })).toBe("Organization Admin");
   });
 });

@@ -24,7 +24,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
         <div className="sign-in-card workspace-select-card">
           <span className="meta-label">01 / YOUR ORGANIZATION</span>
           <h2 id="workspace-select-title">Choose your workspace</h2>
-          {testMode && <p className="preview-disclaimer" role="status">Kiet Local test session · no login · changes are saved to the development database; invitation emails are not sent.</p>}
+          {testMode && <p className="preview-disclaimer" role="status">Test mode · Emails disabled</p>}
 
           {isLive ? <div className="workspace-memberships">
             {choices.map((membership) => {
@@ -38,7 +38,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
                   </span>
                   <span>
                     {isAwaiting
-                      ? "Organization joined · Awaiting department assignment"
+                      ? "Awaiting department assignment"
                       : membershipAccessDescription(membership)}
                   </span>
                 </button>
@@ -46,9 +46,9 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
             })}
             {memberships.filter((item) => !choices.includes(item)).map((membership) => <div key={membership.organization.id} className="workspace-membership is-unavailable">
               <span className="workspace-membership-heading"><img src={entryAssets.unavailableWorkspace} alt="" width={26} height={26} /><strong>{membership.organization.name}</strong><span className="workspace-membership-status">{membership.status.toUpperCase()}</span></span>
-              <span>An active membership is required.</span>
+              <span>Access unavailable</span>
             </div>)}
-            {choices.length === 0 && <p role="status">You do not have an active organization workspace yet. You can create an organization or ask an administrator for membership.</p>}
+            {choices.length === 0 && <p role="status">No workspace available.</p>}
             {onCreateOrganization && <form className="organization-create-form" onSubmit={(event) => {
               event.preventDefault();
               setCreating(true); setCreateError("");
@@ -77,10 +77,10 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
                 <img src={entryAssets.unavailableWorkspace} alt="" width={26} height={26} />
                 <strong>Research Sandbox</strong>
                 <span className="workspace-membership-status">
-                  <img src={entryAssets.statusMuted} alt="" width={7} height={7} />NOT CONNECTED
+                  <img src={entryAssets.statusMuted} alt="" width={7} height={7} />UNAVAILABLE
                 </span>
               </span>
-              <span>This sample workspace is not connected.</span>
+              <span>Demo workspace</span>
             </button>
           </div>}
           {!isLive && <><button type="button" className="primary-button workspace-continue" onClick={() => onContinue()}>Continue to workspace</button>

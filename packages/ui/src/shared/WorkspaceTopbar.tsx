@@ -18,7 +18,7 @@ function initials(label: string): string {
  */
 export function WorkspaceTopbar({ breadcrumb, previewLabel, contextOpen, onToggleContext, search, searchActive = false, panel, chrome = "full" }: ContextControlProps & {
   breadcrumb: string;
-  previewLabel: string;
+  previewLabel?: string;
   /** Page-scoped search field revealed inside the island. */
   search?: ReactNode;
   /** Keeps the island expanded while the search holds a value. */
@@ -120,7 +120,7 @@ export function WorkspaceTopbar({ breadcrumb, previewLabel, contextOpen, onToggl
         </div>}
       </div>
       {!reader && <div className="topbar-actions">
-        <span className="preview-state">{previewLabel}</span>
+        {previewLabel && <span className="preview-state">{previewLabel}</span>}
         <button type="button" className="context-toggle" onClick={onToggleContext} aria-expanded={contextOpen} aria-controls="arden-context-panel">
           <Icon name="knowledge" size={16} /><span>Context</span>
         </button>
