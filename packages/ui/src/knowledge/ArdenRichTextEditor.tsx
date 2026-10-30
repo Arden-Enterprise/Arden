@@ -72,15 +72,28 @@ const textSizes: { value: TextSize; label: string }[] = [
 function TextSizeMenu({ value, disabled, onChange }: { value: TextSize; disabled: boolean; onChange: (size: TextSize) => void }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const focusListOnOpen = useRef(false);
   const menuId = useId();
   const current = textSizes.find((option) => option.value === value) ?? textSizes[0];
 
+  const close = (restoreFocus: boolean) => {
+    setOpen(false);
+    if (restoreFocus) triggerRef.current?.focus();
+  };
+
   useEffect(() => {
     if (!open) return;
+    if (focusListOnOpen.current) {
+      focusListOnOpen.current = false;
+      const selected = rootRef.current?.querySelector<HTMLButtonElement>("[role='option'][aria-selected='true']")
+        ?? rootRef.current?.querySelector<HTMLButtonElement>("[role='option']");
+      selected?.focus();
+    }
     const onPointer = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const onKey = (event: globalThis.KeyboardEvent) => { if (event.key === "Escape") close(true); };
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -89,16 +102,45 @@ function TextSizeMenu({ value, disabled, onChange }: { value: TextSize; disabled
     };
   }, [open]);
 
+  const moveOption = (currentOption: HTMLButtonElement, direction: 1 | -1) => {
+    const items = [...rootRef.current?.querySelectorAll<HTMLButtonElement>("[role='option']") ?? []];
+    const index = items.indexOf(currentOption);
+    items[Math.min(items.length - 1, Math.max(0, index + direction))]?.focus();
+  };
+
   return <div className={`arden-text-size${open ? " is-open" : ""}`} ref={rootRef}>
-    <button type="button" className="arden-text-size-trigger" aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId}
-      disabled={disabled} onMouseDown={(event) => event.preventDefault()} onClick={() => setOpen((currentOpen) => !currentOpen)}>
+    <button type="button" className="arden-text-size-trigger" ref={triggerRef} aria-haspopup="listbox" aria-expanded={open} aria-controls={menuId}
+      aria-label={`Text size: ${current.label}`}
+      disabled={disabled} onMouseDown={(event) => event.preventDefault()}
+      onClick={(event) => {
+        const next = !open;
+        focusListOnOpen.current = next && event.detail === 0;
+        setOpen(next);
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+        event.preventDefault();
+        if (open) {
+          const selected = rootRef.current?.querySelector<HTMLButtonElement>("[role='option'][aria-selected='true']")
+            ?? rootRef.current?.querySelector<HTMLButtonElement>("[role='option']");
+          selected?.focus();
+          return;
+        }
+        focusListOnOpen.current = true;
+        setOpen(true);
+      }}>
       <span>{current.label}</span>
     </button>
     {open && <div className="arden-text-size-menu" id={menuId} role="listbox" aria-label="Text size">
       {textSizes.map((option) => <button type="button" key={option.value} role="option" aria-selected={option.value === value}
         className={option.value === value ? "is-selected" : undefined}
         onMouseDown={(event) => event.preventDefault()}
-        onClick={() => { onChange(option.value); setOpen(false); }}>{option.label}</button>)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") { event.preventDefault(); moveOption(event.currentTarget, 1); }
+          if (event.key === "ArrowUp") { event.preventDefault(); moveOption(event.currentTarget, -1); }
+          if (event.key === "Escape") { event.preventDefault(); close(true); }
+        }}
+        onClick={() => { onChange(option.value); close(true); }}>{option.label}</button>)}
     </div>}
   </div>;
 }

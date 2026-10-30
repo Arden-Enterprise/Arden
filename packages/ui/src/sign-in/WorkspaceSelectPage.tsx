@@ -36,8 +36,11 @@ export function WorkspaceSelectPage({
     setCreateError("");
     try {
       await onCreateOrganization(trimmed);
+      setOrganizationInput("");
+      setShowCreate(false);
     } catch (error: unknown) {
       setCreateError(error instanceof Error ? error.message : "Organization setup could not be completed.");
+    } finally {
       setCreating(false);
     }
   };

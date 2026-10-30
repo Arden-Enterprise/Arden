@@ -175,53 +175,53 @@
   display: flex; flex: 999 1 520px; flex-direction: column; gap: 0; min-width: 0; padding-bottom: 18px;
   border-color: #1c1c22; border-radius: 10px; background: #141418; box-shadow: none;
 }
-.arden-app-shell .draft-document .arden-rich-text-shell { overflow: visible; border: 0; border-radius: 0; background: transparent; }
-.arden-app-shell .draft-document .arden-format-toolbar {
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-rich-text-shell { overflow: visible; border: 0; border-radius: 0; background: transparent; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar {
   gap: 4px; min-height: 40px; margin: 0 0 8px; padding: 0; border-bottom: 1px solid #1c1c22; background: transparent;
 }
-.arden-app-shell .draft-document .arden-format-toolbar button {
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button {
   min-width: 32px; min-height: 32px; padding: 0 8px; border: 0; border-radius: 8px;
   color: var(--arden-text-secondary); background: transparent; font-size: 13px; font-weight: 600;
 }
-.arden-app-shell .draft-document .arden-format-toolbar button:hover:not(:disabled),
-.arden-app-shell .draft-document .arden-format-toolbar button.is-active { border: 0; color: var(--arden-text-primary); background: #2e2e38; }
-.arden-app-shell .draft-document .arden-format-divider { height: 16px; margin: 0 4px; background: #2a2a32; }
-.arden-app-shell .draft-document .arden-format-group { display: flex; align-items: center; gap: 2px; }
-.arden-app-shell .draft-document .arden-format-block { width: 32px; padding: 0; font-size: 15px; line-height: 1; }
-.arden-app-shell .draft-document .arden-text-size { position: relative; }
-.arden-app-shell .draft-document .arden-format-toolbar button.arden-text-size-trigger {
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button:hover:not(:disabled),
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.is-active { border: 0; color: var(--arden-text-primary); background: #2e2e38; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-divider { height: 16px; margin: 0 4px; background: #2a2a32; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-group { display: flex; align-items: center; gap: 2px; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-block { width: 32px; padding: 0; font-size: 15px; line-height: 1; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size { position: relative; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.arden-text-size-trigger {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 108px; min-width: 108px; min-height: 32px; padding: 0 10px;
   border: 1px solid #2a2a32; border-radius: 8px; color: var(--arden-text-primary); background: #1c1c22; font-size: 13px; font-weight: 500;
 }
-.arden-app-shell .draft-document .arden-text-size-trigger::after {
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size-trigger::after {
   content: ""; flex: none; width: 0; height: 0; border-right: 4px solid transparent; border-left: 4px solid transparent; border-top: 4px solid currentColor; opacity: .7;
 }
-.arden-app-shell .draft-document .arden-text-size-trigger::after { transition: transform 140ms var(--arden-motion-ease, ease); }
-.arden-app-shell .draft-document .arden-format-toolbar button.arden-text-size-trigger:hover:not(:disabled),
-.arden-app-shell .draft-document .arden-text-size.is-open .arden-text-size-trigger { border-color: #2a2a32; color: var(--arden-text-primary); background: #1c1c22; }
-.arden-app-shell .draft-document .arden-format-toolbar button.arden-text-size-trigger:focus,
-.arden-app-shell .draft-document .arden-format-toolbar button.arden-text-size-trigger:focus-visible { outline: none; box-shadow: none; }
-.arden-app-shell .draft-document .arden-text-size.is-open .arden-text-size-trigger::after { transform: rotate(180deg); }
-.arden-app-shell .draft-document .arden-text-size-menu {
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size-trigger::after { transition: transform 140ms var(--arden-motion-ease, ease); }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.arden-text-size-trigger:hover:not(:disabled),
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size.is-open .arden-text-size-trigger { border-color: #2a2a32; color: var(--arden-text-primary); background: #1c1c22; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.arden-text-size-trigger:focus,
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.arden-text-size-trigger:focus-visible { outline: none; box-shadow: none; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size.is-open .arden-text-size-trigger::after { transform: rotate(180deg); }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size-menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 6; display: grid; gap: 1px; width: 108px; padding: 4px;
   border: 1px solid #2a2a32; border-radius: 8px; background: #1c1c22; box-shadow: 0 12px 28px rgb(0 0 0 / 36%);
   transform-origin: top center; animation: arden-text-size-in 140ms var(--arden-motion-ease, ease);
 }
-.arden-app-shell .draft-document .arden-format-toolbar .arden-text-size-menu button {
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button {
   justify-content: flex-start; width: 100%; min-width: 0; min-height: 26px; padding: 0 8px; border: 0; border-radius: 5px;
   color: var(--arden-text-secondary); background: transparent; text-align: left; font-size: 12px; font-weight: 500; white-space: nowrap;
 }
-.arden-app-shell .draft-document .arden-format-toolbar .arden-text-size-menu button:nth-child(2) { font-size: 14px; font-weight: 600; }
-.arden-app-shell .draft-document .arden-format-toolbar .arden-text-size-menu button:nth-child(3) { font-size: 16px; font-weight: 650; }
-.arden-app-shell .draft-document .arden-format-toolbar .arden-text-size-menu button:hover:not(:disabled),
-.arden-app-shell .draft-document .arden-format-toolbar .arden-text-size-menu button.is-selected { color: var(--arden-text-primary); background: #2e2e38; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button:nth-child(2) { font-size: 14px; font-weight: 600; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button:nth-child(3) { font-size: 16px; font-weight: 650; }
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button:hover:not(:disabled),
+.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button.is-selected { color: var(--arden-text-primary); background: #2e2e38; }
 .arden-app-shell .draft-document .bn-editor { min-height: 280px; padding: 8px 2px 16px; color: #dcdbe3; font-size: 15px; line-height: 1.75; }
 .arden-app-shell .draft-document .bn-editor:focus,
 .arden-app-shell .draft-document .bn-editor:focus-visible,
 .arden-app-shell .draft-document .ProseMirror:focus,
 .arden-app-shell .draft-document .ProseMirror:focus-visible { outline: none; box-shadow: none; }
 @keyframes arden-text-size-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .arden-app-shell .draft-document .arden-text-size-menu { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size-menu { animation: none; } }
 .draft-document { display: flex; flex: 999 1 520px; flex-direction: column; gap: 12px; min-width: 0; padding-bottom: 18px; }
 .draft-document > .knowledge-notice { margin: 0 18px; }
 .draft-document-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--arden-border); }

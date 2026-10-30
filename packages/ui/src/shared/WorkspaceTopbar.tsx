@@ -6,7 +6,7 @@ import { ToastContent } from "./ActionToast";
 
 export type ContextControlProps = { contextOpen: boolean; onToggleContext: () => void };
 
-const ardenMark = new URL("../../../../brand/arden-logo-final/png/arden-logo-white.png", import.meta.url).href;
+const ardenMark = new URL("../assets/arden-logo-white.png", import.meta.url).href;
 
 type IslandMode = "idle" | "search" | "toast" | "confirm" | "panel";
 

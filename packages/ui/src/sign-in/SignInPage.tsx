@@ -70,6 +70,8 @@ export function SignInPage({
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [resetToken, setResetToken] = useState("");
+  const [useResetCode, setUseResetCode] = useState(false);
+  const usingRecoverySession = Boolean(recoveryTokens) && !useResetCode;
   const [notice, setNotice] = useState<{ text: string; isSuccess?: boolean } | null>(() => {
     const status = new URLSearchParams(window.location.search).get("status");
     return status === "error" ? { text: "Sign in could not be completed." } : null;
@@ -163,7 +165,7 @@ export function SignInPage({
     setBusy("submit");
     setNotice(null);
     try {
-      if (recoveryTokens) {
+      if (usingRecoverySession && recoveryTokens) {
         await resetPasswordWithToken(platform, {
           accessToken: recoveryTokens.accessToken,
           refreshToken: recoveryTokens.refreshToken,
@@ -374,7 +376,7 @@ export function SignInPage({
                 </div>
               )}
               <form onSubmit={handleResetPassword}>
-                {!recoveryTokens && (
+                {!usingRecoverySession && (
                   <>
                     <label>
                       <span>Email address</span>
@@ -440,7 +442,7 @@ export function SignInPage({
                   <button
                     type="button"
                     className="auth-text-link"
-                    onClick={() => switchMode("forgot-password")}
+                    onClick={() => { setUseResetCode(true); switchMode("forgot-password"); }}
                   >
                     Request new code
                   </button>

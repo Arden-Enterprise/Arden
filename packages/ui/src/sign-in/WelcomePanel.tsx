@@ -1,7 +1,7 @@
 import { KnowledgeConnections } from "./KnowledgeConnections";
 import { entryAssets } from "./entryAssets";
 
-const ardenLockup = new URL("../../../../brand/arden-logo-final/svg/arden-lockup-white.svg", import.meta.url).href;
+const ardenLockup = new URL("../assets/arden-lockup-white.svg", import.meta.url).href;
 
 export function WelcomePanel({ mode = "sign-in" }: { mode?: "sign-in" | "workspace" }) {
   const selectingWorkspace = mode === "workspace";

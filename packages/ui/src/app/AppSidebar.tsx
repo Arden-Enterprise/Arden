@@ -70,13 +70,22 @@ function SidebarAccountMenu({ memberName, memberRole, authenticated, onSignOut }
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const actionRef = useRef<HTMLButtonElement>(null);
+  const focusActionOnOpen = useRef(false);
   useEffect(() => {
     if (!open) return;
+    if (focusActionOnOpen.current) {
+      focusActionOnOpen.current = false;
+      actionRef.current?.focus();
+    }
     const onPointer = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      triggerRef.current?.focus();
     };
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
@@ -88,15 +97,20 @@ function SidebarAccountMenu({ memberName, memberRole, authenticated, onSignOut }
 
   return (
     <div className="sidebar-account" ref={rootRef}>
-      {open && <div className="sidebar-account-menu" id={menuId} role="menu">
-        <button type="button" role="menuitem" disabled>Settings</button>
-        <button type="button" role="menuitem" onClick={() => { setOpen(false); onSignOut(); }}>{authenticated ? "Log out" : "Exit preview"}</button>
-      </div>}
-      <button type="button" className="sidebar-member" title={`${memberName} · ${memberRole}`}
-        aria-expanded={open} aria-haspopup="menu" aria-controls={menuId} onClick={() => setOpen((current) => !current)}>
+      <button type="button" className="sidebar-member" title={`${memberName} · ${memberRole}`} ref={triggerRef}
+        aria-expanded={open} aria-haspopup="menu" aria-controls={menuId}
+        onClick={(event) => {
+          const next = !open;
+          focusActionOnOpen.current = next && event.detail === 0;
+          setOpen(next);
+        }}>
         <span className="sidebar-avatar" aria-hidden="true">{initialsOf(memberName)}</span>
         <div><strong>{memberName}</strong><span>{memberRole}</span></div>
       </button>
+      {open && <div className="sidebar-account-menu" id={menuId} role="menu">
+        <button type="button" role="menuitem" disabled>Settings</button>
+        <button type="button" role="menuitem" ref={actionRef} onClick={() => { setOpen(false); onSignOut(); }}>{authenticated ? "Log out" : "Exit preview"}</button>
+      </div>}
     </div>
   );
 }
@@ -160,7 +174,7 @@ export function AppSidebar({
       </div>
 
       <div className="sidebar-workspace-row">
-        <button type="button" className="access-card" disabled={!canSwitchWorkspace} onClick={onSwitchWorkspace}
+        <button type="button" className="access-card" disabled={!canSwitchWorkspace} tabIndex={collapsed && canSwitchWorkspace ? -1 : undefined} onClick={onSwitchWorkspace}
           aria-label={`Workspace: ${organizationName}${canSwitchWorkspace ? ". Switch workspace" : ""}`} title={organizationName}>
           <span className="access-card-mark" aria-hidden="true">{initialsOf(organizationName)}</span>
           <span className="access-card-copy"><strong id="access-card-title">{organizationName}</strong>

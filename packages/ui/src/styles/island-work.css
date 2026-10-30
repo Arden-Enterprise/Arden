@@ -142,6 +142,9 @@
 .personal-feedback { margin: 0 0 12px; }
 
 @container workspace (max-width: 760px) {
+  .arden-app-shell:has(.personal-content) .workspace-topbar { grid-column: 1 / -1; height: auto; min-height: 64px; }
+  .arden-app-shell:has(.personal-content) .personal-content { padding-top: 76px; }
+  .arden-app-shell .note-editor-card { padding-top: 0; }
   .arden-app-shell .personal-grid { grid-template-columns: minmax(0, 1fr); }
   .arden-app-shell .note-list-card { max-width: none; height: 100%; }
   .arden-app-shell .personal-content:not(.is-editing-note) .note-editor-card { display: none; }
@@ -150,4 +153,11 @@
   .arden-app-shell .note-back-button { display: inline-flex; }
   .note-editor-page { padding: 24px 18px; }
   .arden-app-shell .editor-title-label textarea { font-size: 24px; }
+}
+@media (max-width: 639px) {
+  .arden-app-shell:has(.personal-content) .workspace-page { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .arden-app-shell:has(.personal-content) .personal-content { grid-row: 2; padding-top: 0; }
+  .arden-app-shell:has(.personal-content) .app-sidebar,
+  .arden-app-shell.is-nav-open .app-sidebar { z-index: 9; }
+  .arden-app-shell .personal-content .workspace-scroll-content { padding-bottom: 112px; }
 }
