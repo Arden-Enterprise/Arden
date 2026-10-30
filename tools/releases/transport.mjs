@@ -3,6 +3,7 @@ import { pipeline } from "node:stream/promises";
 
 const migrationStatuses = new Set(["NO_PENDING", "READY", "REQUIRES_OPERATOR", "DRIFT",
   "BACKUP_NOT_READY", "BASELINE_REQUIRED", "OUTCOME_UNKNOWN", "STALE_RUN"]);
+const receiverErrors = new Set(["invalid_request", "release_failed"]);
 
 function migrationBlock(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
@@ -21,6 +22,16 @@ function migrationBlock(value) {
   return error;
 }
 
+function receiverFailure(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).sort().join("\0") !== ["error", "ok"].sort().join("\0")
+    || value.ok !== false || !receiverErrors.has(value.error)) return null;
+  const error = new Error(`Release receiver rejected the request (${value.error}); inspect receiver status before retrying`);
+  error.code = "ARDEN_RECEIVER_REJECTED";
+  error.receiverCode = value.error;
+  return error;
+}
+
 export async function exchange(child, request, archive, timeoutMs = 20 * 60 * 1000) {
   let output = "";
   let oversized = false;
@@ -36,7 +47,8 @@ export async function exchange(child, request, archive, timeoutMs = 20 * 60 * 10
         accept(value.result);
         return;
       }
-      reject(migrationBlock(value) ?? new Error("Restricted release request failed; inspect status before retrying"));
+      reject(migrationBlock(value) ?? receiverFailure(value)
+        ?? new Error("Restricted release request failed; inspect status before retrying"));
     });
   });
   const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
@@ -62,7 +74,7 @@ export async function exchange(child, request, archive, timeoutMs = 20 * 60 * 10
     input?.destroy();
     child.stdin?.destroy();
     await Promise.allSettled([feed, completion]);
-    if (error?.code === "ARDEN_MIGRATION_BLOCKED") throw error;
+    if (["ARDEN_MIGRATION_BLOCKED", "ARDEN_RECEIVER_REJECTED"].includes(error?.code)) throw error;
     throw new Error("Release transport failed; reconcile receiver status before another deployment");
   } finally { clearTimeout(timer); }
 }

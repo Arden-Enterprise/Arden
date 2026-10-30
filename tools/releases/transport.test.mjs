@@ -49,6 +49,21 @@ test("a bounded migration block keeps only its safe status and migration IDs", a
   });
 });
 
+test("allowlisted receiver error categories survive transport without arbitrary details", async () => {
+  assert.ok(exchange, "Bounded process transport is not implemented");
+  for (const category of ["invalid_request", "release_failed"]) {
+    const child = spawn(process.execPath, ["-e", `console.log(JSON.stringify({ok:false,error:${JSON.stringify(category)}}));process.exit(1);`],
+      { stdio: ["pipe", "pipe", "pipe"] });
+    await assert.rejects(exchange(child, { op: "deploy" }), error => {
+      assert.equal(error.code, "ARDEN_RECEIVER_REJECTED");
+      assert.equal(error.receiverCode, category);
+      assert.match(error.message, new RegExp(`\\(${category}\\)`));
+      assert.doesNotMatch(error.message, /exception|token|credential|secret/i);
+      return true;
+    });
+  }
+});
+
 test("untrusted receiver failure text is discarded", async () => {
   assert.ok(exchange, "Bounded process transport is not implemented");
   const child = spawn(process.execPath, ["-e", `console.log(JSON.stringify({ok:false,error:"migration_blocked",

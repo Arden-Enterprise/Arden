@@ -294,6 +294,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   main(process.argv[2], process.env).catch(error => {
     if (error?.code === "ARDEN_MIGRATION_BLOCKED" && migrationStatuses.has(error.status)) {
       console.error(error.message);
+    } else if (error?.code === "ARDEN_RECEIVER_REJECTED"
+      && ["invalid_request", "release_failed"].includes(error.receiverCode)) {
+      console.error(error.message);
     } else {
       console.error("Release command failed. Check the failed stage and receiver status; no blind retries were made.");
     }
