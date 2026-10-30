@@ -85,6 +85,7 @@ class ManagementTests(unittest.TestCase):
         self.assertFalse(valid_migration_role_probe("|".join(good), "arden", good[1]))
 
         query = migration_role_probe_sql()
+        self.assertEqual(query.count("|| '|' ||") + 1, len(good))
         self.assertIn("n.nspname = 'arden'", query)
         self.assertIn("public.arden_schema_migrations", query)
         self.assertIn("pg_auth_members", query)
