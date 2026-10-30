@@ -232,6 +232,17 @@ def migration_inventory_fingerprint(inventory):
                           .encode("utf-8")).hexdigest()
 
 
+def verify_active_api_container(api, manifest, manager, service_uuid):
+    labels = api.get("Config", {}).get("Labels", {})
+    expected_image = manager.image_id(manifest, "api")
+    if (not api.get("State", {}).get("Running")
+            or api.get("State", {}).get("Health", {}).get("Status") != "healthy"
+            or api.get("Image") != expected_image
+            or labels.get("com.docker.compose.project") != service_uuid
+            or labels.get("com.docker.compose.service") != "arden-api"):
+        raise ValueError("The active API container does not match the protected migration source")
+
+
 def active_migration_inventory(manifest, image_rows, ledger_rows, policy=None):
     """Bind a baseline inventory to the exact active image, including legacy manifests."""
     if (not isinstance(manifest, dict) or not isinstance(image_rows, list)
@@ -301,13 +312,7 @@ def baseline_migrations(environment):
 
     api_name = f"arden-api-{config['service_uuid']}"
     api = inspect(api_name)
-    labels = api.get("Config", {}).get("Labels", {})
-    if (not api.get("State", {}).get("Running")
-            or api.get("State", {}).get("Health", {}).get("Status") != "healthy"
-            or api.get("Image") != manifest.get("images", {}).get("api", {}).get("id")
-            or labels.get("com.docker.compose.project") != config["service_uuid"]
-            or labels.get("com.docker.compose.service") != "arden-api"):
-        raise ValueError("The active API container does not match the protected migration source")
+    verify_active_api_container(api, manifest, manager, config["service_uuid"])
     app_values = {}
     for entry in api.get("Config", {}).get("Env", []):
         key, separator, value = entry.partition("=")

@@ -152,6 +152,36 @@ class MigrationBaselineTests(unittest.TestCase):
                 operator.active_migration_inventory(
                     invalid_manifest, invalid_rows, self.applied, invalid_policy)
 
+    def test_baseline_source_accepts_verified_portable_to_local_api_image_binding(self):
+        operator = load_operator()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            baseline_image = {"id": "sha256:" + "1" * 64, "tag": "arden-baseline-api"}
+            portable_image = {"id": "sha256:" + "2" * 64, "tag": "arden-release-api"}
+            local_image = "sha256:" + "3" * 64
+            manager = object.__new__(operator.CoolifyManager)
+            manager.config = {
+                "baseline": {"images": {"api": baseline_image}},
+                "state_dir": str(root / "staging"),
+            }
+            operator.write_json(root / "image-bindings.json", {portable_image["id"]: local_image})
+            manifest = {"images": {"api": portable_image}}
+            api = {
+                "Image": local_image,
+                "State": {"Running": True, "Health": {"Status": "healthy"}},
+                "Config": {"Labels": {
+                    "com.docker.compose.project": "abc123def456",
+                    "com.docker.compose.service": "arden-api",
+                }},
+            }
+
+            operator.verify_active_api_container(api, manifest, manager, "abc123def456")
+
+            mismatched = copy.deepcopy(api)
+            mismatched["Image"] = "sha256:" + "4" * 64
+            with self.assertRaises(ValueError):
+                operator.verify_active_api_container(mismatched, manifest, manager, "abc123def456")
+
     def test_accepts_the_exact_active_image_and_plans_only_checksums_for_applied_rows(self):
         result = self.run_plan()
         self.assertEqual(result["environment"], "staging")
