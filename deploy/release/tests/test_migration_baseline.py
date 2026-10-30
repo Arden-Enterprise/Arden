@@ -254,12 +254,17 @@ class MigrationBaselineTests(unittest.TestCase):
 
     def test_operator_migration_client_forwards_sql_stdin_to_docker(self):
         operator = load_operator()
-        with patch.object(operator, "run", return_value="ok") as execute:
+        image = "sha256:" + "9" * 64
+        with patch.object(operator, "run", side_effect=["999\n", "ok"]) as execute:
             result = operator.run_migration_sql(
-                "db-image", "private-net", Path("/private/migration.env"), "SELECT 1;")
+                image, "private-net", Path("/private/migration.env"), "SELECT 1;")
         self.assertEqual(result, "ok")
-        arguments = execute.call_args.args[0]
+        identity_probe = execute.call_args_list[0].args[0]
+        self.assertEqual(identity_probe[identity_probe.index("--user") + 1], "postgres")
+        self.assertEqual(identity_probe[-3:], [image, "-c", "id -u"])
+        arguments = execute.call_args_list[1].args[0]
         self.assertIn("--interactive", arguments)
+        self.assertEqual(arguments[arguments.index("--user") + 1], "postgres")
         self.assertEqual(execute.call_args.kwargs, {"data": "SELECT 1;", "timeout": 90})
 
     def test_migration_owner_transfer_temporarily_grants_and_revokes_required_create_privileges(self):
@@ -289,6 +294,7 @@ class MigrationBaselineTests(unittest.TestCase):
         self.assertIn("format('GRANT CREATE ON SCHEMA public TO %I'", template)
         self.assertIn("format('REVOKE CREATE ON SCHEMA public FROM %I'", template)
         self.assertIn("format('GRANT USAGE ON SCHEMA public TO %I'", template)
+        self.assertIn("format('GRANT CONNECT ON DATABASE %I TO %I'", template)
 
 if __name__ == "__main__":
     unittest.main()

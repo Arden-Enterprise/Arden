@@ -109,6 +109,13 @@ BEGIN
 END
 $arden_migration_temporary_database_create$;
 
+-- Database CONNECT is the only persistent database-level permission required.
+DO $arden_migration_database_connect$
+BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), '__MIGRATION_ROLE__');
+END
+$arden_migration_database_connect$;
+
 DO $arden_migration_public_usage$
 BEGIN
     EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', '__MIGRATION_ROLE__');

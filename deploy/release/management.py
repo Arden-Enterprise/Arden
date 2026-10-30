@@ -81,6 +81,26 @@ def migration_role_name(environment):
     return f"arden_release_migration_{environment}"
 
 
+def verify_migration_client_user(image, command):
+    """Verify the pinned Postgres image can run its client as a non-root user."""
+    if not isinstance(image, str) or not IMAGE_ID.fullmatch(image):
+        raise ValueError("Protected database client image is unavailable")
+    arguments = ["run", "--rm", "--pull=never", "--network", "none",
+                 "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+                 "--memory", "64m", "--cpus", "0.25", "--pids-limit", "16",
+                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                 "--log-driver", "none", "--user", "postgres", "--entrypoint", "/bin/sh",
+                 image, "-c", "id -u"]
+    try:
+        result = command(arguments)
+    except Exception as error:
+        raise RuntimeError("Protected database client has no verified non-root Postgres user") from error
+    uid = result.strip() if isinstance(result, str) else ""
+    if not re.fullmatch(r"[1-9][0-9]{0,9}", uid):
+        raise RuntimeError("Protected database client has no verified non-root Postgres user")
+    return int(uid)
+
+
 def migration_role_probe_sql():
     """Verify a schema-scoped owner without granting it authority over other services."""
     return (
@@ -89,6 +109,7 @@ def migration_role_probe_sql():
         "r.rolcreatedb::text || '|' || r.rolcreaterole::text || '|' || "
         "r.rolreplication::text || '|' || r.rolinherit::text || '|' || r.rolcanlogin::text || '|' || "
         "has_schema_privilege(current_user, 'arden', 'CREATE')::text || '|' || "
+        "has_database_privilege(current_user, current_database(), 'CONNECT')::text || '|' || "
         "(NOT has_database_privilege(current_user, current_database(), 'CREATE'))::text || '|' || "
         "has_schema_privilege(current_user, 'public', 'USAGE')::text || '|' || "
         "(NOT has_schema_privilege(current_user, 'public', 'CREATE'))::text || '|' || "
@@ -128,8 +149,8 @@ def migration_role_probe_sql():
 def valid_migration_role_probe(value, database, username):
     """Require a dedicated login owning Arden objects and only the public ledger."""
     fields = value.split("|") if isinstance(value, str) else []
-    return (len(fields) == 21 and fields[:2] == [database, username]
-            and fields[2:] == ["false"] * 6 + ["true"] * 13)
+    return (len(fields) == 22 and fields[:2] == [database, username]
+            and fields[2:] == ["false"] * 6 + ["true"] * 14)
 
 
 def valid_migration_baseline_receipt(receipt, environment):
@@ -235,9 +256,9 @@ class CoolifyManager:
         """Prove the migration session lock is free before any retry or ledger reconciliation."""
         image = settings["database_image"]
         actual = self.command(["image", "inspect", "--format", "{{.Id}}", image]).strip()
-        user = self.command(["image", "inspect", "--format", "{{.Config.User}}", image]).strip()
-        if actual != image or not user or user.lower() in {"root", "0", "0:0", "root:root"}:
+        if actual != image:
             raise RuntimeError("Protected database client image is unavailable")
+        verify_migration_client_user(image, self.command)
         query = ("SELECT CASE WHEN pg_try_advisory_lock(hashtext('arden:migrations')) "
                  "THEN pg_advisory_unlock(hashtext('arden:migrations')) ELSE false END")
         script = ("set -eu; psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
@@ -249,7 +270,7 @@ class CoolifyManager:
                      "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                      "--log-driver", "none", "--env-file", settings["env_file"],
                      "--env", "PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=2000",
-                     "--entrypoint", "/bin/sh", image, "-c", script]
+                     "--user", "postgres", "--entrypoint", "/bin/sh", image, "-c", script]
         try:
             output = self.migration_command(arguments, timeout=30)
         except Exception as error:
@@ -469,9 +490,9 @@ class CoolifyManager:
     def _read_migration_ledger(self, settings):
         image = settings["database_image"]
         actual = self.command(["image", "inspect", "--format", "{{.Id}}", image]).strip()
-        user = self.command(["image", "inspect", "--format", "{{.Config.User}}", image]).strip()
-        if actual != image or not user or user.lower() in {"root", "0", "0:0", "root:root"}:
+        if actual != image:
             raise RuntimeError("Protected database client image is unavailable")
+        verify_migration_client_user(image, self.command)
         role_probe = migration_role_probe_sql()
         script = ("set -eu; "
                   "status=$(psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
@@ -496,7 +517,7 @@ class CoolifyManager:
                      "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                      "--log-driver", "none", "--env-file", settings["env_file"],
                      "--env", "PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=2000",
-                     "--entrypoint", "/bin/sh", image, "-c", script]
+                     "--user", "postgres", "--entrypoint", "/bin/sh", image, "-c", script]
         output = self.migration_command(arguments, timeout=60)
         lines = output.splitlines()
         if not lines or lines[0] in {"MISSING_TABLE", "MISSING_CHECKSUM"}:

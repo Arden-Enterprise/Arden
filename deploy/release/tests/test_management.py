@@ -13,10 +13,10 @@ from test_protocol import fixture
 try:
     from management import (validate_config, CoolifyManager, migration_role_name,
                             migration_role_probe_sql, valid_migration_role_probe,
-                            valid_migration_baseline_receipt)
+                            valid_migration_baseline_receipt, verify_migration_client_user)
 except ModuleNotFoundError:
     validate_config = CoolifyManager = migration_role_name = migration_role_probe_sql = None
-    valid_migration_role_probe = valid_migration_baseline_receipt = None
+    valid_migration_role_probe = valid_migration_baseline_receipt = verify_migration_client_user = None
 
 
 def configuration():
@@ -75,7 +75,7 @@ class ManagementTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             migration_role_name("unknown")
 
-        good = ["postgres", "arden_release_migration_staging"] + ["false"] * 6 + ["true"] * 13
+        good = ["postgres", "arden_release_migration_staging"] + ["false"] * 6 + ["true"] * 14
         self.assertTrue(valid_migration_role_probe("|".join(good), "postgres", good[1]))
         for index in range(2, len(good)):
             invalid = good.copy()
@@ -92,9 +92,30 @@ class ManagementTests(unittest.TestCase):
         self.assertIn("'public', 'CREATE'", query)
         self.assertIn("'public', 'USAGE'", query)
         self.assertIn("has_database_privilege(current_user, current_database(), 'CREATE')", query)
+        self.assertIn("has_database_privilege(current_user, current_database(), 'CONNECT')", query)
         self.assertIn("t.typrelid = 'public.arden_schema_migrations'::regclass", query)
         self.assertIn("ledger_type.typarray", query)
         self.assertNotIn("REASSIGN OWNED", query)
+
+    def test_database_client_probe_requires_a_pinned_image_and_explicit_nonroot_postgres_user(self):
+        image = "sha256:" + "9" * 64
+        observed = []
+
+        def command(arguments):
+            observed.append(arguments)
+            return "999\n"
+
+        self.assertEqual(verify_migration_client_user(image, command), 999)
+        arguments = observed[0]
+        for option in ["--pull=never", "--network", "none", "--read-only", "--cap-drop", "ALL",
+                       "--security-opt", "no-new-privileges:true", "--user", "postgres"]:
+            self.assertIn(option, arguments)
+        self.assertEqual(arguments[-3:], [image, "-c", "id -u"])
+        for result in ["0\n", "root\n", "999\n1000\n"]:
+            with self.subTest(result=result), self.assertRaises(RuntimeError):
+                verify_migration_client_user(image, lambda _arguments, value=result: value)
+        with self.assertRaises(ValueError):
+            verify_migration_client_user("postgres:latest", command)
 
     def test_checksum_baseline_receipt_tracks_verified_active_image_not_bootstrap_snapshot(self):
         active, _ = fixture()
@@ -346,8 +367,8 @@ class ManagementTests(unittest.TestCase):
                 return name + "\n"
             if arguments[0] == "image" and "{{.Id}}" in arguments:
                 return image
-            if arguments[0] == "image" and "{{.Config.User}}" in arguments:
-                return "1000:1000"
+            if arguments[0] == "run" and "--user" in arguments and "postgres" in arguments:
+                return "999\n"
             self.fail("Unexpected Docker reconciliation command")
 
         def migration_command(arguments, timeout):
@@ -403,8 +424,8 @@ class ManagementTests(unittest.TestCase):
                 return "false\n"
             if arguments[0] == "image" and "{{.Id}}" in arguments:
                 return image
-            if arguments[0] == "image" and "{{.Config.User}}" in arguments:
-                return "1000:1000"
+            if arguments[0] == "run" and "--user" in arguments and "postgres" in arguments:
+                return "999\n"
             self.fail("Unexpected Docker reconciliation command")
 
         manager = CoolifyManager(config, command=docker, migration_command=lambda *args, **kwargs: "f\n")
@@ -479,14 +500,14 @@ class ManagementTests(unittest.TestCase):
         def docker(arguments):
             if "{{.Id}}" in arguments:
                 return image
-            if "{{.Config.User}}" in arguments:
-                return "postgres"
-            self.fail("Unexpected Docker image inspection")
+            if arguments[0] == "run" and "--user" in arguments and "postgres" in arguments:
+                return "999\n"
+            self.fail("Unexpected Docker client identity probe")
 
         def migration_command(arguments, timeout):
             commands.append((arguments, timeout))
             role = "|".join(["postgres", "arden_release_migration_staging"]
-                            + ["false"] * 6 + ["true"] * 13)
+                            + ["false"] * 6 + ["true"] * 14)
             return (f"READY\nROLE|{role}\n"
                     "0001_example|" + "d" * 64 + "\n")
 
@@ -500,6 +521,7 @@ class ManagementTests(unittest.TestCase):
         self.assertEqual(timeout, 60)
         self.assertEqual(arguments[arguments.index("--network") + 1], "arden-database-private")
         self.assertEqual(arguments[arguments.index("--env-file") + 1], settings["env_file"])
+        self.assertEqual(arguments[arguments.index("--user") + 1], "postgres")
         self.assertEqual(arguments[arguments.index("--env") + 1],
                          "PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=2000")
         self.assertEqual(arguments[-4:-1], ["/bin/sh", image, "-c"])
