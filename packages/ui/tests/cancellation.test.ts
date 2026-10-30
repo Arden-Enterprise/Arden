@@ -43,8 +43,9 @@ describe("explicit cancellation", () => {
     render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Ask Arden" }), { target: { value: "First question" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Arden" }), { target: { value: "Next draft" } });
     fireEvent.click(screen.getByRole("button", { name: "Stop waiting" }));
-    expect((screen.getByRole("textbox", { name: "Ask Arden" }) as HTMLTextAreaElement).value).toBe("First question");
+    expect((screen.getByRole("textbox", { name: "Ask Arden" }) as HTMLTextAreaElement).value).toBe("First question\n\nNext draft");
     fireEvent.change(screen.getByRole("textbox", { name: "Ask Arden" }), { target: { value: "Second question" } });
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     await act(() => finishFirst({ status: "ANSWERED", answer: "Late old answer", citations: [] }));
@@ -52,9 +53,12 @@ describe("explicit cancellation", () => {
     expect(screen.getByRole("button", { name: "Stop waiting" })).toBeTruthy();
     await act(() => finishSecond({ status: "ANSWERED", answer: "Current answer", citations: [] }));
     expect(screen.getByText("Current answer")).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Arden" }), { target: { value: "Unsent prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(within(screen.getByRole("alertdialog")).getByText("This clears this chat and your unsent prompt.")).toBeTruthy();
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("Current answer")).toBeTruthy();
+    expect((screen.getByRole("textbox", { name: "Ask Arden" }) as HTMLTextAreaElement).value).toBe("Unsent prompt");
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "New chat" }));
     expect(screen.queryByText("Current answer")).toBeNull();
@@ -101,6 +105,39 @@ describe("explicit cancellation", () => {
     expect(screen.queryByRole("textbox", { name: "Group name" })).toBeNull();
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
     expect(save).not.toHaveBeenCalled();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Create reader group" })));
+  });
+
+  it("returns focus to creating a note when the last unsaved note is discarded", async () => {
+    function Notes() {
+      const controller = usePrivateNotes([]);
+      return createElement(PersonalWorkspacePage, {
+        controller, platform: "web", organizationId: "org", contributionAttempt: null,
+        onContributionAttemptChange: vi.fn(), onKnowledgeDraftCreated: vi.fn(), contextOpen: false, onToggleContext: vi.fn(),
+      });
+    }
+    render(createElement(Notes));
+    fireEvent.click(screen.getByLabelText("New private note"));
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard changes" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("New private note")));
+    expect(screen.queryByRole("textbox", { name: "Note content" })).toBeNull();
+  });
+
+  it("returns focus to a reader-group row after closing or discarding its details", async () => {
+    vi.spyOn(api, "loadAudienceGroups").mockResolvedValue([
+      { id: "group", name: "Demo readers", description: "", version: 1, status: "ACTIVE", members: [] },
+    ]);
+    render(createElement(ServerAudienceGroupPanel, { platform: "web", organizationId: "org", organizationName: "Example", members: [], departments: [] }));
+    const row = await screen.findByRole("button", { name: /Demo readers/ });
+    fireEvent.click(screen.getByRole("button", { name: "Close reader group details" }));
+    await waitFor(() => expect(document.activeElement).toBe(row));
+    fireEvent.click(row);
+    fireEvent.click(screen.getByRole("button", { name: "Details", exact: true }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Group name" }), { target: { value: "Unsaved name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    await waitFor(() => expect(document.activeElement).toBe(row));
   });
 
   it("clears department, invitation and reviewer forms without changing saved data", async () => {

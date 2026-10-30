@@ -41,7 +41,8 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   };
   const backToNotes = () => {
     setEditorOpen(false);
-    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".note-list .is-selected")?.focus());
+    requestAnimationFrame(() => (document.querySelector<HTMLButtonElement>(".note-list .is-selected")
+      ?? document.querySelector<HTMLButtonElement>('[aria-label="New private note"]'))?.focus());
   };
 
   // Contributing a copy opens inside this page's status island rather than a modal dialog.

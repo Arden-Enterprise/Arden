@@ -77,7 +77,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
     setPending(false); setError(null);
     if (question) {
       setMessages((current) => current.filter((message) => message.id !== question.id));
-      setDraft((current) => current || question.query);
+      setDraft((current) => current ? `${question.query}\n\n${current}` : question.query);
     }
     requestAnimationFrame(() => composerRef.current?.focus());
   };
@@ -151,7 +151,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
       {!empty && composer("dock")}
     </div>
     {resetting && <KnowledgeDialog confirmation title="Start a new chat?" onClose={() => setResetting(false)}>
-      <p>This clears the current conversation.</p>
+      <p>{draft.trim() ? "This clears this chat and your unsent prompt." : "This clears the current conversation."}</p>
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setResetting(false)}>Cancel</button>
         <button type="button" className="primary-button" onClick={reset}>New chat</button></div>
     </KnowledgeDialog>}
