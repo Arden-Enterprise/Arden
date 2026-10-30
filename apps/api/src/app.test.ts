@@ -278,6 +278,24 @@ describe("API auth and private draft routes", () => {
     });
     expect(invalidOtp.statusCode).toBe(401);
     expect(invalidOtp.json().error.code).toBe("INVALID_TOKEN");
+
+    const reusedOtp = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "second-password" },
+    });
+    expect(reusedOtp.statusCode).toBe(401);
+    expect(reusedOtp.json().error.code).toBe("INVALID_TOKEN");
+    expect(reusedOtp.json().error.message).toBe("The reset code has already been used.");
+
+    const reusedAccessToken = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "third-password" },
+    });
+    expect(reusedAccessToken.statusCode).toBe(401);
+    expect(reusedAccessToken.json().error.code).toBe("INVALID_TOKEN");
+    expect(reusedAccessToken.json().error.message).toBe("The reset code has already been used.");
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
@@ -1092,8 +1110,13 @@ class FakeAuthProvider implements AuthProvider {
     this.lastResetEmail = email;
   }
 
+  private readonly usedOtpTokens = new Set<string>();
+
   async verifyOtp(params: { email: string; token: string }) {
+    const key = `${params.email}:${params.token}`;
+    if (this.usedOtpTokens.has(key)) throw new Error("INVALID_OTP");
     if (params.token !== "valid-token") throw new Error("INVALID_OTP");
+    this.usedOtpTokens.add(key);
     const tokens = { accessToken: "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
     this.usersByAccessToken.set(tokens.accessToken, { userId: ownerId, email: params.email, passwordSetupRequired: false });
     return { tokens };
