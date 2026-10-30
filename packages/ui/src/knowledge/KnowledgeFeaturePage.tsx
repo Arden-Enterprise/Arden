@@ -65,7 +65,7 @@ function SampleKnowledgeFeaturePage({ view, active = true, organizationName = "F
   };
   const openDraft = () => { setKnowledgeScreen("editor"); goTo("knowledge"); };
   return <main id={active ? "arden-main" : undefined} className="workspace-page" tabIndex={-1}>
-    <WorkspaceTopbar breadcrumb={`${organizationName} / ${departmentName} / ${openedDocument?.title ?? labels[effectiveView]}`} previewLabel={createdDraft && effectiveView === "knowledge" ? "SERVER DRAFT · OTHER CONTENT SAMPLE" : "Sample workflows · Session only"} contextOpen={contextOpen} onToggleContext={onToggleContext} />
+    <WorkspaceTopbar breadcrumb={`${organizationName} / ${departmentName} / ${openedDocument?.title ?? labels[effectiveView]}`} previewLabel={createdDraft && effectiveView === "knowledge" ? "Draft · Demo content" : "Demo"} contextOpen={contextOpen} onToggleContext={onToggleContext} />
     <div className="knowledge-feature-page">
       {effectiveView === "knowledge" && openedDocument && <KnowledgeDocumentDetail metadata={openedDocument}
         focusTarget={openedCitation}
@@ -76,7 +76,7 @@ function SampleKnowledgeFeaturePage({ view, active = true, organizationName = "F
           {openedDocument.sourceBlocks.map((block) => <section key={block.id} data-source-block-id={block.id}>
             {block.heading && <h3>{block.heading}</h3>}<p>{block.text}</p>
           </section>)}
-          <footer>This sample demonstrates the governed reading layout. The original file appears here after import through Arden Core.</footer>
+          <footer>Demo document</footer>
         </div>} />}
       {effectiveView === "knowledge" && !openedDocument && knowledgeScreen === "library" && <KnowledgeLibrary active={active} createdDraft={createdDraft} onCreate={() => setKnowledgeScreen("create")} onOpenDocument={(document) => { setOpenedCitation(null); setOpenedDocument(document); }} />}
       {effectiveView === "knowledge" && knowledgeScreen === "create" && <CreateKnowledge draft={state.draft} onSave={(draft) => { dispatch({ type: "edit", draft }); dispatch({ type: "save" }); }} onContinue={(draft) => { dispatch({ type: "edit", draft }); dispatch({ type: "save" }); setKnowledgeScreen("editor"); }} onBack={() => setKnowledgeScreen("library")} />}

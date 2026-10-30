@@ -26,15 +26,15 @@ describe("redesigned knowledge states", () => {
   });
 
   it("distinguishes a published snapshot from a later working version", () => {
-    expect(draftStatus(draft).label).toBe("Draft · metadata incomplete");
-    expect(draftStatus({ ...draft, audienceIds: undefined as unknown as string[] }).label).toBe("Draft · metadata incomplete");
-    expect(draftStatus({ ...draft, responsibleDepartmentId: "dept" }).label).toBe("Draft · metadata incomplete");
+    expect(draftStatus(draft).label).toBe("Draft · Details needed");
+    expect(draftStatus({ ...draft, audienceIds: undefined as unknown as string[] }).label).toBe("Draft · Details needed");
+    expect(draftStatus({ ...draft, responsibleDepartmentId: "dept" }).label).toBe("Draft · Details needed");
     expect(draftStatus({ ...draft, responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT", audienceIds: ["audience"] }).label).toBe("Draft");
     expect(draftStatus({ ...draft, hasPendingSubmission: true }, submission).label).toBe("Awaiting review");
     expect(draftStatus(draft, submission).label).toBe("Published");
     expect(draftStatus({ ...draft, versionId: "version-3" }, submission).label).toBe("Edited after publication");
     expect(draftStatus(draft, { ...submission, publicationState: "PREPARING", publishedVersionId: null }).label).toBe("Preparing publication");
-    expect(draftStatus(draft, { ...submission, publicationState: "SUPERSEDED" }).label).toBe("Replaced by a newer publication");
+    expect(draftStatus(draft, { ...submission, publicationState: "SUPERSEDED" }).label).toBe("Newer version published");
     expect(draftStatus(draft, { ...submission, publicationState: "FAILED", publishedVersionId: null })).toEqual({ label: "Publication failed", tone: "is-danger" });
     expect(draftStatus(draft, { ...submission, status: "REJECTED" }).tone).toBe("is-danger");
   });

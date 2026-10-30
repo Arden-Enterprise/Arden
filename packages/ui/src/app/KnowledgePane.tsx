@@ -29,7 +29,7 @@ export function KnowledgePane({ content, open, onToggle }: { content: PaneConten
           <p>{content.description}</p>
 
           <section className="access-boundary" aria-labelledby="boundary-title">
-            <span className="meta-label">ACCESS BOUNDARY</span>
+            <span className="meta-label">ACCESS</span>
             <strong id="boundary-title">{content.boundaryTitle}</strong>
             <p>{content.boundaryBody}</p>
           </section>

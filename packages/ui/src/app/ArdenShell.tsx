@@ -91,10 +91,10 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
   "organization-access": {
     eyebrow: "ADMINISTRATION CONTEXT",
     title: "Organization boundaries",
-    description: "Review the synthetic organization structure and the proposed document access scopes.",
+    description: "Members, departments and readers",
     suggestions: ["Review membership", "Inspect access changes", "Verify department scope"],
-    boundaryTitle: "Server authority required",
-    boundaryBody: "This admin UI is a local preview. A real session, server authorization and audit event are required before any access change takes effect.",
+    boundaryTitle: "Organization access",
+    boundaryBody: "Demo · Temporary changes",
   },
   "knowledge": {
     eyebrow: "KNOWLEDGE CONTEXT", title: "Your shared library",
@@ -452,16 +452,18 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     ? {
       ...paneContent[activeView],
       title: privateNotes.selectedNote ? privateNotes.draft.title.trim() || "Untitled private note" : "Private notes",
-      description: privateNotes.serverBacked ? "Your private notes are loaded from the selected organization’s Arden server." : "Drafts stay in this preview session when you switch notes or screens.",
-      boundaryBody: privateNotes.serverBacked ? "Only you can work with this server-stored note. It is excluded from shared answers." : "Only you can work with this preview note. It is excluded from shared answers. Refreshing or exiting clears this session.",
+      description: privateNotes.serverBacked ? "Private notes" : "Demo · Temporary notes",
+      boundaryBody: privateNotes.serverBacked ? "Only you" : "Demo · Cleared on refresh",
     }
     : serverOrganizationId && activeView === "knowledge"
-      ? { ...paneContent.knowledge, description: "Your server-backed drafts and currently accessible published versions.",
-        boundaryBody: "Drafts remain author-owned. Approved versions are shown only when your current server-side audience and access scope allow them." }
+      ? { ...paneContent.knowledge, description: "Documents and drafts",
+        boundaryBody: "Documents you can access" }
       : serverOrganizationId && activeView === "review-queue"
-        ? { ...paneContent[activeView], description: "Submissions assigned by an explicit reviewer grant.",
-          boundaryBody: "A reviewer can act only within the granted department and classification, never on their own submission." }
-        : paneContent[activeView];
+        ? { ...paneContent[activeView], description: "Pending submissions",
+          boundaryBody: "Submissions you can review" }
+        : serverOrganizationId && activeView === "organization-access"
+          ? { ...paneContent[activeView], boundaryBody: "Organization Admin" }
+          : paneContent[activeView];
 
   return (
     <WorkspaceNavigationContext.Provider value={{ open: navOpen, setOpen: setNavOpen }}>

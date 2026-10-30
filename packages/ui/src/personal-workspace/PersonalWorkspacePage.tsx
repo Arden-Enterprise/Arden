@@ -56,12 +56,11 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
 
   return (
     <main id="arden-main" className="workspace-page" aria-labelledby="personal-workspace-title" tabIndex={-1}>
-      <WorkspaceTopbar breadcrumb="Arden / Work / Private Notes" previewLabel={serverBacked ? "PRIVATE NOTES · SERVER" : "SAMPLE NOTES · SESSION ONLY"} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={contributionPanel} />
+      <WorkspaceTopbar breadcrumb="Arden / Work / Private Notes" previewLabel={serverBacked ? undefined : "Demo"} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={contributionPanel} />
       <WorkspacePageContent className={`personal-content${editorOpen ? " is-editing-note" : ""}`} header={<WorkspacePageHeader className="personal-title-row"
-        eyebrow="WORK · OWNER PRIVATE"
+        eyebrow="WORK"
         title="Private Notes"
         titleId="personal-workspace-title"
-        description="Only you can open these. Contributing creates a separate copy for review; the original stays private."
       />}>
         {loading && <p className="island-meta" role="status">Loading your private notes…</p>}
         {error && <p className="admin-feedback is-error personal-feedback" role="alert">{error}</p>}
@@ -71,14 +70,14 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
             onCreate={() => { controller.createNote(); setQuery(""); openEditor(); }}
             onSelect={(note) => { controller.selectNote(note); openEditor(); }} onClearSearch={() => setQuery("")} />
           <PrivateNoteEditor selectedNote={selectedNote} draftTitle={draft.title} draftBody={draft.body} isDirty={isDirty}
-            savedMessage={saveMessage || state.savedMessage || (serverBacked ? "Private note · server-backed storage." : "Session preview. Refreshing or exiting clears your notes.")}
+            savedMessage={saveMessage || state.savedMessage || (serverBacked ? "" : "Demo · Cleared on refresh")}
             toolbar={<>
               <span className="island-chip"><Icon name="lock" size={12} />Only you</span>
-              <span className="private-state" aria-live="polite">{isDirty ? "Unsaved changes" : serverBacked ? "Saved · Server" : "Saved · Preview"}</span>
+              <span className="private-state" aria-live="polite">{isDirty ? "Unsaved changes" : serverBacked ? "Saved" : "Saved · Demo"}</span>
               <span className="note-toolbar-spacer" />
               <button type="button" className="secondary-button note-back-button" onClick={backToNotes}>Back to notes</button>
-              {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}><Icon name="layers" size={14} />Contribute copy</button>}
-              <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : serverBacked ? "Save" : "Save preview"}</button>
+              {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}><Icon name="layers" size={14} />Create review draft</button>}
+              <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : "Save"}</button>
             </>}
             onTitleChange={controller.editTitle} onBodyChange={controller.editBody} />
         </div>

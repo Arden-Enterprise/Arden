@@ -51,9 +51,9 @@ describe("organization member administration", () => {
       .toEqual([departmentAdministrator]);
   });
 
-  it("explains that only members who still need a department will wait after deletion", () => {
+  it("keeps the assignment and access consequences of department deletion", () => {
     expect(departmentDeletionSummary(2)).toBe(
-      "Deleting this department will unassign 2 members. Members who still need a department will enter the waiting room; organization administrators remain active.",
+      "2 members will be unassigned. Department access will be removed.",
     );
   });
 });

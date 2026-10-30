@@ -1,5 +1,4 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { KnowledgeNotice } from "../knowledge/KnowledgePrimitives";
 import { ApiError, createKnowledgeDraft, type CreatedKnowledgeDraft } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 
@@ -67,15 +66,14 @@ export function ContributePrivateNoteDialog({ platform, organizationId, source, 
   return <div className="contribute-island" role="dialog" aria-labelledby={titleId}
     onKeyDown={(event) => { if (event.key === "Escape" && !busy) { event.stopPropagation(); onClose(); } }}>
     <div>
-      <h2 id={titleId} ref={heading} tabIndex={-1}>Contribute a copy</h2>
-      <p className="island-meta">Arden makes a separate shared draft from this saved version. Your private note stays private and unchanged. Nothing is submitted, approved or published.</p>
+      <h2 id={titleId} ref={heading} tabIndex={-1}>Create review draft</h2>
+      <p className="island-meta">Your original stays private.</p>
     </div>
-    <div className="knowledge-source-preview"><strong>{source.title}</strong><span>Saved private version · exact text to copy</span><pre>{source.body}</pre></div>
+    <div className="knowledge-source-preview"><strong>{source.title}</strong><span>Content to copy</span><pre>{source.body}</pre></div>
     <form className="knowledge-contribute-form" onSubmit={(event) => void submit(event)}>
-      <small>Who can read it and who reviews it are chosen later, in the draft.</small>
-      {retryPending && <KnowledgeNotice title="Result uncertain" tone="amber">Retry here with the same request key to avoid creating a duplicate. Do not change the source until the result is known.</KnowledgeNotice>}
+      {retryPending && !error && <p role="status">Couldn’t confirm draft creation.</p>}
       {error && <p role="alert" className="knowledge-form-error">{error}</p>}
-      <div className="dialog-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>{busy ? "Creating…" : retryPending ? "Retry same request" : "Create shared draft"}</button></div>
+      <div className="dialog-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>{busy ? "Creating…" : retryPending ? "Retry" : "Create draft"}</button></div>
     </form>
   </div>;
 }

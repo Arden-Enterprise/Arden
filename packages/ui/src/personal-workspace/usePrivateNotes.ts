@@ -14,7 +14,7 @@ type DraftRepresentation = {
 type DraftListRepresentation = { items: Array<{ id: string; title: string; currentVersion: number; updatedAt: string }>; nextCursor: string | null };
 
 function toPrivateNote(note: DraftRepresentation): PrivateNote {
-  return { id: note.id, title: note.title, body: note.body, updatedLabel: `Saved to server · ${new Date(note.updatedAt).toLocaleString()}`, sourceVersionId: note.currentVersion.id };
+  return { id: note.id, title: note.title, body: note.body, updatedLabel: `Saved ${new Date(note.updatedAt).toLocaleString()}`, sourceVersionId: note.currentVersion.id };
 }
 
 export function usePrivateNotes(initialNotes: PrivateNote[]) {
@@ -110,10 +110,10 @@ export function usePrivateNotes(initialNotes: PrivateNote[]) {
       versions.current.set(result.id, result.currentVersion.version);
       const updatedNotes = [toPrivateNote(result), ...state.notes.filter((note) => note.id !== selectedNote.id && note.id !== result.id)];
       dispatch({ type: "reset", notes: updatedNotes });
-      setSaveMessage("Saved to your private workspace.");
+      setSaveMessage("Saved");
     } catch (cause) {
       if (cause instanceof ApiError && cause.code === "VERSION_CONFLICT") {
-        setError("This note changed on the server. Reload the private notes before saving again.");
+        setError("This note has changed. Reopen it before saving.");
       } else {
         setError(cause instanceof Error ? cause.message : "The note was not saved.");
       }

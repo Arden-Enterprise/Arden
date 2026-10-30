@@ -33,14 +33,14 @@ function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: ()
       onCancel={(event) => { event.preventDefault(); onClose(); }}
     >
       <div className="organization-dialog-heading">
-        <h2 id="unconfirmed-email-title">Email chưa được xác nhận</h2>
+        <h2 id="unconfirmed-email-title">Verify your email</h2>
       </div>
       <p className="organization-dialog-description">
-        Tài khoản với email <strong>{email}</strong> chưa được xác nhận. Vui lòng kiểm tra hộp thư đến (hoặc thư mục Spam / Junk) và nhấn vào liên kết xác nhận trước khi đăng nhập.
+        Check <strong>{email}</strong> for a verification link.
       </p>
       <div className="organization-dialog-actions">
         <button type="button" className="auth-primary" autoFocus onClick={onClose}>
-          Đã hiểu
+          OK
         </button>
       </div>
     </dialog>
@@ -97,7 +97,7 @@ export function SignInPage({
     } catch (error) {
       if (error instanceof ApiError && error.code === "EMAIL_NOT_CONFIRMED") {
         setUnconfirmedEmail(email.trim());
-        setNotice({ text: "Email chưa được xác nhận. Vui lòng kiểm tra hộp thư để kích hoạt tài khoản." });
+        setNotice({ text: "Check your email to verify your account." });
       } else {
         setNotice({ text: error instanceof Error ? error.message : "Sign in could not be completed." });
       }
@@ -114,7 +114,7 @@ export function SignInPage({
     try {
       await signUp(platform, email.trim(), password, fullName.trim());
       setNotice({
-        text: "Account created. Check your email for confirmation if required, then sign in.",
+        text: "Check your email to continue.",
         isSuccess: true,
       });
       setMode("sign-in");
@@ -184,7 +184,7 @@ export function SignInPage({
       setMode("sign-in");
     } catch (cause) {
       setNotice({
-        text: cause instanceof ApiError ? cause.message : "Password reset could not be completed. Check your code and try again.",
+        text: cause instanceof ApiError ? cause.message : "Couldn’t reset password.",
       });
     } finally {
       setBusy(null);
@@ -393,7 +393,7 @@ export function SignInPage({
                       />
                     </label>
                     <label>
-                      <span>Verification code or token</span>
+                      <span>Verification code</span>
                       <input
                         type="text"
                         value={resetToken}
@@ -464,7 +464,7 @@ export function SignInPage({
           )}
           {showPreview && (
             <details className="auth-preview-tools">
-              <summary>Development preview</summary>
+              <summary>Demo</summary>
               <button type="button" onClick={onEnterPreview}>Member</button>
               <button type="button" onClick={onOpenSetup}>Setup</button>
               {onEnterAdminPreview && <button type="button" onClick={onEnterAdminPreview}>Admin</button>}

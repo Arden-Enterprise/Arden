@@ -74,7 +74,7 @@ describe("invitation page feedback", () => {
     fireEvent.submit(form);
 
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toContain("could not be accepted");
+    expect(alert.textContent).toBe("Invitation unavailable for this account.");
     expect(screen.getByRole("button", { name: "Accept invitation" })).toBeTruthy();
     expect(acceptInvitation).toHaveBeenCalledTimes(1);
 

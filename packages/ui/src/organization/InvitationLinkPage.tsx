@@ -43,14 +43,14 @@ function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: ()
       onCancel={(event) => { event.preventDefault(); onClose(); }}
     >
       <div className="organization-dialog-heading">
-        <h2 id="unconfirmed-email-title">Email chưa được xác nhận</h2>
+        <h2 id="unconfirmed-email-title">Verify your email</h2>
       </div>
       <p className="organization-dialog-description">
-        Tài khoản với email <strong>{email}</strong> chưa được xác nhận. Vui lòng kiểm tra hộp thư đến (hoặc thư mục Spam / Junk) và nhấn vào liên kết xác nhận trước khi đăng nhập.
+        Check <strong>{email}</strong> for a verification link.
       </p>
       <div className="organization-dialog-actions">
         <button type="button" className="auth-primary" autoFocus onClick={onClose}>
-          Đã hiểu
+          OK
         </button>
       </div>
     </dialog>
@@ -109,7 +109,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     if (invitation && email.trim().toLowerCase() !== invitation.email.toLowerCase()) {
-      setError(`Email đăng nhập phải là ${invitation.email} để khớp với thư mời.`);
+      setError(`Use ${invitation.email}.`);
       setBusy(false);
       return;
     }
@@ -124,15 +124,15 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     } catch (cause) {
       if (cause instanceof ApiError && cause.code === "EMAIL_NOT_CONFIRMED") {
         setUnconfirmedEmail(email.trim());
-        setError("Email chưa được xác nhận. Vui lòng kiểm tra hộp thư để kích hoạt tài khoản.");
+        setError("Check your email to verify your account.");
       } else if (cause instanceof ApiError && cause.status === 401) {
-        setError("Sign-in could not be completed. Check the address and password, or create an account.");
+        setError("Couldn’t sign in.");
       } else if (cause instanceof ApiError && cause.status === 404) {
-        setError(`Signed in as ${email}, but this account does not match the invitation, or the invitation has expired.`);
+        setError(`Invitation unavailable for ${email}.`);
       } else if (cause instanceof ApiError && cause.status >= 500) {
-        setError("The server encountered an error while processing the invitation. Please try again later.");
+        setError("Couldn’t accept invitation.");
       } else {
-        setError("This invitation could not be accepted for this signed-in account. Check which account you used and try again.");
+        setError("Invitation unavailable for this account.");
       }
     } finally { setBusy(false); }
   };
@@ -140,22 +140,22 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
   const handleSignUp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     if (invitation && email.trim().toLowerCase() !== invitation.email.toLowerCase()) {
-      setError(`Email tạo tài khoản phải là ${invitation.email} để khớp với thư mời.`);
+      setError(`Use ${invitation.email}.`);
       setBusy(false);
       return;
     }
     try {
       await signUp(platform, email.trim(), password, fullName.trim());
-      setMessage("Account setup initiated. Check your email for confirmation, then sign in to accept the invitation.");
+      setMessage("Check your email to continue.");
       setMode("sign-in");
     } catch (cause) {
       if (cause instanceof ApiError && (cause.code === "ACCOUNT_ALREADY_EXISTS" || cause.status === 409)) {
-        setError("An account with this email address already exists. Please sign in to accept the invitation.");
+        setError("Account already exists. Sign in.");
         setMode("sign-in");
       } else if (cause instanceof ApiError && cause.message) {
         setError(cause.message);
       } else {
-        setError("Account setup could not be completed. Check the password requirements or try signing in.");
+        setError("Couldn’t create account.");
       }
     } finally { setBusy(false); }
   };
@@ -169,14 +169,14 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 404) {
         setError(currentAccountEmail
-          ? `This invitation cannot be accepted with ${currentAccountEmail}. It was sent to a different email address or has expired. Please sign out and use the invited email account.`
-          : "This invitation could not be accepted for this signed-in account. It may belong to a different email address, or have already been accepted.");
+          ? `Invitation unavailable for ${currentAccountEmail}.`
+          : "Invitation unavailable for this account.");
       } else if (cause instanceof ApiError && cause.status >= 500) {
-        setError("The server encountered an error while accepting the invitation. Please try again later.");
+        setError("Couldn’t accept invitation.");
       } else if (cause instanceof ApiError && cause.status === 0) {
-        setError(cause.message || "Arden could not reach its server. Check your connection and try again.");
+        setError(cause.message || "Connection unavailable.");
       } else {
-        setError("This invitation could not be accepted for this signed-in account. Check which account you used and try again.");
+        setError("Invitation unavailable for this account.");
       }
     } finally { setBusy(false); }
   };
@@ -190,9 +190,9 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       setCurrentAccountEmail(null);
       setEmail(invitation?.email ?? "");
       setPassword("");
-      setMessage("Signed out. Please sign in or create an account with the invited email address.");
+      setMessage("Sign in with the invited email.");
     } catch {
-      setError("This session could not be cleared. Sign out from Arden and reopen the invitation.");
+      setError("Couldn’t sign out.");
     } finally { setBusy(false); }
   };
 

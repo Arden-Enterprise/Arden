@@ -7,7 +7,7 @@ const sectionLabels: Record<keyof ReaderChoices, string> = { organization: "ORGA
 
 function readerKindLabel(audience: KnowledgeAudienceOption): string {
   return audience.kind === "ORGANIZATION_ALL" ? "Everyone in the organization"
-    : audience.kind === "DEPARTMENT_ALL" ? "Everyone in the department" : "Audience group";
+    : audience.kind === "DEPARTMENT_ALL" ? "Everyone in the department" : "Reader group";
 }
 
 /**
@@ -68,7 +68,7 @@ export function ReaderPicker({ choices, selectedIds, audiences, disabled, depart
           <Icon name={audience.kind === "ORGANIZATION_ALL" ? "building" : "people"} size={14} />
           <span><strong>{audience.name}</strong><small>{readerKindLabel(audience)}</small></span>
         </div>)}
-      </div>) : <p className="reader-picker-empty">{search ? "No matching audience you can target." : "Every available audience is already added."}</p>}
+      </div>) : <p className="reader-picker-empty">{search ? "No results" : "All readers added"}</p>}
       {departmentHint && <p className="reader-picker-empty">{departmentHint}</p>}
     </div>}
     {selected.length ? <ul className="reader-picker-selected" aria-label="Readers">
@@ -77,6 +77,6 @@ export function ReaderPicker({ choices, selectedIds, audiences, disabled, depart
         <span><strong>{audience.name}</strong><small>{readerKindLabel(audience)}</small></span>
         <button type="button" className="island-icon-button" disabled={disabled} aria-label={`Remove ${audience.name}`} onClick={() => onRemove(audience.id)}><Icon name="close" size={12} /></button>
       </li>)}
-    </ul> : <p className="island-meta">No readers yet. Add at least one audience before submitting.</p>}
+    </ul> : <p className="island-meta">Select readers</p>}
   </div>;
 }

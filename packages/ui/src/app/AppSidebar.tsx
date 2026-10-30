@@ -97,14 +97,14 @@ export function AppSidebar({
         className={`sidebar-nav-item${active ? " is-active" : ""}`}
         onClick={() => { if (item.view) onNavigate(item.view); }}
         disabled={disabled}
-        aria-label={reviewCount !== undefined ? `${item.label}, ${reviewCount} assigned` : item.planned ? `${item.label} — not connected` : item.label}
+        aria-label={reviewCount !== undefined ? `${item.label}, ${reviewCount} assigned` : item.planned ? `${item.label} — not available yet` : item.label}
         aria-current={active ? "page" : undefined}
-        title={unassignedNotice ?? (item.planned ? `${item.label} is not connected yet` : item.label)}
+        title={unassignedNotice ?? (item.planned ? `${item.label} is not available yet` : item.label)}
       >
         <Icon name={item.icon} size={18} />
         <span className="sidebar-nav-label"><span className="nav-label-full">{item.label}</span><span className="nav-label-short" aria-hidden="true">{item.shortLabel}</span></span>
         {reviewCount !== undefined && reviewCount > 0 && <small className="sidebar-review-count">{reviewCount}</small>}
-        {item.planned && <small className="sidebar-planned">Planned</small>}
+        {item.planned && <small className="sidebar-planned">Coming later</small>}
       </button>
     );
   };
