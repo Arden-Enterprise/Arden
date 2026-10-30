@@ -380,7 +380,7 @@ export type CreatedInvitation = { invitationId: string; email: string; organizat
 export type OrganizationAdminData = {
   departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
-  members: Array<{ id: string; email: string; name: string; status: MembershipStatus; departmentId: string | null; departmentIds?: string[]; roleIds: string[]; roleNames: string[] }>;
+  members: Array<{ id: string; email: string; name: string; status: MembershipStatus; departmentId: string | null; departmentIds?: string[]; isOrganizationAdmin: boolean; roleIds: string[]; roleNames: string[] }>;
   invitations: Array<{ id: string; email: string; departmentId: string | null; status: string; expiresAt: Date }>;
 };
 export type KnowledgeOptions = {
@@ -731,7 +731,7 @@ export class ArdenRepository implements ArdenDataRepository {
           FROM role r WHERE r.organization_id = $1 AND r.status = 'ACTIVE' ORDER BY r.name`, [organizationId]);
       const members = await client.query<{
         id: string; email: string; name: string; status: MembershipStatus; department_id: string | null;
-        role_ids: string[] | null; role_names: string[] | null; department_ids: string[];
+        role_ids: string[] | null; role_names: string[] | null; department_ids: string[]; is_organization_admin: boolean;
       }>(`
         SELECT om.membership_id AS id, ua.email, ua.full_name AS name, om.status,
                max(dm.department_id::text) FILTER (WHERE dm.is_primary AND dm.status = 'ACTIVE')::uuid AS department_id,
@@ -740,11 +740,14 @@ export class ArdenRepository implements ArdenDataRepository {
                  WHERE all_dm.membership_id = om.membership_id AND all_dm.status = 'ACTIVE'
                    AND all_d.status = 'ACTIVE' AND all_d.organization_id = $1) AS department_ids,
                COALESCE(array_agg(DISTINCT r.role_id::text) FILTER (WHERE r.role_id IS NOT NULL), '{}') AS role_ids,
-               COALESCE(array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS role_names
+               COALESCE(array_agg(DISTINCT r.name) FILTER (WHERE r.name IS NOT NULL), '{}') AS role_names,
+               COALESCE(bool_or(r.organization_id IS NULL AND r.is_system AND r.code = 'ORG_ADMIN'
+                 AND role_scope.organization_id = $1 AND role_scope.scope_type = 'ORGANIZATION'), false) AS is_organization_admin
           FROM organization_membership om JOIN user_account ua ON ua.user_id = om.user_id
           LEFT JOIN department_membership dm ON dm.membership_id = om.membership_id AND dm.is_primary AND dm.status = 'ACTIVE'
           LEFT JOIN role_assignment ra ON ra.membership_id = om.membership_id AND ra.status = 'ACTIVE'
             AND ra.valid_from <= now() AND (ra.valid_until IS NULL OR ra.valid_until > now())
+          LEFT JOIN access_scope role_scope ON role_scope.access_scope_id = ra.access_scope_id
           LEFT JOIN role r ON r.role_id = ra.role_id AND r.status = 'ACTIVE'
          WHERE om.organization_id = $1 GROUP BY om.membership_id, ua.email, ua.full_name, om.status
          ORDER BY ua.full_name, ua.email`, [organizationId]);
@@ -768,6 +771,7 @@ export class ArdenRepository implements ArdenDataRepository {
         members: members.rows.map((row) => ({
           id: row.id, email: row.email, name: row.name, status: row.status, departmentId: row.department_id,
           departmentIds: row.department_ids,
+          isOrganizationAdmin: row.is_organization_admin,
           roleIds: row.role_ids ?? [], roleNames: row.role_names ?? [],
         })),
         invitations: invitations.rows.map((row) => ({ id: row.id, email: row.email, departmentId: row.department_id, status: row.status, expiresAt: row.expires_at })),

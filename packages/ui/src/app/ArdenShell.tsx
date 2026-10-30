@@ -27,6 +27,7 @@ import { createPreviewOrganization, type OrganizationPreview } from "../organiza
 import { membershipReadiness } from "../organization/organizationWorkflow";
 import type { PaneContent, Platform, PrivateNote, WorkspaceView } from "../shared/types";
 import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership } from "../shared/api-client";
+import { needsDepartmentAssignment } from "../shared/membershipAssignment";
 
 type ArdenShellProps = { platform: Platform };
 
@@ -444,7 +445,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
   const liveAdmin = activeMembership?.roleCodes.includes("ORG_ADMIN") ?? false;
-  const isUnassignedMember = Boolean(serverSession && !liveAdmin && !activeMembership?.departmentId && !activeMembership?.canUsePrivateWorkspace);
+  const isUnassignedMember = Boolean(serverSession && activeMembership && needsDepartmentAssignment(activeMembership));
   const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue" || activeView === "knowledge-handover";
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
   const activeContext = activeView === "personal-workspace"

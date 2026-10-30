@@ -330,6 +330,7 @@ describe("API auth and private draft routes", () => {
     const adminData = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/administration`, headers: { cookie: adminSession } });
     expect(adminData.statusCode).toBe(200);
     expect(adminData.json().departments[0].name).toBe("Product");
+    expect(adminData.json().members[0]).toMatchObject({ isOrganizationAdmin: true });
 
     const createdAudience = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Operations readers", description: "Operations knowledge audience" } });
     expect(createdAudience.statusCode).toBe(201);
@@ -1284,7 +1285,7 @@ class MemoryRepository implements ArdenDataRepository {
     return {
       departments: [{ id: "ffffffff-ffff-4fff-8fff-ffffffffffff", name: "Product", defaultRoleId: "11111111-aaaa-4aaa-8aaa-111111111111", defaultRoleName: "Product Member" }],
       roles: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product Member", code: "DEPT_DEFAULT_TEST", isDefault: true }],
-      members: [{ id: "77777777-7777-4777-8777-777777777777", email: "owner@example.test", name: "Owner", status: "ACTIVE", departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", roleIds: [], roleNames: [] }],
+      members: [{ id: "77777777-7777-4777-8777-777777777777", email: "owner@example.test", name: "Owner", status: "ACTIVE", departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", isOrganizationAdmin: true, roleIds: ["global-org-admin"], roleNames: ["Organization Admin"] }],
       invitations: [],
     };
   }

@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../shared/Icon";
 import type { OrganizationAdministration, ReviewerGrant } from "../shared/api-client";
 import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
+import { departmentDeletionSummary } from "./memberAdministration";
 
 type Member = OrganizationAdministration["members"][number];
 type Department = OrganizationAdministration["departments"][number];
@@ -10,8 +11,8 @@ export function memberInitials(name: string): string {
   return name.split(/\s+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 }
 
-export function memberStatus(status: string, departmentId?: string | null): { label: string; tone: string } {
-  if (status === "ACTIVE" && !departmentId) {
+export function memberStatus(status: string, departmentId?: string | null, isOrganizationAdmin = false): { label: string; tone: string } {
+  if (status === "ACTIVE" && !departmentId && !isOrganizationAdmin) {
     return { label: "Awaiting assignment", tone: "tone-info" };
   }
   return status === "ACTIVE" ? { label: "Active", tone: "tone-success" }
@@ -50,7 +51,7 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
   const heading = useDetailFocus();
   const titleId = useId();
   const [moving, setMoving] = useState(false);
-  const status = memberStatus(member.status, member.departmentId);
+  const status = memberStatus(member.status, member.departmentId, isAdmin);
   const otherDepartments = (member.departmentIds ?? []).filter((id) => id !== member.departmentId);
   const groupMemberships = audienceGroups.flatMap((group) => group.members
     .filter((groupMember) => groupMember.membershipId === member.id && groupMember.status === "ACTIVE")
@@ -147,7 +148,7 @@ export function DepartmentDetailIsland({ department, members, grants, busy, dele
       <section className="island-detail-section" aria-label="Department lifecycle">
         <h3>Department lifecycle</h3>
         {inDepartment.length > 0 ? (
-          <p className="island-meta">Deleting this department will move {inDepartment.length} member{inDepartment.length > 1 ? "s" : ""} to the waiting room until reassigned.</p>
+          <p className="island-meta">{departmentDeletionSummary(inDepartment.length)}</p>
         ) : (
           <p className="island-meta">This department has no members and can be deleted safely.</p>
         )}

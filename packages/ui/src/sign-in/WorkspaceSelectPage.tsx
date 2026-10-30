@@ -1,6 +1,7 @@
 import { WelcomePanel } from "./WelcomePanel";
 import { entryAssets } from "./entryAssets";
 import type { OrganizationMembership } from "../shared/api-client";
+import { membershipAccessDescription, needsDepartmentAssignment } from "../shared/membershipAssignment";
 import { useState } from "react";
 
 export function WorkspaceSelectPage({ organizationName, memberships, onContinue, onBack, onCreateOrganization, testMode = false }: {
@@ -27,7 +28,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
 
           {isLive ? <div className="workspace-memberships">
             {choices.map((membership) => {
-              const isAwaiting = !membership.departmentId && !membership.canUsePrivateWorkspace;
+              const isAwaiting = needsDepartmentAssignment(membership);
               return (
                 <button type="button" key={membership.organization.id} className="workspace-membership" onClick={() => onContinue(membership.organization.id)}>
                   <span className="workspace-membership-heading">
@@ -38,7 +39,7 @@ export function WorkspaceSelectPage({ organizationName, memberships, onContinue,
                   <span>
                     {isAwaiting
                       ? "Organization joined · Awaiting department assignment"
-                      : `${membership.departmentName ? `${membership.departmentName} · ` : ""}${membership.roleCodes.length ? membership.roleCodes.join(", ") : "Active membership"} · Private workspace access`}
+                      : membershipAccessDescription(membership)}
                   </span>
                 </button>
               );

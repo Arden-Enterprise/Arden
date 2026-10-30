@@ -66,7 +66,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
         VALUES ($1, $2, $3), ($4, $2, $5), ($6, $2, $7)`,
       [ids.ownerMembership, ids.organization, ids.owner, ids.managerMembership, ids.manager,
         ids.organizationReviewerMembership, ids.organizationReviewer]);
-      await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Synthetic private-note owner'), ($4, $2, $5, 'Synthetic manager')`, [ids.ownerRole, ids.organization, roleCodes[0], ids.managerRole, roleCodes[1]]);
+      // The custom member role has "Administrator" in its display name, but is not the protected ORG_ADMIN capability.
+      await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $2, $3, 'Synthetic private-note owner'), ($4, $2, $5, 'Department Administrator')`, [ids.ownerRole, ids.organization, roleCodes[0], ids.managerRole, roleCodes[1]]);
       await client.query(`INSERT INTO department (department_id, organization_id, code, name, default_role_id)
         VALUES ($1, $2, 'TEST', 'Synthetic department', $3)`, [ids.department, ids.organization, ids.ownerRole]);
       await client.query(`INSERT INTO department_membership
@@ -309,8 +310,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const administration = await repository.getOrganizationAdministration(ids.owner, ids.organization);
     expect(administration?.members).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: ids.ownerMembership }),
-      expect.objectContaining({ id: ids.managerMembership, name: "Synthetic Manager" }),
+      expect.objectContaining({ id: ids.ownerMembership, isOrganizationAdmin: true }),
+      expect.objectContaining({ id: ids.managerMembership, name: "Synthetic Manager", isOrganizationAdmin: false, roleNames: expect.arrayContaining(["Department Administrator"]) }),
     ]));
     await expect(repository.getOrganizationAdministration(ids.manager, ids.organization)).resolves.toBeNull();
     await expect(repository.getOrganizationAdministration(ids.owner, randomUUID())).resolves.toBeNull();

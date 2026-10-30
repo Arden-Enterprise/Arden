@@ -21,7 +21,7 @@ export type CurrentSession = {
 export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
-  members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; departmentIds?: string[]; roleIds: string[]; roleNames: string[] }>;
+  members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; departmentIds?: string[]; isOrganizationAdmin: boolean; roleIds: string[]; roleNames: string[] }>;
   invitations: Array<{ id: string; email: string; departmentId: string | null; status: string; expiresAt: string }>;
 };
 
