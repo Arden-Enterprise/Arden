@@ -125,6 +125,33 @@ class MigrationBaselineTests(unittest.TestCase):
         values.update(changes)
         return self.prepare(**values)
 
+    def test_legacy_active_manifest_derives_policy_inventory_from_exact_image_sql(self):
+        operator = load_operator()
+        future = {"id": "0005", "filename": "0005_later_change.sql",
+                  "sha256": "c" * 64, "rollout": "operator"}
+        policy = {"schema": 1, "migrations": self.migration_inventory + [future]}
+        legacy_fingerprint = bootstrap.verify_migration_inventory(
+            self.rows, [row["migration_id"] for row in self.applied])
+        manifest = {"commit": self.source["commit"], "tree": self.source["tree"],
+                    "migrations": legacy_fingerprint,
+                    "images": {"api": {"id": self.source["api_image"]}}}
+
+        inventory, fingerprint = operator.active_migration_inventory(
+            manifest, self.rows, self.applied, policy)
+
+        self.assertEqual(inventory, self.migration_inventory)
+        self.assertEqual(fingerprint, self.source["migrations"])
+        self.assertNotEqual(fingerprint, legacy_fingerprint)
+        for invalid_manifest, invalid_rows, invalid_policy in [
+            ({**manifest, "migrations": "0" * 64}, self.rows, policy),
+            (manifest, [{**self.rows[0], "sha256": "d" * 64}, self.rows[1]], policy),
+            (manifest, self.rows, {"schema": 1, "migrations": [future]}),
+        ]:
+            with self.subTest(manifest=invalid_manifest, rows=invalid_rows, policy=invalid_policy), \
+                    self.assertRaises(ValueError):
+                operator.active_migration_inventory(
+                    invalid_manifest, invalid_rows, self.applied, invalid_policy)
+
     def test_accepts_the_exact_active_image_and_plans_only_checksums_for_applied_rows(self):
         result = self.run_plan()
         self.assertEqual(result["environment"], "staging")
