@@ -458,13 +458,13 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     const name = request.body.name.trim();
-    const departmentName = request.body.departmentName?.trim() || "General";
-    if (!isValidLabel(name, 120) || !isValidLabel(departmentName, 80) || !context.emailVerified || !isNormalizedEmail(context.email)) {
+    const departmentName = request.body.departmentName?.trim();
+    if (!isValidLabel(name, 120) || (departmentName && !isValidLabel(departmentName, 80)) || !context.emailVerified || !isNormalizedEmail(context.email)) {
       return reply.code(400).send(safeError("INVALID_ORGANIZATION", "Verified account details and non-empty names are required.", request.id));
     }
     try {
       const organization = await dependencies.repository.createOrganization(
-        context.userId, context.email, context.fullName, { name, departmentName }, request.id,
+        context.userId, context.email, context.fullName, { name, ...(departmentName ? { departmentName } : {}) }, request.id,
       );
       reply.header("Location", `/api/v1/organizations/${organization.organizationId}`);
       return reply.code(201).send({ organization });

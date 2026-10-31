@@ -375,7 +375,7 @@ function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
   };
 }
 export type OrganizationSetup = { name: string; departmentName?: string };
-export type CreatedOrganization = { organizationId: string; name: string; departmentId: string; departmentName: string };
+export type CreatedOrganization = { organizationId: string; name: string; departmentId: string | null; departmentName: string | null };
 export type CreatedInvitation = { invitationId: string; email: string; organizationName: string; expiresAt: Date };
 export type OrganizationAdminData = {
   departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
@@ -593,55 +593,80 @@ export class ArdenRepository implements ArdenDataRepository {
         VALUES ($1, $2, 'ORGANIZATION_ALL', 'Everyone in organization',
           'Every active member of the organization', true, $1)`, [allMembersRoleId, organizationId]);
 
-      const baseDepartmentName = setup.departmentName?.trim() || "General";
-      const role = await client.query<{ role_id: string }>(`
-        INSERT INTO role (organization_id, code, name, description, is_system)
-        VALUES ($1, 'DEPT_DEFAULT_BOOTSTRAP', $2, 'Default role for the base department', false)
-        RETURNING role_id`, [organizationId, `${baseDepartmentName} Member`]);
-      const roleId = role.rows[0]?.role_id;
-      if (!roleId) throw new Error("Default role creation returned no id");
-      const department = await client.query<{ department_id: string }>(`
-        INSERT INTO department (organization_id, code, name, default_role_id)
-        VALUES ($1, 'GENERAL', $2, $3)
-        RETURNING department_id`, [organizationId, baseDepartmentName, roleId]);
-      const departmentId = department.rows[0]?.department_id;
-      if (!departmentId) throw new Error("Department creation returned no id");
-      await client.query(`INSERT INTO audience (
-          audience_id, organization_id, kind, department_id, name, description, is_managed, legacy_role_id)
-        VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
-          'Every active member of the department', true, $1)`,
-      [roleId, organizationId, departmentId, `${baseDepartmentName} members`]);
-      await client.query(`
-        INSERT INTO role_permission (role_id, permission_id)
-        SELECT $1, permission_id FROM permission
-         WHERE code IN ('PUBLISHED_CONTENT_VIEW', 'PUBLISHED_CONTENT_SEARCH', 'PUBLISHED_CONTENT_CONTRIBUTE',
-                        'PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE')
-        ON CONFLICT DO NOTHING`, [roleId]);
-      const departmentScope = await client.query<{ access_scope_id: string }>(`
-        INSERT INTO access_scope (organization_id, department_id, scope_type)
-        VALUES ($1, $2, 'DEPARTMENT') RETURNING access_scope_id`, [organizationId, departmentId]);
+      const baseDepartmentName = setup.departmentName?.trim();
+      let departmentId: string | null = null;
+      let departmentRoleId: string | null = null;
+      let departmentScopeId: string | null = null;
+
+      if (baseDepartmentName) {
+        const suffix = randomUUID().replaceAll("-", "").slice(0, 8).toUpperCase();
+        const role = await client.query<{ role_id: string }>(`
+          INSERT INTO role (organization_id, code, name, description, is_system)
+          VALUES ($1, $2, $3, 'Default role for the base department', false)
+          RETURNING role_id`, [organizationId, `DEPT_DEFAULT_${suffix}`, `${baseDepartmentName} Member`]);
+        departmentRoleId = role.rows[0]?.role_id ?? null;
+        if (!departmentRoleId) throw new Error("Default role creation returned no id");
+
+        const department = await client.query<{ department_id: string }>(`
+          INSERT INTO department (organization_id, code, name, default_role_id)
+          VALUES ($1, $2, $3, $4)
+          RETURNING department_id`, [organizationId, `DEPT_${suffix}`, baseDepartmentName, departmentRoleId]);
+        departmentId = department.rows[0]?.department_id ?? null;
+        if (!departmentId) throw new Error("Department creation returned no id");
+
+        await client.query(`INSERT INTO audience (
+            audience_id, organization_id, kind, department_id, name, description, is_managed, legacy_role_id)
+          VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
+            'Every active member of the department', true, $1)`,
+        [departmentRoleId, organizationId, departmentId, `${baseDepartmentName} members`]);
+
+        await client.query(`
+          INSERT INTO role_permission (role_id, permission_id)
+          SELECT $1, permission_id FROM permission
+           WHERE code IN ('PUBLISHED_CONTENT_VIEW', 'PUBLISHED_CONTENT_SEARCH', 'PUBLISHED_CONTENT_CONTRIBUTE',
+                          'PRIVATE_WORKSPACE_READ', 'PRIVATE_WORKSPACE_WRITE')
+          ON CONFLICT DO NOTHING`, [departmentRoleId]);
+
+        const departmentScope = await client.query<{ access_scope_id: string }>(`
+          INSERT INTO access_scope (organization_id, department_id, scope_type)
+          VALUES ($1, $2, 'DEPARTMENT') RETURNING access_scope_id`, [organizationId, departmentId]);
+        departmentScopeId = departmentScope.rows[0]?.access_scope_id ?? null;
+      }
+
       const organizationScope = await client.query<{ access_scope_id: string }>(`
         INSERT INTO access_scope (organization_id, scope_type)
         VALUES ($1, 'ORGANIZATION') RETURNING access_scope_id`, [organizationId]);
+
       const membership = await client.query<{ membership_id: string }>(`
         INSERT INTO organization_membership (organization_id, user_id, status)
         VALUES ($1, $2, 'ACTIVE') RETURNING membership_id`, [organizationId, userId]);
       const membershipId = membership.rows[0]?.membership_id;
       if (!membershipId) throw new Error("Creator membership creation returned no id");
-      await client.query(`
-        INSERT INTO department_membership (membership_id, department_id, is_primary, status)
-        VALUES ($1, $2, true, 'ACTIVE')`, [membershipId, departmentId]);
-      await client.query(`
-        INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
-        VALUES ($1, $2, $3), ($1,
-          (SELECT role_id FROM role WHERE organization_id IS NULL AND code = 'ORG_ADMIN' AND is_system), $4)`,
-      [membershipId, roleId, departmentScope.rows[0]?.access_scope_id, organizationScope.rows[0]?.access_scope_id]);
+
+      if (departmentId && departmentRoleId && departmentScopeId) {
+        await client.query(`
+          INSERT INTO department_membership (membership_id, department_id, is_primary, status)
+          VALUES ($1, $2, true, 'ACTIVE')`, [membershipId, departmentId]);
+        await client.query(`
+          INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
+          VALUES ($1, $2, $3), ($1,
+            (SELECT role_id FROM role WHERE organization_id IS NULL AND code = 'ORG_ADMIN' AND is_system), $4)`,
+        [membershipId, departmentRoleId, departmentScopeId, organizationScope.rows[0]?.access_scope_id]);
+      } else {
+        await client.query(`
+          INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
+          VALUES ($1,
+            (SELECT role_id FROM role WHERE organization_id IS NULL AND code = 'ORG_ADMIN' AND is_system), $2)`,
+        [membershipId, organizationScope.rows[0]?.access_scope_id]);
+      }
+
       await client.query(`
         INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
         VALUES ($1, $2, 'ORGANIZATION_CREATED', 'SUCCESS', $3::jsonb)`,
       [organizationId, membershipId, JSON.stringify({ departmentId, requestId })]);
+
       await client.query("COMMIT");
-      return { organizationId, name: setup.name, departmentId, departmentName: baseDepartmentName };
+      return { organizationId, name: setup.name, departmentId, departmentName: baseDepartmentName ?? null };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -720,7 +745,7 @@ export class ArdenRepository implements ArdenDataRepository {
   async getOrganizationAdministration(userId: string, organizationId: string): Promise<OrganizationAdminData | null> {
     return this.withOrganizationAdmin(userId, organizationId, async (client) => {
       const departments = await client.query<{ id: string; name: string; code: string; is_base: boolean; default_role_id: string; default_role_name: string }>(`
-        SELECT d.department_id AS id, d.name, d.code, (d.code = 'GENERAL') AS is_base,
+        SELECT d.department_id AS id, d.name, d.code, false AS is_base,
                r.role_id AS default_role_id, r.name AS default_role_name
           FROM department d JOIN role r ON r.role_id = d.default_role_id
          WHERE d.organization_id = $1 AND d.status = 'ACTIVE'

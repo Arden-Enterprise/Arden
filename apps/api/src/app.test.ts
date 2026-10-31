@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreateSharedDraftResult, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -341,6 +341,22 @@ describe("API auth and private draft routes", () => {
       departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", departmentName: "Product",
     });
     expect(repository.createdOrganization).toMatchObject({ userId: ownerId, email: "owner@example.test", name: "Product Team" });
+  });
+
+  it("creates an organization without initial departments when departmentName is omitted", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/organizations",
+      headers: { cookie: session, origin: "http://localhost:5180" },
+      payload: { name: "Blank Org" },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().organization).toEqual({
+      organizationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      name: "Blank Org",
+      departmentId: null,
+      departmentName: null,
+    });
   });
 
   it("exposes organization administration and audience/department mutations only to the Org Admin", async () => {
@@ -1382,9 +1398,14 @@ class MemoryRepository implements ArdenDataRepository {
     return [{ organizationId, organizationName: "Arden Test Org", status: "ACTIVE", roleCodes: ["MEMBER"], canUsePrivateWorkspace: true }];
   }
 
-  async createOrganization(userId: string, email: string, _fullName: string | null, setup: { name: string; departmentName: string }): Promise<{ organizationId: string; name: string; departmentId: string; departmentName: string }> {
+  async createOrganization(userId: string, email: string, _fullName: string | null, setup: OrganizationSetup): Promise<CreatedOrganization> {
     this.createdOrganization = { userId, email, name: setup.name };
-    return { organizationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", name: setup.name, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", departmentName: setup.departmentName };
+    return {
+      organizationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      name: setup.name,
+      departmentId: setup.departmentName ? "ffffffff-ffff-4fff-8fff-ffffffffffff" : null,
+      departmentName: setup.departmentName ?? null,
+    };
   }
 
   async getOrganizationAdministration(userId: string, requestedOrganization: string): Promise<OrganizationAdminData | null> {
