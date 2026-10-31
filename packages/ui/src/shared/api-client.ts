@@ -361,9 +361,9 @@ export async function createOrganization(platform: Platform, name: string, depar
   });
 }
 
-export async function signUp(platform: Platform, email: string, password: string, fullName: string): Promise<void> {
+export async function signUp(platform: Platform, email: string, password: string, fullName: string, redirectTo?: string): Promise<void> {
   await request(platform, "/api/v1/auth/sign-up", {
-    method: "POST", body: JSON.stringify({ email, password, fullName }),
+    method: "POST", body: JSON.stringify({ email, password, fullName, ...(redirectTo ? { redirectTo } : {}) }),
   });
 }
 

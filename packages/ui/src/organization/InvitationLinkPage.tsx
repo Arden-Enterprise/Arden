@@ -75,6 +75,13 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
   useEffect(() => {
     let active = true;
     setLoadingInvitation(true);
+    if (typeof window !== "undefined" && window.localStorage && token) {
+      try {
+        window.localStorage.setItem("arden_pending_invitation_token", token);
+      } catch {
+        // ignore
+      }
+    }
     getInvitationPreview(platform, token)
       .then((preview) => {
         if (!active) return;
@@ -84,6 +91,13 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       })
       .catch(() => {
         if (!active) return;
+        if (typeof window !== "undefined" && window.localStorage) {
+          try {
+            window.localStorage.removeItem("arden_pending_invitation_token");
+          } catch {
+            // ignore
+          }
+        }
         setInvitationInvalid(true);
         setLoadingInvitation(false);
       });
@@ -119,6 +133,13 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       setSignedIn(true);
       if (signedInSession.actor?.email) setCurrentAccountEmail(signedInSession.actor.email);
       await acceptInvitation(platform, token);
+      if (typeof window !== "undefined" && window.localStorage) {
+        try {
+          window.localStorage.removeItem("arden_pending_invitation_token");
+        } catch {
+          // ignore
+        }
+      }
       const updatedSession = await currentSession(platform);
       onAccepted(updatedSession);
     } catch (cause) {
@@ -147,7 +168,10 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       return;
     }
     try {
-      await signUp(platform, email.trim(), password, fullName.trim());
+      const redirectTo = typeof window !== "undefined" && window.location
+        ? `${window.location.origin}/invite/${encodeURIComponent(token)}`
+        : undefined;
+      await signUp(platform, email.trim(), password, fullName.trim(), redirectTo);
       setMessage("Check your email to continue.");
       setMode("sign-in");
     } catch (cause) {
@@ -166,6 +190,13 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     setBusy(true); setError(""); setMessage("");
     try {
       await acceptInvitation(platform, token);
+      if (typeof window !== "undefined" && window.localStorage) {
+        try {
+          window.localStorage.removeItem("arden_pending_invitation_token");
+        } catch {
+          // ignore
+        }
+      }
       const updatedSession = await currentSession(platform);
       onAccepted(updatedSession);
     } catch (cause) {

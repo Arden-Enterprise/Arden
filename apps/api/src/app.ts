@@ -198,7 +198,7 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Body: { email: string; password: string; fullName: string } }>("/api/v1/auth/sign-up", {
+  app.post<{ Body: { email: string; password: string; fullName: string; redirectTo?: string } }>("/api/v1/auth/sign-up", {
     schema: {
       body: {
         type: "object", additionalProperties: false, required: ["email", "password", "fullName"],
@@ -206,16 +206,32 @@ export function buildApp(dependencies: AppDependencies) {
           email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
           password: { type: "string", minLength: 1, maxLength: 1024 },
           fullName: { type: "string", minLength: 1, maxLength: 200 },
+          redirectTo: { type: "string", minLength: 1, maxLength: 2048 },
         },
       },
     },
   }, async (request, reply) => {
     if (!dependencies.auth) return authUnavailable(reply, request);
     try {
+      let validatedRedirectTo: string | undefined;
+      if (request.body.redirectTo) {
+        try {
+          const parsed = new URL(request.body.redirectTo);
+          const trusted = dependencies.authTrustedOrigins.includes(parsed.origin) ||
+            (dependencies.publicWebOrigin && new URL(dependencies.publicWebOrigin).origin === parsed.origin);
+          if (trusted) {
+            validatedRedirectTo = request.body.redirectTo;
+          }
+        } catch {
+          // ignore malformed redirectTo
+        }
+      }
+
       await dependencies.auth.signUp({
         email: request.body.email.trim().toLowerCase(),
         password: request.body.password,
         fullName: request.body.fullName.trim(),
+        redirectTo: validatedRedirectTo,
       });
       return reply.code(202).send({
         status: "check_email",

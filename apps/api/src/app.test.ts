@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
-import type { AuthProvider } from "./auth/provider.js";
+import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
 import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreateSharedDraftResult, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
@@ -591,6 +591,34 @@ describe("API auth and private draft routes", () => {
     expect(JSON.stringify(existing.headers["set-cookie"] ?? "")).not.toContain("arden_access");
   });
 
+  it("forwards trusted redirectTo for sign-up confirmation", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: {
+        email: "invited.member@example.test",
+        password: "synthetic-password",
+        fullName: "Invited Member",
+        redirectTo: "http://localhost:5180/invite/test-token-123",
+      },
+    });
+    expect(authProvider.lastSignUpCredentials?.redirectTo).toBe("http://localhost:5180/invite/test-token-123");
+
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: {
+        email: "invited2@example.test",
+        password: "synthetic-password",
+        fullName: "Invited Member 2",
+        redirectTo: "https://evil.site/phish",
+      },
+    });
+    expect(authProvider.lastSignUpCredentials?.redirectTo).toBeUndefined();
+  });
+
   it("signs out through Supabase and clears the session cookies", async () => {
     const response = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-out",
@@ -1059,6 +1087,7 @@ class FakeAuthProvider implements AuthProvider {
   signUpBehavior: "success" | "already_exists" | "rejected" = "success";
   lastResetEmail: string | null = null;
   lastUpdatedPassword: { token: string; password: string } | null = null;
+  lastSignUpCredentials: SupabaseSignUp | null = null;
   private readonly usersByAccessToken = new Map<string, { userId: string; email: string; passwordSetupRequired: boolean }>();
 
   async signIn(credentials: { email: string; password: string }) {
@@ -1074,7 +1103,8 @@ class FakeAuthProvider implements AuthProvider {
     return { userId, email, fullName: null, tokens };
   }
 
-  async signUp() {
+  async signUp(credentials?: SupabaseSignUp) {
+    if (credentials) this.lastSignUpCredentials = credentials;
     if (this.signUpBehavior === "already_exists") throw new Error("USER_ALREADY_EXISTS");
     if (this.signUpBehavior === "rejected") throw new Error("SIGNUP_REJECTED");
     return { tokens: null, emailVerified: false };

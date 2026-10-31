@@ -9,6 +9,7 @@ import {
   acceptInvitation,
   getInvitationPreview,
   signIn,
+  signUp,
   ApiError,
   type CurrentSession,
   type InvitationPreview,
@@ -22,6 +23,7 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
     acceptInvitation: vi.fn(),
     getInvitationPreview: vi.fn(),
     signIn: vi.fn(),
+    signUp: vi.fn(),
   };
 });
 
@@ -97,5 +99,56 @@ describe("invitation page feedback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Accept invitation" }));
     await waitFor(() => expect(acceptInvitation).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("alert").textContent).toBe("Couldn’t confirm invitation acceptance.");
+  });
+  it("persists invitation token to storage and passes redirectTo when creating account", async () => {
+    vi.mocked(signUp).mockResolvedValueOnce(undefined);
+    render(
+      createElement(InvitationLinkPage, {
+        platform: "web",
+        token: "invite-token-abc",
+        onAccepted: vi.fn(),
+      }),
+    );
+
+    await screen.findByText("Join Arden Demo");
+    expect(window.localStorage.getItem("arden_pending_invitation_token")).toBe("invite-token-abc");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret123" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
+
+    await waitFor(() => {
+      expect(signUp).toHaveBeenCalledWith(
+        "web",
+        "member@example.com",
+        "secret123",
+        "New User",
+        `${window.location.origin}/invite/invite-token-abc`,
+      );
+    });
+  });
+
+  it("clears pending invitation token from storage when invitation is accepted", async () => {
+    window.localStorage.setItem("arden_pending_invitation_token", "invite-token-abc");
+    vi.mocked(acceptInvitation).mockResolvedValueOnce(undefined);
+
+    render(
+      createElement(InvitationLinkPage, {
+        platform: "web",
+        token: "invite-token-abc",
+        authenticated: true,
+        session: { actor: { id: "user-1", email: "member@example.com" }, memberships: [], account: { passwordSetupRequired: false } },
+        onAccepted: vi.fn(),
+      }),
+    );
+
+    await screen.findByRole("button", { name: "Accept invitation" });
+    fireEvent.click(screen.getByRole("button", { name: "Accept invitation" }));
+
+    await waitFor(() => {
+      expect(acceptInvitation).toHaveBeenCalledWith("web", "invite-token-abc");
+      expect(window.localStorage.getItem("arden_pending_invitation_token")).toBeNull();
+    });
   });
 });

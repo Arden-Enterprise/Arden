@@ -118,9 +118,26 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
 
 type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
 
+const PENDING_INVITATION_STORAGE_KEY = "arden_pending_invitation_token";
+
 function tokenFromInvitationPath(pathname: string): string | null {
   const match = /^\/invite\/([A-Za-z0-9_-]{43})\/?$/.exec(pathname);
   return match?.[1] ?? null;
+}
+
+function resolveInitialInvitationToken(): { token: string | null; fromPath: boolean } {
+  if (typeof window === "undefined") return { token: null, fromPath: false };
+  const pathToken = tokenFromInvitationPath(window.location.pathname);
+  if (pathToken) return { token: pathToken, fromPath: true };
+  try {
+    const stored = window.localStorage?.getItem(PENDING_INVITATION_STORAGE_KEY)?.trim();
+    if (stored && /^[A-Za-z0-9_-]{43}$/.test(stored)) {
+      return { token: stored, fromPath: false };
+    }
+  } catch {
+    // ignore
+  }
+  return { token: null, fromPath: false };
 }
 
 function parseRecoveryHash(location: Location): { accessToken: string; refreshToken: string } | null {
@@ -156,7 +173,7 @@ export function ArdenShell({ platform }: ArdenShellProps) {
 
 function ArdenShellContent({ platform }: ArdenShellProps) {
   const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
-  const [invitationToken, setInvitationToken] = useState<string | null>(() => tokenFromInvitationPath(window.location.pathname));
+  const [invitationToken, setInvitationToken] = useState<string | null>(() => resolveInitialInvitationToken().token);
   const [recoveryTokens, setRecoveryTokens] = useState<{ accessToken: string; refreshToken: string } | null>(() => {
     if (typeof window === "undefined") return null;
     const parsed = parseRecoveryHash(window.location);
@@ -214,6 +231,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (new URLSearchParams(window.location.search).has("auth") || (typeof window !== "undefined" && window.location.pathname === "/reset-password")) {
       try { window.history.replaceState(null, "", "/"); } catch {}
     }
+    if (typeof window !== "undefined" && window.localStorage) {
+      try { window.localStorage.removeItem(PENDING_INVITATION_STORAGE_KEY); } catch {}
+    }
     setServerSession(current);
     if (current.account?.passwordSetupRequired === true) {
       setEntryView("password-setup");
@@ -240,8 +260,23 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     void restoreSession(platform).then((current) => {
       if (current) {
         if (current.account?.passwordSetupRequired === true) return acceptServerSession(current);
-        if (invitationToken) setServerSession(current);
-        else return acceptServerSession(current);
+        const pathToken = typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
+        const activeMemberships = current.memberships.filter((membership) => membership.status === "active");
+        if (!pathToken && activeMemberships.length > 0) {
+          if (typeof window !== "undefined" && window.localStorage) {
+            try { window.localStorage.removeItem(PENDING_INVITATION_STORAGE_KEY); } catch {}
+          }
+          setInvitationToken(null);
+          return acceptServerSession(current);
+        }
+        if (invitationToken) {
+          setServerSession(current);
+          if (!pathToken && typeof window !== "undefined") {
+            try { window.history.replaceState(null, "", `/invite/${invitationToken}`); } catch {}
+          }
+        } else {
+          return acceptServerSession(current);
+        }
       }
       return undefined;
     }).catch(() => undefined);
@@ -367,7 +402,15 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           await apiCreateOrganization(platform, name, departmentName);
           await acceptServerSession(await currentSession(platform));
         }}
-        onBack={() => { void apiSignOut(platform).catch(() => undefined); setServerSession(null); privateNotes.reset(); setEntryView("sign-in"); }}
+        onBack={() => {
+          if (typeof window !== "undefined" && window.localStorage) {
+            try { window.localStorage.removeItem(PENDING_INVITATION_STORAGE_KEY); } catch {}
+          }
+          void apiSignOut(platform).catch(() => undefined);
+          setServerSession(null);
+          privateNotes.reset();
+          setEntryView("sign-in");
+        }}
         onContinue={(organizationId) => {
           const membership = serverSession.memberships.find((item) => item.organization.id === organizationId);
           if (membership) enterServerOrganization(membership);

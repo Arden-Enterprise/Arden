@@ -78,6 +78,17 @@ describe("Supabase session transport", () => {
     }));
   });
 
+  it("submits registration with optional redirectTo on web", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ status: "check_email" }, { status: 202 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(signUp("web", "new@example.test", "secure-password", "Jane Doe", "https://arden.example.test/invite/abc-123")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith("https://arden.example.test/api/v1/auth/sign-up", expect.objectContaining({
+      method: "POST", credentials: "include", body: JSON.stringify({ email: "new@example.test", password: "secure-password", fullName: "Jane Doe", redirectTo: "https://arden.example.test/invite/abc-123" }),
+    }));
+  });
+
   it("fetches invitation preview with encoded token", async () => {
     vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
     const preview = { organizationName: "Cheval", email: "guest@example.test", expiresAt: "2026-11-03T08:00:00Z" };
