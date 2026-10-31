@@ -1,0 +1,21 @@
+%% Figure M-01, Report 4 section 3.2.5: Organization Invitation State Machine
+%% Drawn from Diagrams/State Machine/02_Invitation_Detailed.drawio
+%% Code: organization_invitation.status IN (PENDING, ACCEPTED, REVOKED, EXPIRED), migration 0002
+stateDiagram-v2
+    state "Pending" as Pending
+    state "Accepted" as Accepted
+    state "Revoked" as Revoked
+    state "Expired" as Expired
+    [*] --> Pending : / issue invitation
+    Pending : resend [Org Admin, unexpired] / rotate token and resend
+    Pending : deliveryFailed / remain pending
+    Pending : accept [invalid recipient or token] / reject
+    Pending --> Accepted : accept [verified intended recipient, valid unused token] / consume invitation
+    Pending --> Revoked : revoke [Org Admin]
+    Pending --> Expired : validate [deadline passed]
+    Accepted : entry / create Active membership once
+    Revoked : entry / invalidate invitation token
+    Expired : entry / prevent acceptance
+    Accepted --> [*]
+    Revoked --> [*]
+    Expired --> [*]

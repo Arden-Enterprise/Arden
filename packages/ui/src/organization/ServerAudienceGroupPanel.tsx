@@ -48,6 +48,9 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
   const inFlight = useRef(false);
   const requestGeneration = useRef(0);
   const previousCreateSignal = useRef(createSignal);
+  const groupRows = useRef(new Map<string, HTMLButtonElement>());
+  const createButton = useRef<HTMLButtonElement>(null);
+  const detailOpener = useRef<HTMLElement | null>(null);
   const selected = groups.find(group => group.id === selectedId) ?? null;
   const dirty = creating || Boolean(selected && JSON.stringify(draft) !== JSON.stringify(groupWrite(selected)));
   const disabled = busy || selected?.status === "INACTIVE";
@@ -89,7 +92,14 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
     setError(""); setMessage("");
   };
   const guard = (action: () => void) => { if (dirty) setDiscardAction(() => action); else action(); };
+  const closeDetails = () => guard(() => {
+    const opener = (selectedId ? groupRows.current.get(selectedId) : null) ?? detailOpener.current;
+    setCreating(false); setSelectedId(null); setManagedId(null); setDraft(emptyWrite());
+    setNameSubmitted(false); setError(""); setMessage(""); setMemberId("");
+    requestAnimationFrame(() => (opener?.isConnected ? opener : createButton.current)?.focus());
+  });
   const startNew = () => {
+    detailOpener.current = document.activeElement instanceof HTMLButtonElement ? document.activeElement : null;
     setSelectedId(null); setManagedId(null); setCreating(true); setDraft(emptyWrite()); setSection("details");
     setError(""); setMessage("");
   };
@@ -174,6 +184,7 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
         <section className="island audience-list" aria-label="Reader groups">
           <div className="island-section-label"><span>GROUPS · {groups.length}</span><span>Managed by Org Admins</span></div>
           {groups.map(group => <button type="button" key={group.id} className="audience-row" disabled={busy}
+            ref={(element) => { if (element) groupRows.current.set(group.id, element); else groupRows.current.delete(group.id); }}
             aria-pressed={!managedId && selectedId === group.id} onClick={() => guard(() => select(group))}>
             <span className="island-tile" aria-hidden="true"><Icon name="people" size={16} /></span>
             <span className="audience-row-copy"><strong>{group.name}</strong><small>{group.description || "Reader group"}</small></span>
@@ -181,7 +192,7 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
             <span className={`island-chip${group.status === "INACTIVE" ? "" : " tone-strong"}`}>{group.status === "INACTIVE" ? "Inactive" : "Group"}</span>
           </button>)}
           {!groups.length && !creating && <div className="island-empty"><p>No reader groups yet.</p>
-            <button className="secondary-button" type="button" onClick={() => guard(startNew)}>Create reader group</button></div>}
+            <button ref={createButton} className="secondary-button" type="button" onClick={() => guard(startNew)}>Create reader group</button></div>}
           {creating && <div className="audience-row is-pending" aria-current="true"><span className="island-tile" aria-hidden="true"><Icon name="plus" size={16} /></span>
             <span className="audience-row-copy"><strong>{draft.name || "New reader group"}</strong><small>Not saved yet</small></span></div>}
         </section>
@@ -192,7 +203,8 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
     </aside>}
     {!loading && !managed && (selected || creating) && <aside className="island island-panel island-side" aria-label="Reader group details">
       <div className="island-side-header"><div><span className="meta-label">READER GROUP</span><h2>{draft.name || "New reader group"}</h2>
-        <p>{creating ? "Not saved yet" : `${activeMembers.length} readers · ${selected?.status === "INACTIVE" ? "Inactive" : "Active"}`}</p></div></div>
+        <p>{creating ? "Not saved yet" : `${activeMembers.length} readers · ${selected?.status === "INACTIVE" ? "Inactive" : "Active"}`}</p></div>
+        <button type="button" className="island-icon-button" disabled={busy} aria-label="Close reader group details" onClick={closeDetails}><Icon name="close" size={16} /></button></div>
       {message && <p className="admin-feedback" role="status">{message}</p>}
       <div className="island-seg" role="group" aria-label="Reader group sections">{(["members", "details"] as const).map(tab =>
         <button key={tab} type="button" disabled={creating && tab === "members"} aria-pressed={section === tab}
@@ -222,7 +234,7 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
         {creating && <p role="status" className="island-meta">Save the reader group before adding members.</p>}
       </>}
       {dirty && <footer className="audience-save"><strong>Unsaved changes</strong>
-        <button type="button" className="secondary-button" disabled={busy} onClick={() => { setCreating(false); setDraft(selected ? groupWrite(selected) : emptyWrite()); setNameSubmitted(false); }}>Reset</button>
+        <button type="button" className="secondary-button" disabled={busy} onClick={closeDetails}>Cancel</button>
         <button type="button" className="primary-button" disabled={busy} onClick={() => { setNameSubmitted(true); if (!draft.name.trim()) { setSection("details"); return; } void mutate(() => saveAudienceGroup(platform, organizationId, selected, draft), "Reader group saved."); }}>{busy ? "Saving…" : "Save group"}</button>
       </footer>}
     </aside>}

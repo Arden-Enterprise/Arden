@@ -15,6 +15,7 @@ import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
 import { ServerAudienceGroupPanel } from "./ServerAudienceGroupPanel";
 import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { Icon } from "../shared/Icon";
+import { IslandFilterMenu } from "../shared/IslandFilterMenu";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { countInvitations, invitationFilters, invitationState, visibleInvitations, type InvitationFilter, type InvitationState } from "./invitationStatus";
 import { DepartmentDetailIsland, grantCoverageLabel, grantValidity, MemberDetailIsland, memberInitials, memberStatus as describeMemberStatus } from "./AdminDetailIslands";
@@ -227,8 +228,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         {tab === "members" && <div role="tabpanel" aria-label="Members" className="admin-tabpanel">
           <div className="admin-filters">
             <label className="workspace-search admin-search"><Icon name="search" size={15} /><span className="sr-only">Search members</span><input type="search" placeholder="Filter by name or email" value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} /></label>
-            <label className="island-filter"><span className="sr-only">Filter department</span><select value={memberDepartment} onChange={(event) => setMemberDepartment(event.target.value)}><option value="ALL">Department: All</option>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label className="island-filter"><span className="sr-only">Filter membership status</span><select value={memberStatus} onChange={(event) => setMemberStatus(event.target.value)}><option value="ALL">Status: Any</option><option value="ACTIVE">Active</option><option value="INVITED">Awaiting assignment</option><option value="INACTIVE">Inactive</option></select></label>
+            <IslandFilterMenu label="Filter department" value={memberDepartment} onChange={setMemberDepartment}
+              options={[{ value: "ALL", label: "Department: All" }, ...data.departments.map((item) => ({ value: item.id, label: item.name }))]} />
+            <IslandFilterMenu label="Filter membership status" value={memberStatus} onChange={setMemberStatus}
+              options={[{ value: "ALL", label: "Status: Any" }, { value: "ACTIVE", label: "Active" }, { value: "INVITED", label: "Awaiting assignment" }, { value: "INACTIVE", label: "Inactive" }]} />
           </div>
           <div className="island-split">
           <div className="island-main">
@@ -266,7 +269,9 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         </div>}
         {tab === "departments" && <div role="tabpanel" aria-label="Departments" className="island-split">
           <div className="island-main">
-            <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || ""}</small></label><button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
+            <form className="island admin-inline-form" noValidate onSubmit={submitDepartment}><label className="organization-field"><span>New department</span><input id="admin-department-name" maxLength={80} placeholder="Customer Success" value={departmentNameInput} disabled={busy} aria-invalid={Boolean(departmentError)} aria-describedby="admin-department-help" onChange={(event) => { setDepartmentNameInput(event.target.value); setDepartmentError(""); }} /><small id="admin-department-help" className={departmentError ? "field-error" : ""}>{departmentError || ""}</small></label>
+              {(departmentNameInput || departmentError) && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setDepartmentNameInput(""); setDepartmentError(""); setError(""); }}>Cancel</button>}
+              <button className="primary-button" type="submit" disabled={busy}>{busy ? "Saving…" : "Create department"}</button></form>
             {data.departments.length ? <IslandTable label="Departments" minWidth={600} columns="minmax(220px, 2fr) minmax(90px, 1fr) minmax(90px, 1fr) minmax(90px, 1fr) 96px"
               headers={["DEPARTMENT", "MEMBERS", "PRIMARY", "REVIEWERS", <span className="sr-only">Actions</span>]}>
               {data.departments.map((department) => {
@@ -324,6 +329,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             <form className="admin-side-form" noValidate onSubmit={submitInvite}>
               <label className="organization-field"><span>Work email</span><input id="admin-invite-email" type="email" maxLength={320} placeholder="name@company.com" value={inviteEmail} disabled={busy} aria-invalid={Boolean(inviteError)} aria-describedby="admin-invite-help" onChange={(event) => { setInviteEmail(event.target.value); setInviteError(""); setInviteSuccess(""); }} /><small id="admin-invite-help" className={inviteError ? "field-error" : ""}>{inviteError || `They’ll receive a link to join ${organizationName}.`}</small></label>
               <button className="primary-button" type="submit" disabled={busy}>{busy ? "Sending…" : "Send invitation"}</button>
+              {(inviteEmail || inviteError) && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setInviteEmail(""); setInviteError(""); setInviteSuccess(""); setError(""); }}>Cancel</button>}
               {inviteSuccess && <p className="admin-inline-success" role="status">{inviteSuccess}</p>}
             </form>
           </aside>
@@ -366,7 +372,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               <label className="organization-field"><span>Project tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={projectTag} onChange={(event) => setProjectTag(event.target.value)} /></label>
             </div>
             {overlappingGrant && <p className="admin-feedback is-warning">Review permission already assigned.</p>}
-            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Assign reviewer"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); }}>Reset</button></div>
+            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Assign reviewer"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); setError(""); }}>Cancel</button></div>
           </form>
           </div>
         </div>}

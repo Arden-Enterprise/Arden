@@ -18,5 +18,9 @@ it("preserves unsaved edits and gives effective recovery after a note version co
   expect(result.current.error).toBe("This note has changed. Copy your edits, then refresh the page.");
   expect(result.current.draft.body).toBe("Unsaved local edits");
   expect(result.current.hasUnsavedDrafts).toBe(true);
+  act(() => result.current.discardSelected());
+  expect(result.current.draft.body).toBe("Saved text");
+  expect(result.current.hasUnsavedDrafts).toBe(false);
+  expect(result.current.error).toBe("This note has changed. Copy your edits, then refresh the page.");
   expect(request).toHaveBeenCalledTimes(3);
 });

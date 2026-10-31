@@ -19,14 +19,11 @@
 .sign-in-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  font-family: "Sora", sans-serif;
-  font-size: 24px;
-  font-weight: 600;
-  line-height: 34px;
+  height: 36px;
 }
 
-.sign-in-brand img, .sign-in-boundary img, .sign-in-assurance img { flex: none; }
+.sign-in-brand img { height: 36px; width: auto; }
+.sign-in-boundary img, .sign-in-assurance img { flex: none; }
 
 .sign-in-welcome-copy { min-width: 0; width: 100%; max-width: 662px; }
 

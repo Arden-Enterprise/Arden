@@ -386,6 +386,12 @@
   font-size: 14px;
 }
 
+.workspace-search input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
 .workspace-search input::placeholder {
   color: var(--arden-text-muted);
   opacity: 1;
