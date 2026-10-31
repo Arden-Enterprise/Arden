@@ -1,0 +1,33 @@
+%% Figure M-03, Report 4 section 3.5.5: Knowledge Submission State Machine
+%% Drawn from Diagrams/State Machine/01_Knowledge_Submission_Detailed.drawio
+%% Code: shared_submission.status IN (PENDING_REVIEW, APPROVED, REJECTED, WITHDRAWN) and
+%% publication_state IN (PREPARING, ACTIVE, FAILED, SUPERSEDED), migrations 0018 and 0021.
+%% Mapping: Cancelled = WITHDRAWN; Published = ACTIVE; Preparation Failed = FAILED;
+%% Not Published and Expired = SUPERSEDED. cancel, recoveryRequested, restrictReaders and
+%% unpublish are designed but have no route on staging.
+stateDiagram-v2
+    state "Pending Review" as PendingReview
+    [*] --> PendingReview : / freeze snapshot and proposed readers
+    PendingReview : decision [not permitted] / deny
+    PendingReview --> Approved : approve [review permitted, readers retained or narrowed] / save separate approved policy
+    PendingReview --> Rejected : reject [review permitted, reason provided]
+    PendingReview --> Cancelled : cancel [author or Org Admin, pending]
+    state Approved {
+        state "Preparation Failed" as PreparationFailed
+        state "Not Published" as NotPublished
+        state "Preparing" as Preparing
+        state "Published" as Published
+        [*] --> Preparing : / start preparation
+        Preparing : retryableError [budget remains] / retry preparation
+        Preparing --> Published : indexReady [manifest valid, no newer publication] / activate atomically
+        Preparing --> PreparationFailed : indexFailed [terminal]
+        PreparationFailed --> Preparing : recoveryRequested [snapshot still eligible]
+        Preparing --> NotPublished : activationRefused [newer publication exists]
+        Published : restrictReaders [Org Admin, subset] / audit restriction
+        Published --> Expired : new version published
+        Published --> Expired : unpublish [Org Admin, reason provided]
+        NotPublished --> [*]
+        Expired --> [*]
+    }
+    Rejected --> [*]
+    Cancelled --> [*]
