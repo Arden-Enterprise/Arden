@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreateSharedDraftResult, DecideReviewResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreateSharedDraftResult, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -179,7 +179,7 @@ describe("API auth and private draft routes", () => {
       account: { passwordSetupRequired: false },
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
-        status: "active", roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
+        status: "active", departmentId: null, departmentName: null, roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
       }],
     });
   });
@@ -278,6 +278,24 @@ describe("API auth and private draft routes", () => {
     });
     expect(invalidOtp.statusCode).toBe(401);
     expect(invalidOtp.json().error.code).toBe("INVALID_TOKEN");
+
+    const reusedOtp = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "second-password" },
+    });
+    expect(reusedOtp.statusCode).toBe(401);
+    expect(reusedOtp.json().error.code).toBe("INVALID_TOKEN");
+    expect(reusedOtp.json().error.message).toBe("The reset code has already been used.");
+
+    const reusedAccessToken = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "third-password" },
+    });
+    expect(reusedAccessToken.statusCode).toBe(401);
+    expect(reusedAccessToken.json().error.code).toBe("INVALID_TOKEN");
+    expect(reusedAccessToken.json().error.message).toBe("The reset code has already been used.");
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
@@ -330,6 +348,7 @@ describe("API auth and private draft routes", () => {
     const adminData = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/administration`, headers: { cookie: adminSession } });
     expect(adminData.statusCode).toBe(200);
     expect(adminData.json().departments[0].name).toBe("Product");
+    expect(adminData.json().members[0]).toMatchObject({ isOrganizationAdmin: true });
 
     const createdAudience = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Operations readers", description: "Operations knowledge audience" } });
     expect(createdAudience.statusCode).toBe(201);
@@ -340,9 +359,49 @@ describe("API auth and private draft routes", () => {
     const assigned = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups/${createdAudience.json().id}/members`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { membershipId: "77777777-7777-4777-8777-777777777777" } });
     expect(assigned.statusCode).toBe(201);
 
+    const changedDepartment = await app.inject({
+      method: "POST",
+      url: `/api/v1/organizations/${organizationId}/members/77777777-7777-4777-8777-777777777777/department`,
+      headers: { cookie: adminSession, origin: "http://localhost:5180" },
+      payload: { departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff" },
+    });
+    expect(changedDepartment.statusCode).toBe(200);
+    expect(changedDepartment.json()).toEqual({
+      membershipId: "77777777-7777-4777-8777-777777777777",
+      departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+    });
+
+    const deleteFirstDept = await app.inject({
+      method: "POST",
+      url: `/api/v1/organizations/${organizationId}/departments/ffffffff-ffff-4fff-8fff-ffffffffffff/delete`,
+      headers: { cookie: adminSession, origin: "http://localhost:5180" },
+    });
+    expect(deleteFirstDept.statusCode).toBe(200);
+
+    const customDelete = await app.inject({
+      method: "POST",
+      url: `/api/v1/organizations/${organizationId}/departments/44444444-4444-4444-8444-444444444444/delete`,
+      headers: { cookie: adminSession, origin: "http://localhost:5180" },
+    });
+    expect(customDelete.statusCode).toBe(200);
+    expect(customDelete.json()).toEqual({ departmentId: "44444444-4444-4444-8444-444444444444", status: "archived", unassignedCount: 0, reassignedCount: 0 });
+
     const memberSession = await desktopSession(app, "member@example.test");
     const denied = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/administration`, headers: { cookie: memberSession } });
     expect(denied.statusCode).toBe(404);
+    const deniedDepartmentChange = await app.inject({
+      method: "POST",
+      url: `/api/v1/organizations/${organizationId}/members/77777777-7777-4777-8777-777777777777/department`,
+      headers: { cookie: memberSession, origin: "http://localhost:5180" },
+      payload: { departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff" },
+    });
+    expect(deniedDepartmentChange.statusCode).toBe(404);
+    const deniedDelete = await app.inject({
+      method: "POST",
+      url: `/api/v1/organizations/${organizationId}/departments/44444444-4444-4444-8444-444444444444/delete`,
+      headers: { cookie: memberSession, origin: "http://localhost:5180" },
+    });
+    expect(deniedDelete.statusCode).toBe(404);
     const deniedAudienceWrite = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups`, headers: { cookie: memberSession, origin: "http://localhost:5180" }, payload: { name: "Forged audience", description: "" } });
     expect(deniedAudienceWrite.statusCode).toBe(404);
     expect((await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/roles`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Legacy role" } })).statusCode).toBe(404);
@@ -396,7 +455,7 @@ describe("API auth and private draft routes", () => {
     const created = await app.inject({
       method: "POST", url: `/api/v1/organizations/${organizationId}/invitations`,
       headers: { cookie: adminSession, origin: "http://localhost:5180" },
-      payload: { departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", email: "New.Member@Example.Test" },
+      payload: { email: "New.Member@Example.Test" },
     });
     expect(created.statusCode).toBe(202);
     expect(JSON.stringify(created.json())).not.toContain("token");
@@ -412,6 +471,15 @@ describe("API auth and private draft routes", () => {
     expect(resent.statusCode).toBe(202);
     const resentToken = invitationMailer.sent[1]?.invitationUrl.split("/").at(-1);
     expect(resentToken).not.toBe(token);
+
+    const preview = await app.inject({ method: "GET", url: `/api/v1/invitations/${resentToken}` });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({
+      organizationName: "Arden Test Org",
+      email: "new.member@example.test",
+    });
+    const invalidPreview = await app.inject({ method: "GET", url: `/api/v1/invitations/${token}` });
+    expect(invalidPreview.statusCode).toBe(404);
 
     const wrongAccount = await desktopSession(app, "owner@example.test");
     const rejected = await app.inject({ method: "POST", url: "/api/v1/invitations/accept", headers: { cookie: wrongAccount, origin: "http://localhost:5180" }, payload: { token: resentToken } });
@@ -498,6 +566,10 @@ describe("API auth and private draft routes", () => {
 
     const noSession = await app.inject({ method: "GET", url: "/api/v1/me" });
     expect(noSession.statusCode).toBe(401);
+
+    const unconfirmed = await app.inject({ method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" }, payload: { email: "unconfirmed@example.test", password: "synthetic-password" } });
+    expect(unconfirmed.statusCode).toBe(403);
+    expect(unconfirmed.json().error.code).toBe("EMAIL_NOT_CONFIRMED");
 
     const extraField = await app.inject({ method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" }, payload: { email: "owner@example.test", password: "synthetic-password", userId: otherId } });
     expect(extraField.statusCode).toBe(400);
@@ -714,6 +786,8 @@ describe("API auth and private draft routes", () => {
     const listed = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/drafts`, headers });
     expect(listed.statusCode).toBe(200);
     expect(listed.json().items).toHaveLength(1);
+    expect(listed.json().items[0]).toMatchObject({ title: "Runbook", status: "ACTIVE", audienceIds: [] });
+    expect(listed.json().items[0].audienceRoleIds).toBeUndefined();
     expect(JSON.stringify(listed.json())).not.toContain("arden-private-object");
     const reopened = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/drafts/${sharedDraftId}`, headers });
     expect(reopened.statusCode).toBe(200);
@@ -721,6 +795,41 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "POST", url, headers, payload })).statusCode).toBe(200);
     expect(repository.sharedCreates).toBe(1);
     expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, title: "Other" } })).statusCode).toBe(409);
+  });
+
+  it("accepts new drafts and reviewer grants without a classification (decision 0013)", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const headers = { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey };
+    const payload = { title: "Runbook", body: "Recovery steps" };
+    const created = await app.inject({ method: "POST", url: `${root}/drafts/new`, headers, payload });
+    expect(created.statusCode).toBe(201);
+    expect(repository.sharedDraft?.classification).toBe("INTERNAL");
+    expect((await app.inject({ method: "POST", url: `${root}/drafts/new`, headers, payload })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `${root}/drafts/new`, headers,
+      payload: { ...payload, classification: "SECRET" } })).statusCode).toBe(400);
+
+    const grant = await app.inject({ method: "POST", url: `${root}/reviewer-grants`,
+      headers: { cookie: session, origin: "http://localhost:5180" },
+      payload: { reviewerMembershipId: otherId, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", level: "STANDARD" } });
+    expect(grant.statusCode).toBe(201);
+    expect(repository.reviewerGrant?.classifications).toEqual(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"]);
+    expect(repository.reviewerGrant).toMatchObject({ scope: "DEPARTMENT", level: "STANDARD" });
+  });
+
+  it("creates whole-organization grants and rejects mismatched scope metadata (decision 0015)", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const url = `/api/v1/organizations/${organizationId}/knowledge/reviewer-grants`;
+    const headers = { cookie: session, origin: "http://localhost:5180" };
+    const created = await app.inject({ method: "POST", url, headers,
+      payload: { reviewerMembershipId: otherId, scope: "ORGANIZATION" } });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({ scope: "ORGANIZATION", departmentId: null, level: "STANDARD" });
+    expect((await app.inject({ method: "POST", url, headers,
+      payload: { reviewerMembershipId: otherId, scope: "ORGANIZATION",
+        departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url, headers,
+      payload: { reviewerMembershipId: otherId, scope: "DEPARTMENT" } })).statusCode).toBe(400);
   });
 
   it("preserves an uploaded PDF through metadata, submission, review and preparation", async () => {
@@ -791,7 +900,8 @@ describe("API auth and private draft routes", () => {
       url: `/api/v1/organizations/${organizationId}/knowledge/options`, headers: { cookie: session } });
     expect(options.statusCode).toBe(200);
     expect(options.json()).toMatchObject({ departments: [{ name: "Product" }],
-      audiences: [{ name: "Product members" }] });
+      primaryDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      organizationReviewerAvailable: false, audiences: [{ name: "Product members" }] });
     expect(options.headers["cache-control"]).toBe("no-store");
     const otherOrganization = await app.inject({ method: "GET",
       url: `/api/v1/organizations/${otherOrganizationId}/knowledge/options`, headers: { cookie: session } });
@@ -952,6 +1062,7 @@ class FakeAuthProvider implements AuthProvider {
   private readonly usersByAccessToken = new Map<string, { userId: string; email: string; passwordSetupRequired: boolean }>();
 
   async signIn(credentials: { email: string; password: string }) {
+    if (credentials.email === "unconfirmed@example.test") throw new Error("EMAIL_NOT_CONFIRMED");
     if (credentials.password !== "synthetic-password" || !credentials.email.endsWith("@example.test")) throw new Error("INVALID_CREDENTIALS");
     const suffix = credentials.email.startsWith("owner") ? "owner"
       : credentials.email.startsWith("manager") ? "manager"
@@ -999,8 +1110,13 @@ class FakeAuthProvider implements AuthProvider {
     this.lastResetEmail = email;
   }
 
+  private readonly usedOtpTokens = new Set<string>();
+
   async verifyOtp(params: { email: string; token: string }) {
+    const key = `${params.email}:${params.token}`;
+    if (this.usedOtpTokens.has(key)) throw new Error("INVALID_OTP");
     if (params.token !== "valid-token") throw new Error("INVALID_OTP");
+    this.usedOtpTokens.add(key);
     const tokens = { accessToken: "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
     this.usersByAccessToken.set(tokens.accessToken, { userId: ownerId, email: params.email, passwordSetupRequired: false });
     return { tokens };
@@ -1192,7 +1308,7 @@ class MemoryRepository implements ArdenDataRepository {
     return {
       departments: [{ id: "ffffffff-ffff-4fff-8fff-ffffffffffff", name: "Product", defaultRoleId: "11111111-aaaa-4aaa-8aaa-111111111111", defaultRoleName: "Product Member" }],
       roles: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product Member", code: "DEPT_DEFAULT_TEST", isDefault: true }],
-      members: [{ id: "77777777-7777-4777-8777-777777777777", email: "owner@example.test", name: "Owner", status: "ACTIVE", departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", roleIds: [], roleNames: [] }],
+      members: [{ id: "77777777-7777-4777-8777-777777777777", email: "owner@example.test", name: "Owner", status: "ACTIVE", departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", isOrganizationAdmin: true, roleIds: ["global-org-admin"], roleNames: ["Organization Admin"] }],
       invitations: [],
     };
   }
@@ -1201,16 +1317,22 @@ class MemoryRepository implements ArdenDataRepository {
     if ((userId !== ownerId && userId !== otherId) || requestedOrganization !== organizationId) return null;
     return {
       departments: [{ id: "ffffffff-ffff-4fff-8fff-ffffffffffff", name: "Product" }],
+      primaryDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+      organizationReviewerAvailable: false,
       audiences: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product members",
         departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", kind: "DEPARTMENT_ALL" }],
     };
   }
 
   async createDepartment(userId: string, requestedOrganization: string, _name: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
+  async deleteDepartment(userId: string, requestedOrganization: string, _departmentId: string): Promise<DeleteDepartmentResult> {
+    if (userId !== ownerId || requestedOrganization !== organizationId) return { success: false, errorReason: "NOT_FOUND" };
+    return { success: true, unassignedCount: 0, reassignedCount: 0 };
+  }
   async changePrimaryDepartment(userId: string, requestedOrganization: string, _membershipId: string, _departmentId: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
 
-  async createInvitation(userId: string, requestedOrganization: string, departmentId: string, email: string, tokenHash: string, expiresAt: Date): Promise<{ invitationId: string; email: string; organizationName: string; expiresAt: Date } | null> {
-    if (userId !== ownerId || requestedOrganization !== organizationId || departmentId !== "ffffffff-ffff-4fff-8fff-ffffffffffff") return null;
+  async createInvitation(userId: string, requestedOrganization: string, _departmentId: string | null | undefined, email: string, tokenHash: string, expiresAt: Date): Promise<{ invitationId: string; email: string; organizationName: string; expiresAt: Date } | null> {
+    if (userId !== ownerId || requestedOrganization !== organizationId) return null;
     this.pendingInvitation = { invitationId: "99999999-9999-4999-8999-999999999999", email, tokenHash, expiresAt, accepted: false };
     return { invitationId: this.pendingInvitation.invitationId, email, organizationName: "Arden Test Org", expiresAt };
   }
@@ -1227,6 +1349,12 @@ class MemoryRepository implements ArdenDataRepository {
     if (userId !== ownerId || requestedOrganization !== organizationId || !invite || invite.invitationId !== invitationId || invite.accepted) return false;
     invite.accepted = true;
     return true;
+  }
+
+  async getInvitationByToken(tokenHash: string): Promise<{ invitationId: string; organizationName: string; email: string; expiresAt: Date } | null> {
+    const invite = this.pendingInvitation;
+    if (!invite || invite.accepted || invite.expiresAt <= new Date() || invite.tokenHash !== tokenHash) return null;
+    return { invitationId: invite.invitationId, organizationName: "Arden Test Org", email: invite.email, expiresAt: invite.expiresAt };
   }
 
   async acceptInvitation(userId: string, email: string, _fullName: string | null, emailVerified: boolean, tokenHash: string): Promise<boolean> {
@@ -1367,7 +1495,8 @@ class MemoryRepository implements ArdenDataRepository {
 
   async createReviewerGrant(userId: string, requestedOrganization: string, input: ReviewerGrantInput): Promise<ReviewerGrantRecord | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId || input.reviewerMembershipId !== otherId) return null;
-    this.reviewerGrant = { ...input, id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", status: "ACTIVE",
+    this.reviewerGrant = { ...input, level: input.level ?? "STANDARD",
+      id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", status: "ACTIVE",
       validFrom: new Date("2026-10-10T09:00:00.000Z") };
     return this.reviewerGrant;
   }

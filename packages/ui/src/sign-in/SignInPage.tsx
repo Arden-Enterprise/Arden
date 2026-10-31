@@ -1,4 +1,4 @@
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { Platform } from "../shared/types";
 import {
   beginGoogleSignIn,
@@ -12,6 +12,40 @@ import {
 import { AuthLayout } from "./AuthLayout";
 
 export type SignInMode = "sign-in" | "register" | "forgot-password" | "reset-password";
+
+function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const previous = document.activeElement;
+    dialog.current?.showModal();
+    return () => {
+      dialog.current?.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
+  return (
+    <dialog
+      ref={dialog}
+      className="organization-dialog admin-confirm"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="unconfirmed-email-title"
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+    >
+      <div className="organization-dialog-heading">
+        <h2 id="unconfirmed-email-title">Verify your email</h2>
+      </div>
+      <p className="organization-dialog-description">
+        Check <strong>{email}</strong> for a verification link.
+      </p>
+      <div className="organization-dialog-actions">
+        <button type="button" className="auth-primary" autoFocus onClick={onClose}>
+          OK
+        </button>
+      </div>
+    </dialog>
+  );
+}
 
 export function SignInPage({
   platform,
@@ -36,18 +70,25 @@ export function SignInPage({
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [resetToken, setResetToken] = useState("");
+  const [useResetCode, setUseResetCode] = useState(false);
+  const usingRecoverySession = Boolean(recoveryTokens) && !useResetCode;
   const [notice, setNotice] = useState<{ text: string; isSuccess?: boolean } | null>(() => {
     const status = new URLSearchParams(window.location.search).get("status");
     return status === "error" ? { text: "Sign in could not be completed." } : null;
   });
   const [busy, setBusy] = useState<"submit" | "google" | null>(null);
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
   const showPreview = new URLSearchParams(window.location.search).get("preview") === "1";
 
   const switchMode = (newMode: SignInMode) => {
+    if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
+      try { window.history.replaceState(null, "", "/"); } catch {}
+    }
     setMode(newMode);
     setNotice(null);
     setPassword("");
     setConfirmPassword("");
+    setResetToken("");
   };
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
@@ -57,7 +98,12 @@ export function SignInPage({
     try {
       await onAuthenticated(await signIn(platform, email.trim(), password));
     } catch (error) {
-      setNotice({ text: error instanceof Error ? error.message : "Sign in could not be completed." });
+      if (error instanceof ApiError && error.code === "EMAIL_NOT_CONFIRMED") {
+        setUnconfirmedEmail(email.trim());
+        setNotice({ text: "Check your email to verify your account." });
+      } else {
+        setNotice({ text: error instanceof Error ? error.message : "Sign in could not be completed." });
+      }
     } finally {
       setBusy(null);
       setPassword("");
@@ -71,7 +117,7 @@ export function SignInPage({
     try {
       await signUp(platform, email.trim(), password, fullName.trim());
       setNotice({
-        text: "Account created. Check your email for confirmation if required, then sign in.",
+        text: "Check your email to continue.",
         isSuccess: true,
       });
       setMode("sign-in");
@@ -97,9 +143,10 @@ export function SignInPage({
     try {
       await requestPasswordReset(platform, email.trim());
       setNotice({
-        text: "If an account with this email exists, a password reset link has been sent to your email.",
+        text: "A verification code has been sent to your email. Enter the code and your new password below.",
         isSuccess: true,
       });
+      setMode("reset-password");
     } catch (cause) {
       setNotice({
         text: cause instanceof ApiError ? cause.message : "Password reset could not be requested. Try again later.",
@@ -118,7 +165,7 @@ export function SignInPage({
     setBusy("submit");
     setNotice(null);
     try {
-      if (recoveryTokens) {
+      if (usingRecoverySession && recoveryTokens) {
         await resetPasswordWithToken(platform, {
           accessToken: recoveryTokens.accessToken,
           refreshToken: recoveryTokens.refreshToken,
@@ -131,14 +178,18 @@ export function SignInPage({
           newPassword: password,
         });
       }
+      if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
+        try { window.history.replaceState(null, "", "/"); } catch {}
+      }
       setNotice({
         text: "Password updated successfully. You can now sign in with your new password.",
         isSuccess: true,
       });
+      setResetToken("");
       setMode("sign-in");
     } catch (cause) {
       setNotice({
-        text: cause instanceof ApiError ? cause.message : "Password reset could not be completed. Check your code and try again.",
+        text: cause instanceof ApiError ? cause.message : "Couldn’t reset password.",
       });
     } finally {
       setBusy(null);
@@ -308,13 +359,6 @@ export function SignInPage({
                   >
                     ← Back to sign in
                   </button>
-                  <button
-                    type="button"
-                    className="auth-text-link"
-                    onClick={() => switchMode("reset-password")}
-                  >
-                    Have a reset code?
-                  </button>
                 </div>
               </form>
             </>
@@ -332,7 +376,7 @@ export function SignInPage({
                 </div>
               )}
               <form onSubmit={handleResetPassword}>
-                {!recoveryTokens && (
+                {!usingRecoverySession && (
                   <>
                     <label>
                       <span>Email address</span>
@@ -347,7 +391,7 @@ export function SignInPage({
                       />
                     </label>
                     <label>
-                      <span>Verification code or token</span>
+                      <span>Verification code</span>
                       <input
                         type="text"
                         value={resetToken}
@@ -395,6 +439,13 @@ export function SignInPage({
                   >
                     ← Back to sign in
                   </button>
+                  <button
+                    type="button"
+                    className="auth-text-link"
+                    onClick={() => { setUseResetCode(true); switchMode("forgot-password"); }}
+                  >
+                    Request new code
+                  </button>
                 </div>
               </form>
             </>
@@ -418,7 +469,7 @@ export function SignInPage({
           )}
           {showPreview && (
             <details className="auth-preview-tools">
-              <summary>Development preview</summary>
+              <summary>Demo</summary>
               <button type="button" onClick={onEnterPreview}>Member</button>
               <button type="button" onClick={onOpenSetup}>Setup</button>
               {onEnterAdminPreview && <button type="button" onClick={onEnterAdminPreview}>Admin</button>}
@@ -426,6 +477,12 @@ export function SignInPage({
           )}
         </div>
       </section>
+      {unconfirmedEmail && (
+        <UnconfirmedEmailDialog
+          email={unconfirmedEmail}
+          onClose={() => setUnconfirmedEmail(null)}
+        />
+      )}
     </AuthLayout>
   );
 }

@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 let release;
+let migrationInventory;
 try { release = await import("./release.mjs"); } catch (error) {
+  if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
+}
+try { migrationInventory = await import("../../apps/api/migrations/inventory.mjs"); } catch (error) {
   if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
 }
 
@@ -13,6 +17,19 @@ const environment = {
 };
 
 test("release code is present", () => assert.ok(release, "Release client is not implemented"));
+
+test("release metadata binds the complete migration policy inventory", () => {
+  assert.ok(release && migrationInventory, "Release migration inventory is not implemented");
+  assert.equal(typeof release.metadata, "function", "Release metadata must be available to the bundle builder");
+  const source = release.metadata();
+  assert.equal(source.migrations, migrationInventory.fingerprintMigrationInventory(source.migration_inventory));
+  assert.ok(source.migration_inventory.length >= 23);
+  const operatorOnlyIds = new Set(["0018", "0019", "0020", "0021", "0022", "0023"]);
+  for (const id of operatorOnlyIds) {
+    assert.equal(source.migration_inventory.find(row => row.id === id)?.rollout, "operator",
+      `Migration ${id} must remain operator-class`);
+  }
+});
 
 test("only public canonical push targets can obtain a deployment environment", () => {
   assert.ok(release, "Release client is not implemented");
@@ -55,6 +72,123 @@ test("production promotion changes deployment identity without rebuilding images
   assert.equal(Object.hasOwn(result, "images"), false);
 });
 
+function inventorySource(commit, tree) {
+  const migration_inventory = [{ id: "0001", filename: "0001_example.sql", sha256: "d".repeat(64), rollout: "expand" }];
+  return { commit, tree, migration_inventory,
+    migrations: migrationInventory.fingerprintMigrationInventory(migration_inventory) };
+}
+
+test("staging plans the exact source before upload and fences every mutating call", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const source = inventorySource(environment.GITHUB_SHA, "b".repeat(40));
+  const manifest = { schema: 2, ...source, run_id: environment.GITHUB_RUN_ID,
+    attempt: 1, images: { api: { id: "sha256:" + "1".repeat(64) }, web: { id: "sha256:" + "2".repeat(64) } },
+    archive_sha256: "c".repeat(64), archive_size: 10 };
+  const calls = [], heads = [];
+  const send = async (request, archive) => {
+    calls.push({ request, archive });
+    return request.op === "plan-migrations" ? { status: "READY", migration_ids: ["0001_example"] } : { status: "ok" };
+  };
+  const getHead = async () => { heads.push(true); return environment.GITHUB_SHA; };
+  const result = await release.executeStagingRelease(environment, manifest, "temporary-archive", send, getHead);
+  assert.deepEqual(result, { status: "ok" });
+  assert.deepEqual(calls.map(call => call.request.op), ["plan-migrations", "upload", "deploy"]);
+  assert.equal(calls[0].request.migrations, source.migrations);
+  assert.deepEqual(calls[0].request.migration_inventory, source.migration_inventory);
+  assert.equal(calls[0].archive, undefined);
+  assert.equal(calls[1].archive, "temporary-archive");
+  assert.equal(heads.length, 3);
+});
+
+test("a previous migration attempt is reconciled and replanned before upload", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const source = inventorySource(environment.GITHUB_SHA, "b".repeat(40));
+  const manifest = { schema: 2, ...source, run_id: environment.GITHUB_RUN_ID,
+    attempt: 1, images: { api: { id: "sha256:" + "1".repeat(64) }, web: { id: "sha256:" + "2".repeat(64) } },
+    archive_sha256: "c".repeat(64), archive_size: 10 };
+  const calls = [], heads = [];
+  const send = async (request, archive) => {
+    calls.push({ request, archive });
+    if (request.op === "plan-migrations") {
+      return calls.filter(call => call.request.op === "plan-migrations").length === 1
+        ? { status: "RECOVERY_REQUIRED", migration_ids: [] }
+        : { status: "READY", migration_ids: ["0001_example"] };
+    }
+    if (request.op === "reconcile-migrations") return { status: "RECONCILED" };
+    return { status: "ok" };
+  };
+  const result = await release.executeStagingRelease(environment, manifest, "temporary-archive", send,
+    async () => { heads.push(true); return environment.GITHUB_SHA; });
+  assert.deepEqual(result, { status: "ok" });
+  assert.deepEqual(calls.map(call => call.request.op), [
+    "plan-migrations", "reconcile-migrations", "plan-migrations", "upload", "deploy",
+  ]);
+  assert.equal(calls[1].request.commit, environment.GITHUB_SHA);
+  assert.equal(calls[1].request.attempt, 1);
+  assert.equal(heads.length, 5);
+});
+
+test("a blocked or malformed staging plan stops before any upload", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const source = inventorySource(environment.GITHUB_SHA, "b".repeat(40));
+  const manifest = { schema: 2, ...source, run_id: environment.GITHUB_RUN_ID,
+    attempt: 1, images: { api: { id: "sha256:" + "1".repeat(64) }, web: { id: "sha256:" + "2".repeat(64) } },
+    archive_sha256: "c".repeat(64), archive_size: 10 };
+  for (const plan of [
+    { status: "REQUIRES_OPERATOR", migration_ids: ["0022_remove_old_data"] },
+    { status: "DRIFT", migration_ids: [] },
+    { status: "READY", migration_ids: [] },
+    { status: "NO_PENDING", migration_ids: ["0001_example"] },
+    { status: "READY", migration_ids: ["../../secret"] },
+  ]) {
+    const calls = [];
+    await assert.rejects(() => release.executeStagingRelease(environment, manifest, "temporary-archive",
+      async request => { calls.push(request.op); return plan; }, async () => environment.GITHUB_SHA));
+    assert.deepEqual(calls, ["plan-migrations"]);
+  }
+});
+
+test("production plans against its own verified staging artifact then promotes without upload or rebuild", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const main = { ...environment, GITHUB_REF_NAME: "main" };
+  const source = inventorySource(main.GITHUB_SHA, "b".repeat(40));
+  const calls = [], heads = [];
+  const send = async (request, archive) => {
+    calls.push({ request, archive });
+    return request.op === "plan-migrations" ? { status: "NO_PENDING", migration_ids: [] } : { status: "promoted" };
+  };
+  const result = await release.executeProductionRelease(main, source, send,
+    async () => { heads.push(true); return main.GITHUB_SHA; });
+  assert.deepEqual(result, { status: "promoted" });
+  assert.deepEqual(calls.map(call => call.request.op), ["plan-migrations", "promote"]);
+  assert.equal(calls[0].request.environment, "production");
+  assert.equal(calls[0].request.tree, source.tree);
+  assert.equal(calls[1].request.tree, source.tree);
+  assert.equal(calls[0].archive, undefined);
+  assert.equal(Object.hasOwn(calls[1].request, "images"), false);
+  assert.equal(heads.length, 2);
+});
+
+test("PR, fork and stale-head jobs cannot send migration or deployment requests", async () => {
+  assert.ok(release, "Release client is not implemented");
+  const source = inventorySource(environment.GITHUB_SHA, "b".repeat(40));
+  const manifest = { schema: 2, ...source, run_id: environment.GITHUB_RUN_ID,
+    attempt: 1, images: { api: { id: "sha256:" + "1".repeat(64) }, web: { id: "sha256:" + "2".repeat(64) } },
+    archive_sha256: "c".repeat(64), archive_size: 10 };
+  for (const env of [{ ...environment, GITHUB_EVENT_NAME: "pull_request" },
+    { ...environment, GITHUB_REPOSITORY: "attacker/Arden" }]) {
+    const calls = [];
+    await assert.rejects(() => release.executeStagingRelease(env, manifest, "archive",
+      async request => calls.push(request.op), async () => env.GITHUB_SHA));
+    assert.deepEqual(calls, []);
+  }
+  const calls = [];
+  await assert.rejects(() => release.executeStagingRelease(environment, manifest, "archive",
+    async request => { calls.push(request.op); return { status: "NO_PENDING", migration_ids: [] }; },
+    async () => "e".repeat(40)), /superseded/i);
+  assert.deepEqual(calls, []);
+});
+
 test("preflight checks each environment with a read-only status request", async () => {
   for (const branch of ["staging", "main"]) {
     const calls = [];
@@ -64,12 +198,19 @@ test("preflight checks each environment with a read-only status request", async 
     });
     assert.deepEqual(calls, [{ op: "status", environment: branch === "main" ? "production" : "staging" }]);
   }
+  await release.checkReadiness(environment, async () => ({
+    active: { manifest: { schema: 2, commit: "b".repeat(40) } }, pending: null,
+  }));
+  await release.checkReadiness(environment, async () => ({
+    active: { manifest: { schema: 2, commit: "b".repeat(40) } },
+    pending: { phase: "migrating" },
+  }));
 });
 
 test("preflight refuses unavailable, incomplete or unresolved release state", async () => {
   const active = { manifest: { schema: 1, commit: "b".repeat(40) } };
   for (const status of [undefined, {}, { active }, { active, pending: {} },
-    { active: { manifest: { schema: 2, commit: "b".repeat(40) } }, pending: null }]) {
+    { active: { manifest: { schema: 3, commit: "b".repeat(40) } }, pending: null }]) {
     await assert.rejects(() => release.checkReadiness(environment, async () => status));
   }
   await assert.rejects(() => release.checkReadiness(environment, async () => { throw new Error("unreachable"); }), /unreachable/);

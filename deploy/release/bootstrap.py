@@ -6,7 +6,43 @@ from pathlib import PurePosixPath
 import re
 import struct
 import hashlib
+import ipaddress
 import json
+from urllib.parse import unquote, urlsplit
+from protocol import validate_migration_inventory
+
+
+def build_migration_target_config(environment, api_networks, database_networks, database_image, runtime_database_url):
+    """Capture only non-secret target identity; migration credentials stay in a root-only env file."""
+    if environment not in {"staging", "production"}:
+        raise ValueError("Select the exact migration environment")
+    shared = sorted(set(api_networks) & set(database_networks))
+    if len(shared) != 1 or not re.fullmatch(r"sha256:[a-f0-9]{64}", database_image or ""):
+        raise ValueError("The database image and its private network must be unambiguous")
+    try:
+        url = urlsplit(runtime_database_url)
+        database_host = url.hostname or ""
+        database_name = unquote(url.path.lstrip("/"))
+        database_user = unquote(url.username or "")
+        port = url.port
+    except (AttributeError, ValueError) as error:
+        raise ValueError("The existing application database target is invalid") from error
+    try:
+        ipaddress.ip_address(database_host)
+        is_ip = True
+    except ValueError:
+        is_ip = False
+    if (url.scheme not in {"postgres", "postgresql"} or not database_host
+            or is_ip
+            or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", database_host)
+            or not re.fullmatch(r"[a-zA-Z0-9_]{1,63}", database_name)
+            or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]{0,62}", database_user)
+            or url.query or url.fragment or (port is not None and port != 5432)):
+        raise ValueError("The existing application database target is invalid")
+    return {"network": shared[0], "database_image": database_image,
+            "database_host": database_host, "database_name": database_name,
+            "runtime_database_user": database_user,
+            "env_file": f"/etc/arden/releases/{environment}.migration.env"}
 
 
 def verify_migration_inventory(rows, applied):
@@ -18,6 +54,133 @@ def verify_migration_inventory(rows, applied):
         raise ValueError("Applied database ledger differs from the captured image inventory")
     ordered = sorted(rows, key=lambda row: row["name"])
     return hashlib.sha256(json.dumps(ordered, separators=(",", ":")).encode()).hexdigest()
+
+
+def plan_migration_checksum_baseline(environment, expected_environment, expected_source,
+                                     active_source, image_rows, ledger_rows, migration_inventory):
+    """Validate legacy ledger IDs against the exact active image before checksum backfill."""
+    source_keys = {"commit", "tree", "api_image", "migrations"}
+    if (environment not in {"staging", "production"} or environment != expected_environment
+            or not isinstance(expected_source, dict) or set(expected_source) != source_keys
+            or not isinstance(active_source, dict) or set(active_source) != source_keys
+            or active_source != expected_source):
+        raise ValueError("Active migration baseline target or source changed")
+    if (not re.fullmatch(r"[a-f0-9]{40}", active_source["commit"])
+            or not re.fullmatch(r"[a-f0-9]{40}", active_source["tree"])
+            or not re.fullmatch(r"sha256:[a-f0-9]{64}", active_source["api_image"])
+            or not re.fullmatch(r"[a-f0-9]{64}", active_source["migrations"])):
+        raise ValueError("Active migration baseline identity is malformed")
+    try:
+        validate_migration_inventory(migration_inventory, active_source["migrations"])
+    except (TypeError, ValueError) as error:
+        raise ValueError("Active release migration inventory is invalid") from error
+    expected_image_rows = [{"name": item["filename"], "sha256": item["sha256"]}
+                           for item in migration_inventory]
+    if not isinstance(image_rows, list) or image_rows != expected_image_rows:
+        raise ValueError("Active image SQL files do not match the protected release inventory")
+    if any(not isinstance(row, dict) or set(row) != {"name", "sha256"}
+           or not isinstance(row.get("name"), str)
+           or not re.fullmatch(r"\d{4}_[a-z0-9_]+\.sql", row["name"])
+           or not isinstance(row.get("sha256"), str)
+           or not re.fullmatch(r"[a-f0-9]{64}", row["sha256"]) for row in image_rows):
+        raise ValueError("Active image migration inventory is malformed")
+    names = [row.get("name") if isinstance(row, dict) else None for row in image_rows]
+    if names != sorted(names):
+        raise ValueError("Active image migration inventory is not ordered")
+    ledger_ids = []
+    checksums = {}
+    for row in ledger_rows if isinstance(ledger_rows, list) else []:
+        if (not isinstance(row, dict) or set(row) != {"migration_id", "checksum"}
+                or not isinstance(row.get("migration_id"), str)
+                or (row["checksum"] is not None and (not isinstance(row["checksum"], str)
+                    or not re.fullmatch(r"[a-f0-9]{64}", row["checksum"])) )):
+            raise ValueError("Active migration ledger is malformed")
+        migration_id = row["migration_id"]
+        if migration_id in checksums:
+            raise ValueError("Active migration ledger contains duplicate IDs")
+        ledger_ids.append(migration_id)
+        checksums[migration_id] = row["checksum"]
+    expected_ids = [name[:-4] for name in names if isinstance(name, str) and name.endswith(".sql")]
+    if ledger_ids != expected_ids:
+        raise ValueError("Active migration ledger differs from the exact image inventory")
+    verify_migration_inventory(image_rows, ledger_ids)
+    updates = []
+    all_checksums = []
+    for row in image_rows:
+        migration_id = row["name"][:-4]
+        checksum = row["sha256"]
+        existing = checksums[migration_id]
+        if existing is not None and existing != checksum:
+            raise ValueError("Existing migration checksum conflicts with the active image")
+        all_checksums.append({"migration_id": migration_id, "checksum": checksum})
+        if existing is None:
+            updates.append({"migration_id": migration_id, "checksum": checksum})
+    return {"environment": environment, "source": dict(active_source),
+            "migration_inventory": copy.deepcopy(migration_inventory),
+            "checksums": all_checksums, "updates": updates}
+
+
+def migration_baseline_statements(plan, ledger_ddl):
+    """Render only the versioned ledger DDL and checksums for already-applied IDs."""
+    if (not isinstance(plan, dict) or set(plan) != {
+            "environment", "source", "migration_inventory", "checksums", "updates"}
+            or plan["environment"] not in {"staging", "production"}
+            or not isinstance(ledger_ddl, str) or not ledger_ddl.strip()
+            or not isinstance(plan["updates"], list) or not isinstance(plan["checksums"], list)
+            or not plan["checksums"]):
+        raise ValueError("Invalid migration checksum baseline plan")
+    try:
+        validate_migration_inventory(plan["migration_inventory"], plan["source"]["migrations"])
+    except (TypeError, KeyError, ValueError) as error:
+        raise ValueError("Migration checksum baseline source inventory is invalid") from error
+    if plan["checksums"] != [
+            {"migration_id": row["filename"][:-4], "checksum": row["sha256"]}
+            for row in plan["migration_inventory"]]:
+        raise ValueError("Migration checksum baseline hashes do not match the source inventory")
+    expected_ids = []
+    expected_hashes = {}
+    for row in plan["checksums"]:
+        if (not isinstance(row, dict) or set(row) != {"migration_id", "checksum"}
+                or not isinstance(row["migration_id"], str)
+                or not re.fullmatch(r"\d{4}_[a-z0-9_]+", row["migration_id"])
+                or not isinstance(row["checksum"], str)
+                or not re.fullmatch(r"[a-f0-9]{64}", row["checksum"])
+                or row["migration_id"] in expected_hashes):
+            raise ValueError("Invalid migration checksum baseline inventory")
+        expected_ids.append(row["migration_id"])
+        expected_hashes[row["migration_id"]] = row["checksum"]
+    if expected_ids != sorted(expected_ids):
+        raise ValueError("Migration checksum baseline inventory is not ordered")
+    ids = ",".join("'" + value + "'" for value in expected_ids)
+    cases = " ".join("WHEN '" + value + "' THEN '" + expected_hashes[value] + "'" for value in expected_ids)
+    guard = (
+        "DO $$ BEGIN IF (SELECT count(*) FROM public.arden_schema_migrations) <> "
+        + str(len(expected_ids))
+        + " OR EXISTS (SELECT 1 FROM public.arden_schema_migrations WHERE migration_id <> ALL(ARRAY["
+        + ids
+        + "]::text[]) OR (checksum IS NOT NULL AND checksum <> CASE migration_id "
+        + cases
+        + " ELSE NULL END)) THEN RAISE EXCEPTION 'migration baseline source changed'; END IF; END $$;"
+    )
+    statements = ["BEGIN;", "DO $$ BEGIN PERFORM pg_advisory_xact_lock(hashtext('arden:migrations')); END $$;",
+                  ledger_ddl, guard]
+    for row in plan["updates"]:
+        if (not isinstance(row, dict) or set(row) != {"migration_id", "checksum"}
+                or not isinstance(row["migration_id"], str)
+                or not re.fullmatch(r"\d{4}_[a-z0-9_]+", row["migration_id"])
+                or not isinstance(row["checksum"], str)
+                or not re.fullmatch(r"[a-f0-9]{64}", row["checksum"])):
+            raise ValueError("Invalid migration checksum update")
+        statements.append(
+            "UPDATE public.arden_schema_migrations SET checksum = '" + row["checksum"]
+            + "' WHERE migration_id = '" + row["migration_id"] + "' AND checksum IS NULL;"
+        )
+    statements.append("COMMIT;")
+    statements.append(
+        "SELECT migration_id || '|' || checksum FROM public.arden_schema_migrations "
+        "ORDER BY migration_id;"
+    )
+    return statements
 
 
 def candidate_template(final):

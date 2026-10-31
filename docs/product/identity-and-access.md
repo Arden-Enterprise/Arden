@@ -50,8 +50,8 @@ Scope: administration and explicit Reviewer Grants. Flow: authorized grant creat
 
 | Acceptance ID | Complete path to verify | Evidence / remaining |
 | --- | --- | --- |
-| F05-AC1 | Membership, grant scope, validity and required level determine queue/detail/decision access, with rechecks after protected-content reads. | Main source implements slices; G1/G3 must be resolved for later branch behavior. |
-| F05-AC2 | Review authority and self-review restrictions follow the selected accepted contract; no implicit administrator bypass is introduced while reconciling alternatives. | Main forbids the bypass; branch ADR 0011 describes an audited Org Admin exception. Do not silently select either for new integration. |
+| F05-AC1 | Membership, frozen readers, disjoint grant scope, validity and tags determine queue/detail/decision access, with rechecks after protected-content reads; legacy pending snapshots retain their original rule. | ADR 0013–0015 explicitly confirmed on 29 October 2026; real migration/runtime-role tests remain required. |
+| F05-AC2 | Ordinary reviewers cannot self-review; Organization Admin retains final decision authority and audited self-approval under ADR 0011. | Preserve private-original isolation and source access independently of review authority. |
 | F05-AC3 | Grant/member removal and audience changes block unauthorized pending decisions; denial does not expose hidden content or alter another author's draft. | Actual-role and concurrency evidence required where affected. |
 
 ## F06 Installation administration

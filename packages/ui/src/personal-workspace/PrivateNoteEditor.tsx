@@ -12,6 +12,7 @@ type PrivateNoteEditorProps = {
   toolbar: ReactNode;
   onTitleChange: (value: string) => void;
   onBodyChange: (value: string) => void;
+  entering?: boolean;
 };
 
 export function PrivateNoteEditor({
@@ -23,11 +24,12 @@ export function PrivateNoteEditor({
   toolbar,
   onTitleChange,
   onBodyChange,
+  entering = false,
 }: PrivateNoteEditorProps) {
   const titleRef = useAutosizeTextarea(draftTitle, 40);
 
   return (
-    <section className="note-editor-card island" aria-label="Private note editor">
+    <section className={`note-editor-card island${entering ? " is-entering" : ""}`} aria-label="Private note editor">
       {selectedNote ? (
         <>
           <div className="private-editor-toolbar" role="toolbar" aria-label="Note actions">{toolbar}</div>
@@ -43,7 +45,7 @@ export function PrivateNoteEditor({
               />
             </label>
             <span className={`edit-state${isDirty ? " is-dirty" : ""}`}>
-              {isDirty ? "Unsaved draft · kept while you switch notes" : selectedNote.updatedLabel}
+              {isDirty ? "Unsaved changes" : selectedNote.updatedLabel}
             </span>
             <label className="editor-body-label">
               <span className="sr-only">Note content</span>
@@ -55,7 +57,7 @@ export function PrivateNoteEditor({
             </label>
           </div>
           <footer className="editor-footer" aria-live="polite">
-            <span>{savedMessage || "Session preview. Refreshing or exiting clears your notes."}</span>
+            {savedMessage && <span>{savedMessage}</span>}
             <span>{draftBody.length} characters</span>
           </footer>
         </>
@@ -63,7 +65,6 @@ export function PrivateNoteEditor({
         <div className="island-empty empty-editor">
           <span className="island-tile" aria-hidden="true"><Icon name="lock" size={16} /></span>
           <h3>Select a private note</h3>
-          <p>Choose a note from the list or create a new one. Only you can open it.</p>
         </div>
       )}
     </section>

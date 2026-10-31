@@ -1,83 +1,213 @@
-import { WelcomePanel } from "./WelcomePanel";
-import { entryAssets } from "./entryAssets";
+import { type FormEvent, useState } from "react";
 import type { OrganizationMembership } from "../shared/api-client";
-import { useState } from "react";
+import { membershipAccessDescription, needsDepartmentAssignment } from "../shared/membershipAssignment";
+import { AuthLayout } from "./AuthLayout";
 
-export function WorkspaceSelectPage({ organizationName, memberships, onContinue, onBack, onCreateOrganization, testMode = false }: {
+export function WorkspaceSelectPage({
+  organizationName,
+  memberships,
+  onContinue,
+  onBack,
+  onCreateOrganization,
+  testMode = false,
+}: {
   organizationName: string;
   memberships?: OrganizationMembership[];
   testMode?: boolean;
   onContinue: (organizationId?: string) => void;
   onBack: () => void;
-  onCreateOrganization?: (name: string, departmentName: string) => Promise<void>;
+  onCreateOrganization?: (name: string, departmentName?: string) => Promise<void>;
 }) {
   const [organizationInput, setOrganizationInput] = useState("");
-  const [departmentInput, setDepartmentInput] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+
   const isLive = memberships !== undefined;
-  const choices = memberships?.filter((item) => item.status === "active" && item.canUsePrivateWorkspace) ?? [];
+  const choices = memberships?.filter((item) => item.status === "active") ?? [];
+  const hasNoWorkspaces = isLive && choices.length === 0;
+
+  const handleCreate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!onCreateOrganization) return;
+    const trimmed = organizationInput.trim();
+    if (!trimmed) return;
+    setCreating(true);
+    setCreateError("");
+    try {
+      await onCreateOrganization(trimmed);
+      setOrganizationInput("");
+      setShowCreate(false);
+    } catch (error: unknown) {
+      setCreateError(error instanceof Error ? error.message : "Organization setup could not be completed.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
-    <main className="sign-in-page workspace-select-page">
-      <WelcomePanel mode="workspace" />
-      <section className="sign-in-panel" aria-labelledby="workspace-select-title">
-        <div className="sign-in-card workspace-select-card">
-          <span className="meta-label">01 / YOUR ORGANIZATION</span>
-          <h2 id="workspace-select-title">Choose your workspace</h2>
-          {testMode && <p className="preview-disclaimer" role="status">Kiet Local test session · no login · changes are saved to the development database; invitation emails are not sent.</p>}
+    <AuthLayout wide>
+      <section className="auth-card auth-workspace-card" aria-labelledby="workspace-select-title">
+        <div className="auth-card-main">
+          {hasNoWorkspaces || showCreate ? (
+            <>
+              <span className="auth-eyebrow">YOUR ORGANIZATION</span>
+              <h1 id="workspace-select-title">Create your organization</h1>
+              <p className="auth-helper-text" style={{ textAlign: "center", margin: "8px 0 20px" }}>
+                {hasNoWorkspaces
+                  ? "You don’t have an active workspace yet. Set up an organization to get started."
+                  : "Set up a new organization workspace for your team."}
+              </p>
 
-          {isLive ? <div className="workspace-memberships">
-            {choices.map((membership) => <button type="button" key={membership.organization.id} className="workspace-membership" onClick={() => onContinue(membership.organization.id)}>
-              <span className="workspace-membership-heading"><img src={entryAssets.selectedWorkspace} alt="" width={26} height={26} /><strong>{membership.organization.name}</strong><span className="workspace-membership-status">AVAILABLE</span></span>
-              <span>{membership.roleCodes.length ? membership.roleCodes.join(", ") : "Active membership"} · Private workspace access</span>
-            </button>)}
-            {memberships.filter((item) => !choices.includes(item)).map((membership) => <div key={membership.organization.id} className="workspace-membership is-unavailable">
-              <span className="workspace-membership-heading"><img src={entryAssets.unavailableWorkspace} alt="" width={26} height={26} /><strong>{membership.organization.name}</strong><span className="workspace-membership-status">{membership.status.toUpperCase()}</span></span>
-              <span>{membership.status === "active" ? "This membership has no private workspace permission." : "An active membership is required."}</span>
-            </div>)}
-            {choices.length === 0 && <p role="status">You do not have an active organization workspace yet. You can create an organization or ask an administrator for membership.</p>}
-            {onCreateOrganization && <form className="organization-create-form" onSubmit={(event) => {
-              event.preventDefault();
-              setCreating(true); setCreateError("");
-              void onCreateOrganization(organizationInput.trim(), departmentInput.trim())
-                .catch((error: unknown) => setCreateError(error instanceof Error ? error.message : "Organization setup could not be completed."))
-                .finally(() => setCreating(false));
-            }}>
-              <h3>Create an organization</h3>
-              <label><span>Organization name</span><input required maxLength={120} value={organizationInput} onChange={(event) => setOrganizationInput(event.target.value)} /></label>
-              <label><span>Your primary department</span><input required maxLength={80} value={departmentInput} onChange={(event) => setDepartmentInput(event.target.value)} /></label>
-              {createError && <p role="alert">{createError}</p>}
-              <button type="submit" className="primary-button" disabled={creating}>{creating ? "Creating…" : "Create organization"}</button>
+              {createError && (
+                <div className="auth-message" role="alert">
+                  {createError}
+                </div>
+              )}
 
-            </form>}
-          </div> : <div className="workspace-memberships">
-            <div className="workspace-membership is-selected" aria-label={`${organizationName}, selected sample workspace`}>
-              <div className="workspace-membership-heading">
-                <img src={entryAssets.selectedWorkspace} alt="" width={26} height={26} />
-                <h3>{organizationName}</h3>
-                <span className="workspace-membership-status">
-                  <img src={entryAssets.statusAmber} alt="" width={7} height={7} />SELECTED
-                </span>
-              </div>
-              <p>Product Engineering · Member</p>
-            </div>
-            <button type="button" className="workspace-membership is-unavailable" disabled>
-              <span className="workspace-membership-heading">
-                <img src={entryAssets.unavailableWorkspace} alt="" width={26} height={26} />
-                <strong>Research Sandbox</strong>
-                <span className="workspace-membership-status">
-                  <img src={entryAssets.statusMuted} alt="" width={7} height={7} />NOT CONNECTED
-                </span>
-              </span>
-              <span>This sample workspace is not connected.</span>
-            </button>
-          </div>}
-          {!isLive && <><button type="button" className="primary-button workspace-continue" onClick={() => onContinue()}>Continue to workspace</button>
+              <form onSubmit={handleCreate}>
+                <label>
+                  <span>Organization name</span>
+                  <input
+                    type="text"
+                    required
+                    maxLength={120}
+                    value={organizationInput}
+                    onChange={(event) => setOrganizationInput(event.target.value)}
+                    placeholder="e.g. Acme Corporation"
+                    autoFocus
+                  />
+                </label>
+                <button type="submit" className="auth-primary" disabled={creating}>
+                  {creating ? "Creating organization…" : "Create organization"}
+                </button>
+                <div className="auth-footer-links" style={{ justifyContent: "center" }}>
+                  {showCreate && choices.length > 0 ? (
+                    <button
+                      type="button"
+                      className="auth-text-link"
+                      onClick={() => {
+                        setShowCreate(false);
+                        setCreateError("");
+                      }}
+                    >
+                      ← Back to workspaces
+                    </button>
+                  ) : (
+                    <button type="button" className="auth-text-link" onClick={onBack}>
+                      {isLive ? "Sign out" : "Back to sign in"}
+                    </button>
+                  )}
+                </div>
+              </form>
+            </>
+          ) : (
+            <>
+              <span className="auth-eyebrow">{isLive ? "YOUR WORKSPACES" : "DEMO WORKSPACE"}</span>
+              <h1 id="workspace-select-title">Choose your workspace</h1>
+              {testMode && (
+                <p
+                  className="auth-helper-text"
+                  role="status"
+                  style={{ textAlign: "center", margin: "6px 0 12px", color: "var(--arden-accent)" }}
+                >
+                  Test mode · Emails disabled
+                </p>
+              )}
 
-          </>}
-          <button type="button" className="text-button workspace-back" onClick={onBack}>{isLive ? "Sign out" : "Back to sign in"}</button>
+              {isLive ? (
+                <>
+                  <div className="workspace-choice-list">
+                    {choices.map((membership) => {
+                      const isAwaiting = needsDepartmentAssignment(membership);
+                      return (
+                        <button
+                          type="button"
+                          key={membership.organization.id}
+                          className="workspace-choice-card"
+                          onClick={() => onContinue(membership.organization.id)}
+                        >
+                          <div className="workspace-choice-header">
+                            <strong>{membership.organization.name}</strong>
+                            <span className={`workspace-status-badge ${isAwaiting ? "is-warning" : "is-active"}`}>
+                              {isAwaiting ? "AWAITING ASSIGNMENT" : "AVAILABLE"}
+                            </span>
+                          </div>
+                          <span className="workspace-choice-desc">
+                            {isAwaiting
+                              ? "Awaiting department assignment"
+                              : membershipAccessDescription(membership)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {memberships?.filter((item) => !choices.includes(item)).map((membership) => (
+                      <div key={membership.organization.id} className="workspace-choice-card is-unavailable">
+                        <div className="workspace-choice-header">
+                          <strong>{membership.organization.name}</strong>
+                          <span className="workspace-status-badge is-muted">{membership.status.toUpperCase()}</span>
+                        </div>
+                        <span className="workspace-choice-desc">Access unavailable</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {onCreateOrganization && (
+                    <button
+                      type="button"
+                      className="auth-google-button"
+                      style={{ marginTop: "6px" }}
+                      onClick={() => setShowCreate(true)}
+                    >
+                      + Create another organization
+                    </button>
+                  )}
+
+                  <div className="auth-footer-links" style={{ justifyContent: "center", marginTop: "16px" }}>
+                    <button type="button" className="auth-text-link" onClick={onBack}>
+                      Sign out
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="workspace-choice-list">
+                    <div className="workspace-choice-card is-selected" aria-label={`${organizationName}, selected sample workspace`}>
+                      <div className="workspace-choice-header">
+                        <strong>{organizationName}</strong>
+                        <span className="workspace-status-badge is-active">SELECTED</span>
+                      </div>
+                      <span className="workspace-choice-desc">Product Engineering · Member</span>
+                    </div>
+                    <div className="workspace-choice-card is-unavailable">
+                      <div className="workspace-choice-header">
+                        <strong>Research Sandbox</strong>
+                        <span className="workspace-status-badge is-muted">UNAVAILABLE</span>
+                      </div>
+                      <span className="workspace-choice-desc">Demo workspace</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="auth-primary"
+                    style={{ marginTop: "16px" }}
+                    onClick={() => onContinue()}
+                  >
+                    Continue to workspace
+                  </button>
+
+                  <div className="auth-footer-links" style={{ justifyContent: "center", marginTop: "16px" }}>
+                    <button type="button" className="auth-text-link" onClick={onBack}>
+                      Back to sign in
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
         </div>
       </section>
-    </main>
+    </AuthLayout>
   );
 }

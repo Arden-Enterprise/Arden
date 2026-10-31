@@ -4,6 +4,8 @@ Read the [feature index](README.md), especially G1/G3. Sources: current main [Fl
 
 Provenance: the public records identify project lead/task-owner decisions; exact original individuals are not established here. Product/engineering decision owners must reconcile conflicting contracts; delivery ownership remains in ARD-27 and its existing child work. Acceptance rows below expose coverage to establish, not observed passing behavior or new approval of a branch contract.
 
+29 October 2026 reconciliation: inspected main `be27d2c` includes ADR 0011/0012. The requesting maintainer explicitly confirmed ADR 0013–0015 for this integration after comparison with main. References below to branch-only contracts and G1/G3 are historical: the selected contract is Semantic Document v1, mutable author drafts, immutable snapshots, Approve/Reject, preparation then index-ready atomic activation, primary-department responsibility and disjoint reader-derived reviewer scopes. This decision does not establish full-path acceptance or authorize resetting populated data.
+
 ## F07 Creation and contribution
 
 Paths: start a new shared draft, or save a private note and explicitly contribute a separate copy → responsible department/audience metadata → saved working content. Private originals remain owner-only in both main and branch plans.

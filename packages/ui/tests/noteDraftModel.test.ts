@@ -67,4 +67,26 @@ describe("private note preview drafts", () => {
     expect(notePreviewReducer(empty, { type: "save" })).toBe(empty);
     expect(notePreviewReducer(empty, { type: "edit", field: "body", value: "text" })).toBe(empty);
   });
+
+  it("discards only the selected note's edits", () => {
+    let state = createNotePreview(sampleNotes);
+    state = notePreviewReducer(state, { type: "edit", field: "body", value: "Keep first draft" });
+    state = notePreviewReducer(state, { type: "select", id: "handover" });
+    state = notePreviewReducer(state, { type: "edit", field: "body", value: "Discard second draft" });
+    state = notePreviewReducer(state, { type: "discard" });
+    expect(state.notes).toEqual(sampleNotes);
+    expect(getNoteDraft(state, sampleNotes[1]).body).toBe("Original handover");
+    expect(getNoteDraft(state, sampleNotes[0]).body).toBe("Keep first draft");
+  });
+
+  it("removes a never-saved local note without deleting saved notes or other drafts", () => {
+    let state = createNotePreview(sampleNotes);
+    state = notePreviewReducer(state, { type: "edit", field: "body", value: "Keep first draft" });
+    state = notePreviewReducer(state, { type: "create", note: { id: "pending-new", title: "New", body: "", updatedLabel: "Not saved" } });
+    state = notePreviewReducer(state, { type: "discard" });
+    expect(state.notes).toEqual(sampleNotes);
+    expect(state.selectedId).toBe("review");
+    expect(getNoteDraft(state, sampleNotes[0]).body).toBe("Keep first draft");
+    expect(notePreviewReducer(createNotePreview([]), { type: "discard" }).notes).toEqual([]);
+  });
 });

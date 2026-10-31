@@ -5,7 +5,7 @@ import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
-import type { KnowledgeClassification } from "./knowledge/policy.js";
+import { allKnowledgeClassifications, defaultKnowledgeClassification, type KnowledgeClassification } from "./knowledge/policy.js";
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
 import type { AskArdenClient } from "./answers/ai-client.js";
@@ -35,7 +35,8 @@ type AppDependencies = {
 };
 
 type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean; passwordSetupRequired?: boolean };
-type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification: KnowledgeClassification };
+// Decision 0013: classification is optional and defaults to INTERNAL; review strictness comes from audience breadth.
+type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification?: KnowledgeClassification };
 
 export function buildApp(dependencies: AppDependencies) {
   const app = Fastify({
@@ -113,6 +114,9 @@ export function buildApp(dependencies: AppDependencies) {
       setAuthCookies(reply, result.tokens, dependencies.secureCookies);
       return { authenticated: true };
     } catch (error) {
+      if (error instanceof Error && error.message === "EMAIL_NOT_CONFIRMED") {
+        return reply.code(403).send(safeError("EMAIL_NOT_CONFIRMED", "Your email address has not been confirmed yet. Please check your inbox for the confirmation link.", request.id));
+      }
       if (error instanceof Error && error.message === "INVALID_CREDENTIALS") {
         return reply.code(401).send(safeError("INVALID_CREDENTIALS", "Email or password is incorrect.", request.id));
       }
@@ -276,6 +280,31 @@ export function buildApp(dependencies: AppDependencies) {
   app.get("/api/v1/auth/verify", handleVerify);
   app.get("/verify", handleVerify);
 
+  const consumedResetTokens = new Map<string, number>();
+  const RESET_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+
+  const isResetTokenConsumed = (tokenKey: string): boolean => {
+    const consumedAt = consumedResetTokens.get(tokenKey);
+    if (consumedAt === undefined) return false;
+    if (Date.now() - consumedAt > RESET_TOKEN_TTL_MS) {
+      consumedResetTokens.delete(tokenKey);
+      return false;
+    }
+    return true;
+  };
+
+  const markResetTokenConsumed = (tokenKey: string) => {
+    if (consumedResetTokens.size > 1000) {
+      const now = Date.now();
+      for (const [key, timestamp] of consumedResetTokens) {
+        if (now - timestamp > RESET_TOKEN_TTL_MS) {
+          consumedResetTokens.delete(key);
+        }
+      }
+    }
+    consumedResetTokens.set(tokenKey, Date.now());
+  };
+
   app.post<{ Body: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string } }>("/api/v1/auth/reset-password", {
     schema: {
       body: {
@@ -292,13 +321,22 @@ export function buildApp(dependencies: AppDependencies) {
   }, async (request, reply) => {
     if (!dependencies.auth || !dependencies.auth.updateUserPassword) return authUnavailable(reply, request);
     try {
+      const email = request.body.email ? request.body.email.trim().toLowerCase() : undefined;
+      const token = request.body.token ? request.body.token.trim() : undefined;
+      const accessToken = request.body.accessToken ? request.body.accessToken.trim() : undefined;
+      const tokenKey = email && token ? `otp:${email}:${token}` : (accessToken ? `access:${accessToken}` : null);
+
+      if (tokenKey && isResetTokenConsumed(tokenKey)) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
+      }
+
       let tokens: AuthSessionTokens | null = null;
-      if (request.body.accessToken && request.body.refreshToken) {
-        tokens = { accessToken: request.body.accessToken, refreshToken: request.body.refreshToken, expiresIn: 3600 };
-      } else if (request.body.email && request.body.token && dependencies.auth.verifyOtp) {
+      if (accessToken && request.body.refreshToken) {
+        tokens = { accessToken, refreshToken: request.body.refreshToken, expiresIn: 3600 };
+      } else if (email && token && dependencies.auth.verifyOtp) {
         const verified = await dependencies.auth.verifyOtp({
-          email: request.body.email.trim().toLowerCase(),
-          token: request.body.token.trim(),
+          email,
+          token,
           type: "recovery",
         });
         tokens = verified.tokens;
@@ -310,7 +348,19 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid reset token or session is required.", request.id));
       }
 
+      if (tokens.accessToken && isResetTokenConsumed(`access:${tokens.accessToken}`)) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
+      }
+
       await dependencies.auth.updateUserPassword(tokens, request.body.newPassword);
+
+      if (tokenKey) {
+        markResetTokenConsumed(tokenKey);
+      }
+      if (tokens.accessToken) {
+        markResetTokenConsumed(`access:${tokens.accessToken}`);
+      }
+
       setAuthCookies(reply, tokens, dependencies.secureCookies);
       return reply.code(200).send({ status: "password_updated" });
     } catch (error) {
@@ -352,6 +402,8 @@ export function buildApp(dependencies: AppDependencies) {
         memberships: memberships.map((membership) => ({
           organization: { id: membership.organizationId, name: membership.organizationName },
           status: membership.status.toLowerCase(),
+          departmentId: membership.departmentId ?? null,
+          departmentName: membership.departmentName ?? null,
           roleCodes: membership.roleCodes,
           canUsePrivateWorkspace: membership.canUsePrivateWorkspace,
         })),
@@ -362,10 +414,10 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Body: { name: string; departmentName: string } }>("/api/v1/organizations", {
+  app.post<{ Body: { name: string; departmentName?: string } }>("/api/v1/organizations", {
     schema: {
       body: {
-        type: "object", additionalProperties: false, required: ["name", "departmentName"],
+        type: "object", additionalProperties: false, required: ["name"],
         properties: {
           name: { type: "string", minLength: 1, maxLength: 120 },
           departmentName: { type: "string", minLength: 1, maxLength: 80 },
@@ -376,7 +428,7 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     const name = request.body.name.trim();
-    const departmentName = request.body.departmentName.trim();
+    const departmentName = request.body.departmentName?.trim() || "General";
     if (!isValidLabel(name, 120) || !isValidLabel(departmentName, 80) || !context.emailVerified || !isNormalizedEmail(context.email)) {
       return reply.code(400).send(safeError("INVALID_ORGANIZATION", "Verified account details and non-empty names are required.", request.id));
     }
@@ -430,6 +482,31 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  app.post<{ Params: { organizationId: string; departmentId: string } }>("/api/v1/organizations/:organizationId/departments/:departmentId/delete", {
+    schema: {
+      params: {
+        type: "object", required: ["organizationId", "departmentId"],
+        properties: { organizationId: { type: "string", pattern: uuidPattern }, departmentId: { type: "string", pattern: uuidPattern } },
+      },
+    },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const result = await dependencies.repository.deleteDepartment(context.userId, request.params.organizationId, request.params.departmentId, request.id);
+      if (!result.success) {
+        if (result.errorReason === "BASE_DEPARTMENT") {
+          return reply.code(409).send(safeError("CANNOT_DELETE_BASE_DEPARTMENT", "The base department of the organization cannot be deleted.", request.id));
+        }
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      return reply.code(200).send({ departmentId: request.params.departmentId, status: "archived", unassignedCount: result.unassignedCount ?? 0, reassignedCount: result.reassignedCount ?? 0 });
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Department deletion failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
   app.post<{ Params: { organizationId: string; membershipId: string }; Body: { departmentId: string } }>("/api/v1/organizations/:organizationId/members/:membershipId/department", {
     schema: {
       params: {
@@ -451,11 +528,11 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: { departmentId: string; email: string } }>("/api/v1/organizations/:organizationId/invitations", {
+  app.post<{ Params: { organizationId: string }; Body: { departmentId?: string | null; email: string } }>("/api/v1/organizations/:organizationId/invitations", {
     schema: {
       params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
       body: {
-        type: "object", additionalProperties: false, required: ["departmentId", "email"],
+        type: "object", additionalProperties: false, required: ["email"],
         properties: {
           departmentId: { type: "string", pattern: uuidPattern },
           email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
@@ -472,10 +549,11 @@ export function buildApp(dependencies: AppDependencies) {
     const token = randomBytes(32).toString("base64url");
     const tokenHash = hashInvitationToken(token);
     const email = request.body.email.trim().toLowerCase();
+    const departmentId = request.body.departmentId ? request.body.departmentId.trim() : null;
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     try {
       const invitation = await dependencies.repository.createInvitation(
-        context.userId, request.params.organizationId, request.body.departmentId, email, tokenHash, expiresAt, request.id,
+        context.userId, request.params.organizationId, departmentId, email, tokenHash, expiresAt, request.id,
       );
       if (!invitation) return reply.code(404).send(resourceNotAvailable(request.id));
       try {
@@ -561,6 +639,30 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  app.get<{ Params: { token: string } }>("/api/v1/invitations/:token", {
+    schema: {
+      params: {
+        type: "object", additionalProperties: false, required: ["token"],
+        properties: { token: { type: "string", minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]+$" } },
+      },
+    },
+  }, async (request, reply) => {
+    try {
+      const invitation = await dependencies.repository.getInvitationByToken(hashInvitationToken(request.params.token));
+      if (!invitation) {
+        return reply.code(404).send(safeError("INVITATION_NOT_AVAILABLE", "This invitation is invalid, has expired, or has already been accepted.", request.id));
+      }
+      return reply.code(200).send({
+        organizationName: invitation.organizationName,
+        email: invitation.email,
+        expiresAt: invitation.expiresAt.toISOString(),
+      });
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation lookup failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
   app.post<{ Body: { token: string } }>("/api/v1/invitations/accept", {
     schema: {
       body: { type: "object", additionalProperties: false, required: ["token"], properties: { token: { type: "string", minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]+$" } } },
@@ -587,7 +689,7 @@ export function buildApp(dependencies: AppDependencies) {
       headers: { type: "object", required: ["idempotency-key"], properties: {
         "idempotency-key": { type: "string", pattern: uuidPattern },
       } },
-      body: { type: "object", additionalProperties: false, required: ["sourcePrivateVersionId", "classification"], properties: {
+      body: { type: "object", additionalProperties: false, required: ["sourcePrivateVersionId"], properties: {
         sourcePrivateVersionId: { type: "string", pattern: uuidPattern },
         classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
       } },
@@ -622,7 +724,7 @@ export function buildApp(dependencies: AppDependencies) {
       const result = await dependencies.repository.createKnowledgeDraft(context.userId, organizationId, {
         actorMembershipId: actor.membershipId,
         sourceVersionId: source.versionId,
-        classification: request.body.classification,
+        classification: request.body.classification ?? defaultKnowledgeClassification,
         idempotencyKey: request.headers["idempotency-key"] as string,
         expectedSource: source,
         copiedContent: copied,
@@ -674,14 +776,14 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: { title: string; body: string; classification: KnowledgeClassification } }>(
+  app.post<{ Params: { organizationId: string }; Body: { title: string; body: string; classification?: KnowledgeClassification } }>(
     "/api/v1/organizations/:organizationId/knowledge/drafts/new", {
       schema: {
         params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
         headers: { type: "object", required: ["idempotency-key"], properties: {
           "idempotency-key": { type: "string", pattern: uuidPattern },
         } },
-        body: { type: "object", additionalProperties: false, required: ["title", "body", "classification"], properties: {
+        body: { type: "object", additionalProperties: false, required: ["title", "body"], properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           body: { type: "string", maxLength: maxBodyBytes },
           classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
@@ -706,7 +808,7 @@ export function buildApp(dependencies: AppDependencies) {
         stored = await dependencies.storage.write(semanticBody);
         creationAttempted = true;
         const result = await dependencies.repository.createNewKnowledgeDraft(context.userId, organizationId, {
-          actorMembershipId: actor.membershipId, title, classification: request.body.classification,
+          actorMembershipId: actor.membershipId, title, classification: request.body.classification ?? defaultKnowledgeClassification,
           idempotencyKey: request.headers["idempotency-key"] as string, content: stored, requestId: request.id,
         });
         if (result.kind === "unavailable" || result.kind === "idempotency-conflict") {
@@ -733,7 +835,7 @@ export function buildApp(dependencies: AppDependencies) {
       }
     });
 
-  app.post<{ Params: { organizationId: string }; Body: { title: string; pdfBase64: string; classification: KnowledgeClassification } }>(
+  app.post<{ Params: { organizationId: string }; Body: { title: string; pdfBase64: string; classification?: KnowledgeClassification } }>(
     "/api/v1/organizations/:organizationId/knowledge/drafts/pdf", {
       bodyLimit: maxPdfBase64Length + 4096,
       schema: {
@@ -741,7 +843,7 @@ export function buildApp(dependencies: AppDependencies) {
         headers: { type: "object", required: ["idempotency-key"], properties: {
           "idempotency-key": { type: "string", pattern: uuidPattern },
         } },
-        body: { type: "object", additionalProperties: false, required: ["title", "pdfBase64", "classification"], properties: {
+        body: { type: "object", additionalProperties: false, required: ["title", "pdfBase64"], properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
           classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
@@ -769,7 +871,7 @@ export function buildApp(dependencies: AppDependencies) {
         stored = await dependencies.storage.writePdf(bytes);
         creationAttempted = true;
         const result = await dependencies.repository.createNewKnowledgeDraft(context.userId, request.params.organizationId, {
-          actorMembershipId: actor.membershipId, title, classification: request.body.classification,
+          actorMembershipId: actor.membershipId, title, classification: request.body.classification ?? defaultKnowledgeClassification,
           idempotencyKey: request.headers["idempotency-key"] as string, content: stored, requestId: request.id,
         });
         if (result.kind === "unavailable" || result.kind === "idempotency-conflict") {
@@ -822,7 +924,7 @@ export function buildApp(dependencies: AppDependencies) {
       const drafts = await dependencies.repository.listKnowledgeDrafts(context.userId, request.params.organizationId);
       if (!drafts) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
-      return { items: drafts.map(({ sourceUri: _sourceUri, sourcePrivateVersionId: _privateSource, ...draft }) => draft) };
+      return { items: drafts.map(representSharedDraftSummary) };
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft list failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
@@ -958,7 +1060,7 @@ export function buildApp(dependencies: AppDependencies) {
           request.headers["idempotency-key"] as string, request.id);
         if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
         if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT", "Reload this draft and its review status.", request.id));
-        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Add an active responsible department, access scope and audience before submitting.", request.id));
+        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Choose who can read this draft and save it before submitting. You need an active primary department; ask an Org Admin if you have none.", request.id));
         reply.header("Cache-Control", "no-store");
         return reply.code(result.kind === "submitted" ? 201 : 200).send(representSubmission(result.submission));
       } catch (error) {
@@ -1004,14 +1106,19 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: Omit<ReviewerGrantInput, "validUntil"> & { validUntil: string | null } }>(
+  app.post<{ Params: { organizationId: string }; Body: {
+    reviewerMembershipId: string; scope?: ReviewerGrantInput["scope"]; departmentId?: string | null;
+    classifications?: ReviewerGrantInput["classifications"]; level?: ReviewerGrantInput["level"];
+    teamTag?: string | null; projectTag?: string | null; validUntil: string | null;
+  } }>(
     "/api/v1/organizations/:organizationId/knowledge/reviewer-grants", {
       schema: {
         params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
         body: { type: "object", additionalProperties: false,
-          required: ["reviewerMembershipId", "departmentId", "classifications", "level"], properties: {
+          required: ["reviewerMembershipId"], properties: {
             reviewerMembershipId: { type: "string", pattern: uuidPattern },
-            departmentId: { type: "string", pattern: uuidPattern },
+            scope: { type: "string", enum: ["DEPARTMENT", "ORGANIZATION"], default: "DEPARTMENT" },
+            departmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
             classifications: { type: "array", minItems: 1, maxItems: 3, uniqueItems: true,
               items: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] } },
             level: { type: "string", enum: ["STANDARD", "SPECIALIST", "SENIOR"] },
@@ -1024,15 +1131,22 @@ export function buildApp(dependencies: AppDependencies) {
       const context = await requestActor(request, reply);
       if (!context) return;
       const { validUntil, ...rest } = request.body;
+      const scope = rest.scope ?? "DEPARTMENT";
+      const departmentId = rest.departmentId ?? null;
       const expiry = validUntil ? new Date(validUntil) : null;
       if ((expiry && (!Number.isFinite(expiry.getTime()) || expiry <= new Date()))
+        || (scope === "DEPARTMENT" && departmentId === null)
+        || (scope === "ORGANIZATION" && departmentId !== null)
         || (rest.teamTag !== undefined && rest.teamTag !== null && !rest.teamTag.trim())
         || (rest.projectTag !== undefined && rest.projectTag !== null && !rest.projectTag.trim())) {
         return reply.code(400).send(safeError("INVALID_REQUEST", "The reviewer grant is invalid.", request.id));
       }
       try {
         const grant = await dependencies.repository.createReviewerGrant(context.userId, request.params.organizationId, {
-          ...rest, teamTag: rest.teamTag?.trim() ?? null,
+          reviewerMembershipId: rest.reviewerMembershipId, scope, departmentId,
+          level: rest.level, teamTag: rest.teamTag?.trim() ?? null,
+          // Decision 0013: a grant no longer narrows by classification; legacy pending submissions still match a level.
+          classifications: rest.classifications ?? [...allKnowledgeClassifications],
           projectTag: rest.projectTag?.trim() ?? null, validUntil: expiry,
         }, request.id);
         if (!grant) return reply.code(404).send(resourceNotAvailable(request.id));
@@ -1172,7 +1286,8 @@ export function buildApp(dependencies: AppDependencies) {
       const items = await dependencies.repository.listPublishedKnowledge(context.userId, request.params.organizationId);
       if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
-      return { items: items.map(({ sourceUri: _sourceUri, ...item }) => ({ ...item,
+      return { items: items.map(({ sourceUri: _sourceUri, audienceRoleIds, ...item }) => ({ ...item,
+        audienceIds: audienceRoleIds ?? [],
         publishedAt: item.publishedAt.toISOString(), validFrom: item.validFrom.toISOString(),
         validUntil: item.validUntil?.toISOString() ?? null })) };
     } catch (error) {
@@ -1605,6 +1720,28 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
       mimeType: draft.mimeType,
       contentHash: draft.contentHash,
     },
+    createdAt: draft.createdAt.toISOString(),
+    updatedAt: draft.updatedAt.toISOString(),
+  };
+}
+
+function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
+  return {
+    id: draft.id,
+    organizationId: draft.organizationId,
+    title: draft.title,
+    classification: draft.classification,
+    status: "ACTIVE" as const,
+    responsibleDepartmentId: draft.responsibleDepartmentId,
+    targetScopeType: draft.targetScopeType,
+    teamTag: draft.teamTag,
+    projectTag: draft.projectTag,
+    hasPendingSubmission: draft.hasPendingSubmission,
+    versionId: draft.versionId,
+    mimeType: draft.mimeType,
+    contentHash: draft.contentHash,
+    currentVersion: draft.currentVersion,
+    audienceIds: draft.audienceRoleIds ?? [],
     createdAt: draft.createdAt.toISOString(),
     updatedAt: draft.updatedAt.toISOString(),
   };

@@ -19,3 +19,9 @@ Follow [specifications](specifications.md) for recording agreed brainstorm outco
 No written ruleset can pre-enumerate every future case. When a case is not covered, apply the invariants, consult version-matched primary documentation, seek decisions for material tradeoffs, and add the accepted rule so the next contributor has it.
 
 Update the [implementation inventory](../implementation-status.md) when a capability or rollout boundary changes. Keep private Knowledge-repository records in that repository under its own instructions; public application docs must not import private operational details.
+
+## Daily team handoff
+
+On each day with Arden project work, create or update that day's shared Knowledge handoff using its existing `handoffs/YYYY-MM-DD-short-task.md` structure and template. Use the `Asia/Saigon` calendar date, read any existing daily entry first, and append meaningful decisions, completed work, source revisions, actual checks and remaining work without overwriting another contributor's record. Follow the Knowledge repository's daily-handoff guide for the authoritative private structure and update its index.
+
+Update at meaningful milestones and before handing off; distinguish local implementation, publication, merge and deployment. A day without project work needs no entry or scheduled job. This reporting requirement does not authorize unrelated writes, publication, production deployment or disclosure of private content; record any unshared local checkpoint honestly when publication is not authorized.

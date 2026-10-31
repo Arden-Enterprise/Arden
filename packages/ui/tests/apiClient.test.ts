@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiRequest, beginGoogleSignIn, createKnowledgeDraft, createNewKnowledgeDraft, createPdfKnowledgeDraft, currentSession,
-  decideKnowledgeReview, saveKnowledgeDraft, setAccountPassword, signIn, signOut, signUp,
+  decideKnowledgeReview, deleteDepartment, getInvitationPreview, saveKnowledgeDraft, setAccountPassword, signIn, signOut, signUp,
   submitKnowledgeDraft } from "../src/shared/api-client";
 
 const actorId = "11111111-1111-4111-8111-111111111111";
@@ -23,6 +23,25 @@ afterEach(() => {
 });
 
 describe("Supabase session transport", () => {
+  it("keeps a lost write response uncertain, without claiming the write failed", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("network closed")));
+    await expect(apiRequest("web", "/api/v1/example", { method: "POST", body: "{}" }))
+      .rejects.toThrow("Couldn’t confirm this action.");
+    await expect(apiRequest("web", "/api/v1/example"))
+      .rejects.toThrow("Connection unavailable.");
+  });
+
+  it("shows readable document errors while retaining the machine code", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: {
+      code: "INVALID_DOCUMENT", message: "Semantic Document violates schema version 1.",
+    } }, { status: 400 })));
+    await expect(apiRequest("web", "/api/v1/example")).rejects.toMatchObject({
+      status: 400, code: "INVALID_DOCUMENT", message: "Unsupported document format.",
+    });
+  });
+
   it("uses Arden's sign-in endpoint and HttpOnly web cookies", async () => {
     vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
     const fetchMock = vi.fn()
@@ -56,6 +75,30 @@ describe("Supabase session transport", () => {
     await expect(signUp("web", "new@example.test", "secure-password", "Jane Doe")).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith("https://arden.example.test/api/v1/auth/sign-up", expect.objectContaining({
       method: "POST", credentials: "include", body: JSON.stringify({ email: "new@example.test", password: "secure-password", fullName: "Jane Doe" }),
+    }));
+  });
+
+  it("fetches invitation preview with encoded token", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const preview = { organizationName: "Cheval", email: "guest@example.test", expiresAt: "2026-11-03T08:00:00Z" };
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(preview, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getInvitationPreview("web", "4e-SL2tSdcYWMhj7HFTDKIcw5Vks-ygUeOY8JfkuZGg")).resolves.toEqual(preview);
+    expect(fetchMock).toHaveBeenCalledWith("https://arden.example.test/api/v1/invitations/4e-SL2tSdcYWMhj7HFTDKIcw5Vks-ygUeOY8JfkuZGg", expect.objectContaining({
+      credentials: "include",
+    }));
+  });
+
+  it("deletes empty department through API client", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", status: "archived" }, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(deleteDepartment("web", organizationId, "ffffffff-ffff-4fff-8fff-ffffffffffff")).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(`https://arden.example.test/api/v1/organizations/${organizationId}/departments/ffffffff-ffff-4fff-8fff-ffffffffffff/delete`, expect.objectContaining({
+      method: "POST",
+      body: "{}",
     }));
   });
 
@@ -139,6 +182,17 @@ describe("shared knowledge draft transport", () => {
     expect(JSON.parse(init.body as string)).toEqual({ sourcePrivateVersionId: sourceVersionId, classification: "CONFIDENTIAL" });
   });
 
+  it("omits the classification when none is chosen and accepts the server default (decision 0013)", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ ...createdDraft, classification: "INTERNAL" }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, undefined, idempotencyKey))
+      .resolves.toMatchObject({ id: createdDraft.id, classification: "INTERNAL" });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ sourcePrivateVersionId: sourceVersionId });
+  });
+
   it("passes the idempotency key through the narrow desktop bridge", async () => {
     const requestApi = vi.fn().mockResolvedValueOnce({ status: 200, body: JSON.stringify(createdDraft) });
     vi.stubGlobal("window", { location: { origin: "file://" }, ardenDesktop: { requestApi } });
@@ -158,7 +212,7 @@ describe("shared knowledge draft transport", () => {
       .mockResolvedValueOnce(Response.json({ error: { code: "RESOURCE_NOT_AVAILABLE", message: "Not available." } }, { status: 404 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, "CONFIDENTIAL", idempotencyKey)).rejects.toThrow("invalid shared draft");
+    await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, "CONFIDENTIAL", idempotencyKey)).rejects.toThrow("Couldn’t confirm draft creation.");
     await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, "CONFIDENTIAL", idempotencyKey)).rejects.toThrow("Not available.");
   });
 
@@ -167,7 +221,7 @@ describe("shared knowledge draft transport", () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValueOnce(new TypeError("connection closed")));
 
     await expect(createKnowledgeDraft("web", organizationId, sourceVersionId, "CONFIDENTIAL", idempotencyKey))
-      .rejects.toThrow("Could not confirm whether the shared draft was created");
+      .rejects.toThrow("Couldn’t confirm draft creation.");
   });
 });
 

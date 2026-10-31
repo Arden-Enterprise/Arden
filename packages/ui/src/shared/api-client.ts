@@ -7,6 +7,8 @@ import { isKnowledgeClassification, type KnowledgeClassification } from "./knowl
 export type OrganizationMembership = {
   organization: { id: string; name: string };
   status: string;
+  departmentId?: string | null;
+  departmentName?: string | null;
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
 };
@@ -17,10 +19,10 @@ export type CurrentSession = {
   testMode?: boolean;
 };
 export type OrganizationAdministration = {
-  departments: Array<{ id: string; name: string; defaultRoleId: string; defaultRoleName: string }>;
+  departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
   roles: Array<{ id: string; name: string; code: string; isDefault: boolean }>;
-  members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; departmentIds?: string[]; roleIds: string[]; roleNames: string[] }>;
-  invitations: Array<{ id: string; email: string; departmentId: string; status: string; expiresAt: string }>;
+  members: Array<{ id: string; email: string; name: string; status: string; departmentId: string | null; departmentIds?: string[]; isOrganizationAdmin: boolean; roleIds: string[]; roleNames: string[] }>;
+  invitations: Array<{ id: string; email: string; departmentId: string | null; status: string; expiresAt: string }>;
 };
 
 export type CreatedKnowledgeDraft = {
@@ -34,6 +36,13 @@ export type CreatedKnowledgeDraft = {
 
 export type KnowledgeOptions = {
   departments: Array<{ id: string; name: string }>;
+  /**
+   * The member's primary department, which owns and reviews their drafts (decision 0014). Undefined means the
+   * server predates that rule and still expects the author to choose a responsible department.
+   */
+  primaryDepartmentId?: string | null;
+  /** Undefined means the server predates organization-scoped reviewer grants. */
+  organizationReviewerAvailable?: boolean;
   audiences: Array<{ id: string; name: string; departmentId: string | null;
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
 };
@@ -128,7 +137,8 @@ export type PublishedKnowledge = {
 export type ReviewerGrant = {
   id: string;
   reviewerMembershipId: string;
-  departmentId: string;
+  scope: "DEPARTMENT" | "ORGANIZATION";
+  departmentId: string | null;
   classifications: KnowledgeClassification[];
   level: "STANDARD" | "SPECIALIST" | "SENIOR";
   teamTag: string | null;
@@ -162,8 +172,11 @@ export function loadKnowledgeOptions(platform: Platform, organizationId: string)
 }
 
 export async function listKnowledgeDrafts(platform: Platform, organizationId: string): Promise<KnowledgeDraftSummary[]> {
-  const result = await request<{ items: KnowledgeDraftSummary[] }>(platform, `${knowledgePath(organizationId)}/drafts`);
-  return result.items;
+  // The list route returns the repository shape (`audienceRoleIds`), unlike the detail route (`audienceIds`).
+  // Normalize here so screens never receive an undefined audience list.
+  const result = await request<{ items: (Omit<KnowledgeDraftSummary, "audienceIds"> & { audienceIds?: string[] | null; audienceRoleIds?: string[] | null })[] }>(
+    platform, `${knowledgePath(organizationId)}/drafts`);
+  return result.items.map(({ audienceRoleIds, audienceIds, ...item }) => ({ ...item, audienceIds: audienceIds ?? audienceRoleIds ?? [] }));
 }
 
 export function loadKnowledgeDraft(platform: Platform, organizationId: string, draftId: string): Promise<KnowledgeDraftRecord> {
@@ -171,14 +184,15 @@ export function loadKnowledgeDraft(platform: Platform, organizationId: string, d
 }
 
 export function createNewKnowledgeDraft(platform: Platform, organizationId: string,
-  input: { title: string; body: string; classification: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
+  // Decision 0013: classification is optional; the server defaults a new draft to INTERNAL.
+  input: { title: string; body: string; classification?: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/new`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
   });
 }
 
 export async function createPdfKnowledgeDraft(platform: Platform, organizationId: string,
-  input: { title: string; file: File; classification: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
+  input: { title: string; file: File; classification?: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
   if (!/\.pdf$/i.test(input.file.name) || input.file.size === 0 || input.file.size > 5 * 1024 * 1024) {
     throw new ApiError(0, "Choose a PDF file up to 5 MB.");
   }
@@ -251,7 +265,7 @@ export async function listReviewerGrants(platform: Platform, organizationId: str
 }
 
 export function createReviewerGrant(platform: Platform, organizationId: string,
-  input: Omit<ReviewerGrant, "id" | "status" | "validFrom">): Promise<ReviewerGrant> {
+  input: Pick<ReviewerGrant, "reviewerMembershipId" | "scope" | "departmentId" | "teamTag" | "projectTag" | "validUntil">): Promise<ReviewerGrant> {
   return request(platform, `${knowledgePath(organizationId)}/reviewer-grants`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -259,9 +273,18 @@ export function deactivateReviewerGrant(platform: Platform, organizationId: stri
   return request(platform, `${knowledgePath(organizationId)}/reviewer-grants/${grantId}/deactivate`, { method: "POST" });
 }
 
+const userErrorMessages: Record<string, string> = {
+  AUTH_UNAVAILABLE: "Sign-in unavailable.",
+  AI_UNAVAILABLE: "Ask Arden is unavailable.",
+  INVALID_DOCUMENT: "Unsupported document format.",
+  INVALID_METADATA: "Check document details.",
+  SOURCE_NOT_SUPPORTED: "Couldn’t copy this note.",
+  IDEMPOTENCY_CONFLICT: "Request changed. Reopen to try again.",
+};
+
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly code: string | null = null) {
-    super(message);
+    super(code && Object.hasOwn(userErrorMessages, code) ? userErrorMessages[code] : message);
     this.name = "ApiError";
   }
 }
@@ -332,9 +355,9 @@ export async function currentSession(platform: Platform): Promise<CurrentSession
   };
 }
 
-export async function createOrganization(platform: Platform, name: string, departmentName: string): Promise<void> {
+export async function createOrganization(platform: Platform, name: string, departmentName?: string): Promise<void> {
   await request(platform, "/api/v1/organizations", {
-    method: "POST", body: JSON.stringify({ name, departmentName }),
+    method: "POST", body: JSON.stringify({ name, ...(departmentName ? { departmentName } : {}) }),
   });
 }
 
@@ -342,6 +365,16 @@ export async function signUp(platform: Platform, email: string, password: string
   await request(platform, "/api/v1/auth/sign-up", {
     method: "POST", body: JSON.stringify({ email, password, fullName }),
   });
+}
+
+export type InvitationPreview = {
+  organizationName: string;
+  email: string;
+  expiresAt: string;
+};
+
+export async function getInvitationPreview(platform: Platform, token: string): Promise<InvitationPreview> {
+  return request<InvitationPreview>(platform, `/api/v1/invitations/${encodeURIComponent(token)}`);
 }
 
 export async function acceptInvitation(platform: Platform, token: string): Promise<void> {
@@ -356,6 +389,13 @@ export async function loadOrganizationAdministration(platform: Platform, organiz
 
 export async function createDepartment(platform: Platform, organizationId: string, name: string): Promise<void> {
   await request(platform, `/api/v1/organizations/${organizationId}/departments`, { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export async function deleteDepartment(platform: Platform, organizationId: string, departmentId: string): Promise<void> {
+  await request(platform, `/api/v1/organizations/${organizationId}/departments/${departmentId}/delete`, {
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export async function loadAudienceGroups(platform: Platform, organizationId: string): Promise<AudienceGroupRecord[]> {
@@ -394,8 +434,11 @@ export async function changePrimaryDepartment(platform: Platform, organizationId
   await request(platform, `/api/v1/organizations/${organizationId}/members/${membershipId}/department`, { method: "POST", body: JSON.stringify({ departmentId }) });
 }
 
-export async function inviteOrganizationMember(platform: Platform, organizationId: string, departmentId: string, email: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
-  return request(platform, `/api/v1/organizations/${organizationId}/invitations`, { method: "POST", body: JSON.stringify({ departmentId, email }) });
+export async function inviteOrganizationMember(platform: Platform, organizationId: string, departmentId: string | null | undefined, email: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
+  return request(platform, `/api/v1/organizations/${organizationId}/invitations`, {
+    method: "POST",
+    body: JSON.stringify({ email, ...(departmentId ? { departmentId } : {}) }),
+  });
 }
 
 export async function resendOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
@@ -406,7 +449,8 @@ export async function revokeOrganizationInvitation(platform: Platform, organizat
   await request(platform, `/api/v1/organizations/${organizationId}/invitations/${invitationId}/revoke`, { method: "POST" });
 }
 
-export async function createKnowledgeDraft(platform: Platform, organizationId: string, sourcePrivateVersionId: string, classification: KnowledgeClassification, idempotencyKey: string): Promise<CreatedKnowledgeDraft> {
+/** `classification` may be omitted (decision 0013); the server then stores INTERNAL. */
+export async function createKnowledgeDraft(platform: Platform, organizationId: string, sourcePrivateVersionId: string, classification: KnowledgeClassification | undefined, idempotencyKey: string): Promise<CreatedKnowledgeDraft> {
   let response: unknown;
   try {
     response = await request<unknown>(platform, `/api/v1/organizations/${organizationId}/knowledge/drafts`, {
@@ -416,20 +460,20 @@ export async function createKnowledgeDraft(platform: Platform, organizationId: s
     });
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 0) {
-      throw new ApiError(0, "Could not confirm whether the shared draft was created. Retry the same request to check safely.");
+      throw new ApiError(0, "Couldn’t confirm draft creation.");
     }
     throw cause;
   }
-  if (typeof response !== "object" || response === null || Array.isArray(response)) throw new ApiError(0, "The server returned an invalid shared draft.");
+  if (typeof response !== "object" || response === null || Array.isArray(response)) throw new ApiError(0, "Couldn’t confirm draft creation.");
   const draft = response as Record<string, unknown>;
   const currentVersion = draft.currentVersion;
   if (typeof draft.id !== "string" || draft.organizationId !== organizationId ||
     typeof draft.title !== "string" || typeof draft.body !== "string" ||
-    !isKnowledgeClassification(draft.classification) || draft.classification !== classification ||
+    !isKnowledgeClassification(draft.classification) || (classification !== undefined && draft.classification !== classification) ||
     draft.status !== "ACTIVE" || typeof currentVersion !== "object" || currentVersion === null ||
     !("version" in currentVersion) || typeof currentVersion.version !== "number" ||
     !Number.isSafeInteger(currentVersion.version) || currentVersion.version < 1) {
-    throw new ApiError(0, "The server returned an invalid shared draft.");
+    throw new ApiError(0, "Couldn’t confirm draft creation.");
   }
   return {
     id: draft.id,
@@ -490,7 +534,7 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
     }
   } catch (cause) {
     if (cause instanceof ApiError) throw cause;
-    throw new ApiError(0, "Arden could not reach its server. Your changes have not been saved.");
+    throw new ApiError(0, method === "GET" ? "Connection unavailable." : "Couldn’t confirm this action.");
   }
 
   if (response.status < 200 || response.status >= 300) {
@@ -514,7 +558,7 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
   }
   if (response.status === 204 || response.body.length === 0) return undefined as T;
   try { return JSON.parse(response.body) as T; }
-  catch { throw new ApiError(response.status, "The server returned an invalid response."); }
+  catch { throw new ApiError(response.status, method === "GET" ? "Couldn’t load this information." : "Couldn’t confirm this action."); }
 }
 
 function requireDesktopBridge() {

@@ -1,16 +1,17 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
-import { KnowledgeNotice } from "../knowledge/KnowledgePrimitives";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { ApiError, createKnowledgeDraft, type CreatedKnowledgeDraft } from "../shared/api-client";
-import { isKnowledgeClassification, knowledgeClassifications, type KnowledgeClassification } from "../shared/knowledge-classification";
 import type { Platform } from "../shared/types";
 
+/** A pending copy request, kept so a retry reuses the same idempotency key for the same source version. */
 export type ContributionAttempt = {
   sourceVersionId: string;
-  classification: KnowledgeClassification;
   idempotencyKey: string;
 };
 
+/**
+ * Contribute-a-copy form shown inside the status island (passed to WorkspaceTopbar as its panel).
+ * Focus moves to its heading when it opens and back to the opener when it closes.
+ */
 export function ContributePrivateNoteDialog({ platform, organizationId, source, attempt, onAttemptChange, onClose, onCreated }: {
   platform: Platform;
   organizationId: string;
@@ -20,16 +21,23 @@ export function ContributePrivateNoteDialog({ platform, organizationId, source, 
   onClose: () => void;
   onCreated: (draft: CreatedKnowledgeDraft) => void;
 }) {
-  const [classification, setClassification] = useState<KnowledgeClassification>(attempt?.classification ?? "INTERNAL");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [retryPending, setRetryPending] = useState(Boolean(attempt));
   const mounted = useRef(true);
   const inFlight = useRef(false);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const titleId = useId();
+  const excerpt = source.body.replace(/\s+/g, " ").trim();
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    const opener = document.activeElement;
+    heading.current?.focus();
+    return () => {
+      mounted.current = false;
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
   }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -38,10 +46,11 @@ export function ContributePrivateNoteDialog({ platform, organizationId, source, 
     inFlight.current = true;
     setBusy(true);
     setError("");
-    const request = attempt ?? { sourceVersionId: source.versionId, classification, idempotencyKey: crypto.randomUUID() };
+    const request = attempt ?? { sourceVersionId: source.versionId, idempotencyKey: crypto.randomUUID() };
     onAttemptChange(request);
     try {
-      const created = await createKnowledgeDraft(platform, organizationId, request.sourceVersionId, request.classification, request.idempotencyKey);
+      // Decision 0013: no classification is sent; readers chosen in the draft decide how it is reviewed.
+      const created = await createKnowledgeDraft(platform, organizationId, request.sourceVersionId, undefined, request.idempotencyKey);
       if (mounted.current) onCreated(created);
     } catch (cause) {
       if (!mounted.current) return;
@@ -55,18 +64,20 @@ export function ContributePrivateNoteDialog({ platform, organizationId, source, 
     }
   };
 
-  return <KnowledgeDialog title="Contribute a private note" onClose={onClose} dismissible={!busy}>
-    <p>Arden will copy this saved private-note version into a separate shared draft on the server. The original stays private. This does not submit, approve or publish the copy.</p>
-    <div className="knowledge-source-preview"><strong>{source.title}</strong><span>Saved private version · exact text to copy</span><pre>{source.body}</pre></div>
+  return <div className="contribute-island" role="dialog" aria-labelledby={titleId}
+    onKeyDown={(event) => { if (event.key === "Escape" && !busy) { event.stopPropagation(); onClose(); } }}>
+    <div>
+      <h2 id={titleId} ref={heading} tabIndex={-1}>Create review draft</h2>
+      <p className="island-meta">Your original stays private.</p>
+    </div>
+    <div className="knowledge-source-preview">
+      <strong>{source.title}</strong>
+      <p className={excerpt ? undefined : "is-empty"}>{excerpt || "Nothing written in this note yet."}</p>
+    </div>
     <form className="knowledge-contribute-form" onSubmit={(event) => void submit(event)}>
-      <label htmlFor="contribution-classification">Classification</label>
-      <select id="contribution-classification" value={classification} disabled={busy || retryPending} onChange={(event) => { if (isKnowledgeClassification(event.target.value)) setClassification(event.target.value); }}>
-        {knowledgeClassifications.map((value) => <option key={value} value={value}>{value.charAt(0) + value.slice(1).toLowerCase()}</option>)}
-      </select>
-      <small>Classification is stored with this draft. Audience and reviewer assignment are not available in this step.</small>
-      {retryPending && <KnowledgeNotice title="Result uncertain" tone="amber">Retry here with the same request key to avoid creating a duplicate. Do not change source or classification until the result is known.</KnowledgeNotice>}
+      {retryPending && !error && <p role="status">Couldn’t confirm draft creation.</p>}
       {error && <p role="alert" className="knowledge-form-error">{error}</p>}
-      <div className="dialog-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>{busy ? "Creating…" : retryPending ? "Retry same request" : "Create shared draft"}</button></div>
+      <div className="dialog-actions"><button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={busy}>{busy ? "Creating…" : retryPending ? "Retry" : "Create draft"}</button></div>
     </form>
-  </KnowledgeDialog>;
+  </div>;
 }

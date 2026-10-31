@@ -18,7 +18,7 @@
 .my-work-row-copy { display: grid; flex: 1 1 260px; gap: 2px; min-width: 0; }
 .my-work-row-copy strong, .my-work-row-link strong { font-weight: 600; overflow-wrap: anywhere; }
 .my-work-row-copy span, .my-work-row-link span { color: var(--arden-text-secondary); font-size: 12px; }
-.my-work-row .secondary-button { min-height: 28px; padding: 0 10px; font-size: 12px; }
+.my-work-row .secondary-button { min-height: var(--arden-control-sm); padding: 0 10px; font-size: 12px; }
 .my-work-row.is-compact { padding: 10px 12px; }
 .my-work-row-link { display: grid; flex: 1; gap: 2px; min-width: 0; padding: 0; border: 0; color: var(--arden-text-primary); background: transparent; text-align: left; cursor: pointer; }
 .my-work-row-link:hover:not(:disabled) strong { text-decoration: underline; text-underline-offset: 3px; }
@@ -31,16 +31,60 @@
 .my-work-private .secondary-button { justify-self: start; }
 
 /* ---------- Private Notes ---------- */
-.arden-app-shell .personal-content { max-width: 1240px; }
-.arden-app-shell .personal-grid { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; grid-template-columns: none; }
+.arden-app-shell .personal-content {
+  position: relative; max-width: none; width: 100%; grid-template-rows: minmax(0, 1fr);
+  --arden-notes-surface: #141418; --arden-notes-line: #1c1c22;
+}
+.arden-app-shell:has(.personal-content) { padding-right: 0; padding-bottom: 0; }
+.arden-app-shell:has(.personal-content) .workspace-page {
+  display: grid; grid-template-columns: 270px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr);
+  height: 100dvh; margin-top: calc(-1 * var(--arden-shell-gap)); overflow: visible;
+  box-shadow: -16px 0 0 #141418;
+}
+.arden-app-shell:has(.personal-content) .workspace-topbar {
+  grid-column: 2; grid-row: 1; z-index: 3; align-self: start; height: 76px; padding-right: 12px;
+  background: var(--arden-bg-app);
+}
+.arden-app-shell:has(.personal-content) .app-sidebar { z-index: 4; }
+.arden-app-shell:has(.personal-content) .personal-content { grid-column: 1 / -1; grid-row: 1; min-height: 0; }
+.arden-app-shell .personal-content > .workspace-page-header {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+  clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+.arden-app-shell .personal-content .workspace-scroll-region {
+  display: flex; grid-row: 1; flex-direction: column; min-height: 0; overflow: hidden; scrollbar-gutter: auto;
+  border-radius: 0 16px 16px 0; background: var(--arden-notes-surface);
+}
+.arden-app-shell:has(.personal-content) { column-gap: 0; }
+.arden-app-shell .personal-content .workspace-scroll-content { display: flex; flex: 1; flex-direction: column; min-height: 0; padding: 0; }
+.arden-app-shell .personal-grid {
+  display: grid; flex: 1; grid-template-columns: 270px minmax(0, 1fr); align-items: stretch;
+  gap: 0; width: 100%; min-height: 0; height: 100%; margin: 0;
+}
 .arden-app-shell .note-list-card {
-  display: flex; flex: 1 1 260px; flex-direction: column; gap: 4px; max-width: 320px; min-width: 0; padding: 8px;
-  border: 1px solid var(--arden-border); border-radius: 14px; background: var(--arden-bg-sidebar);
+  display: flex; flex-direction: column; gap: 4px; width: 100%; max-width: none; height: 100%; min-width: 0; min-height: 0; padding: 8px; overflow: hidden;
+  border: 0; border-radius: 0; background: var(--arden-notes-surface); box-shadow: none;
 }
 .arden-app-shell .note-list-header { display: flex; align-items: center; gap: 6px; min-height: 0; padding: 4px 4px 4px; border: 0; }
-.arden-app-shell .note-list-header .workspace-search { flex: 1; min-width: 0; background: var(--arden-bg-app); }
+.arden-app-shell .note-list-header .workspace-search {
+  flex: 1; min-width: 0; height: 36px; gap: 8px; padding: 0 8px 0 12px;
+  border: 1px solid rgb(255 255 255 / 12%); border-radius: 10px; background: rgb(255 255 255 / 4%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 6%);
+}
+.arden-app-shell .note-list-header .workspace-search:focus-within {
+  border-color: #2a2a32;
+  box-shadow: none;
+}
+.arden-app-shell .note-list-header .workspace-search input { caret-color: var(--arden-text-primary); }
+.arden-app-shell .note-list-header .workspace-search input:focus,
+.arden-app-shell .note-list-header .workspace-search input:focus-visible { outline: none; box-shadow: none; }
+.arden-app-shell .note-list-header .workspace-search kbd {
+  display: inline-flex; align-items: center; justify-content: center; height: 22px; padding: 0 8px;
+  border: 1px solid rgb(255 255 255 / 10%); border-radius: 6px; background: rgb(255 255 255 / 7%);
+  color: var(--arden-text-secondary); font-size: 11px; line-height: 1;
+}
 .arden-app-shell .note-list-count { padding: 6px 8px 2px; }
-.arden-app-shell .note-list { display: grid; gap: 2px; padding: 0; }
+.arden-app-shell .note-list { display: grid; flex: 1; align-content: start; gap: 2px; min-height: 0; padding: 0; overflow: auto; }
 .arden-app-shell .note-list > button {
   display: grid; gap: 2px; min-height: 0; padding: 10px 12px; border: 0; border-radius: 10px;
   color: var(--arden-text-primary); background: transparent; text-align: left; box-shadow: none; transform: none;
@@ -52,17 +96,33 @@
 .arden-app-shell .note-list .note-row-meta { color: var(--arden-text-muted); font-size: 11px; }
 .arden-app-shell .note-list .note-row-meta.is-unsaved { color: var(--arden-warning); font-weight: 600; }
 .arden-app-shell .note-list .island-empty { justify-items: start; padding: 16px 12px; text-align: left; }
+@media (prefers-reduced-motion: no-preference) {
+  .arden-app-shell .note-list > button.is-entering { overflow: hidden; animation: note-row-in .42s var(--arden-morph) both; }
+  .arden-app-shell .note-editor-card.is-entering .note-editor-page { animation: note-page-in .48s var(--arden-morph) both; }
+}
+@keyframes note-row-in {
+  from { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+  to { opacity: 1; max-height: 96px; padding-top: 10px; padding-bottom: 10px; }
+}
+@keyframes note-page-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
 
 .arden-app-shell .note-editor-card {
-  display: flex; flex: 999 1 480px; flex-direction: column; min-width: 0; min-height: 620px; padding: 0;
-  border: 1px solid var(--arden-border); border-radius: 14px; background: var(--arden-surface-base);
+  display: flex; flex-direction: column; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 76px 0 0; overflow: hidden;
+  border: 0; border-left: 1px solid var(--arden-notes-line); border-radius: 0 16px 16px 0; background: var(--arden-notes-surface); box-shadow: none;
 }
-.arden-app-shell .private-editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--arden-border); }
+.arden-app-shell .private-editor-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px;
+  border-top: 1px solid #16161a; border-bottom: 1px solid var(--arden-notes-line);
+}
 .arden-app-shell .private-editor-toolbar .private-state { color: var(--arden-text-secondary); font-size: 12px; letter-spacing: 0; }
+.arden-app-shell .private-editor-toolbar .island-chip { height: 32px; padding: 0 12px; border-color: #2a2a32; border-radius: 8px; background: #1c1c22; }
 .note-toolbar-spacer { flex: 1; }
 .arden-app-shell .private-editor-toolbar .primary-button { min-height: 32px; }
 .arden-app-shell .note-back-button { display: none; }
-.note-editor-page { display: grid; flex: 1; align-content: start; gap: 6px; width: 100%; max-width: 760px; margin: 0 auto; padding: 32px 40px 24px; }
+.note-editor-page { display: flex; flex: 1; flex-direction: column; align-content: stretch; gap: 6px; width: 100%; max-width: none; min-height: 0; margin: 0; padding: 28px 36px 20px; overflow: auto; }
 .arden-app-shell .note-editor-page .editor-title-label, .arden-app-shell .note-editor-page .editor-body-label { display: block; min-height: 0; padding: 0; }
 .arden-app-shell .editor-title-label textarea {
   width: 100%; min-height: 0; padding: 0 0 4px; border: 0; color: var(--arden-text-primary); background: transparent;
@@ -71,21 +131,33 @@
 .arden-app-shell .editor-title-label textarea:focus-visible { outline: 0; box-shadow: 0 2px 0 var(--arden-accent-border); }
 .arden-app-shell .note-editor-page .edit-state { margin-bottom: 18px; color: var(--arden-text-secondary); font-size: 12px; }
 .arden-app-shell .note-editor-page .edit-state.is-dirty { color: var(--arden-warning); }
+.arden-app-shell .note-editor-page .editor-body-label { display: flex; flex: 1; min-height: 0; }
 .arden-app-shell .editor-body-label textarea {
-  width: 100%; min-height: 380px; padding: 0; border: 0; border-radius: 0; color: #dcdbe3; background: transparent;
-  font-size: 15px; line-height: 1.75; resize: vertical;
+  width: 100%; flex: 1; min-height: 240px; padding: 0; border: 0; border-radius: 0; color: #dcdbe3; background: transparent;
+  font-size: 15px; line-height: 1.75; resize: none;
 }
 .arden-app-shell .editor-body-label textarea:focus-visible { outline: 0; }
-.arden-app-shell .editor-footer { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--arden-border); color: var(--arden-text-muted); font-size: 12px; }
+.arden-app-shell .editor-footer { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--arden-notes-line); color: var(--arden-text-muted); font-size: 12px; }
 .arden-app-shell .empty-editor { flex: 1; align-content: center; }
 .personal-feedback { margin: 0 0 12px; }
 
 @container workspace (max-width: 760px) {
-  .arden-app-shell .note-list-card { max-width: none; flex-basis: 100%; }
+  .arden-app-shell:has(.personal-content) .workspace-topbar { grid-column: 1 / -1; height: auto; min-height: 64px; }
+  .arden-app-shell:has(.personal-content) .personal-content { padding-top: 76px; }
+  .arden-app-shell .note-editor-card { padding-top: 0; }
+  .arden-app-shell .personal-grid { grid-template-columns: minmax(0, 1fr); }
+  .arden-app-shell .note-list-card { max-width: none; height: 100%; }
   .arden-app-shell .personal-content:not(.is-editing-note) .note-editor-card { display: none; }
   .arden-app-shell .personal-content.is-editing-note .note-list-card { display: none; }
   .arden-app-shell .personal-content.is-editing-note .personal-title-row { display: none; }
   .arden-app-shell .note-back-button { display: inline-flex; }
   .note-editor-page { padding: 24px 18px; }
   .arden-app-shell .editor-title-label textarea { font-size: 24px; }
+}
+@media (max-width: 639px) {
+  .arden-app-shell:has(.personal-content) .workspace-page { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .arden-app-shell:has(.personal-content) .personal-content { grid-row: 2; padding-top: 0; }
+  .arden-app-shell:has(.personal-content) .app-sidebar,
+  .arden-app-shell.is-nav-open .app-sidebar { z-index: 9; }
+  .arden-app-shell .personal-content .workspace-scroll-content { padding-bottom: 112px; }
 }

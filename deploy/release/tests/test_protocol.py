@@ -15,13 +15,17 @@ except ModuleNotFoundError:
 
 
 def fixture(managed=True):
+    migration_inventory = [{"id": "0001", "filename": "0001_example.sql",
+                            "sha256": "d" * 64, "rollout": "expand"}]
+    migrations = hashlib.sha256(json.dumps(migration_inventory, separators=(",", ":"),
+                                ensure_ascii=False).encode()).hexdigest()
     configs = {}
     images = {}
     for component, user in [("api", "1000:1000"), ("web", "101:101")]:
         raw = json.dumps({"architecture": "amd64", "os": "linux", "config": {
             "User": user, "Labels": {"org.opencontainers.image.revision": "a" * 40,
                                      "io.arden.release.tree": "b" * 40,
-                                     "io.arden.release.migrations": "c" * 64,
+                                     "io.arden.release.migrations": migrations,
                                      "io.arden.release.managed": "1" if managed else "0"}}}).encode()
         digest = hashlib.sha256(raw).hexdigest()
         name = f"blobs/sha256/{digest}"
@@ -37,8 +41,9 @@ def fixture(managed=True):
             item.size = len(raw)
             archive.addfile(item, io.BytesIO(raw))
     payload = data.getvalue()
-    manifest = {"schema": 1, "commit": "a" * 40, "tree": "b" * 40,
-                "run_id": "12345", "attempt": 1, "migrations": "c" * 64,
+    manifest = {"schema": 2, "commit": "a" * 40, "tree": "b" * 40,
+                "run_id": "12345", "attempt": 1, "migrations": migrations,
+                "migration_inventory": migration_inventory,
                 "images": images, "archive_sha256": hashlib.sha256(payload).hexdigest(),
                 "archive_size": len(payload)}
     return manifest, payload
@@ -94,6 +99,122 @@ class ProtocolTests(unittest.TestCase):
             protocol.validate_request(request, "production")
         self.assertEqual(protocol.validate_request({"op": "status", "environment": "staging"},
                                                   "staging")["op"], "status")
+
+    def test_plan_migrations_is_exact_and_bound_to_one_environment(self):
+        request = {"op": "plan-migrations", "environment": "staging",
+                   "commit": self.manifest["commit"], "tree": self.manifest["tree"],
+                   "run_id": self.manifest["run_id"], "attempt": self.manifest["attempt"],
+                   "migrations": self.manifest["migrations"],
+                   "migration_inventory": self.manifest["migration_inventory"]}
+        self.assertEqual(protocol.validate_request(request, "staging"), request)
+        for forced in ["production", "unknown"]:
+            with self.subTest(forced=forced), self.assertRaises(ValueError):
+                protocol.validate_request(request, forced)
+        wrong = copy.deepcopy(request)
+        wrong["environment"] = "production"
+        with self.assertRaises(ValueError):
+            protocol.validate_request(wrong, "staging")
+        for mutate in [lambda value: value.update(command="sh"),
+                       lambda value: value.update(run_id="0"),
+                       lambda value: value.update(tree="x" * 40),
+                       lambda value: value.update(migrations="c" * 64),
+                       lambda value: value.update(api_image_id="sha256:" + "8" * 64),
+                       lambda value: value["migration_inventory"][0].update(rollout="automatic"),
+                       lambda value: value["migration_inventory"].append(value["migration_inventory"][0])]:
+            bad = copy.deepcopy(request)
+            mutate(bad)
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                protocol.validate_request(bad, "staging")
+
+    def test_migration_reconciliation_is_exact_and_bound_to_a_new_workflow_attempt(self):
+        request = {"op": "reconcile-migrations", "environment": "staging",
+                   "commit": self.manifest["commit"], "run_id": self.manifest["run_id"],
+                   "attempt": self.manifest["attempt"]}
+        self.assertEqual(protocol.validate_request(request, "staging"), request)
+        with self.assertRaises(ValueError):
+            protocol.validate_request(request, "production")
+        for mutate in [lambda value: value.update(extra="not-allowed"),
+                       lambda value: value.update(commit="x" * 40),
+                       lambda value: value.update(attempt=0)]:
+            bad = copy.deepcopy(request)
+            mutate(bad)
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                protocol.validate_request(bad, "staging")
+
+    def test_new_release_manifest_requires_canonical_ordered_inventory_and_matching_fingerprint(self):
+        data = copy.deepcopy(self.manifest)
+        self.assertEqual(protocol.validate_manifest(data), data)
+        mutations = [lambda value: value.update(schema=1),
+                     lambda value: value["migration_inventory"][0].update(filename="0002_example.sql"),
+                     lambda value: value["migration_inventory"][0].update(sha256="A" * 64),
+                     lambda value: value["migration_inventory"][0].update(rollout="unknown"),
+                     lambda value: value["migration_inventory"][0].update(rollout=[]),
+                     lambda value: value.update(migration_inventory=[]),
+                     lambda value: value.update(migration_inventory=[
+                         {"id": "0002", "filename": "0002_next.sql", "sha256": "a" * 64, "rollout": "operator"},
+                         {"id": "0001", "filename": "0001_example.sql", "sha256": "d" * 64, "rollout": "expand"}])]
+        for mutate in mutations:
+            bad = copy.deepcopy(data)
+            mutate(bad)
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                protocol.validate_manifest(bad)
+
+    def test_schema_one_is_readable_only_as_legacy_stored_state(self):
+        legacy = copy.deepcopy(self.manifest)
+        legacy["schema"] = 1
+        legacy.pop("migration_inventory")
+        with self.assertRaises(ValueError):
+            protocol.validate_manifest(legacy)
+        self.assertEqual(protocol.validate_stored_manifest(legacy), legacy)
+        baseline = {"commit": "a" * 40, "tree": "b" * 40, "migrations": "c" * 64,
+                    "images": {"api": {"id": "sha256:" + "1" * 64},
+                               "web": {"id": "sha256:" + "2" * 64}}}
+        self.assertEqual(protocol.validate_stored_manifest(baseline), baseline)
+        with self.assertRaises(ValueError):
+            protocol.validate_manifest(baseline)
+
+    def test_ledger_comparison_uses_exact_prefix_hashes_and_rollout_class(self):
+        compare = protocol.compare_migration_ledger
+        inventory = [
+            {"id": "0001", "filename": "0001_example.sql", "sha256": "d" * 64, "rollout": "expand"},
+            {"id": "0002", "filename": "0002_review.sql", "sha256": "e" * 64, "rollout": "operator"},
+        ]
+        self.assertEqual(compare(inventory, []), {"status": "REQUIRES_OPERATOR",
+                                                   "migration_ids": ["0001_example", "0002_review"]})
+        self.assertEqual(compare(inventory, [{"migration_id": "0001_example", "checksum": "d" * 64}]),
+                         {"status": "REQUIRES_OPERATOR", "migration_ids": ["0002_review"]})
+        self.assertEqual(compare(inventory, [{"migration_id": "0001_example", "checksum": "d" * 64},
+                                             {"migration_id": "0002_review", "checksum": "e" * 64}]),
+                         {"status": "NO_PENDING", "migration_ids": []})
+        expand_inventory = copy.deepcopy(inventory)
+        expand_inventory[1]["rollout"] = "expand"
+        self.assertEqual(compare(expand_inventory, []), {"status": "READY",
+                                                         "migration_ids": ["0001_example", "0002_review"]})
+        gapped_inventory = [
+            {"id": "0001", "filename": "0001_example.sql", "sha256": "d" * 64, "rollout": "expand"},
+            {"id": "0003", "filename": "0003_review.sql", "sha256": "e" * 64, "rollout": "expand"},
+        ]
+        self.assertEqual(compare(gapped_inventory, [{"migration_id": "0001_example", "checksum": "d" * 64}]),
+                         {"status": "READY", "migration_ids": ["0003_review"]})
+        self.assertEqual(compare(gapped_inventory, [
+            {"migration_id": "0001_example", "checksum": "d" * 64},
+            {"migration_id": "0003_review", "checksum": "e" * 64},
+        ]), {"status": "NO_PENDING", "migration_ids": []})
+        self.assertEqual(compare(inventory, None), {"status": "BASELINE_REQUIRED", "migration_ids": []})
+        self.assertEqual(compare(inventory, [{"migration_id": "0001_example", "checksum": None}]),
+                         {"status": "BASELINE_REQUIRED", "migration_ids": []})
+        for ledger in [
+            [{"migration_id": "0009_unknown", "checksum": "f" * 64}],
+            [{"migration_id": "0001_example", "checksum": "a" * 64}],
+            [{"migration_id": "0002_review", "checksum": "e" * 64}],
+            [{"migration_id": "0001_example", "checksum": "d" * 64},
+             {"migration_id": "0001_example", "checksum": "d" * 64}],
+            [{"migration_id": "0002_review", "checksum": "e" * 64},
+             {"migration_id": "0001_example", "checksum": "d" * 64}],
+            [{"migration_id": "0001_example", "checksum": True}],
+        ]:
+            with self.subTest(ledger=ledger):
+                self.assertEqual(compare(inventory, ledger), {"status": "DRIFT", "migration_ids": []})
 
     def test_valid_saved_image_archive_is_accepted(self):
         protocol.validate_archive(io.BytesIO(self.payload), self.manifest)

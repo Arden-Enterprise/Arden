@@ -30,16 +30,16 @@ export function MyWorkPage({ onOpenPrivateNotes, onOpenKnowledge, onOpenReview, 
   const actionCount = sampleWorkQueue.length - reviewCount;
 
   return <main id="arden-main" className="workspace-page my-work-page" aria-labelledby="my-work-title" tabIndex={-1}>
-    <WorkspaceTopbar breadcrumb="Arden / Work / My Work" previewLabel="SAMPLE DATA · PREVIEW" contextOpen={contextOpen} onToggleContext={onToggleContext}
-      search={<SearchField value={query} onChange={setQuery} placeholder="Search priority queue…" />} searchActive={Boolean(query)} />
+    <WorkspaceTopbar breadcrumb="Arden / Work / My Work" previewLabel="Demo" contextOpen={contextOpen} onToggleContext={onToggleContext}
+      search={<SearchField value={query} onChange={setQuery} placeholder="Search tasks…" />} searchActive={Boolean(query)} />
     <WorkspacePageContent className="my-work-content" header={<WorkspacePageHeader className="my-work-title-row"
       eyebrow="WORK" title="My Work" titleId="my-work-title"
-      description={`${actionCount} sample items need you · ${reviewCount} review waiting`}
+      description={`Demo · ${actionCount} tasks · ${reviewCount} ${reviewCount === 1 ? "review" : "reviews"}`}
       action={<button type="button" className="primary-button" onClick={onOpenKnowledge} disabled={!onOpenKnowledge}><Icon name="plus" size={14} />New draft</button>}
     />}>
       <div className="my-work-dashboard">
         <section className="island my-work-card my-work-queue-card" aria-labelledby="priority-title">
-          <div className="my-work-card-heading"><h2 id="priority-title">Priority queue</h2><span className="island-badge">{filteredQueue.length}</span>
+          <div className="my-work-card-heading"><h2 id="priority-title">Tasks</h2><span className="island-badge">{filteredQueue.length}</span>
             <div className="my-work-filters">
               <label className="island-filter"><span className="sr-only">Work type</span><select value={type} onChange={(event) => { const value = event.target.value; if (value === "all" || value === "review" || value === "handover" || value === "knowledge") setType(value); }}><option value="all">Type: All</option><option value="review">Review</option><option value="handover">Handover</option><option value="knowledge">Knowledge</option></select></label>
               <label className="island-filter"><span className="sr-only">Work status</span><select value={status} onChange={(event) => { const value = event.target.value; if (value === "all" || value === "review-requested" || value === "at-risk" || value === "in-progress" || value === "source-changed") setStatus(value); }}><option value="all">Status: Any</option><option value="review-requested">Review requested</option><option value="at-risk">At risk</option><option value="in-progress">In progress</option><option value="source-changed">Source changed</option></select></label>

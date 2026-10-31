@@ -39,12 +39,12 @@ export function DiscardChangesDialog({ exiting, onCancel, onDiscard, switchingMe
       }}
     >
       <span className="meta-label">UNSAVED CHANGES</span>
-      <h2 id="discard-title">{switchingMember ? "Switch preview member?" : exiting ? "Exit this preview?" : "Leave without applying changes?"}</h2>
+      <h2 id="discard-title">{switchingMember ? "Switch preview member?" : exiting ? "Exit this preview?" : "Discard changes?"}</h2>
       <p id="discard-description">{switchingMember
-        ? "Switching members clears this member’s private notes and unsaved drafts. Keep working, or discard them and open the other member’s workspace."
+        ? "This member’s demo notes and drafts will be cleared."
         : exiting
-        ? "Your notes and organization changes are kept only in this session. Exiting clears them."
-        : "Your organization changes have not been applied. Stay to review them, or discard them and continue."}</p>
+        ? "Demo changes will be cleared."
+        : "Unsaved changes will be lost."}</p>
       <div className="dialog-actions">
         <button type="button" className="secondary-button" autoFocus onClick={onCancel}>Keep working</button>
         <button type="button" className="primary-button" onClick={onDiscard}>{switchingMember ? "Discard and switch" : exiting ? "Discard and exit" : "Discard changes"}</button>

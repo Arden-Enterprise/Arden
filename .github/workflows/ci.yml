@@ -36,12 +36,17 @@ jobs:
         with:
           node-version: 24.22.1
           package-manager-cache: false
+      - name: Validate migration inventory and immutable history
+        shell: bash
+        env:
+          ARDEN_MIGRATION_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: node tools/releases/migrations.mjs check --base "$ARDEN_MIGRATION_BASE_SHA"
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm test:remote
       - name: Release client and branch policy tests
-        run: node --test tools/releases/release.test.mjs tools/releases/transport.test.mjs tools/releases/identity.test.mjs tools/pull-requests/conventions.test.mjs
+        run: node --test tools/releases/release.test.mjs tools/releases/transport.test.mjs tools/releases/identity.test.mjs tools/releases/migration-inventory.test.mjs tools/pull-requests/conventions.test.mjs
       - name: Prepare temporary release-verifier test environment without pip caching
         run: python tools/releases/setup-python.py
       - name: Release protocol tests (Windows)
@@ -94,11 +99,23 @@ jobs:
         run: python3 tools/verification/schema-recovery.py
         env:
           ARDEN_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Verify release migration role ownership and denial boundaries
+        run: python3 tools/verification/migration-owner.py
+        env:
+          ARDEN_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
       - name: Apply all migrations only to the disposable runner database
         run: pnpm --filter @arden/api db:migrate
         env:
           ARDEN_MIGRATION_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci
-      - name: Exercise actual PostgreSQL isolation and permission rules
+      - name: Verify a repeated full-chain migration is an idempotent no-op
+        run: pnpm --filter @arden/api db:migrate
+        env:
+          ARDEN_MIGRATION_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci
+      - name: Transfer real schema ownership before exercising application workflows
+        run: python3 tools/verification/migration-owner.py --full-schema
+        env:
+          ARDEN_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+      - name: Exercise actual PostgreSQL isolation and permission rules after ownership transfer
         run: pnpm --filter @arden/api test
         env:
           ARDEN_TEST_DATABASE_URL: postgresql://postgres:disposable_ci_only@127.0.0.1:5432/arden_test_ci

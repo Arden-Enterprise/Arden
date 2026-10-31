@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "./app.js";
-import { SupabaseAuthProvider } from "./auth/provider.js";
+import { resolveSupabaseAuthPublicUrl, SupabaseAuthProvider } from "./auth/provider.js";
 import { assertLocalFlow1TestTarget, LocalFlow1TestAuthProvider, parseLocalTestAccounts } from "./auth/local-flow1-test.js";
 import { ArdenRepository } from "./db/repository.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -27,6 +27,9 @@ if (!databaseUrl) {
 const pool = new Pool({ connectionString: databaseUrl });
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPABASE_ANON_KEY;
+const supabaseAuthPublicUrl = resolveSupabaseAuthPublicUrl(
+  process.env.SUPABASE_AUTH_PUBLIC_URL, supabaseUrl,
+);
 const localFlow1TestMode = process.env.ARDEN_LOCAL_FLOW1_TEST_MODE === "true";
 const remoteFlow1TestMode = isKietLocalFlow1TestTarget(
   databaseUrl, process.env.NODE_ENV, Boolean(supabaseUrl || supabasePublishableKey),
@@ -109,7 +112,11 @@ const app = buildApp({
   checkDatabase: checkRuntimeDatabase,
   auth: localFlow1TestMode
     ? new LocalFlow1TestAuthProvider(parseLocalTestAccounts(process.env.ARDEN_LOCAL_TEST_USERS))
-    : supabaseUrl && supabasePublishableKey ? new SupabaseAuthProvider(supabaseUrl, supabasePublishableKey) : null,
+    : supabaseUrl && supabasePublishableKey
+      ? new SupabaseAuthProvider(supabaseUrl, supabasePublishableKey, supabaseAuthPublicUrl, {
+        requirePublicAuthUrl: process.env.NODE_ENV === "production",
+      })
+      : null,
   testActor: remoteFlow1TestMode ? kietLocalFlow1TestActor : undefined,
   authTrustedOrigins: flow1TestMode ? ["http://127.0.0.1:5180"] : trustedOrigins,
   secureCookies: process.env.NODE_ENV === "production",

@@ -1,5 +1,5 @@
 // Glyphs from @flaticon/flaticon-uicons 3.3.1, Regular Rounded.
-// Keep this mapping in sync with the pinned font and preserve visible attribution.
+// Keep this mapping in sync with the pinned font.
 export const iconGlyphs = {
   arrow: "\uf19b",
   check: "\uf3c8",
@@ -26,6 +26,7 @@ export const iconGlyphs = {
   people: "\ufea6",
   expand: "\uf153",
   pdf: "\uf66a",
+  edit: "\ufa29",
 } as const;
 
 export type IconName = keyof typeof iconGlyphs;

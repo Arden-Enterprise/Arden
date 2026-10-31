@@ -10,9 +10,10 @@ describe("workspace navigation with Ask Arden", () => {
     const markup = JSON.stringify(sidebar);
     expect(markup).toContain("Ask Arden");
     expect(workNavigation).toContainEqual(expect.objectContaining({ label: "Ask Arden", view: "ask-arden" }));
-    for (const label of ["My Work", "Ask Arden", "Private Notes", "Library", "Reviews", "Handover"]) {
+    for (const label of ["My Work", "Ask Arden", "Private Notes", "Library", "Reviews"]) {
       expect(markup).toContain(label);
     }
+    expect(markup).not.toContain("Handover");
   });
 
   it("shows Administration only to organization admins", () => {

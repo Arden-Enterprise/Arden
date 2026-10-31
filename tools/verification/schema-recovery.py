@@ -1,4 +1,4 @@
-"""Rehearse the 0017 -> 0021 schema upgrade and scoped restore on a disposable CI DB.
+"""Rehearse the publication reset, 0023 forward upgrade and scoped restore on a disposable CI DB.
 
 This is verification, not a release/migration command. It accepts only the
 GitHub job's PostgreSQL service and creates its own unpredictable test database.
@@ -46,12 +46,15 @@ def main():
         return result
 
     migrations = sorted(Path("apps/api/migrations").glob("[0-9][0-9][0-9][0-9]_*.sql"))
-    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 22)]:
+    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 24)]:
         raise ValueError("Revisit this bounded rehearsal before changing migration inventory")
     spec = importlib.util.spec_from_file_location('publication_upgrade', 'deploy/release/publication_upgrade.py')
     upgrade = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(upgrade)
-    grouped = upgrade.render_upgrade([{'name': p.name, 'sql': p.read_text(encoding='utf-8')} for p in migrations])
+    # The historical reset bundle remains bounded to 0018–0021. New forward
+    # migrations are rehearsed separately, never smuggled into that operator tool.
+    grouped = upgrade.render_upgrade([{'name': p.name, 'sql': p.read_text(encoding='utf-8')}
+                                      for p in migrations[:21]])
 
     def migration_sql(paths):
         return "\n".join(p.read_text(encoding="utf-8") + "\nINSERT INTO public.arden_schema_migrations "
@@ -93,6 +96,23 @@ def main():
             raise AssertionError("Grouped upgrade accepted an already upgraded database")
         except subprocess.CalledProcessError:
             assert snapshot() == upgraded, "Baseline rejection changed upgraded data"
+        sql("INSERT INTO arden.knowledge_base(organization_id,name,scope_type) VALUES "
+            "('10000000-0000-4000-8000-000000000001','Preserve on reviewer upgrade','ORGANIZATION');")
+        before_reviewer_upgrade = snapshot()
+        forward = ("BEGIN; SELECT pg_advisory_xact_lock(hashtext('arden:migrations'));\n"
+                   + migration_sql(migrations[21:]) + "\n")
+        try:
+            sql(forward + "SELECT 1/0; COMMIT;")
+            raise AssertionError("Expected failed reviewer migration rehearsal")
+        except subprocess.CalledProcessError:
+            assert snapshot() == before_reviewer_upgrade, "Failed reviewer upgrade changed baseline"
+        sql(forward + "COMMIT;")
+        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"23"
+        assert sql("SELECT name FROM arden.knowledge_base;").strip() == b"Preserve on reviewer upgrade"
+        assert sql("SELECT count(*) FROM arden.organization;").strip() == b"1"
+        assert sql("SELECT column_default FROM information_schema.columns "
+                   "WHERE table_schema='arden' AND table_name='shared_submission' "
+                   "AND column_name='review_rule';").strip() == b"'GRANT_SCOPE'::text"
         # Recover only Arden and its ledger, keeping the external service probe.
         restore = docker("exec", "-i", container, "pg_restore", "--file=-", data=backup)
         restore += docker("exec", "-i", container, "pg_restore", "--file=-", data=ledger)
@@ -102,7 +122,8 @@ def main():
         assert sql("SELECT value FROM public.outside_restore_boundary;").strip() == b"preserve-external-service"
         assert sql("SELECT to_regclass('arden.knowledge_index_generation') IS NULL;").strip() == b"t"
         assert sql("SELECT count(*) FROM pg_trigger WHERE tgname='trg_audit_event_append_only';").strip() == b"1"
-        print("PASS: atomic upgrade failure, 0017->0021 reset, exact table/ledger restore, external boundary preserved")
+        print("PASS: atomic reset/0023 failures, populated 0021->0023 upgrade, "
+              "exact table/ledger restore, external boundary preserved")
     finally:
         docker("exec", container, "dropdb", "-U", "postgres", database)
 

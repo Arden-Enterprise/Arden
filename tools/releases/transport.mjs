@@ -1,6 +1,26 @@
 import { createReadStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 
+const migrationStatuses = new Set(["NO_PENDING", "READY", "REQUIRES_OPERATOR", "DRIFT",
+  "BACKUP_NOT_READY", "BASELINE_REQUIRED", "OUTCOME_UNKNOWN", "STALE_RUN"]);
+
+function migrationBlock(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).sort().join("\0") !== ["error", "migration_ids", "ok", "status"].sort().join("\0")
+    || value.ok !== false || value.error !== "migration_blocked" || !migrationStatuses.has(value.status)
+    || value.status === "READY" || value.status === "NO_PENDING"
+    || !Array.isArray(value.migration_ids) || value.migration_ids.length > 1000
+    || value.migration_ids.some(id => typeof id !== "string" || !/^\d{4}_[a-z0-9_]+$/.test(id))
+    || new Set(value.migration_ids).size !== value.migration_ids.length
+    || (value.status === "NO_PENDING" && value.migration_ids.length !== 0)) return null;
+  const error = new Error(`Migration plan blocked: ${value.status}`
+    + (value.migration_ids.length ? ` (${value.migration_ids.join(", ")})` : ""));
+  error.code = "ARDEN_MIGRATION_BLOCKED";
+  error.status = value.status;
+  error.migrationIds = value.migration_ids;
+  return error;
+}
+
 export async function exchange(child, request, archive, timeoutMs = 20 * 60 * 1000) {
   let output = "";
   let oversized = false;
@@ -8,12 +28,15 @@ export async function exchange(child, request, archive, timeoutMs = 20 * 60 * 10
   const completion = new Promise((accept, reject) => {
     child.on("error", () => reject(new Error("Restricted transport could not start")));
     child.on("close", code => {
-      try {
-        if (oversized || code !== 0) throw new Error("Transport failed");
-        const value = JSON.parse(output);
-        if (value.ok !== true) throw new Error("Receiver rejected the operation");
+      if (oversized) { reject(new Error("Restricted release request failed; inspect status before retrying")); return; }
+      let value;
+      try { value = JSON.parse(output); }
+      catch { reject(new Error("Restricted release request failed; inspect status before retrying")); return; }
+      if (code === 0 && value?.ok === true && Object.hasOwn(value, "result")) {
         accept(value.result);
-      } catch { reject(new Error("Restricted release request failed; inspect status before retrying")); }
+        return;
+      }
+      reject(migrationBlock(value) ?? new Error("Restricted release request failed; inspect status before retrying"));
     });
   });
   const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
@@ -34,11 +57,12 @@ export async function exchange(child, request, archive, timeoutMs = 20 * 60 * 10
   try {
     const [, value] = await Promise.all([feed, completion]);
     return value;
-  } catch {
+  } catch (error) {
     child.kill("SIGKILL");
     input?.destroy();
     child.stdin?.destroy();
     await Promise.allSettled([feed, completion]);
+    if (error?.code === "ARDEN_MIGRATION_BLOCKED") throw error;
     throw new Error("Release transport failed; reconcile receiver status before another deployment");
   } finally { clearTimeout(timer); }
 }

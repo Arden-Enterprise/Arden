@@ -34,6 +34,30 @@ Manual local Mainflow 1 testing may use the dedicated local adapter in `apps/api
 
 The organization, session-context, and owner-private note contract for the first backend slice is accepted and partially implemented. SQL authorization has a gated real-PostgreSQL test that has not run in this environment; API request tests use a synthetic Supabase adapter rather than a live project. See [first-slice permission and API contracts](first-slice-permission-and-api-contracts.md), [decision 0002](../decisions/0002-first-slice-private-notes-contract.md), and the active [Supabase decision 0001](../decisions/0001-supabase-and-hybrid-development.md).
 
+### Database ownership is an execution contract
+
+The release migration login owns Arden DDL and its migration ledger; it is not the
+internal executor of reviewed `SECURITY DEFINER` functions. Preserve those functions'
+existing trusted `postgres` execution identity. Moving them to a non-bypass owner
+while their input tables use FORCE RLS and runtime-only policies silently changes
+validation and worker behavior. Never bulk-transfer routines as ordinary ownership
+housekeeping. The migration-role probe must reject that broken ownership split.
+
+Do not change FORCE RLS, actor/organization transaction settings, internal function
+owners, reviewer/audience gates or indexing execution privileges independently.
+Review them together and run the real runtime/worker workflow suite after the full
+schema ownership handoff. A synthetic ownership probe, readiness endpoint or green
+build does not prove submit/review/indexing still works. Changes to trusted function
+bodies/owners require an explicitly reviewed operator operation, not an automatic
+`expand` migration under the restricted DDL login.
+
+The operator-only `deploy/release/security-definer-owner-repair.sql` restores the
+known pre-transfer function owners after an exact-target backup and rehearsal. It
+does not modify data, policies, EXECUTE grants, actor roles or function bodies.
+Never repair this regression by granting BYPASSRLS to API users or letting Org Admin
+read another user's private drafts/notes. These restrictions apply to every
+contributor and agent, not to one named tool.
+
 ## 3. Knowledge ownership and governance
 
 - Personal originals remain private. Sharing/contributing is explicit, with a preview of copied text/files, audience, and authority. A separate copy is not an implicit live mirror.
@@ -41,8 +65,8 @@ The organization, session-context, and owner-private note contract for the first
 - The web/desktop client offers this action only for a saved owner-private version in the selected organization. The client sends that version ID and a UUID idempotency key, never a claimed actor or audience. An ambiguous result is retried with the same key; the server remains the authorization authority. The returned shared draft is held only in the current UI session and cleared on organization switch or sign-out, separate from all synthetic knowledge samples. No client button may treat it as submitted, reviewed, or published.
 - Prevent private back-links through provenance, attachments, mentions, derived summaries, citations, graph edges, or review history. Shared readers receive only provenance they are permitted to inspect.
 - Distinguish personal notes, shared drafts, official publications, external source objects, and work briefs in data and UI. External sync does not confer official approval.
-- Check a reviewer's current authority for the responsible department, any team/project attribute filters, intended audience, and submitted version at decision time. Deny ordinary reviewer self-approval; Organization Admin is the explicit final-authority exception and every such decision records `selfApproved: true`. Department is the highest ordinary reviewer-authority scope; team/project attributes do not create hierarchy or inherited approval permission. One eligible reviewer may approve unless the organization's recorded policy requires additional review steps. Assignment to a request does not itself confer broader access to personal originals or other content.
-- Enforce the accepted `INTERNAL`, `CONFIDENTIAL` and `RESTRICTED` knowledge classifications separately from audience. Confidential review needs the applicable reviewer grant; Restricted review needs a specialist or senior grant. An extra review step exists only where recorded organization policy requires it. If the effective access model cannot restrict a Restricted document to its intended readers, deny final approval and publication. Changing classification or widening audience after submission requires a new snapshot and review.
+- Check a reviewer's current authority against the frozen readers, responsible department, team/project attribute filters, review rule and submitted version at decision time. New organization-wide snapshots require an `ORGANIZATION` grant; department and group-only snapshots require a `DEPARTMENT` grant for the responsible department. These scopes are disjoint and do not inherit. Deny ordinary reviewer self-approval; Organization Admin is the explicit final-authority exception and every such decision records `selfApproved: true`. One eligible reviewer may approve; assignment to a request does not itself confer broader access to personal originals or other content.
+- Preserve transition rules per immutable submission. A `LEGACY` organization-wide submission may also use the prior responsible-department Specialist/Senior grant, and legacy `CONFIDENTIAL` / `RESTRICTED` classification checks remain; a new `GRANT_SCOPE` submission uses only the disjoint scope rule. The legacy-signature database eligibility function is a broad RLS prerequisite and must never replace the exact server policy. If an intended audience cannot be safely enforced, deny approval and publication. Widening audience after submission requires a new snapshot and review.
 - Bind review/approval to an immutable content version/hash **and** intended scope. Store reviewer, decision, timestamp, and relevant policy version. Editing approved content requires another review cycle.
 - Final approval moves the exact approved snapshot to publication preparation. It does not change the current pointer. Only complete indexing followed by atomic activation makes that version visible to search/RAG. There is no manual publisher role. Keep review, preparation and activation separately auditable; a mutable draft cannot become visible through a generic update endpoint.
 - Enforce transitions transactionally and reject stale version/conflicting approvals. Archival, unpublishing, and revocation must have explicit visibility semantics and audit evidence.

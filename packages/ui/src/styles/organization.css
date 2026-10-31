@@ -1,7 +1,7 @@
 .organization-access-content { max-width: 1232px; }
 .organization-access-heading { align-items: flex-end; gap: 24px; }
 .workspace-page-header.organization-access-heading { align-items: stretch; gap: 7px; }
-.workspace-page-header.organization-access-heading .workspace-page-header-row { align-items: flex-end; gap: 24px; }
+.workspace-page-header.organization-access-heading .workspace-page-header-row { align-items: center; gap: 24px; }
 .organization-access-heading h1 { margin: 10px 0 8px; font-size: 32px; line-height: 1.35; }
 .organization-access-heading p { color: var(--arden-text-secondary); font-size: 15px; line-height: 1.5; }
 .organization-access-heading > .primary-button,

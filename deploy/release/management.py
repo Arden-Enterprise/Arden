@@ -6,12 +6,14 @@ import json
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import time
 from urllib import request as http, error as http_error
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
-from protocol import strict_json, DIGEST, IMAGE_ID
+from protocol import (strict_json, DIGEST, IMAGE_ID, compare_migration_ledger, run_identity,
+                      validate_migration_inventory)
 from state import read_json, write_json
 
 
@@ -45,7 +47,145 @@ def validate_config(config, environment):
             raise ValueError("Existing private storage must be explicit and external")
     if not DIGEST.fullmatch(config.get("migrations", "")):
         raise ValueError("Missing approved migration fingerprint")
+    migration = config.get("migration")
+    if migration is not None:
+        if (type(migration) is not dict or set(migration) != {
+                "network", "database_image", "database_host", "database_name",
+                "runtime_database_user", "env_file"}
+                or any(type(migration.get(field)) is not str for field in {
+                    "network", "database_image", "database_host", "database_name",
+                    "runtime_database_user", "env_file"})):
+            raise ValueError("Invalid protected migration configuration")
+        if (not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", migration["network"])
+                or migration["network"].lower() in {"bridge", "host", "none"}
+                or not IMAGE_ID.fullmatch(migration["database_image"])
+                or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", migration["database_host"])
+                or not re.fullmatch(r"[a-zA-Z0-9_]{1,63}", migration["database_name"])
+                or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_-]{0,62}", migration["runtime_database_user"])
+                or migration["env_file"] != f"/etc/arden/releases/{environment}.migration.env"):
+            raise ValueError("Invalid protected migration target")
+        attached = services["arden-api"].get("networks", {})
+        declared = config.get("template", {}).get("networks", {})
+        valid_networks = {network.get("name") for alias, network in declared.items()
+                          if alias in attached and alias != "default"
+                          and type(network) is dict and network.get("external") is True
+                          and isinstance(network.get("name"), str)}
+        if migration["network"] not in valid_networks:
+            raise ValueError("Migration network is not an attached private API network")
     return config
+
+
+def migration_role_name(environment):
+    if environment not in {"staging", "production"}:
+        raise ValueError("Select the exact migration environment")
+    return f"arden_release_migration_{environment}"
+
+
+def verify_migration_client_user(image, command):
+    """Verify the pinned Postgres image can run its client as a non-root user."""
+    if not isinstance(image, str) or not IMAGE_ID.fullmatch(image):
+        raise ValueError("Protected database client image is unavailable")
+    arguments = ["run", "--rm", "--pull=never", "--network", "none",
+                 "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+                 "--memory", "64m", "--cpus", "0.25", "--pids-limit", "16",
+                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                 "--log-driver", "none", "--user", "postgres", "--entrypoint", "/bin/sh",
+                 image, "-c", "id -u"]
+    try:
+        result = command(arguments)
+    except Exception as error:
+        raise RuntimeError("Protected database client has no verified non-root Postgres user") from error
+    uid = result.strip() if isinstance(result, str) else ""
+    if not re.fullmatch(r"[1-9][0-9]{0,9}", uid):
+        raise RuntimeError("Protected database client has no verified non-root Postgres user")
+    return int(uid)
+
+
+def migration_role_probe_sql():
+    """Verify a schema-scoped owner without granting it authority over other services."""
+    return (
+        "SELECT current_database() || '|' || current_user || '|' || "
+        "r.rolsuper::text || '|' || r.rolbypassrls::text || '|' || "
+        "r.rolcreatedb::text || '|' || r.rolcreaterole::text || '|' || "
+        "r.rolreplication::text || '|' || r.rolinherit::text || '|' || r.rolcanlogin::text || '|' || "
+        "has_schema_privilege(current_user, 'arden', 'CREATE')::text || '|' || "
+        "has_database_privilege(current_user, current_database(), 'CONNECT')::text || '|' || "
+        "(NOT has_database_privilege(current_user, current_database(), 'CREATE'))::text || '|' || "
+        "has_schema_privilege(current_user, 'public', 'USAGE')::text || '|' || "
+        "(NOT has_schema_privilege(current_user, 'public', 'CREATE'))::text || '|' || "
+        "(SELECT n.nspowner = r.oid FROM pg_namespace n WHERE n.nspname = 'arden')::text || '|' || "
+        "(SELECT c.relowner = r.oid FROM pg_class c "
+        "WHERE c.oid = 'public.arden_schema_migrations'::regclass)::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'arden' AND c.relkind IN ('r','p','v','m','S','f','c') "
+        "AND c.relowner <> r.oid AND NOT EXISTS (SELECT 1 FROM pg_depend d "
+        "WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = 'arden' AND ((p.prosecdef AND p.proowner <> "
+        "(SELECT oid FROM pg_roles WHERE rolname = 'postgres' AND rolsuper)) "
+        "OR (NOT p.prosecdef AND p.proowner <> r.oid)) "
+        "AND NOT EXISTS (SELECT 1 FROM pg_depend d "
+        "WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "WHERE n.nspname = 'arden' AND t.typtype IN ('c','d','e','r','m') AND t.typowner <> r.oid "
+        "AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_type'::regclass "
+        "AND d.objid = t.oid AND d.deptype = 'e')))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_namespace n WHERE n.nspowner = r.oid AND n.nspname <> 'arden'))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE c.relowner = r.oid AND n.nspname NOT IN ('arden','public','pg_catalog','information_schema') "
+        "AND c.relkind IN ('r','p','v','m','S','f','c')) AND NOT EXISTS "
+        "(SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE c.relowner = r.oid AND n.nspname = 'public' AND c.relname <> 'arden_schema_migrations' "
+        "AND c.relkind IN ('r','p','v','m','S','f','c')) AND NOT EXISTS "
+        "(SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE p.proowner = r.oid AND n.nspname NOT IN ('arden','pg_catalog','information_schema')) AND NOT EXISTS "
+        "(SELECT 1 FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "WHERE t.typowner = r.oid AND n.nspname NOT IN ('arden','pg_catalog','information_schema') "
+        "AND NOT (n.nspname = 'public' AND (t.typrelid = 'public.arden_schema_migrations'::regclass "
+        "OR t.oid = (SELECT ledger_type.typarray FROM pg_type ledger_type "
+        "WHERE ledger_type.typrelid = 'public.arden_schema_migrations'::regclass)))))::text || '|' || "
+        "(NOT EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid OR m.roleid = r.oid))::text "
+        "FROM pg_roles r WHERE r.rolname = current_user"
+    )
+
+
+def valid_migration_role_probe(value, database, username):
+    """Require a dedicated login owning Arden objects and only the public ledger."""
+    fields = value.split("|") if isinstance(value, str) else []
+    return (len(fields) == 22 and fields[:2] == [database, username]
+            and fields[2:] == ["false"] * 6 + ["true"] * 14)
+
+
+def valid_migration_baseline_receipt(receipt, environment):
+    if (type(receipt) is not dict or set(receipt) != {
+            "schema", "environment", "source", "migration_inventory", "checksums", "verified_at"}
+            or receipt.get("schema") != 2 or receipt.get("environment") != environment
+            or type(receipt.get("verified_at")) is not int
+            or not 0 < receipt["verified_at"] <= int(time.time()) + 60
+            or type(receipt.get("checksums")) is not list or not receipt["checksums"]):
+        return False
+    source = receipt.get("source")
+    if (type(source) is not dict or set(source) != {"commit", "tree", "api_image", "migrations"}
+            or type(source.get("commit")) is not str or not re.fullmatch(r"[a-f0-9]{40}", source["commit"])
+            or type(source.get("tree")) is not str or not re.fullmatch(r"[a-f0-9]{40}", source["tree"])
+            or type(source.get("api_image")) is not str or not IMAGE_ID.fullmatch(source["api_image"])
+            or type(source.get("migrations")) is not str or not DIGEST.fullmatch(source["migrations"])):
+        return False
+    try:
+        validate_migration_inventory(receipt["migration_inventory"], source["migrations"])
+    except (TypeError, ValueError):
+        return False
+    ids = []
+    for row in receipt["checksums"]:
+        if (type(row) is not dict or set(row) != {"migration_id", "checksum"}
+                or type(row.get("migration_id")) is not str
+                or not re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", row["migration_id"])
+                or type(row.get("checksum")) is not str or not DIGEST.fullmatch(row["checksum"])):
+            return False
+        ids.append(row["migration_id"])
+    expected_checksums = [{"migration_id": row["filename"][:-4], "checksum": row["sha256"]}
+                          for row in receipt["migration_inventory"]]
+    return ids == sorted(set(ids)) and receipt["checksums"] == expected_checksums
 
 
 class NoRedirect(http.HTTPRedirectHandler):
@@ -54,12 +194,116 @@ class NoRedirect(http.HTTPRedirectHandler):
 
 
 class CoolifyManager:
-    def __init__(self, config, request=None, command=None, operation=None):
+    def __init__(self, config, request=None, command=None, operation=None, migration_command=None):
         self.config = validate_config(config, config.get("environment"))
         self.request = request or self._request
         self.command = command or self._command
         self.operation = operation or self._operation
+        self.migration_command = migration_command or self._migration_command
         self.protected = None
+
+    @staticmethod
+    def _migration_container_from_arguments(arguments):
+        try:
+            index = arguments.index("--name")
+        except ValueError:
+            return None
+        if index + 1 >= len(arguments):
+            raise RuntimeError("Migration container identity is invalid")
+        name = arguments[index + 1]
+        if not re.fullmatch(r"arden-release-migration-(?:staging|production)-[1-9][0-9]{0,19}-[1-9][0-9]{0,3}", name):
+            raise RuntimeError("Migration container identity is invalid")
+        return name
+
+    def _migration_container_running(self, name):
+        try:
+            result = self.command(["inspect", "--format", "{{.State.Running}}", name]).strip()
+        except Exception:
+            result = None
+        if result == "true":
+            return True
+        if result == "false":
+            return False
+        if result is not None:
+            raise RuntimeError("Migration container state is invalid")
+        # The name filter is substring-based; any match keeps the outcome uncertain.
+        if self.command(["ps", "--all", "--quiet", "--filter", f"name={name}"]).strip():
+            raise RuntimeError("Migration container could not be identified exactly")
+        return False
+
+    def _stop_migration_container(self, name):
+        if not self._migration_container_running(name):
+            return
+        try:
+            self.command(["stop", "--time", "10", name])
+        except Exception:
+            # A concurrent clean exit may remove the --rm container before stop reaches it.
+            pass
+        if self._migration_container_running(name):
+            raise RuntimeError("Migration container could not be stopped; database state requires reconciliation")
+
+    def migration_container_name(self, manifest):
+        run_id, attempt = manifest.get("run_id"), manifest.get("attempt")
+        run_identity(run_id, attempt)
+        return f"arden-release-migration-{self.config['environment']}-{run_id}-{attempt}"
+
+    def reconcile_migration_execution(self, manifest):
+        """Stop only the named migration process recorded by the pending release attempt."""
+        self._stop_migration_container(self.migration_container_name(manifest))
+        settings = self._migration_settings()
+        if settings is None:
+            raise RuntimeError("Migration configuration is unavailable; database state requires reconciliation")
+        self._assert_migration_lock_free(settings)
+
+    def _assert_migration_lock_free(self, settings):
+        """Prove the migration session lock is free before any retry or ledger reconciliation."""
+        image = settings["database_image"]
+        actual = self.command(["image", "inspect", "--format", "{{.Id}}", image]).strip()
+        if actual != image:
+            raise RuntimeError("Protected database client image is unavailable")
+        verify_migration_client_user(image, self.command)
+        query = ("SELECT CASE WHEN pg_try_advisory_lock(hashtext('arden:migrations')) "
+                 "THEN pg_advisory_unlock(hashtext('arden:migrations')) ELSE false END")
+        script = ("set -eu; psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
+                  "--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align "
+                  f"--command=\"{query}\"")
+        arguments = ["/usr/bin/docker", "run", "--rm", "--pull=never", "--network", settings["network"],
+                     "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+                     "--memory", "128m", "--cpus", "0.50", "--pids-limit", "32",
+                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                     "--log-driver", "none", "--env-file", settings["env_file"],
+                     "--env", "PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=2000",
+                     "--user", "postgres", "--entrypoint", "/bin/sh", image, "-c", script]
+        try:
+            output = self.migration_command(arguments, timeout=30)
+        except Exception as error:
+            raise RuntimeError("Migration database lock could not be verified; database state requires reconciliation") from error
+        if output.strip() != "t":
+            raise RuntimeError("Migration database advisory lock is still held; database state requires reconciliation")
+
+    def _migration_command(self, arguments, timeout=900):
+        try:
+            result = subprocess.run(arguments, capture_output=True, text=True,
+                                    timeout=timeout, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            name = self._migration_container_from_arguments(arguments)
+            if name:
+                try:
+                    self._stop_migration_container(name)
+                except Exception as cleanup_error:
+                    raise RuntimeError("Migration timed out and its container state is uncertain") from cleanup_error
+            raise RuntimeError("Migration command outcome requires reconciliation") from error
+        if result.returncode:
+            name = self._migration_container_from_arguments(arguments)
+            if name:
+                try:
+                    self._stop_migration_container(name)
+                except Exception as cleanup_error:
+                    raise RuntimeError("Migration failed and its container state is uncertain") from cleanup_error
+            raise RuntimeError("Migration command failed; database state requires reconciliation")
+        if len(result.stdout) > 64 * 1024:
+            raise RuntimeError("Migration command response exceeds its limit")
+        return result.stdout
 
     def _operation(self, op):
         message = {"op": op, "service_uuid": self.config["service_uuid"],
@@ -158,8 +402,14 @@ class CoolifyManager:
             raise RuntimeError("Protected infrastructure was recreated during deployment")
 
     def preflight(self, manifest):
-        if manifest["migrations"] != self.config["migrations"]:
-            raise ValueError("Schema approval is required before this release")
+        if manifest.get("schema") in {None, 1}:
+            if manifest["migrations"] != self.config["migrations"]:
+                raise ValueError("Schema approval is required before this release")
+        elif manifest.get("schema") == 2:
+            if not self._baseline_receipt_ready():
+                raise ValueError("Migration checksum baseline is required before this release")
+        else:
+            raise ValueError("Unsupported migration release schema")
         if shutil.disk_usage(self.config["state_dir"]).free < 256 * 1024 * 1024:
             raise ValueError("Insufficient release disk space")
         if self.config.get("coolify_image_id"):
@@ -167,6 +417,203 @@ class CoolifyManager:
             if actual != self.config["coolify_image_id"]:
                 raise ValueError("Review the Coolify adapter after its image changes")
         self._check_protected()
+
+    def _migration_settings(self):
+        settings = self.config.get("migration")
+        if not isinstance(settings, dict):
+            return None
+        path = Path(settings["env_file"])
+        try:
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077
+                    or path.is_symlink() or path.resolve() != path):
+                return None
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError):
+            return None
+        lines = raw.splitlines()
+        prefix = "ARDEN_MIGRATION_DATABASE_URL="
+        if len(lines) != 1 or "\r" in raw or not lines[0].startswith(prefix):
+            return None
+        value = lines[0][len(prefix):]
+        try:
+            url = urlsplit(value)
+            database = unquote(url.path.lstrip("/"))
+            username = unquote(url.username or "")
+            password = url.password
+            port = url.port
+        except ValueError:
+            return None
+        if (url.scheme not in {"postgres", "postgresql"} or not url.hostname
+                or url.hostname != settings["database_host"] or database != settings["database_name"]
+                or username != migration_role_name(self.config["environment"])
+                or username == settings["runtime_database_user"] or not password
+                or url.query or url.fragment or (port is not None and port != 5432)):
+            return None
+        return {**settings, "migration_database_user": username}
+
+    def _baseline_receipt_ready(self):
+        path = Path(self.config["state_dir"]) / "migration-baseline.json"
+        try:
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077
+                    or path.is_symlink() or path.resolve() != path):
+                return False
+            receipt = read_json(path)
+        except (OSError, ValueError):
+            return False
+        return valid_migration_baseline_receipt(receipt, self.config["environment"])
+
+    def _backup_ready(self, settings):
+        path = Path(f"/etc/arden/releases/{self.config['environment']}.backup-readiness.json")
+        try:
+            info = path.lstat()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o077
+                    or path.is_symlink() or path.resolve() != path):
+                return False
+            receipt = read_json(path)
+        except (OSError, ValueError):
+            return False
+        fields = {"schema", "environment", "network", "database_host", "database_name",
+                  "backup_reference", "backup_created_at", "restore_tested_at", "verified_at"}
+        now = int(time.time())
+        return (type(receipt) is dict and set(receipt) == fields
+                and receipt.get("schema") == 1 and receipt.get("environment") == self.config["environment"]
+                and receipt.get("network") == settings["network"]
+                and receipt.get("database_host") == settings["database_host"]
+                and receipt.get("database_name") == settings["database_name"]
+                and type(receipt.get("backup_reference")) is str
+                and re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", receipt["backup_reference"]) is not None
+                and all(type(receipt.get(key)) is int and 0 < receipt[key] <= now
+                        for key in ["backup_created_at", "restore_tested_at", "verified_at"])
+                and now - receipt["backup_created_at"] <= 24 * 60 * 60
+                and now - receipt["restore_tested_at"] <= 90 * 24 * 60 * 60
+                and now - receipt["verified_at"] <= 15 * 60)
+
+    def _read_migration_ledger(self, settings):
+        image = settings["database_image"]
+        actual = self.command(["image", "inspect", "--format", "{{.Id}}", image]).strip()
+        if actual != image:
+            raise RuntimeError("Protected database client image is unavailable")
+        verify_migration_client_user(image, self.command)
+        role_probe = migration_role_probe_sql()
+        script = ("set -eu; "
+                  "status=$(psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
+                  "--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align "
+                  "--command=\"SELECT CASE WHEN to_regclass('public.arden_schema_migrations') IS NULL "
+                  "THEN 'MISSING_TABLE' WHEN NOT EXISTS (SELECT 1 FROM information_schema.columns "
+                  "WHERE table_schema='public' AND table_name='arden_schema_migrations' "
+                  "AND column_name='checksum' AND data_type='text') THEN 'MISSING_CHECKSUM' ELSE 'READY' END\"); "
+                  "printf '%s\\n' \"$status\"; "
+                  "if [ \"$status\" = READY ]; then "
+                  "role=$(psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
+                  "--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align "
+                  "--command=\"" + role_probe + "\"); "
+                  "printf 'ROLE|%s\\n' \"$role\"; "
+                  "psql --dbname=\"$ARDEN_MIGRATION_DATABASE_URL\" --no-psqlrc "
+                  "--set=ON_ERROR_STOP=1 --quiet --tuples-only --no-align "
+                  "--field-separator='|' --command=\"SELECT migration_id || '|' || COALESCE(checksum, '') "
+                  "FROM public.arden_schema_migrations ORDER BY migration_id\"; fi")
+        arguments = ["/usr/bin/docker", "run", "--rm", "--pull=never", "--network", settings["network"],
+                     "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m",
+                     "--memory", "128m", "--cpus", "0.50", "--pids-limit", "32",
+                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                     "--log-driver", "none", "--env-file", settings["env_file"],
+                     "--env", "PGOPTIONS=-c default_transaction_read_only=on -c statement_timeout=5000 -c lock_timeout=2000",
+                     "--user", "postgres", "--entrypoint", "/bin/sh", image, "-c", script]
+        output = self.migration_command(arguments, timeout=60)
+        lines = output.splitlines()
+        if not lines or lines[0] in {"MISSING_TABLE", "MISSING_CHECKSUM"}:
+            return None
+        if lines[0] != "READY":
+            raise RuntimeError("Protected migration ledger response is invalid")
+        if len(lines) < 2 or not lines[1].startswith("ROLE|"):
+            raise RuntimeError("Protected migration role could not be verified")
+        role = lines[1][len("ROLE|"):].split("|")
+        if not valid_migration_role_probe(
+                "|".join(role), settings["database_name"], settings["migration_database_user"]):
+            raise RuntimeError("Protected migration role is not the approved least-privilege owner")
+        rows = []
+        for line in lines[2:]:
+            pieces = line.split("|")
+            if len(pieces) != 2:
+                raise RuntimeError("Protected migration ledger response is invalid")
+            rows.append({"migration_id": pieces[0], "checksum": pieces[1] or None})
+        return rows
+
+    def plan_migrations(self, candidate):
+        inventory = candidate.get("migration_inventory") if isinstance(candidate, dict) else None
+        fingerprint = candidate.get("migrations") if isinstance(candidate, dict) else None
+        try:
+            validate_migration_inventory(inventory, fingerprint)
+        except ValueError:
+            return {"status": "DRIFT", "migration_ids": []}
+        settings = self._migration_settings()
+        if settings is None or not self._baseline_receipt_ready():
+            return {"status": "BASELINE_REQUIRED", "migration_ids": []}
+        try:
+            ledger = self._read_migration_ledger(settings)
+        except Exception as error:
+            return {"status": "OUTCOME_UNKNOWN", "migration_ids": []}
+        plan = compare_migration_ledger(inventory, ledger)
+        if plan["status"] == "READY" and not self._backup_ready(settings):
+            return {"status": "BACKUP_NOT_READY", "migration_ids": plan["migration_ids"]}
+        return plan
+
+    @staticmethod
+    def _migration_cli_result(raw, inventory):
+        try:
+            value = strict_json(raw)
+        except ValueError as error:
+            raise RuntimeError("Migration runner returned an invalid response") from error
+        if type(value) is not dict or set(value) - {"status", "migration_ids", "reason"}:
+            raise RuntimeError("Migration runner returned an invalid response")
+        if (value.get("status") not in {"APPLIED", "NO_PENDING", "LOCKED", "BASELINE_REQUIRED", "DRIFT", "REQUIRES_OPERATOR"}
+                or type(value.get("migration_ids")) is not list
+                or any(type(item) is not str or not re.fullmatch(r"[0-9]{4}_[a-z0-9_]+", item)
+                       for item in value["migration_ids"])
+                or len(value["migration_ids"]) != len(set(value["migration_ids"]))):
+            raise RuntimeError("Migration runner returned an invalid response")
+        known = {item["filename"][:-4] for item in inventory}
+        if any(item not in known for item in value["migration_ids"]):
+            raise RuntimeError("Migration runner returned an invalid response")
+        return value
+
+    def apply_migrations(self, manifest):
+        plan = self.plan_migrations(manifest)
+        if plan["status"] == "NO_PENDING":
+            return plan
+        if plan["status"] != "READY":
+            raise ValueError("Migration plan is blocked: " + plan["status"])
+        settings = self._migration_settings()
+        if settings is None:
+            raise ValueError("Migration configuration is unavailable")
+        self.ensure_images(manifest)
+        image = self.image_id(manifest, "api")
+        container_name = self.migration_container_name(manifest)
+        arguments = ["/usr/bin/docker", "run", "--name", container_name, "--rm", "--pull=never", "--network", settings["network"],
+                     "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
+                     "--memory", "512m", "--cpus", "0.75", "--pids-limit", "64",
+                     "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
+                     "--log-driver", "none", "--env-file", settings["env_file"],
+                     "--entrypoint", "node", image, "dist/db/migrate.js", "--apply-safe"]
+        failed = False
+        try:
+            raw = self.migration_command(arguments, timeout=900)
+            result = self._migration_cli_result(raw, manifest["migration_inventory"])
+            failed = result["status"] not in {"APPLIED", "NO_PENDING"}
+        except Exception:
+            failed = True
+        self._assert_migration_lock_free(settings)
+        reconciled = self.plan_migrations(manifest)
+        if reconciled["status"] == "NO_PENDING":
+            return {"status": "APPLIED" if plan["status"] == "READY" else "NO_PENDING",
+                    "migration_ids": plan["migration_ids"], "reconciled": failed}
+        if failed:
+            raise RuntimeError("Migration failed; the database ledger was reconciled and the app was not activated")
+        if reconciled["status"] != "NO_PENDING":
+            raise RuntimeError("Migration did not reach the candidate ledger; the app was not activated")
+        return {"status": "APPLIED", "migration_ids": plan["migration_ids"]}
 
     @staticmethod
     def _normalized_config(value):

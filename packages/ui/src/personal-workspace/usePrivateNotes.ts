@@ -14,7 +14,7 @@ type DraftRepresentation = {
 type DraftListRepresentation = { items: Array<{ id: string; title: string; currentVersion: number; updatedAt: string }>; nextCursor: string | null };
 
 function toPrivateNote(note: DraftRepresentation): PrivateNote {
-  return { id: note.id, title: note.title, body: note.body, updatedLabel: `Saved to server · ${new Date(note.updatedAt).toLocaleString()}`, sourceVersionId: note.currentVersion.id };
+  return { id: note.id, title: note.title, body: note.body, updatedLabel: `Saved ${new Date(note.updatedAt).toLocaleString()}`, sourceVersionId: note.currentVersion.id };
 }
 
 export function usePrivateNotes(initialNotes: PrivateNote[]) {
@@ -79,10 +79,12 @@ export function usePrivateNotes(initialNotes: PrivateNote[]) {
   const createNote = () => {
     setError("");
     setSaveMessage("");
-    dispatch({ type: "create", note: {
+    const note = {
       id: serverBacked ? `pending-${crypto.randomUUID()}` : `preview-${crypto.randomUUID()}`,
-      title: "Untitled private note", body: "", updatedLabel: serverBacked ? "Not saved" : "Not saved",
-    } });
+      title: "Untitled private note", body: "", updatedLabel: "Not saved",
+    };
+    dispatch({ type: "create", note });
+    return note.id;
   };
 
   const save = async (platform?: Platform, organizationId?: string) => {
@@ -110,10 +112,10 @@ export function usePrivateNotes(initialNotes: PrivateNote[]) {
       versions.current.set(result.id, result.currentVersion.version);
       const updatedNotes = [toPrivateNote(result), ...state.notes.filter((note) => note.id !== selectedNote.id && note.id !== result.id)];
       dispatch({ type: "reset", notes: updatedNotes });
-      setSaveMessage("Saved to your private workspace.");
+      setSaveMessage("Saved");
     } catch (cause) {
       if (cause instanceof ApiError && cause.code === "VERSION_CONFLICT") {
-        setError("This note changed on the server. Reload the private notes before saving again.");
+        setError("This note has changed. Copy your edits, then refresh the page.");
       } else {
         setError(cause instanceof Error ? cause.message : "The note was not saved.");
       }
@@ -138,6 +140,7 @@ export function usePrivateNotes(initialNotes: PrivateNote[]) {
     isDirty: selectedNote ? isNoteDirty(state, selectedNote) || selectedNote.updatedLabel === "Not saved" : false,
     selectNote: (note: PrivateNote) => { setError(""); setSaveMessage(""); dispatch({ type: "select", id: note.id }); },
     createNote,
+    discardSelected: () => { if (saving) return; setSaveMessage(""); dispatch({ type: "discard" }); },
     editTitle: (value: string) => { setSaveMessage(""); dispatch({ type: "edit", field: "title", value }); },
     editBody: (value: string) => { setSaveMessage(""); dispatch({ type: "edit", field: "body", value }); },
     save,

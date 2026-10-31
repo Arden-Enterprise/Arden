@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
-import { createReadStream, createWriteStream, readFileSync, writeFileSync, readdirSync,
+import { createReadStream, createWriteStream, readFileSync, writeFileSync,
   statSync, mkdirSync, chmodSync, existsSync, unlinkSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -8,6 +8,7 @@ import { createGzip } from "node:zlib";
 import { pathToFileURL } from "node:url";
 import { exchange } from "./transport.mjs";
 import { requestIdentity } from "./identity.mjs";
+import { assertSafeExpandMigrations, fingerprintMigrationInventory, loadMigrationInventory } from "../../apps/api/migrations/inventory.mjs";
 
 const sha = /^[0-9a-f]{40}$/;
 const imageId = /^sha256:[0-9a-f]{64}$/;
@@ -49,6 +50,90 @@ export function promotionRequest(env, tree) {
   return { op: "promote", environment: "production", ...context, tree };
 }
 
+const migrationStatuses = new Set(["NO_PENDING", "READY", "REQUIRES_OPERATOR", "DRIFT",
+  "BACKUP_NOT_READY", "BASELINE_REQUIRED", "OUTCOME_UNKNOWN", "STALE_RUN", "RECOVERY_REQUIRED"]);
+
+export function migrationPlanRequest(env, candidate) {
+  const context = releaseContext(env);
+  if (!candidate || candidate.commit !== context.commit || !sha.test(candidate.tree ?? "")
+    || !Array.isArray(candidate.migration_inventory)
+    || fingerprintMigrationInventory(candidate.migration_inventory) !== candidate.migrations) {
+    throw new Error("Migration plan source does not match this workflow commit");
+  }
+  return { op: "plan-migrations", environment: context.environment, commit: context.commit,
+    tree: candidate.tree, run_id: context.run_id, attempt: context.attempt,
+    migrations: candidate.migrations, migration_inventory: candidate.migration_inventory };
+}
+
+export function migrationReconcileRequest(env) {
+  const context = releaseContext(env);
+  return { op: "reconcile-migrations", environment: context.environment,
+    commit: context.commit, run_id: context.run_id, attempt: context.attempt };
+}
+
+async function planMigrationsWithRecovery(env, candidate, send, getHead) {
+  const request = migrationPlanRequest(env, candidate);
+  let plan = await send(request);
+  if (plan?.status === "RECOVERY_REQUIRED") {
+    await assertCurrentHead(env, getHead);
+    const result = await send(migrationReconcileRequest(env));
+    if (!result || typeof result !== "object" || Array.isArray(result)
+      || Object.keys(result).sort().join("\0") !== "status"
+      || !["RECONCILED", "NO_PENDING"].includes(result.status)) {
+      throw new Error("Migration recovery could not be verified");
+    }
+    await assertCurrentHead(env, getHead);
+    plan = await send(request);
+  }
+  return assertMigrationPlan(plan);
+}
+
+export function assertMigrationPlan(plan) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)
+    || Object.keys(plan).sort().join("\0") !== ["migration_ids", "status"].sort().join("\0")
+    || !migrationStatuses.has(plan.status) || !Array.isArray(plan.migration_ids)
+    || plan.migration_ids.length > 1000
+    || plan.migration_ids.some(id => typeof id !== "string" || !/^\d{4}_[a-z0-9_]+$/.test(id))
+    || new Set(plan.migration_ids).size !== plan.migration_ids.length
+    || (plan.status === "NO_PENDING" && plan.migration_ids.length !== 0)
+    || (plan.status === "READY" && plan.migration_ids.length === 0)) {
+    throw new Error("Receiver returned an invalid migration plan");
+  }
+  if (plan.status !== "NO_PENDING" && plan.status !== "READY") {
+    const error = new Error(`Migration plan blocked: ${plan.status}`
+      + (plan.migration_ids.length ? ` (${plan.migration_ids.join(", ")})` : ""));
+    error.code = "ARDEN_MIGRATION_BLOCKED";
+    error.status = plan.status;
+    error.migrationIds = plan.migration_ids;
+    throw error;
+  }
+  return plan;
+}
+
+export async function executeStagingRelease(env, manifest, archive, send, getHead) {
+  const context = releaseContext(env);
+  if (context.environment !== "staging" || manifest?.schema !== 2
+    || manifest.commit !== context.commit || manifest.run_id !== context.run_id
+    || manifest.attempt !== context.attempt) throw new Error("Staging release identity is invalid");
+  await assertCurrentHead(env, getHead);
+  await planMigrationsWithRecovery(env, manifest, send, getHead);
+  await assertCurrentHead(env, getHead);
+  await send({ op: "upload", environment: "staging", manifest }, archive);
+  await assertCurrentHead(env, getHead);
+  return send({ op: "deploy", environment: "staging", manifest });
+}
+
+export async function executeProductionRelease(env, source, send, getHead) {
+  const context = releaseContext(env);
+  if (context.environment !== "production" || source?.commit !== context.commit) {
+    throw new Error("Production promotion source does not match this workflow commit");
+  }
+  await assertCurrentHead(env, getHead);
+  await planMigrationsWithRecovery(env, source, send, getHead);
+  await assertCurrentHead(env, getHead);
+  return send(promotionRequest(env, source.tree));
+}
+
 export async function checkReadiness(env, request) {
   const { environment } = releaseContext(env);
   const status = await request({ op: "status", environment });
@@ -58,22 +143,23 @@ export async function checkReadiness(env, request) {
     && status.active.eligible_for_promotion === false && sha.test(manifest.tree ?? "")
     && /^[0-9a-f]{64}$/.test(manifest.migrations ?? "")
     && ["api", "web"].every(component => imageId.test(manifest.images?.[component]?.id ?? ""));
-  if (status?.pending !== null || (manifest?.schema !== 1 && !baseline)
+  const recoverableMigration = status?.pending !== null && status?.pending?.phase === "migrating";
+  if ((status?.pending !== null && !recoverableMigration)
+    || (![1, 2].includes(manifest?.schema) && !baseline)
     || !sha.test(manifest?.commit ?? "")) {
     throw new Error("Release state needs operator inspection before building or deploying");
   }
 }
 
-function metadata() {
+export function metadata() {
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
   if (!sha.test(commit) || !sha.test(tree)) throw new Error("Invalid source revision");
   const directory = "apps/api/migrations";
-  const files = readdirSync(directory).filter(name => /^\d{4}_[a-z0-9_]+\.sql$/.test(name)).sort();
-  if (!files.length) throw new Error("Missing migration inventory");
-  const inventory = files.map(name => ({ name, sha256: createHash("sha256").update(readFileSync(join(directory, name))).digest("hex") }));
-  const migrations = createHash("sha256").update(JSON.stringify(inventory)).digest("hex");
-  return { commit, tree, migrations };
+  const migration_inventory = loadMigrationInventory(directory);
+  assertSafeExpandMigrations(migration_inventory, directory);
+  const migrations = fingerprintMigrationInventory(migration_inventory);
+  return { commit, tree, migrations, migration_inventory };
 }
 
 function workspace(env) {
@@ -139,7 +225,7 @@ async function bundle(env, root, context = releaseContext(env)) {
   if (size <= 0 || size > maxArchive) throw new Error("Release archive exceeds approved size limit");
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(archive)) hash.update(chunk);
-  const manifest = { schema: 1, ...source, run_id: context.run_id, attempt: context.attempt,
+  const manifest = { schema: 2, ...source, run_id: context.run_id, attempt: context.attempt,
     images, archive_sha256: hash.digest("hex"), archive_size: size };
   writeFileSync(join(root, "manifest.json"), JSON.stringify(manifest), { mode: 0o600 });
   execFileSync("python3", ["-I", "deploy/release/archive.py", "verify", archive, join(root, "manifest.json")],
@@ -152,7 +238,7 @@ async function main(mode, env) {
     if (env.GITHUB_SHA && value.commit !== env.GITHUB_SHA) throw new Error("Checkout identity mismatch");
     if (env.GITHUB_OUTPUT) {
       const { appendFileSync } = await import("node:fs");
-      appendFileSync(env.GITHUB_OUTPUT, Object.entries(value).map(([key, data]) => `${key}=${data}\n`).join(""));
+      appendFileSync(env.GITHUB_OUTPUT, ["commit", "tree", "migrations"].map(key => `${key}=${value[key]}\n`).join(""));
     }
     console.log(JSON.stringify(value));
     return;
@@ -175,9 +261,9 @@ async function main(mode, env) {
   if (!["preflight", "deploy"].includes(mode)) throw new Error("Unknown release client command");
   const context = releaseContext(env);
   prepareSsh(env, root);
-  await assertCurrentHead(env);
   if (mode === "preflight") {
     try {
+      await assertCurrentHead(env);
       await checkReadiness(env, request => rpc(env, root, request));
       console.log("Restricted deployment connection and release state are ready.");
     } finally {
@@ -193,17 +279,24 @@ async function main(mode, env) {
     const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
     if (manifest.commit !== context.commit || manifest.tree !== metadata().tree
       || manifest.run_id !== context.run_id || manifest.attempt !== context.attempt) throw new Error("Release bundle identity mismatch");
-    await rpc(env, root, { op: "upload", environment: "staging", manifest }, join(root, "images.tar.gz"));
-    await assertCurrentHead(env);
-    console.log(JSON.stringify(await rpc(env, root, { op: "deploy", environment: "staging", manifest })));
+    const result = await executeStagingRelease(env, manifest, join(root, "images.tar.gz"),
+      (request, archive) => rpc(env, root, request, archive));
+    console.log(JSON.stringify(result));
   } else {
-    console.log(JSON.stringify(await rpc(env, root, promotionRequest(env, metadata().tree))));
+    const source = metadata();
+    if (source.commit !== context.commit) throw new Error("Promotion checkout does not match workflow source");
+    const result = await executeProductionRelease(env, source, request => rpc(env, root, request));
+    console.log(JSON.stringify(result));
   }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main(process.argv[2], process.env).catch(() => {
-    console.error("Release command failed. Check the failed stage and receiver status; no blind retries were made.");
+  main(process.argv[2], process.env).catch(error => {
+    if (error?.code === "ARDEN_MIGRATION_BLOCKED" && migrationStatuses.has(error.status)) {
+      console.error(error.message);
+    } else {
+      console.error("Release command failed. Check the failed stage and receiver status; no blind retries were made.");
+    }
     process.exitCode = 1;
   });
 }
