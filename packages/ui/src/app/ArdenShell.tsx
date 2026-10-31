@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppSidebar } from "./AppSidebar";
 import { MobileTabIsland } from "./MobileTabIsland";
 import { KnowledgePane } from "./KnowledgePane";
@@ -142,16 +142,7 @@ function parseRecoveryHash(location: Location): { accessToken: string; refreshTo
 }
 
 export function ArdenShell({ platform }: ArdenShellProps) {
-  return (
-    <>
-      <ArdenShellContent platform={platform} />
-      <footer className="icon-credits" aria-label="Icon attribution">
-        {platform === "web"
-          ? <a href="https://www.flaticon.com/uicons" target="_blank" rel="noopener noreferrer">Uicons by Flaticon</a>
-          : <span title="https://www.flaticon.com/uicons">Uicons by Flaticon</span>}
-      </footer>
-    </>
-  );
+  return <ArdenShellContent platform={platform} />;
 }
 
 function ArdenShellContent({ platform }: ArdenShellProps) {
@@ -274,6 +265,15 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     window.scrollTo({ top: 0, behavior: "instant" });
     setNavOpen(false);
   }, [activeView, previewRole, entryView]);
+
+  useLayoutEffect(() => {
+    if (entryView !== "workspace") return;
+    const page = shellRef.current?.querySelector<HTMLElement>("#arden-main");
+    if (!page) return;
+    page.classList.remove("is-page-enter");
+    void page.offsetWidth;
+    page.classList.add("is-page-enter");
+  }, [activeView, entryView]);
 
   const enterMemberWorkspace = (memberId: string) => {
     if (!organization || membershipReadiness(organization, memberId).state !== "ready") return;

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon } from "../shared/Icon";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { PrivateNoteEditor } from "./PrivateNoteEditor";
@@ -24,6 +24,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   const [editorOpen, setEditorOpen] = useState(false);
   const [contributionOpen, setContributionOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
+  const [enteringId, setEnteringId] = useState<string | null>(null);
   const revealSearch = useCallback(() => setEditorOpen(false), []);
   const searchRef = useSearchShortcut(revealSearch);
   const { state, selectedNote, draft, isDirty, serverBacked, loading, saving, error, saveMessage } = controller;
@@ -33,6 +34,12 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
     const current = state.drafts[note.id] ?? note;
     return `${current.title} ${current.body}`.toLowerCase().includes(query.trim().toLowerCase());
   }), [state.notes, state.drafts, query]);
+
+  useEffect(() => {
+    if (!enteringId) return;
+    const timeout = window.setTimeout(() => setEnteringId(null), 520);
+    return () => window.clearTimeout(timeout);
+  }, [enteringId]);
 
   const openEditor = () => {
     setEditorOpen(true);
@@ -70,7 +77,17 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
         <div className="personal-grid">
           <PrivateNoteList notes={visibleNotes} drafts={state.drafts} selectedId={state.selectedId} searching={Boolean(query.trim())}
             search={<SearchField ref={searchRef} value={query} onChange={setQuery} placeholder="Search notes…" />}
-            onCreate={() => { controller.createNote(); setQuery(""); openEditor(); }}
+            enteringId={enteringId}
+            onCreate={() => {
+              const id = controller.createNote();
+              setQuery("");
+              setEnteringId(id);
+              openEditor();
+              requestAnimationFrame(() => {
+                const list = document.querySelector<HTMLElement>(".note-list");
+                if (list) list.scrollTop = 0;
+              });
+            }}
             onSelect={(note) => { controller.selectNote(note); openEditor(); }} onClearSearch={() => setQuery("")} />
           <PrivateNoteEditor selectedNote={selectedNote} draftTitle={draft.title} draftBody={draft.body} isDirty={isDirty}
             savedMessage={saveMessage || state.savedMessage || (serverBacked ? "" : "Demo · Cleared on refresh")}
@@ -83,6 +100,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
               {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}><Icon name="layers" size={14} />Create review draft</button>}
               <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : "Save"}</button>
             </>}
+            entering={selectedNote?.id === enteringId}
             onTitleChange={controller.editTitle} onBodyChange={controller.editBody} />
         </div>
       </WorkspacePageContent>

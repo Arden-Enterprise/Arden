@@ -1,5 +1,10 @@
 /* Ask Arden follows Linear's restrained agent-canvas composition while retaining Arden branding. */
-.ask-arden-page { min-width: 0; overflow: hidden; }
+.arden-app-shell .workspace-page.ask-arden-page {
+  height: var(--arden-shell-height);
+  margin-top: 0;
+  min-width: 0;
+  overflow: hidden;
+}
 .ask-arden-stage {
   position: relative; display: grid; grid-template-rows: 42px minmax(0, 1fr); flex: 1; min-height: 0; overflow: hidden;
   border: 1px solid var(--arden-border); border-radius: 14px; background: #15151d;

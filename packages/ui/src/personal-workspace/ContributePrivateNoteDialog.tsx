@@ -28,6 +28,7 @@ export function ContributePrivateNoteDialog({ platform, organizationId, source, 
   const inFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const titleId = useId();
+  const excerpt = source.body.replace(/\s+/g, " ").trim();
 
   useEffect(() => {
     mounted.current = true;
@@ -69,7 +70,10 @@ export function ContributePrivateNoteDialog({ platform, organizationId, source, 
       <h2 id={titleId} ref={heading} tabIndex={-1}>Create review draft</h2>
       <p className="island-meta">Your original stays private.</p>
     </div>
-    <div className="knowledge-source-preview"><strong>{source.title}</strong><span>Content to copy</span><pre>{source.body}</pre></div>
+    <div className="knowledge-source-preview">
+      <strong>{source.title}</strong>
+      <p className={excerpt ? undefined : "is-empty"}>{excerpt || "Nothing written in this note yet."}</p>
+    </div>
     <form className="knowledge-contribute-form" onSubmit={(event) => void submit(event)}>
       {retryPending && !error && <p role="status">Couldn’t confirm draft creation.</p>}
       {error && <p role="alert" className="knowledge-form-error">{error}</p>}

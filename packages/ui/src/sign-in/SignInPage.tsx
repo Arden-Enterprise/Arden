@@ -70,6 +70,8 @@ export function SignInPage({
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [resetToken, setResetToken] = useState("");
+  const [useResetCode, setUseResetCode] = useState(false);
+  const usingRecoverySession = Boolean(recoveryTokens) && !useResetCode;
   const [notice, setNotice] = useState<{ text: string; isSuccess?: boolean } | null>(() => {
     const status = new URLSearchParams(window.location.search).get("status");
     return status === "error" ? { text: "Sign in could not be completed." } : null;
@@ -86,6 +88,7 @@ export function SignInPage({
     setNotice(null);
     setPassword("");
     setConfirmPassword("");
+    setResetToken("");
   };
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
@@ -140,9 +143,10 @@ export function SignInPage({
     try {
       await requestPasswordReset(platform, email.trim());
       setNotice({
-        text: "If an account with this email exists, a password reset link has been sent to your email.",
+        text: "A verification code has been sent to your email. Enter the code and your new password below.",
         isSuccess: true,
       });
+      setMode("reset-password");
     } catch (cause) {
       setNotice({
         text: cause instanceof ApiError ? cause.message : "Password reset could not be requested. Try again later.",
@@ -161,7 +165,7 @@ export function SignInPage({
     setBusy("submit");
     setNotice(null);
     try {
-      if (recoveryTokens) {
+      if (usingRecoverySession && recoveryTokens) {
         await resetPasswordWithToken(platform, {
           accessToken: recoveryTokens.accessToken,
           refreshToken: recoveryTokens.refreshToken,
@@ -181,6 +185,7 @@ export function SignInPage({
         text: "Password updated successfully. You can now sign in with your new password.",
         isSuccess: true,
       });
+      setResetToken("");
       setMode("sign-in");
     } catch (cause) {
       setNotice({
@@ -354,13 +359,6 @@ export function SignInPage({
                   >
                     ← Back to sign in
                   </button>
-                  <button
-                    type="button"
-                    className="auth-text-link"
-                    onClick={() => switchMode("reset-password")}
-                  >
-                    Have a reset code?
-                  </button>
                 </div>
               </form>
             </>
@@ -378,7 +376,7 @@ export function SignInPage({
                 </div>
               )}
               <form onSubmit={handleResetPassword}>
-                {!recoveryTokens && (
+                {!usingRecoverySession && (
                   <>
                     <label>
                       <span>Email address</span>
@@ -440,6 +438,13 @@ export function SignInPage({
                     onClick={() => switchMode("sign-in")}
                   >
                     ← Back to sign in
+                  </button>
+                  <button
+                    type="button"
+                    className="auth-text-link"
+                    onClick={() => { setUseResetCode(true); switchMode("forgot-password"); }}
+                  >
+                    Request new code
                   </button>
                 </div>
               </form>

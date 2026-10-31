@@ -15,6 +15,7 @@ import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
 import { ServerAudienceGroupPanel } from "./ServerAudienceGroupPanel";
 import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { Icon } from "../shared/Icon";
+import { IslandFilterMenu } from "../shared/IslandFilterMenu";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { countInvitations, invitationFilters, invitationState, visibleInvitations, type InvitationFilter, type InvitationState } from "./invitationStatus";
 import { DepartmentDetailIsland, grantCoverageLabel, grantValidity, MemberDetailIsland, memberInitials, memberStatus as describeMemberStatus } from "./AdminDetailIslands";
@@ -227,8 +228,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         {tab === "members" && <div role="tabpanel" aria-label="Members" className="admin-tabpanel">
           <div className="admin-filters">
             <label className="workspace-search admin-search"><Icon name="search" size={15} /><span className="sr-only">Search members</span><input type="search" placeholder="Filter by name or email" value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} /></label>
-            <label className="island-filter"><span className="sr-only">Filter department</span><select value={memberDepartment} onChange={(event) => setMemberDepartment(event.target.value)}><option value="ALL">Department: All</option>{data.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-            <label className="island-filter"><span className="sr-only">Filter membership status</span><select value={memberStatus} onChange={(event) => setMemberStatus(event.target.value)}><option value="ALL">Status: Any</option><option value="ACTIVE">Active</option><option value="INVITED">Awaiting assignment</option><option value="INACTIVE">Inactive</option></select></label>
+            <IslandFilterMenu label="Filter department" value={memberDepartment} onChange={setMemberDepartment}
+              options={[{ value: "ALL", label: "Department: All" }, ...data.departments.map((item) => ({ value: item.id, label: item.name }))]} />
+            <IslandFilterMenu label="Filter membership status" value={memberStatus} onChange={setMemberStatus}
+              options={[{ value: "ALL", label: "Status: Any" }, { value: "ACTIVE", label: "Active" }, { value: "INVITED", label: "Awaiting assignment" }, { value: "INACTIVE", label: "Inactive" }]} />
           </div>
           <div className="island-split">
           <div className="island-main">
