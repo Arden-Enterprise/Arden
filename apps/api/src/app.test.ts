@@ -619,6 +619,60 @@ describe("API auth and private draft routes", () => {
     expect(authProvider.lastSignUpCredentials?.redirectTo).toBeUndefined();
   });
 
+  it("manages pending invitation lifecycle via http-only cookies across sign-up, preview, me, and sign-out", async () => {
+    const validToken = "A".repeat(43);
+    // 1. Sign up with invitation redirectTo sets the pending invitation cookie
+    const signUpRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: {
+        email: "invited.cookie@example.test",
+        password: "synthetic-password",
+        fullName: "Cookie Member",
+        redirectTo: `http://localhost:5180/invite/${validToken}`,
+      },
+    });
+    expect(signUpRes.statusCode).toBe(202);
+    const signUpCookies = JSON.stringify(signUpRes.headers["set-cookie"] ?? "");
+    expect(signUpCookies).toContain("arden_pending_invite=");
+    expect(signUpCookies).toContain(validToken);
+    expect(signUpCookies).toContain("HttpOnly");
+
+    // 2. GET /api/v1/me returns pendingInvitationToken when cookie is present
+    const session = await desktopSession(app, "invited.cookie@example.test");
+    const meRes = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: {
+        cookie: `${session}; arden_pending_invite=${validToken}`,
+      },
+    });
+    expect(meRes.statusCode).toBe(200);
+    expect(meRes.json().pendingInvitationToken).toBe(validToken);
+
+    // 3. GET /api/v1/invitations/:token with 404 clears the cookie
+    const notFoundPreview = await app.inject({
+      method: "GET",
+      url: `/api/v1/invitations/${"B".repeat(43)}`,
+    });
+    expect(notFoundPreview.statusCode).toBe(404);
+    const notFoundCookies = JSON.stringify(notFoundPreview.headers["set-cookie"] ?? "");
+    expect(notFoundCookies).toContain("arden_pending_invite=");
+    expect(notFoundCookies).toContain("Max-Age=0");
+
+    // 4. POST /api/v1/auth/sign-out clears the pending invitation cookie
+    const signOutRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/sign-out",
+      headers: { origin: "http://localhost:5180", cookie: session },
+    });
+    expect(signOutRes.statusCode).toBe(204);
+    const signOutCookies = JSON.stringify(signOutRes.headers["set-cookie"] ?? "");
+    expect(signOutCookies).toContain("arden_pending_invite=");
+    expect(signOutCookies).toContain("Max-Age=0");
+  });
+
   it("signs out through Supabase and clears the session cookies", async () => {
     const response = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-out",

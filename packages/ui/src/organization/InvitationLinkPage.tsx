@@ -23,6 +23,9 @@ type InvitationLinkPageProps = {
   onAccepted: (session: CurrentSession) => void;
 };
 
+/**
+ * Renders an informational dialog alerting the user to check their email for an unconfirmed account link.
+ */
 function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -57,6 +60,9 @@ function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: ()
   );
 }
 
+/**
+ * Renders the organization invitation acceptance and account registration page.
+ */
 export function InvitationLinkPage({ platform, token, authenticated = false, session = null, onSessionChange, onAccepted }: InvitationLinkPageProps) {
   const [invitation, setInvitation] = useState<InvitationPreview | null>(null);
   const [loadingInvitation, setLoadingInvitation] = useState(true);
@@ -75,13 +81,6 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
   useEffect(() => {
     let active = true;
     setLoadingInvitation(true);
-    if (typeof window !== "undefined" && window.localStorage && token) {
-      try {
-        window.localStorage.setItem("arden_pending_invitation_token", token);
-      } catch {
-        // ignore
-      }
-    }
     getInvitationPreview(platform, token)
       .then((preview) => {
         if (!active) return;
@@ -89,16 +88,13 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
         setEmail(preview.email);
         setLoadingInvitation(false);
       })
-      .catch(() => {
+      .catch((cause) => {
         if (!active) return;
-        if (typeof window !== "undefined" && window.localStorage) {
-          try {
-            window.localStorage.removeItem("arden_pending_invitation_token");
-          } catch {
-            // ignore
-          }
+        if (cause instanceof ApiError && cause.status === 404) {
+          setInvitationInvalid(true);
+        } else {
+          setError("Couldn’t load invitation details. Please check your connection and try again.");
         }
-        setInvitationInvalid(true);
         setLoadingInvitation(false);
       });
     return () => { active = false; };
@@ -133,13 +129,6 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       setSignedIn(true);
       if (signedInSession.actor?.email) setCurrentAccountEmail(signedInSession.actor.email);
       await acceptInvitation(platform, token);
-      if (typeof window !== "undefined" && window.localStorage) {
-        try {
-          window.localStorage.removeItem("arden_pending_invitation_token");
-        } catch {
-          // ignore
-        }
-      }
       const updatedSession = await currentSession(platform);
       onAccepted(updatedSession);
     } catch (cause) {
@@ -190,13 +179,6 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     setBusy(true); setError(""); setMessage("");
     try {
       await acceptInvitation(platform, token);
-      if (typeof window !== "undefined" && window.localStorage) {
-        try {
-          window.localStorage.removeItem("arden_pending_invitation_token");
-        } catch {
-          // ignore
-        }
-      }
       const updatedSession = await currentSession(platform);
       onAccepted(updatedSession);
     } catch (cause) {

@@ -118,28 +118,39 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
 
 type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
 
-const PENDING_INVITATION_STORAGE_KEY = "arden_pending_invitation_token";
-
+/**
+ * Extracts a 43-character invitation token from the URL path `/invite/:token`.
+ *
+ * @param pathname Current window pathname
+ * @returns The token if matched, otherwise null
+ */
 function tokenFromInvitationPath(pathname: string): string | null {
   const match = /^\/invite\/([A-Za-z0-9_-]{43})\/?$/.exec(pathname);
   return match?.[1] ?? null;
 }
 
-function resolveInitialInvitationToken(): { token: string | null; fromPath: boolean } {
-  if (typeof window === "undefined") return { token: null, fromPath: false };
-  const pathToken = tokenFromInvitationPath(window.location.pathname);
-  if (pathToken) return { token: pathToken, fromPath: true };
-  try {
-    const stored = window.localStorage?.getItem(PENDING_INVITATION_STORAGE_KEY)?.trim();
-    if (stored && /^[A-Za-z0-9_-]{43}$/.test(stored)) {
-      return { token: stored, fromPath: false };
-    }
-  } catch {
-    // ignore
-  }
-  return { token: null, fromPath: false };
+/**
+ * Detects whether the current browser location targets password recovery.
+ *
+ * When an account recovery link is followed, password recovery takes precedence
+ * over any pending invitation flow so recovery tokens are not lost or overridden.
+ *
+ * @param location Current browser window location
+ * @returns `true` if the location points to password recovery
+ */
+function isPasswordRecoveryTarget(location: Location): boolean {
+  if (location.pathname === "/reset-password") return true;
+  if (location.hash && location.hash.includes("type=recovery")) return true;
+  if (location.search && location.search.includes("type=recovery")) return true;
+  return false;
 }
 
+/**
+ * Extracts Supabase recovery tokens from the URL hash or query parameters.
+ *
+ * @param location Current browser window location
+ * @returns Access and refresh tokens if present, otherwise null
+ */
 function parseRecoveryHash(location: Location): { accessToken: string; refreshToken: string } | null {
   const hash = location.hash;
   if (hash && hash.includes("type=recovery")) {
@@ -158,6 +169,15 @@ function parseRecoveryHash(location: Location): { accessToken: string; refreshTo
   return null;
 }
 
+/**
+ * ArdenShell top-level shell component.
+ *
+ * Coordinates platform shell framing, navigation, top-level error boundaries,
+ * and workspace layout according to active session and membership states.
+ *
+ * @param props Platform configuration props
+ * @returns Shell layout element
+ */
 export function ArdenShell({ platform }: ArdenShellProps) {
   return (
     <>
@@ -171,18 +191,33 @@ export function ArdenShell({ platform }: ArdenShellProps) {
   );
 }
 
+/**
+ * ArdenShell internal state container and workspace routing dispatcher.
+ *
+ * Manages view transitions between sign-in, invitation preview, workspace selection,
+ * and authenticated workspace surfaces while enforcing password recovery precedence.
+ *
+ * @param props Platform configuration props
+ * @returns Arden shell workspace content
+ */
 function ArdenShellContent({ platform }: ArdenShellProps) {
   const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
-  const [invitationToken, setInvitationToken] = useState<string | null>(() => resolveInitialInvitationToken().token);
+  const [invitationToken, setInvitationToken] = useState<string | null>(() => {
+    if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return null;
+    return typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
+  });
   const [recoveryTokens, setRecoveryTokens] = useState<{ accessToken: string; refreshToken: string } | null>(() => {
     if (typeof window === "undefined") return null;
     const parsed = parseRecoveryHash(window.location);
     if (parsed) {
-      try { window.history.replaceState(null, "", "/"); } catch {}
+      try { window.history.replaceState(null, "", "/reset-password"); } catch {}
     }
     return parsed;
   });
-  const [entryView, setEntryView] = useState<EntryView>(() => invitationToken ? "invite-link" : "sign-in");
+  const [entryView, setEntryView] = useState<EntryView>(() => {
+    if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return "sign-in";
+    return invitationToken ? "invite-link" : "sign-in";
+  });
   const [previewMemberId, setPreviewMemberId] = useState("sample-employee");
   const [invitationId, setInvitationId] = useState("");
   const [accessMemberId, setAccessMemberId] = useState("");
@@ -207,6 +242,11 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [knowledgeCitationTarget, setKnowledgeCitationTarget] = useState<KnowledgeNavigationTarget | null>(null);
   const restoreStarted = useRef(false);
 
+  /**
+   * Activates the selected organization workspace for the signed-in member.
+   *
+   * @param membership Active membership record to enter
+   */
   const enterServerOrganization = (membership: OrganizationMembership) => {
     if (membership.status !== "active") return;
     if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
@@ -227,12 +267,15 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     }
   };
 
+  /**
+   * Commits an authenticated server session into shell state, routing to password
+   * setup, workspace selection, or a single available organization workspace.
+   *
+   * @param current The authenticated server session
+   */
   const acceptServerSession = async (current: CurrentSession) => {
     if (new URLSearchParams(window.location.search).has("auth") || (typeof window !== "undefined" && window.location.pathname === "/reset-password")) {
       try { window.history.replaceState(null, "", "/"); } catch {}
-    }
-    if (typeof window !== "undefined" && window.localStorage) {
-      try { window.localStorage.removeItem(PENDING_INVITATION_STORAGE_KEY); } catch {}
     }
     setServerSession(current);
     if (current.account?.passwordSetupRequired === true) {
@@ -240,14 +283,13 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       return;
     }
     if (invitationToken) {
-      window.history.replaceState(null, "", "/");
+      if (typeof window !== "undefined") {
+        try { window.history.replaceState(null, "", "/"); } catch {}
+      }
       setInvitationToken(null);
     }
     if (recoveryTokens) {
       setRecoveryTokens(null);
-    }
-    if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
-      try { window.history.replaceState(null, "", "/"); } catch {}
     }
     const allowed = current.memberships.filter((membership) => membership.status === "active");
     if (allowed.length === 1) enterServerOrganization(allowed[0]);
@@ -260,27 +302,33 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     void restoreSession(platform).then((current) => {
       if (current) {
         if (current.account?.passwordSetupRequired === true) return acceptServerSession(current);
+        if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) {
+          return acceptServerSession(current);
+        }
         const pathToken = typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
         const activeMemberships = current.memberships.filter((membership) => membership.status === "active");
         if (!pathToken && activeMemberships.length > 0) {
-          if (typeof window !== "undefined" && window.localStorage) {
-            try { window.localStorage.removeItem(PENDING_INVITATION_STORAGE_KEY); } catch {}
-          }
           setInvitationToken(null);
           return acceptServerSession(current);
         }
-        if (invitationToken) {
+        if (pathToken) {
           setServerSession(current);
-          if (!pathToken && typeof window !== "undefined") {
-            try { window.history.replaceState(null, "", `/invite/${invitationToken}`); } catch {}
-          }
-        } else {
-          return acceptServerSession(current);
+          return undefined;
         }
+        if (current.pendingInvitationToken && activeMemberships.length === 0) {
+          setServerSession(current);
+          setInvitationToken(current.pendingInvitationToken);
+          setEntryView("invite-link");
+          if (typeof window !== "undefined") {
+            try { window.history.replaceState(null, "", `/invite/${current.pendingInvitationToken}`); } catch {}
+          }
+          return undefined;
+        }
+        return acceptServerSession(current);
       }
       return undefined;
     }).catch(() => undefined);
-  }, [platform, invitationToken]);
+  }, [platform]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -310,6 +358,11 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setNavOpen(false);
   }, [activeView, previewRole, entryView]);
 
+  /**
+   * Transitions preview mode into a specific member workspace if readiness checks pass.
+   *
+   * @param memberId Target member identifier
+   */
   const enterMemberWorkspace = (memberId: string) => {
     if (!organization || membershipReadiness(organization, memberId).state !== "ready") return;
     const member = organization.members.find(item => item.id === memberId);
@@ -403,9 +456,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           await acceptServerSession(await currentSession(platform));
         }}
         onBack={() => {
-          if (typeof window !== "undefined" && window.localStorage) {
-            try { window.localStorage.removeItem(PENDING_INVITATION_STORAGE_KEY); } catch {}
-          }
           void apiSignOut(platform).catch(() => undefined);
           setServerSession(null);
           privateNotes.reset();
@@ -420,6 +470,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     return <WorkspaceSelectPage organizationName={organization?.name ?? "FPT Digital"} onBack={() => { setPreviewRole(null); setOrganization(null); privateNotes.reset(); setEntryView("sign-in"); }} onContinue={() => { setActiveView("my-work"); setEntryView("workspace"); }} />;
   }
 
+  /**
+   * Navigates the workspace preview back to the administrative access view.
+   */
   const returnToAdmin = () => {
     setPreviewRole("admin");
     setPreviewMemberId("sample-admin");
@@ -439,6 +492,11 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     }} />{pendingMemberEntry && <DiscardChangesDialog exiting={false} switchingMember onCancel={() => setPendingMemberEntry(null)} onDiscard={() => enterMemberWorkspace(pendingMemberEntry)} />}</>;
   }
 
+  /**
+   * Navigates to a specific workspace view, handling unsaved draft confirmation.
+   *
+   * @param view Target workspace view
+   */
   const navigate = (view: WorkspaceView) => {
     setNavOpen(false);
     if (view !== "knowledge") setKnowledgeCitationTarget(null);
@@ -451,11 +509,19 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setActiveView(view);
   };
 
+  /**
+   * Opens knowledge feature view focused on a specific citation reference.
+   *
+   * @param citation Citation reference to inspect
+   */
   const openKnowledgeCitation = (citation: KnowledgeCitationReference) => {
     setKnowledgeCitationTarget({ ...citation, navigationId: crypto.randomUUID() });
     navigate("knowledge");
   };
 
+  /**
+   * Completes local session teardown and resets all workspace state to sign-in.
+   */
   const finishSignOut = () => {
     setNavOpen(false);
     if (serverSession) void apiSignOut(platform).catch(() => undefined);
@@ -476,6 +542,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setPendingMemberEntry(null);
   };
 
+  /**
+   * Initiates member sign-out, checking for unsaved changes before exiting.
+   */
   const signOut = () => {
     if (organizationDirty || privateNotes.hasUnsavedDrafts) {
       setPendingAction("exit");

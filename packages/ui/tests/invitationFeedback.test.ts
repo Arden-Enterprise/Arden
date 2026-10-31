@@ -53,12 +53,14 @@ describe("invitation page feedback", () => {
     expect(invitationFeedback("Invitation has expired.", "")).toEqual({
       role: "alert", className: "auth-message", text: "Invitation has expired.",
     });
+
   });
 
   it("shows a success message when no error is present", () => {
     expect(invitationFeedback("", "Check your email.")).toEqual({
       role: "status", className: "auth-message is-success", text: "Check your email.",
     });
+
   });
 
   it("does not render empty feedback", () => {
@@ -100,7 +102,7 @@ describe("invitation page feedback", () => {
     await waitFor(() => expect(acceptInvitation).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("alert").textContent).toBe("Couldn’t confirm invitation acceptance.");
   });
-  it("persists invitation token to storage and passes redirectTo when creating account", async () => {
+  it("passes redirectTo when creating account on invitation page", async () => {
     vi.mocked(signUp).mockResolvedValueOnce(undefined);
     render(
       createElement(InvitationLinkPage, {
@@ -111,7 +113,6 @@ describe("invitation page feedback", () => {
     );
 
     await screen.findByText("Join Arden Demo");
-    expect(window.localStorage.getItem("arden_pending_invitation_token")).toBe("invite-token-abc");
 
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
@@ -129,8 +130,7 @@ describe("invitation page feedback", () => {
     });
   });
 
-  it("clears pending invitation token from storage when invitation is accepted", async () => {
-    window.localStorage.setItem("arden_pending_invitation_token", "invite-token-abc");
+  it("calls acceptInvitation when accepted by authenticated user", async () => {
     vi.mocked(acceptInvitation).mockResolvedValueOnce(undefined);
 
     render(
@@ -148,7 +148,37 @@ describe("invitation page feedback", () => {
 
     await waitFor(() => {
       expect(acceptInvitation).toHaveBeenCalledWith("web", "invite-token-abc");
-      expect(window.localStorage.getItem("arden_pending_invitation_token")).toBeNull();
     });
+  });
+
+  it("does not mark invitation invalid on transient network error during preview load", async () => {
+    vi.mocked(getInvitationPreview).mockRejectedValueOnce(new ApiError(0, "Network failure"));
+
+    render(
+      createElement(InvitationLinkPage, {
+        platform: "web",
+        token: "invite-token-abc",
+        onAccepted: vi.fn(),
+      }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Couldn’t load invitation details. Please check your connection and try again.");
+    expect(screen.queryByText("Invitation expired or invalid")).toBeNull();
+  });
+
+  it("marks invitation as invalid when getInvitationPreview returns 404", async () => {
+    vi.mocked(getInvitationPreview).mockRejectedValueOnce(new ApiError(404, "Not found"));
+
+    render(
+      createElement(InvitationLinkPage, {
+        platform: "web",
+        token: "invite-token-abc",
+        onAccepted: vi.fn(),
+      }),
+    );
+
+    await screen.findByText("Invitation link unavailable");
+    expect(screen.queryByRole("button", { name: "Accept invitation" })).toBeNull();
   });
 });

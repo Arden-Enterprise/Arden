@@ -227,12 +227,24 @@ export function buildApp(dependencies: AppDependencies) {
         }
       }
 
+      let pendingInviteToken: string | undefined;
+      if (validatedRedirectTo) {
+        try {
+          const parsed = new URL(validatedRedirectTo);
+          const match = /^\/invite\/([A-Za-z0-9_-]{43})\/?$/.exec(parsed.pathname);
+          if (match) pendingInviteToken = match[1];
+        } catch {}
+      }
+
       await dependencies.auth.signUp({
         email: request.body.email.trim().toLowerCase(),
         password: request.body.password,
         fullName: request.body.fullName.trim(),
         redirectTo: validatedRedirectTo,
       });
+      if (pendingInviteToken) {
+        reply.header("set-cookie", pendingInvitationCookie(pendingInviteToken, dependencies.secureCookies));
+      }
       return reply.code(202).send({
         status: "check_email",
         message: "If account setup can proceed, check your email for confirmation. Then return to this invitation and sign in to accept it.",
@@ -397,11 +409,11 @@ export function buildApp(dependencies: AppDependencies) {
     const tokens = readAuthCookies(request.headers.cookie, dependencies.secureCookies);
     try {
       if (tokens) await dependencies.auth.signOut(tokens);
-      clearAuthCookies(reply, dependencies.secureCookies);
+      clearAuthCookies(reply, dependencies.secureCookies, [clearPendingInvitationCookie(dependencies.secureCookies)]);
       return reply.code(204).send();
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Supabase sign-out failed");
-      clearAuthCookies(reply, dependencies.secureCookies);
+      clearAuthCookies(reply, dependencies.secureCookies, [clearPendingInvitationCookie(dependencies.secureCookies)]);
       return authUnavailable(reply, request);
     }
   });
@@ -411,10 +423,12 @@ export function buildApp(dependencies: AppDependencies) {
     if (!context) return;
     try {
       const memberships = await dependencies.repository.listMemberships(context.userId);
+      const pendingInvitationToken = readPendingInvitationCookie(request.headers.cookie, dependencies.secureCookies);
       return {
         actor: { id: context.userId, email: context.email },
         account: { passwordSetupRequired: Boolean(context.passwordSetupRequired) },
         ...(dependencies.testActor ? { testMode: true } : {}),
+        ...(pendingInvitationToken ? { pendingInvitationToken } : {}),
         memberships: memberships.map((membership) => ({
           organization: { id: membership.organizationId, name: membership.organizationName },
           status: membership.status.toLowerCase(),
@@ -666,8 +680,10 @@ export function buildApp(dependencies: AppDependencies) {
     try {
       const invitation = await dependencies.repository.getInvitationByToken(hashInvitationToken(request.params.token));
       if (!invitation) {
+        reply.header("set-cookie", clearPendingInvitationCookie(dependencies.secureCookies));
         return reply.code(404).send(safeError("INVITATION_NOT_AVAILABLE", "This invitation is invalid, has expired, or has already been accepted.", request.id));
       }
+      reply.header("set-cookie", pendingInvitationCookie(request.params.token, dependencies.secureCookies));
       return reply.code(200).send({
         organizationName: invitation.organizationName,
         email: invitation.email,
@@ -692,6 +708,7 @@ export function buildApp(dependencies: AppDependencies) {
         hashInvitationToken(request.body.token), request.id,
       );
       if (!accepted) return reply.code(404).send(safeError("INVITATION_NOT_AVAILABLE", "This invitation is not available for this account.", request.id));
+      reply.header("set-cookie", clearPendingInvitationCookie(dependencies.secureCookies));
       return reply.code(204).send();
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation acceptance failed");
@@ -1652,10 +1669,45 @@ function readOAuthState(header: string | undefined, secure: boolean): { flowId: 
   } catch { return null; }
 }
 
-function clearAuthCookies(reply: FastifyReply, secure: boolean): void {
+/**
+ * Resolves the cookie name for storing pending invitation tokens, using __Host- prefix when secure.
+ */
+function pendingInvitationCookieName(secure: boolean): string {
+  return secure ? "__Host-arden_pending_invite" : "arden_pending_invite";
+}
+
+/**
+ * Creates the Set-Cookie string for a server-owned HttpOnly pending invitation token.
+ */
+function pendingInvitationCookie(token: string, secure: boolean): string {
+  return `${pendingInvitationCookieName(secure)}=${token}; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}; Max-Age=86400`;
+}
+
+/**
+ * Creates the Set-Cookie string to clear the pending invitation cookie.
+ */
+function clearPendingInvitationCookie(secure: boolean): string {
+  return `${pendingInvitationCookieName(secure)}=; Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}; Max-Age=0`;
+}
+
+/**
+ * Reads and validates a pending invitation token from request cookie headers.
+ */
+function readPendingInvitationCookie(header: string | undefined, secure: boolean): string | null {
+  if (!header || header.length > 8192) return null;
+  const prefix = `${pendingInvitationCookieName(secure)}=`;
+  const value = header.split(";").map((part) => part.trim()).find((part) => part.startsWith(prefix))?.slice(prefix.length);
+  if (value && /^[A-Za-z0-9_-]{43}$/.test(value)) return value;
+  return null;
+}
+
+/**
+ * Clears authentication session cookies and any additional specified cookies.
+ */
+function clearAuthCookies(reply: FastifyReply, secure: boolean, additional: string[] = []): void {
   const names = cookieNames(secure);
   const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}; Max-Age=0`;
-  reply.header("set-cookie", [`${names.access}=; ${attributes}`, `${names.refresh}=; ${attributes}`]);
+  reply.header("set-cookie", [`${names.access}=; ${attributes}`, `${names.refresh}=; ${attributes}`, ...additional]);
 }
 
 function hasTrustedOrigin(request: FastifyRequest, trustedOrigins: string[]): boolean {
