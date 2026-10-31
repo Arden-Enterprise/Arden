@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
-import type { AuthProvider } from "./auth/provider.js";
+import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
 import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreateSharedDraftResult, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
@@ -591,6 +591,88 @@ describe("API auth and private draft routes", () => {
     expect(JSON.stringify(existing.headers["set-cookie"] ?? "")).not.toContain("arden_access");
   });
 
+  it("forwards trusted redirectTo for sign-up confirmation", async () => {
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: {
+        email: "invited.member@example.test",
+        password: "synthetic-password",
+        fullName: "Invited Member",
+        redirectTo: "http://localhost:5180/invite/test-token-123",
+      },
+    });
+    expect(authProvider.lastSignUpCredentials?.redirectTo).toBe("http://localhost:5180/invite/test-token-123");
+
+    await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: {
+        email: "invited2@example.test",
+        password: "synthetic-password",
+        fullName: "Invited Member 2",
+        redirectTo: "https://evil.site/phish",
+      },
+    });
+    expect(authProvider.lastSignUpCredentials?.redirectTo).toBeUndefined();
+  });
+
+  it("manages pending invitation lifecycle via http-only cookies across sign-up, preview, me, and sign-out", async () => {
+    const validToken = "A".repeat(43);
+    // 1. Sign up with invitation redirectTo sets the pending invitation cookie
+    const signUpRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: {
+        email: "invited.cookie@example.test",
+        password: "synthetic-password",
+        fullName: "Cookie Member",
+        redirectTo: `http://localhost:5180/invite/${validToken}`,
+      },
+    });
+    expect(signUpRes.statusCode).toBe(202);
+    const signUpCookies = JSON.stringify(signUpRes.headers["set-cookie"] ?? "");
+    expect(signUpCookies).toContain("arden_pending_invite=");
+    expect(signUpCookies).toContain(validToken);
+    expect(signUpCookies).toContain("HttpOnly");
+
+    // 2. GET /api/v1/me returns pendingInvitationToken when cookie is present
+    const session = await desktopSession(app, "invited.cookie@example.test");
+    const meRes = await app.inject({
+      method: "GET",
+      url: "/api/v1/me",
+      headers: {
+        cookie: `${session}; arden_pending_invite=${validToken}`,
+      },
+    });
+    expect(meRes.statusCode).toBe(200);
+    expect(meRes.json().pendingInvitationToken).toBe(validToken);
+
+    // 3. GET /api/v1/invitations/:token with 404 clears the cookie
+    const notFoundPreview = await app.inject({
+      method: "GET",
+      url: `/api/v1/invitations/${"B".repeat(43)}`,
+    });
+    expect(notFoundPreview.statusCode).toBe(404);
+    const notFoundCookies = JSON.stringify(notFoundPreview.headers["set-cookie"] ?? "");
+    expect(notFoundCookies).toContain("arden_pending_invite=");
+    expect(notFoundCookies).toContain("Max-Age=0");
+
+    // 4. POST /api/v1/auth/sign-out clears the pending invitation cookie
+    const signOutRes = await app.inject({
+      method: "POST",
+      url: "/api/v1/auth/sign-out",
+      headers: { origin: "http://localhost:5180", cookie: session },
+    });
+    expect(signOutRes.statusCode).toBe(204);
+    const signOutCookies = JSON.stringify(signOutRes.headers["set-cookie"] ?? "");
+    expect(signOutCookies).toContain("arden_pending_invite=");
+    expect(signOutCookies).toContain("Max-Age=0");
+  });
+
   it("signs out through Supabase and clears the session cookies", async () => {
     const response = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-out",
@@ -1059,6 +1141,7 @@ class FakeAuthProvider implements AuthProvider {
   signUpBehavior: "success" | "already_exists" | "rejected" = "success";
   lastResetEmail: string | null = null;
   lastUpdatedPassword: { token: string; password: string } | null = null;
+  lastSignUpCredentials: SupabaseSignUp | null = null;
   private readonly usersByAccessToken = new Map<string, { userId: string; email: string; passwordSetupRequired: boolean }>();
 
   async signIn(credentials: { email: string; password: string }) {
@@ -1074,7 +1157,8 @@ class FakeAuthProvider implements AuthProvider {
     return { userId, email, fullName: null, tokens };
   }
 
-  async signUp() {
+  async signUp(credentials?: SupabaseSignUp) {
+    if (credentials) this.lastSignUpCredentials = credentials;
     if (this.signUpBehavior === "already_exists") throw new Error("USER_ALREADY_EXISTS");
     if (this.signUpBehavior === "rejected") throw new Error("SIGNUP_REJECTED");
     return { tokens: null, emailVerified: false };

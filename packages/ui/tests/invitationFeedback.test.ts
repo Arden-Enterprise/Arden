@@ -9,6 +9,7 @@ import {
   acceptInvitation,
   getInvitationPreview,
   signIn,
+  signUp,
   ApiError,
   type CurrentSession,
   type InvitationPreview,
@@ -22,6 +23,7 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
     acceptInvitation: vi.fn(),
     getInvitationPreview: vi.fn(),
     signIn: vi.fn(),
+    signUp: vi.fn(),
   };
 });
 
@@ -51,12 +53,14 @@ describe("invitation page feedback", () => {
     expect(invitationFeedback("Invitation has expired.", "")).toEqual({
       role: "alert", className: "auth-message", text: "Invitation has expired.",
     });
+
   });
 
   it("shows a success message when no error is present", () => {
     expect(invitationFeedback("", "Check your email.")).toEqual({
       role: "status", className: "auth-message is-success", text: "Check your email.",
     });
+
   });
 
   it("does not render empty feedback", () => {
@@ -97,5 +101,84 @@ describe("invitation page feedback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Accept invitation" }));
     await waitFor(() => expect(acceptInvitation).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("alert").textContent).toBe("Couldn’t confirm invitation acceptance.");
+  });
+  it("passes redirectTo when creating account on invitation page", async () => {
+    vi.mocked(signUp).mockResolvedValueOnce(undefined);
+    render(
+      createElement(InvitationLinkPage, {
+        platform: "web",
+        token: "invite-token-abc",
+        onAccepted: vi.fn(),
+      }),
+    );
+
+    await screen.findByText("Join Arden Demo");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret123" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
+
+    await waitFor(() => {
+      expect(signUp).toHaveBeenCalledWith(
+        "web",
+        "member@example.com",
+        "secret123",
+        "New User",
+        `${window.location.origin}/invite/invite-token-abc`,
+      );
+    });
+  });
+
+  it("calls acceptInvitation when accepted by authenticated user", async () => {
+    vi.mocked(acceptInvitation).mockResolvedValueOnce(undefined);
+
+    render(
+      createElement(InvitationLinkPage, {
+        platform: "web",
+        token: "invite-token-abc",
+        authenticated: true,
+        session: { actor: { id: "user-1", email: "member@example.com" }, memberships: [], account: { passwordSetupRequired: false } },
+        onAccepted: vi.fn(),
+      }),
+    );
+
+    await screen.findByRole("button", { name: "Accept invitation" });
+    fireEvent.click(screen.getByRole("button", { name: "Accept invitation" }));
+
+    await waitFor(() => {
+      expect(acceptInvitation).toHaveBeenCalledWith("web", "invite-token-abc");
+    });
+  });
+
+  it("does not mark invitation invalid on transient network error during preview load", async () => {
+    vi.mocked(getInvitationPreview).mockRejectedValueOnce(new ApiError(0, "Network failure"));
+
+    render(
+      createElement(InvitationLinkPage, {
+        platform: "web",
+        token: "invite-token-abc",
+        onAccepted: vi.fn(),
+      }),
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Couldn’t load invitation details. Please check your connection and try again.");
+    expect(screen.queryByText("Invitation expired or invalid")).toBeNull();
+  });
+
+  it("marks invitation as invalid when getInvitationPreview returns 404", async () => {
+    vi.mocked(getInvitationPreview).mockRejectedValueOnce(new ApiError(404, "Not found"));
+
+    render(
+      createElement(InvitationLinkPage, {
+        platform: "web",
+        token: "invite-token-abc",
+        onAccepted: vi.fn(),
+      }),
+    );
+
+    await screen.findByText("Invitation link unavailable");
+    expect(screen.queryByRole("button", { name: "Accept invitation" })).toBeNull();
   });
 });

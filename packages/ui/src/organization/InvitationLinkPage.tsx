@@ -23,6 +23,9 @@ type InvitationLinkPageProps = {
   onAccepted: (session: CurrentSession) => void;
 };
 
+/**
+ * Renders an informational dialog alerting the user to check their email for an unconfirmed account link.
+ */
 function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -57,6 +60,9 @@ function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: ()
   );
 }
 
+/**
+ * Renders the organization invitation acceptance and account registration page.
+ */
 export function InvitationLinkPage({ platform, token, authenticated = false, session = null, onSessionChange, onAccepted }: InvitationLinkPageProps) {
   const [invitation, setInvitation] = useState<InvitationPreview | null>(null);
   const [loadingInvitation, setLoadingInvitation] = useState(true);
@@ -82,9 +88,13 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
         setEmail(preview.email);
         setLoadingInvitation(false);
       })
-      .catch(() => {
+      .catch((cause) => {
         if (!active) return;
-        setInvitationInvalid(true);
+        if (cause instanceof ApiError && cause.status === 404) {
+          setInvitationInvalid(true);
+        } else {
+          setError("Couldn’t load invitation details. Please check your connection and try again.");
+        }
         setLoadingInvitation(false);
       });
     return () => { active = false; };
@@ -147,7 +157,10 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       return;
     }
     try {
-      await signUp(platform, email.trim(), password, fullName.trim());
+      const redirectTo = typeof window !== "undefined" && window.location
+        ? `${window.location.origin}/invite/${encodeURIComponent(token)}`
+        : undefined;
+      await signUp(platform, email.trim(), password, fullName.trim(), redirectTo);
       setMessage("Check your email to continue.");
       setMode("sign-in");
     } catch (cause) {
