@@ -15,6 +15,7 @@ export type OrganizationMembership = {
 export type CurrentSession = {
   actor: { id: string; email?: string };
   account: { passwordSetupRequired: boolean };
+  pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
   testMode?: boolean;
 };
@@ -327,6 +328,9 @@ export async function resetPasswordWithToken(
   });
 }
 
+/**
+ * Attempts to restore an existing authenticated session, returning null if unauthenticated.
+ */
 export async function restoreSession(platform: Platform): Promise<CurrentSession | null> {
   try { return await currentSession(platform); }
   catch (error) {
@@ -345,13 +349,18 @@ export async function signOut(platform: Platform): Promise<void> {
   finally { await bridge.clearSession(); }
 }
 
+/**
+ * Retrieves the current authenticated user session and organizations from the server.
+ */
 export async function currentSession(platform: Platform): Promise<CurrentSession> {
   const session = await request<Omit<CurrentSession, "account"> & {
     account?: { passwordSetupRequired?: boolean };
+    pendingInvitationToken?: string | null;
   }>(platform, "/api/v1/me");
   return {
     ...session,
     account: { passwordSetupRequired: session.account?.passwordSetupRequired === true },
+    ...(session.pendingInvitationToken ? { pendingInvitationToken: session.pendingInvitationToken } : {}),
   };
 }
 
@@ -361,9 +370,12 @@ export async function createOrganization(platform: Platform, name: string, depar
   });
 }
 
-export async function signUp(platform: Platform, email: string, password: string, fullName: string): Promise<void> {
+/**
+ * Submits new user account registration with optional post-confirmation redirect target.
+ */
+export async function signUp(platform: Platform, email: string, password: string, fullName: string, redirectTo?: string): Promise<void> {
   await request(platform, "/api/v1/auth/sign-up", {
-    method: "POST", body: JSON.stringify({ email, password, fullName }),
+    method: "POST", body: JSON.stringify({ email, password, fullName, ...(redirectTo ? { redirectTo } : {}) }),
   });
 }
 

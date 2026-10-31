@@ -3,7 +3,7 @@ import { createClient, type Session, type SupabaseClient, type User } from "@sup
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type SupabaseCredentials = { email: string; password: string };
-export type SupabaseSignUp = { email: string; password: string; fullName: string };
+export type SupabaseSignUp = { email: string; password: string; fullName: string; redirectTo?: string };
 export type AuthSessionTokens = {
   accessToken: string;
   refreshToken: string;
@@ -91,7 +91,10 @@ export class SupabaseAuthProvider implements AuthProvider {
     const { data, error } = await this.createAuthClient().auth.signUp({
       email: credentials.email,
       password: credentials.password,
-      options: { data: { full_name: credentials.fullName } },
+      options: {
+        data: { full_name: credentials.fullName },
+        ...(credentials.redirectTo ? { emailRedirectTo: credentials.redirectTo } : {}),
+      },
     });
     if (error) {
       if (isUserAlreadyRegistered(error)) throw new Error("USER_ALREADY_EXISTS");
