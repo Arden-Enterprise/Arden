@@ -1,0 +1,20 @@
+%% Figure M-04, Report 4 section 3.6.4: Knowledge Index Generation State Machine
+%% Drawn from Diagrams/State Machine/04_Index_Generation_Detailed.drawio
+%% Code: knowledge_index_generation.status IN (PENDING, PROCESSING, READY, FAILED), migration 0019;
+%% job max_attempts = 3; supersession uses failure_code INDEX_GENERATION_SUPERSEDED (migration 0021).
+stateDiagram-v2
+    state "Pending" as Pending
+    state "Processing" as Processing
+    state "Ready" as Ready
+    state "Failed" as Failed
+    [*] --> Pending : / register approved snapshot
+    Pending : entry / retain approved snapshot identity
+    Pending --> Processing : jobClaimed / begin generation
+    Processing : do / index exact approved content
+    Processing --> Ready : complete [manifest valid, no newer publication] / activate atomically
+    Processing --> Pending : jobRescheduled [retryable, budget remains]
+    Processing --> Failed : jobFailed [terminal or superseded]
+    Ready : entry / retain complete manifest
+    Failed : entry / retain failure reason, keep previous publication unchanged
+    Ready --> [*]
+    Failed --> [*]

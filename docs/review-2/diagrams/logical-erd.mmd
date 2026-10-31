@@ -1,0 +1,474 @@
+%% Logical ERD of the Arden database (schema arden), 35 tables.
+%% Generated on 31 Oct 2026 from Arden_PostgreSQL_Schema.sql (migrations 0001-0023, staging e9e4b3a).
+%% Every table, column, primary key and foreign key in the database script appears here.
+%% Regenerate this file whenever a migration changes the schema.
+erDiagram
+    department |o--o{ access_scope : "department_id,organization_id"
+    organization ||--o{ access_scope : "organization_id"
+    user_question ||--o{ ai_response : "question_id"
+    organization_membership |o--o{ audience : "created_by_membership_id,organization_id"
+    department |o--o{ audience : "department_id,organization_id"
+    role |o--o{ audience : "legacy_role_id"
+    organization ||--o{ audience : "organization_id"
+    organization_membership |o--o{ audience_group_membership : "assigned_by_membership_id,organization_id"
+    audience ||--o{ audience_group_membership : "audience_id,organization_id"
+    organization_membership ||--o{ audience_group_membership : "membership_id,organization_id"
+    organization_membership |o--o{ audit_event : "actor_membership_id"
+    organization ||--o{ audit_event : "organization_id"
+    user_question |o--o{ audit_event : "question_id"
+    review_decision |o--o{ audit_event : "review_decision_id"
+    role_assignment |o--o{ audit_event : "role_assignment_id"
+    organization ||--o{ authorization_policy : "organization_id"
+    permission ||--o{ authorization_policy : "permission_id"
+    knowledge_chunk ||--o{ citation : "chunk_id"
+    ai_response ||--o{ citation : "response_id"
+    role ||--o{ department : "default_role_id,organization_id"
+    organization ||--o{ department : "organization_id"
+    department ||--o{ department_membership : "department_id"
+    organization_membership ||--o{ department_membership : "membership_id"
+    private_workspace ||--o{ draft_document : "workspace_id"
+    organization_membership ||--o{ draft_version : "created_by_membership_id"
+    draft_document ||--o{ draft_version : "draft_id"
+    department |o--o{ knowledge_base : "department_id,organization_id"
+    organization ||--o{ knowledge_base : "organization_id"
+    published_knowledge_version ||--o{ knowledge_chunk : "published_version_id"
+    organization ||--o{ knowledge_current_publication : "organization_id"
+    published_knowledge_version ||--o{ knowledge_current_publication : "published_version_id"
+    shared_draft ||--o{ knowledge_current_publication : "shared_draft_id"
+    organization ||--o{ knowledge_index_generation : "organization_id"
+    shared_draft ||--o{ knowledge_index_generation : "shared_draft_id"
+    shared_draft_version ||--o{ knowledge_index_generation : "snapshot_version_id"
+    shared_submission ||--o{ knowledge_index_generation : "submission_id"
+    knowledge_index_generation ||--o{ knowledge_index_job : "generation_id"
+    user_account |o--o{ organization : "created_by_user_id"
+    department |o--o{ organization_invitation : "department_id,organization_id"
+    organization_membership ||--o{ organization_invitation : "invited_by_membership_id,organization_id"
+    organization ||--o{ organization_invitation : "organization_id"
+    user_account |o--o{ organization_invitation : "accepted_by_user_id"
+    organization ||--o{ organization_membership : "organization_id"
+    user_account ||--o{ organization_membership : "user_id"
+    organization_membership ||--o{ private_workspace : "membership_id"
+    knowledge_base ||--o{ published_knowledge_version : "knowledge_base_id"
+    organization_membership |o--o{ published_knowledge_version : "published_by_membership_id"
+    shared_submission ||--o{ published_knowledge_version : "submission_id"
+    shared_draft |o--o{ published_knowledge_version : "shared_draft_id"
+    organization_membership ||--o{ review_decision : "reviewer_membership_id"
+    shared_submission ||--o{ review_decision : "submission_id"
+    shared_draft_version |o--o{ review_decision : "snapshot_version_id"
+    department |o--o{ reviewer_grant : "department_id,organization_id"
+    organization_membership ||--o{ reviewer_grant : "granted_by_membership_id,organization_id"
+    organization_membership ||--o{ reviewer_grant : "reviewer_membership_id,organization_id"
+    organization |o--o{ role : "organization_id"
+    organization_membership ||--o{ role_assignment : "membership_id"
+    role ||--o{ role_assignment : "role_id"
+    access_scope ||--o{ role_assignment : "access_scope_id"
+    permission ||--o{ role_permission : "permission_id"
+    role ||--o{ role_permission : "role_id"
+    organization_membership ||--o{ shared_draft : "author_membership_id,organization_id"
+    draft_version |o--o{ shared_draft : "source_private_version_id"
+    published_knowledge_version |o--o{ shared_draft : "source_published_version_id"
+    department |o--o{ shared_draft : "responsible_department_id,organization_id"
+    shared_draft ||--o{ shared_draft_audience : "shared_draft_id,organization_id"
+    role ||--o{ shared_draft_audience : "role_id"
+    shared_draft ||--o{ shared_draft_version : "shared_draft_id"
+    department |o--o{ shared_submission : "target_department_id"
+    department |o--o{ shared_submission : "responsible_department_id,organization_id"
+    organization_membership ||--o{ shared_submission : "submitted_by_membership_id"
+    draft_version |o--o{ shared_submission : "draft_version_id"
+    organization |o--o{ shared_submission : "organization_id"
+    shared_draft |o--o{ shared_submission : "shared_draft_id"
+    shared_draft_version |o--o{ shared_submission : "shared_draft_version_id"
+    user_account ||--o{ system_administration_event : "actor_user_id"
+    user_account |o--o{ system_administration_event : "target_user_id"
+    user_account |o--o{ system_administrator : "granted_by_user_id"
+    user_account |o--o{ system_administrator : "revoked_by_user_id"
+    user_account ||--o{ system_administrator : "user_id"
+    organization_membership ||--o{ user_question : "membership_id"
+    access_scope {
+        uuid access_scope_id PK
+        uuid organization_id FK,UK
+        uuid department_id FK
+        text scope_type
+        text status
+        timestamptz created_at
+    }
+    ai_response {
+        uuid response_id PK
+        uuid question_id FK
+        text response_text
+        text status
+        text model_name
+        text model_version
+        timestamptz generated_at
+    }
+    audience {
+        uuid audience_id PK
+        uuid organization_id FK,UK
+        text kind
+        uuid department_id FK
+        text name
+        text description
+        text status
+        boolean is_managed
+        integer configuration_version
+        uuid created_by_membership_id FK
+        uuid legacy_role_id FK,UK
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    audience_group_membership {
+        uuid audience_group_membership_id PK
+        uuid audience_id FK
+        uuid organization_id FK
+        uuid membership_id FK
+        text status
+        timestamptz valid_from
+        timestamptz valid_until
+        uuid assigned_by_membership_id FK
+        timestamptz assigned_at
+        timestamptz revoked_at
+    }
+    audit_event {
+        uuid audit_event_id PK
+        uuid organization_id FK
+        uuid actor_membership_id FK
+        uuid role_assignment_id FK
+        uuid review_decision_id FK
+        uuid question_id FK
+        text event_type
+        text outcome
+        jsonb details_json
+        timestamptz occurred_at
+    }
+    authorization_policy {
+        uuid policy_id PK
+        uuid organization_id FK,UK
+        uuid permission_id FK
+        text code UK
+        text effect
+        jsonb condition_json
+        integer version UK
+        text status
+        timestamptz effective_from
+        timestamptz created_at
+    }
+    citation {
+        uuid citation_id PK
+        uuid response_id FK,UK
+        uuid chunk_id FK,UK
+        integer citation_order UK
+        text quoted_text
+        integer start_offset
+        integer end_offset
+        timestamptz created_at
+    }
+    department {
+        uuid department_id PK
+        uuid organization_id FK,UK
+        text code UK
+        text name
+        text status
+        timestamptz created_at
+        timestamptz updated_at
+        uuid default_role_id FK
+    }
+    department_membership {
+        uuid department_membership_id PK
+        uuid membership_id FK,UK
+        uuid department_id FK,UK
+        boolean is_primary
+        text status
+        timestamptz assigned_at
+        timestamptz removed_at
+    }
+    draft_document {
+        uuid draft_id PK
+        uuid workspace_id FK
+        text title
+        text description
+        text status
+        integer current_version_no
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    draft_version {
+        uuid draft_version_id PK
+        uuid draft_id FK,UK
+        integer version_no UK
+        text source_uri
+        text mime_type
+        text content_hash
+        uuid created_by_membership_id FK
+        timestamptz created_at
+    }
+    knowledge_base {
+        uuid knowledge_base_id PK
+        uuid organization_id FK,UK
+        uuid department_id FK
+        text name
+        text scope_type
+        text status
+        timestamptz created_at
+    }
+    knowledge_chunk {
+        uuid chunk_id PK
+        uuid published_version_id FK,UK
+        integer chunk_index UK
+        text content
+        text section_path
+        integer token_count
+        vector embedding
+        timestamptz indexed_at
+    }
+    knowledge_current_publication {
+        uuid shared_draft_id PK,FK
+        uuid organization_id FK
+        uuid published_version_id FK,UK
+        uuid_array audience_role_ids
+        text target_scope_type
+        uuid target_department_id
+        timestamptz valid_from
+        timestamptz valid_until
+        timestamptz updated_at
+    }
+    knowledge_index_generation {
+        uuid generation_id PK
+        uuid organization_id FK
+        uuid submission_id FK,UK
+        uuid shared_draft_id FK
+        uuid snapshot_version_id FK,UK
+        text snapshot_content_hash
+        text status
+        jsonb manifest_json
+        text failure_code
+        timestamptz created_at
+        timestamptz started_at
+        timestamptz completed_at
+        timestamptz updated_at
+    }
+    knowledge_index_job {
+        uuid job_id PK
+        uuid generation_id FK,UK
+        text status
+        integer attempt_count
+        integer max_attempts
+        timestamptz available_at
+        uuid lease_owner
+        timestamptz lease_expires_at
+        text last_error_code
+        timestamptz created_at
+        timestamptz completed_at
+        timestamptz updated_at
+    }
+    organization {
+        uuid organization_id PK
+        text name
+        text slug UK
+        text status
+        timestamptz created_at
+        timestamptz updated_at
+        uuid created_by_user_id FK
+    }
+    organization_invitation {
+        uuid invitation_id PK
+        uuid organization_id FK
+        uuid invited_by_membership_id FK
+        uuid department_id FK
+        text email
+        character_64 token_hash
+        text status
+        timestamptz expires_at
+        uuid accepted_by_user_id FK
+        timestamptz accepted_at
+        timestamptz revoked_at
+        timestamptz created_at
+    }
+    organization_membership {
+        uuid membership_id PK
+        uuid organization_id FK,UK
+        uuid user_id FK,UK
+        text status
+        timestamptz joined_at
+        timestamptz left_at
+    }
+    permission {
+        uuid permission_id PK
+        text code UK
+        text resource_type UK
+        text action UK
+        text description
+        text status
+    }
+    private_workspace {
+        uuid workspace_id PK
+        uuid membership_id FK,UK
+        text name
+        text status
+        timestamptz created_at
+    }
+    published_knowledge_version {
+        uuid published_version_id PK
+        uuid submission_id FK,UK
+        uuid knowledge_base_id FK,UK
+        uuid published_by_membership_id FK
+        text title UK
+        integer version_no UK
+        text content_uri
+        text content_hash
+        text index_status
+        timestamptz published_at
+        uuid shared_draft_id FK
+        text classification
+        uuid responsible_department_id
+        uuid_array audience_role_ids
+        timestamptz valid_from
+        timestamptz valid_until
+    }
+    review_decision {
+        uuid review_decision_id PK
+        uuid submission_id FK
+        uuid reviewer_membership_id FK
+        text decision
+        text comment
+        timestamptz decided_at
+        boolean flow2
+        uuid decision_request_id
+        uuid snapshot_version_id FK
+        text content_hash
+    }
+    reviewer_grant {
+        uuid reviewer_grant_id PK
+        uuid organization_id FK
+        uuid reviewer_membership_id FK
+        uuid department_id FK
+        uuid granted_by_membership_id FK
+        text_array classifications
+        text level
+        text team_tag
+        text project_tag
+        text status
+        timestamptz valid_from
+        timestamptz valid_until
+        timestamptz created_at
+        text scope
+    }
+    role {
+        uuid role_id PK
+        uuid organization_id FK,UK
+        text code
+        text name
+        text description
+        boolean is_system
+        text status
+        timestamptz created_at
+        integer configuration_version
+    }
+    role_assignment {
+        uuid role_assignment_id PK
+        uuid membership_id FK
+        uuid role_id FK
+        uuid access_scope_id FK
+        text status
+        timestamptz valid_from
+        timestamptz valid_until
+        timestamptz assigned_at
+    }
+    role_permission {
+        uuid role_id PK,FK
+        uuid permission_id PK,FK
+        timestamptz granted_at
+    }
+    shared_draft {
+        uuid shared_draft_id PK
+        uuid organization_id FK,UK
+        uuid author_membership_id FK
+        uuid source_private_version_id FK
+        uuid source_published_version_id FK
+        text title
+        text classification
+        text status
+        integer current_version_no
+        timestamptz created_at
+        timestamptz updated_at
+        uuid create_request_id
+        text create_request_hash
+        uuid responsible_department_id FK
+        text target_scope_type
+        text team_tag
+        text project_tag
+    }
+    shared_draft_audience {
+        uuid shared_draft_id PK,FK
+        uuid organization_id FK
+        uuid role_id PK,FK
+    }
+    shared_draft_version {
+        uuid shared_draft_version_id PK
+        uuid shared_draft_id FK,UK
+        integer version_no UK
+        text content_uri
+        text mime_type
+        text content_hash
+        timestamptz created_at
+    }
+    shared_submission {
+        uuid submission_id PK
+        uuid draft_version_id FK
+        uuid submitted_by_membership_id FK
+        text target_scope_type
+        uuid target_department_id FK
+        text status
+        timestamptz submitted_at
+        uuid organization_id FK
+        uuid shared_draft_version_id FK
+        uuid shared_draft_id FK
+        integer snapshot_version_no
+        uuid responsible_department_id FK
+        text title
+        text classification
+        text team_tag
+        text project_tag
+        uuid_array audience_role_ids
+        integer policy_version
+        text content_uri
+        text mime_type
+        text content_hash
+        uuid submit_request_id
+        text publication_state
+        text review_rule
+    }
+    system_administration_event {
+        uuid system_administration_event_id PK
+        uuid actor_user_id FK
+        text event_type
+        uuid target_user_id FK
+        text request_id
+        jsonb details_json
+        timestamptz occurred_at
+    }
+    system_administrator {
+        uuid user_id PK,FK
+        text status
+        uuid granted_by_user_id FK
+        timestamptz granted_at
+        uuid revoked_by_user_id FK
+        timestamptz revoked_at
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    user_account {
+        uuid user_id PK
+        text email UK
+        text full_name
+        text display_name
+        text status
+        timestamptz created_at
+        timestamptz updated_at
+    }
+    user_question {
+        uuid question_id PK
+        uuid membership_id FK
+        text question_text
+        text status
+        timestamptz submitted_at
+    }

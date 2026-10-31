@@ -1,0 +1,26 @@
+%% Figure M-02, Report 4 section 3.2.5: Organization Membership State Machine
+%% Drawn from Diagrams/State Machine/03_Membership_Detailed.drawio
+%% Code: organization_membership.status IN (INVITED, ACTIVE, SUSPENDED, LEFT), migration 0001.
+%% Suspend, restore and terminate have no API route on staging (designed, not yet implemented).
+stateDiagram-v2
+    state "Suspended" as Suspended
+    state "Left" as Left
+    [*] --> Active : / establish membership
+    state Active {
+        state "No Department" as NoDepartment
+        state "Department Assigned" as DepartmentAssigned
+        state assignment <<choice>>
+        [*] --> assignment
+        assignment --> NoDepartment : [no department]
+        assignment --> DepartmentAssigned : [department assigned]
+        NoDepartment --> DepartmentAssigned : assignDepartment [Org Admin, active department]
+        DepartmentAssigned --> NoDepartment : departmentArchived / clear assignment, re-evaluate readers
+        DepartmentAssigned : changeDepartment [Org Admin] / re-evaluate reader access
+    }
+    Active --> Suspended : suspend [Org Admin, not last active admin]
+    Suspended --> Active : restore [Org Admin] / re-evaluate current rights and assignment
+    Active --> Left : terminate [Org Admin, not last active admin]
+    Suspended --> Left : terminate [Org Admin]
+    Suspended : entry / block organization access
+    Left : entry / end organization access
+    Left --> [*]
