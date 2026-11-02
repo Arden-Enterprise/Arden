@@ -13,6 +13,11 @@ import { AuthLayout } from "./AuthLayout";
 
 export type SignInMode = "sign-in" | "register" | "forgot-password" | "reset-password";
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function isValidEmail(value: string): boolean {
+  return EMAIL_PATTERN.test(value.trim());
+}
+
 function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -93,6 +98,10 @@ export function SignInPage({
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isValidEmail(email)) {
+      setNotice({ text: "Enter a valid email address." });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
@@ -112,6 +121,10 @@ export function SignInPage({
 
   const handleSignUp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isValidEmail(email)) {
+      setNotice({ text: "Enter a valid email address." });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
@@ -125,6 +138,8 @@ export function SignInPage({
       if (cause instanceof ApiError && (cause.code === "ACCOUNT_ALREADY_EXISTS" || cause.status === 409)) {
         setNotice({ text: "An account with this email address already exists. Please sign in instead." });
         setMode("sign-in");
+      } else if (cause instanceof ApiError && (cause.code === "INVALID_EMAIL" || cause.message === "Enter a valid email address.")) {
+        setNotice({ text: "Enter a valid email address." });
       } else if (cause instanceof ApiError && cause.message) {
         setNotice({ text: cause.message });
       } else {
@@ -138,6 +153,10 @@ export function SignInPage({
 
   const handleForgotPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isValidEmail(email)) {
+      setNotice({ text: "Enter a valid email address." });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
@@ -158,6 +177,10 @@ export function SignInPage({
 
   const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!usingRecoverySession && !isValidEmail(email)) {
+      setNotice({ text: "Enter a valid email address." });
+      return;
+    }
     if (password !== confirmPassword) {
       setNotice({ text: "Passwords do not match." });
       return;
@@ -235,6 +258,8 @@ export function SignInPage({
                     autoComplete="username"
                     placeholder="name@company.com"
                     maxLength={320}
+                    pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                    title="Enter a valid email address (e.g. name@company.com)"
                     required
                   />
                 </label>
@@ -298,6 +323,8 @@ export function SignInPage({
                     autoComplete="username"
                     placeholder="name@company.com"
                     maxLength={320}
+                    pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                    title="Enter a valid email address (e.g. name@company.com)"
                     required
                   />
                 </label>
@@ -345,6 +372,8 @@ export function SignInPage({
                     autoComplete="email"
                     placeholder="name@company.com"
                     maxLength={320}
+                    pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                    title="Enter a valid email address (e.g. name@company.com)"
                     required
                   />
                 </label>
@@ -387,6 +416,8 @@ export function SignInPage({
                         autoComplete="email"
                         placeholder="name@company.com"
                         maxLength={320}
+                        pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                        title="Enter a valid email address (e.g. name@company.com)"
                         required
                       />
                     </label>

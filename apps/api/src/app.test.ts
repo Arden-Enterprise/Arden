@@ -237,6 +237,28 @@ describe("API auth and private draft routes", () => {
       code: "ACCOUNT_SETUP_UNAVAILABLE",
     });
     authProvider.signUpBehavior = "success";
+
+    const invalidEmail = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "123@gmail", password: "secure-password", fullName: "Invalid Email User" },
+    });
+    expect(invalidEmail.statusCode).toBe(400);
+    expect(invalidEmail.json().error).toMatchObject({
+      code: "INVALID_EMAIL",
+      message: "Enter a valid email address.",
+    });
+
+    const invalidSignIn = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "123@gmail", password: "secure-password" },
+    });
+    expect(invalidSignIn.statusCode).toBe(400);
+    expect(invalidSignIn.json().error).toMatchObject({
+      code: "INVALID_EMAIL",
+      message: "Enter a valid email address.",
+    });
   });
 
   it("handles forgot password requests, verification proxy, and password reset", async () => {

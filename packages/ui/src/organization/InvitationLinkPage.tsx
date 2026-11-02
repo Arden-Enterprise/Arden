@@ -118,6 +118,11 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
 
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Enter a valid email address.");
+      setBusy(false);
+      return;
+    }
     if (invitation && email.trim().toLowerCase() !== invitation.email.toLowerCase()) {
       setError(`Use ${invitation.email}.`);
       setBusy(false);
@@ -151,6 +156,11 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
 
   const handleSignUp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Enter a valid email address.");
+      setBusy(false);
+      return;
+    }
     if (invitation && email.trim().toLowerCase() !== invitation.email.toLowerCase()) {
       setError(`Use ${invitation.email}.`);
       setBusy(false);
@@ -369,6 +379,8 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       type="email"
                       required
                       maxLength={320}
+                      pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                      title="Enter a valid email address (e.g. name@company.com)"
                       placeholder="name@company.com"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
@@ -416,6 +428,8 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       type="email"
                       required
                       maxLength={320}
+                      pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+                      title="Enter a valid email address (e.g. name@company.com)"
                       placeholder="name@company.com"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}

@@ -114,4 +114,56 @@ describe("SignInPage password reset flow", () => {
       expect(screen.getByText(/password updated successfully/i)).toBeTruthy();
     });
   });
+
+  it("shows an error notice and prevents sign-up when email format is invalid", async () => {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "register",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    const nameInput = screen.getByPlaceholderText("Your name");
+    const emailInput = screen.getByPlaceholderText("name@company.com");
+    const passwordInput = screen.getByPlaceholderText(/create a secure password/i);
+
+    fireEvent.change(nameInput, { target: { value: "LGK" } });
+    fireEvent.change(emailInput, { target: { value: "123@gmail" } });
+    fireEvent.change(passwordInput, { target: { value: "secure-password" } });
+
+    const submitBtn = screen.getByRole("button", { name: /create account/i });
+    fireEvent.click(submitBtn);
+
+    expect(apiClient.signUp).not.toHaveBeenCalled();
+    expect(emailInput.getAttribute("pattern")).toBe("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
+    expect(screen.getByRole("alert").textContent).toContain("Enter a valid email address.");
+  });
+
+  it("shows an error notice and prevents sign-in when email format is invalid", async () => {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "sign-in",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    const emailInput = screen.getByPlaceholderText("name@company.com");
+    const passwordInput = screen.getByPlaceholderText(/enter your password/i);
+
+    fireEvent.change(emailInput, { target: { value: "123@gmail" } });
+    fireEvent.change(passwordInput, { target: { value: "secure-password" } });
+
+    const submitBtn = screen.getByRole("button", { name: /^sign in$/i });
+    fireEvent.click(submitBtn);
+
+    expect(apiClient.signIn).not.toHaveBeenCalled();
+    expect(emailInput.getAttribute("pattern")).toBe("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
+    expect(screen.getByRole("alert").textContent).toContain("Enter a valid email address.");
+  });
 });

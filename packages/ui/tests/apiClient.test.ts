@@ -42,6 +42,16 @@ describe("Supabase session transport", () => {
     });
   });
 
+  it("maps INVALID_EMAIL error code to user-friendly message", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: {
+      code: "INVALID_EMAIL", message: "Enter a valid email address.",
+    } }, { status: 400 })));
+    await expect(apiRequest("web", "/api/v1/auth/sign-up", { method: "POST", body: "{}" })).rejects.toMatchObject({
+      status: 400, code: "INVALID_EMAIL", message: "Enter a valid email address.",
+    });
+  });
+
   it("uses Arden's sign-in endpoint and HttpOnly web cookies", async () => {
     vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
     const fetchMock = vi.fn()

@@ -281,6 +281,7 @@ const userErrorMessages: Record<string, string> = {
   INVALID_METADATA: "Check document details.",
   SOURCE_NOT_SUPPORTED: "Couldn’t copy this note.",
   IDEMPOTENCY_CONFLICT: "Request changed. Reopen to try again.",
+  INVALID_EMAIL: "Enter a valid email address.",
 };
 
 export class ApiError extends Error {
