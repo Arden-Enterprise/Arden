@@ -593,7 +593,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         isUnassigned={isUnassignedMember}
         memberName={serverSession ? serverSession.actor.email ?? "Signed-in member" : previewMember?.name}
         memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
-        memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : "Member") : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+        memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined}
         canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
