@@ -1,0 +1,443 @@
+/* ==========================================================================
+   Arden Settings Island Styles
+   ========================================================================== */
+
+.settings-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  padding: 0;
+  width: min(880px, calc(100vw - 32px));
+  height: min(640px, calc(100dvh - 48px));
+  border: 1px solid var(--arden-border);
+  border-radius: 16px;
+  background: var(--arden-surface-raised);
+  color: var(--arden-text-primary);
+  box-shadow: var(--arden-shadow-float);
+  overflow: hidden;
+  z-index: 1000;
+}
+
+.settings-dialog::backdrop {
+  background: rgb(8 8 10 / 65%);
+  backdrop-filter: blur(4px);
+}
+
+.settings-dialog-layout {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+/* ---------- Left Navigation Sidebar ---------- */
+.settings-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--arden-bg-sidebar);
+  border-right: 1px solid var(--arden-border);
+  padding: 18px 14px;
+}
+
+.settings-sidebar-header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--arden-border);
+  margin-bottom: 12px;
+}
+
+.settings-sidebar-title {
+  margin: 4px 0 0;
+  font-size: 19px;
+  font-weight: 600;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--arden-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.settings-nav-item:hover:not(.is-active) {
+  color: var(--arden-text-primary);
+  background: var(--arden-surface-hover);
+}
+
+.settings-nav-item.is-active {
+  background: var(--arden-surface-base);
+  color: var(--arden-text-primary);
+  font-weight: 600;
+  border-left: 3px solid var(--arden-violet);
+}
+
+.settings-nav-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.settings-nav-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-nav-badge {
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--arden-accent-subtle);
+  color: var(--arden-violet);
+}
+
+.settings-sidebar-footer {
+  padding-top: 12px;
+  border-top: 1px solid var(--arden-border);
+}
+
+.settings-version-label {
+  font-size: 11px;
+  color: var(--arden-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ---------- Right Content Pane ---------- */
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--arden-surface-raised);
+}
+
+.settings-content-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--arden-border);
+}
+
+.settings-content-crumb {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--arden-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.settings-close-button {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--arden-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--arden-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.settings-close-button:hover {
+  color: var(--arden-text-primary);
+  background: var(--arden-surface-hover);
+}
+
+.settings-content-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+/* ---------- Section Layout & Cards ---------- */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-section-header {
+  margin-bottom: 4px;
+}
+
+.settings-section-header h2 {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--arden-text-primary);
+}
+
+.settings-section-header p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--arden-text-secondary);
+}
+
+.settings-card {
+  padding: 18px;
+  border: 1px solid var(--arden-border);
+  border-radius: 12px;
+  background: var(--arden-surface-base);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--arden-text-primary);
+}
+
+.settings-card-description {
+  margin: 0;
+  font-size: 13px;
+  color: var(--arden-text-secondary);
+  line-height: 1.5;
+}
+
+/* ---------- Account Section Specifics ---------- */
+.settings-profile-summary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.settings-avatar {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: var(--arden-accent-subtle);
+  border: 1px solid var(--arden-violet);
+  color: var(--arden-violet);
+  font-size: 17px;
+  font-weight: 700;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.settings-profile-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-profile-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-profile-name strong {
+  font-size: 15px;
+  color: var(--arden-text-primary);
+}
+
+.settings-role-chip {
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--arden-surface-hover);
+  color: var(--arden-text-secondary);
+  border: 1px solid var(--arden-border);
+}
+
+.settings-profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--arden-text-secondary);
+}
+
+.settings-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ---------- Banners & Feedback ---------- */
+.settings-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-banner strong {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.settings-banner p {
+  margin: 0;
+}
+
+.settings-banner-info {
+  background: rgba(112, 93, 242, 0.08);
+  border: 1px solid rgba(112, 93, 242, 0.25);
+  color: var(--arden-text-primary);
+}
+
+.settings-banner-notice {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: var(--arden-text-primary);
+}
+
+.settings-banner-error {
+  background: var(--arden-danger-subtle);
+  border: 1px solid var(--arden-danger);
+  color: var(--arden-danger);
+}
+
+.settings-banner-success {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #34d399;
+}
+
+/* ---------- Form Styles ---------- */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.settings-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* ---------- Details List ---------- */
+.settings-details-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+}
+
+.settings-details-list dt {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--arden-text-muted);
+  font-weight: 600;
+  margin-bottom: 2px;
+  letter-spacing: 0.04em;
+}
+
+.settings-details-list dd {
+  margin: 0;
+  font-size: 13px;
+  color: var(--arden-text-primary);
+  font-weight: 500;
+}
+
+.settings-monospace {
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--arden-text-secondary);
+  word-break: break-all;
+}
+
+.settings-tag-test {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.settings-card-footer {
+  display: flex;
+  justify-content: flex-start;
+  padding-top: 8px;
+  border-top: 1px solid var(--arden-border);
+}
+
+.settings-empty {
+  display: grid;
+  place-items: center;
+  padding: 48px 16px;
+  color: var(--arden-text-secondary);
+  font-size: 14px;
+}
+
+/* ---------- Mobile Responsiveness ---------- */
+@media (max-width: 640px) {
+  .settings-dialog {
+    width: calc(100vw - 20px);
+    height: calc(100dvh - 32px);
+  }
+
+  .settings-dialog-layout {
+    flex-direction: column;
+  }
+
+  .settings-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--arden-border);
+    padding: 12px;
+  }
+
+  .settings-sidebar-header,
+  .settings-sidebar-footer {
+    display: none;
+  }
+
+  .settings-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 6px;
+  }
+
+  .settings-nav-item {
+    white-space: nowrap;
+    border-left: 1px solid transparent;
+  }
+
+  .settings-nav-item.is-active {
+    border-left-color: transparent;
+    border-bottom: 2px solid var(--arden-violet);
+  }
+
+  .settings-content-body {
+    padding: 16px;
+  }
+}
+

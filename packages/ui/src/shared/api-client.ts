@@ -330,6 +330,15 @@ export async function resetPasswordWithToken(
 }
 
 /**
+ * Updates the password for the currently authenticated account.
+ */
+export async function updateAccountPassword(platform: Platform, newPassword: string): Promise<void> {
+  await request(platform, "/api/v1/auth/reset-password", {
+    method: "POST", body: JSON.stringify({ newPassword }),
+  });
+}
+
+/**
  * Attempts to restore an existing authenticated session, returning null if unauthenticated.
  */
 export async function restoreSession(platform: Platform): Promise<CurrentSession | null> {
