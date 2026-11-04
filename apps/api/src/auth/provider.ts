@@ -235,7 +235,7 @@ export class SupabaseAuthProvider implements AuthProvider {
     if (sessionError) throw new Error(isClientAuthFailure(sessionError) ? "INVALID_SESSION" : "SUPABASE_AUTH_UNAVAILABLE");
     const { error } = await auth.updateUser({ password: newPassword });
     if (error) {
-      if (isClientAuthFailure(error)) throw new Error(error.message || "PASSWORD_UPDATE_REJECTED");
+      if (isClientAuthFailure(error)) throw new Error("PASSWORD_UPDATE_REJECTED");
       throw new Error("SUPABASE_AUTH_UNAVAILABLE");
     }
   }

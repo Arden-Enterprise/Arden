@@ -4,6 +4,7 @@
     "types": ["react", "vitest/globals"]
   },
   "include": [
+    "tests/departmentConfirmation.test.ts",
     "tests/invitationFeedback.test.ts",
     "tests/memberAdministration.test.ts",
     "tests/membershipAssignment.test.ts"

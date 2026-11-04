@@ -176,8 +176,8 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       setBusy(false);
       return;
     }
-    if (password.length < 6) {
-      setError("Password must be at least 6 characters long.");
+    if ([...password].length < 8) {
+      setError("Password must be at least 8 characters long.");
       setBusy(false);
       return;
     }
@@ -457,7 +457,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       autoComplete="new-password"
                       type="password"
                       required
-                      minLength={6}
+                      minLength={8}
                       maxLength={1024}
                       placeholder="Create a secure password"
                       value={password}

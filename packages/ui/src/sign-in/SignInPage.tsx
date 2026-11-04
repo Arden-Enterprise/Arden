@@ -84,17 +84,14 @@ export function SignInPage({
     const hashParams = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
 
     const error = searchParams.get("error") || hashParams.get("error");
-    const errorDescription = searchParams.get("error_description") || hashParams.get("error_description");
     if (error) {
       if (
         error === "verification_failed" ||
         error === "verify_unavailable" ||
-        error.includes("link") ||
-        (errorDescription && errorDescription.toLowerCase().includes("link"))
+        error === "otp_expired"
       ) {
         return {
-          text: errorDescription
-            || "Email confirmation link is invalid or has expired. Please try signing in or request a new link.",
+          text: "Email confirmation link is invalid or has expired. Please try signing in or request a new link.",
           isSuccess: false,
         };
       }
@@ -116,12 +113,12 @@ export function SignInPage({
   useEffect(() => {
     if (typeof window === "undefined") return;
     const searchParams = new URLSearchParams(window.location.search);
-    const hash = window.location.hash;
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
     if (
       searchParams.has("type") ||
       searchParams.has("error") ||
-      hash.includes("type=signup") ||
-      hash.includes("error=")
+      ["signup", "email_change"].includes(hashParams.get("type") ?? "") ||
+      hashParams.has("error")
     ) {
       try {
         window.history.replaceState(null, "", window.location.pathname);
@@ -180,8 +177,8 @@ export function SignInPage({
       setNotice({ text: "Enter your name." });
       return;
     }
-    if (password.length < 6) {
-      setNotice({ text: "Password must be at least 6 characters long." });
+    if ([...password].length < 8) {
+      setNotice({ text: "Password must be at least 8 characters long." });
       return;
     }
     setBusy("submit");
@@ -399,7 +396,7 @@ export function SignInPage({
                     onChange={(event) => setPassword(event.target.value)}
                     autoComplete="new-password"
                     placeholder="Create a secure password"
-                    minLength={6}
+                    minLength={8}
                     maxLength={1024}
                     required
                   />

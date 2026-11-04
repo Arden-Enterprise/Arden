@@ -8,12 +8,14 @@ export function AccountSettingsSection({
   platform,
   session,
   organization,
+  organizationName = organization?.name,
   memberName = "Member",
   memberRole = "Member",
   memberDepartment,
   onRefreshSession,
   onSignOut,
 }: SettingsSectionProps) {
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -38,6 +40,11 @@ export function AccountSettingsSection({
       return;
     }
 
+    if (!passwordSetupRequired && !currentPassword) {
+      setError("Enter your current password.");
+      return;
+    }
+
     setBusy(true);
     try {
       if (passwordSetupRequired) {
@@ -45,9 +52,10 @@ export function AccountSettingsSection({
         setSuccess("Password has been set successfully.");
         await onRefreshSession?.();
       } else {
-        await updateAccountPassword(platform, newPassword);
+        await updateAccountPassword(platform, currentPassword, newPassword);
         setSuccess("Password updated successfully.");
       }
+      setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
     } catch (err) {
@@ -87,10 +95,10 @@ export function AccountSettingsSection({
                   <span>{memberDepartment}</span>
                 </span>
               )}
-              {organization?.name && (
+              {organizationName && (
                 <span className="settings-meta-item">
                   <Icon name="organization" size={14} />
-                  <span>{organization.name}</span>
+                  <span>{organizationName}</span>
                 </span>
               )}
             </div>
@@ -141,6 +149,20 @@ export function AccountSettingsSection({
             )}
 
             <form className="settings-form" onSubmit={handlePasswordSubmit}>
+              {!passwordSetupRequired && (
+                <label className="organization-field">
+                  <span>Current password</span>
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    onChange={(event) => { setCurrentPassword(event.target.value); setError(null); }}
+                    autoComplete="current-password"
+                    maxLength={1024}
+                    required
+                    disabled={busy}
+                  />
+                </label>
+              )}
               <label className="organization-field">
                 <span>{passwordSetupRequired ? "Create password" : "New password"}</span>
                 <input

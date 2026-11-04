@@ -559,6 +559,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const contextControl = { contextOpen, onToggleContext: () => { setNavOpen(false); setContextOpen((open) => !open); } };
   const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
+  const memberName = serverSession ? serverSession.actor.fullName?.trim() || "Signed-in member" : previewMember?.name;
   const liveAdmin = activeMembership?.roleCodes.includes("ORG_ADMIN") ?? false;
   const isUnassignedMember = Boolean(serverSession && activeMembership && needsDepartmentAssignment(activeMembership));
   const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue" || activeView === "knowledge-handover";
@@ -594,7 +595,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         authenticated={Boolean(serverSession)}
         showAdmin={liveAdmin}
         isUnassigned={isUnassignedMember}
-        memberName={serverSession ? serverSession.actor.email ?? "Signed-in member" : previewMember?.name}
+        memberName={memberName}
         memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
         memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
@@ -661,7 +662,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           platform={platform}
           session={serverSession}
           organization={organization}
-          memberName={serverSession ? serverSession.actor.email ?? "Signed-in member" : previewMember?.name}
+          organizationName={activeMembership?.organization.name}
+          memberName={memberName}
           memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
           memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
           onClose={() => setSettingsOpen(false)}

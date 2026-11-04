@@ -96,15 +96,14 @@ export function SettingsDialog({
             <h2 id={titleId} className="settings-sidebar-title">Settings</h2>
           </div>
 
-          <nav className="settings-nav" role="tablist" aria-orientation="vertical">
+          <nav className="settings-nav" aria-label="Settings sections">
             {sections.map((section) => {
               const isActive = section.id === activeSection?.id;
               return (
                 <button
                   key={section.id}
                   type="button"
-                  role="tab"
-                  aria-selected={isActive}
+                  aria-pressed={isActive}
                   className={`settings-nav-item${isActive ? " is-active" : ""}`}
                   onClick={() => setActiveSectionId(section.id)}
                 >
@@ -124,7 +123,7 @@ export function SettingsDialog({
         </aside>
 
         {/* Right Content Area */}
-        <main className="settings-content" role="tabpanel" aria-label={activeSection?.label}>
+        <section className="settings-content" aria-label={activeSection?.label}>
           <div className="settings-content-header">
             <div className="settings-content-titles">
               <span className="settings-content-crumb">Settings / {activeSection?.label}</span>
@@ -152,7 +151,7 @@ export function SettingsDialog({
               </div>
             )}
           </div>
-        </main>
+        </section>
       </div>
     </dialog>
   );
