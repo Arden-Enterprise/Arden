@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { passwordIssue } from "@arden/domain";
 import { AuthLayout } from "../sign-in/AuthLayout";
 import {
   acceptInvitation,
@@ -153,6 +154,12 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     if (invitation && email.trim().toLowerCase() !== invitation.email.toLowerCase()) {
       setError(`Use ${invitation.email}.`);
+      setBusy(false);
+      return;
+    }
+    const issue = passwordIssue(password);
+    if (issue) {
+      setError(issue);
       setBusy(false);
       return;
     }
@@ -396,7 +403,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                   </button>
                 </form>
               ) : (
-                <form onSubmit={(event) => void handleSignUp(event)}>
+                <form noValidate onSubmit={(event) => void handleSignUp(event)}>
                   <label>
                     <span>Full name</span>
                     <input
@@ -432,7 +439,6 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       autoComplete="new-password"
                       type="password"
                       required
-                      minLength={6}
                       maxLength={1024}
                       placeholder="Create a secure password"
                       value={password}

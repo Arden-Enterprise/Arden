@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { passwordIssue } from "@arden/domain";
 import type { Platform } from "../shared/types";
 import {
   beginGoogleSignIn,
@@ -112,6 +113,11 @@ export function SignInPage({
 
   const handleSignUp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const issue = passwordIssue(password);
+    if (issue) {
+      setNotice({ text: issue });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
@@ -158,8 +164,17 @@ export function SignInPage({
 
   const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!usingRecoverySession && !resetToken.trim()) {
+      setNotice({ text: "Enter the verification code sent to your email." });
+      return;
+    }
     if (password !== confirmPassword) {
       setNotice({ text: "Passwords do not match." });
+      return;
+    }
+    const issue = passwordIssue(password);
+    if (issue) {
+      setNotice({ text: issue });
       return;
     }
     setBusy("submit");
@@ -277,7 +292,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleSignUp}>
+              <form noValidate onSubmit={handleSignUp}>
                 <label>
                   <span>Full name</span>
                   <input
@@ -309,7 +324,6 @@ export function SignInPage({
                     onChange={(event) => setPassword(event.target.value)}
                     autoComplete="new-password"
                     placeholder="Create a secure password"
-                    minLength={6}
                     maxLength={1024}
                     required
                   />
@@ -375,7 +389,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleResetPassword}>
+              <form noValidate onSubmit={handleResetPassword}>
                 {!usingRecoverySession && (
                   <>
                     <label>
@@ -409,8 +423,7 @@ export function SignInPage({
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     autoComplete="new-password"
-                    placeholder="Enter new password (min. 6 characters)"
-                    minLength={6}
+                    placeholder="Enter new password"
                     maxLength={1024}
                     required
                   />
@@ -423,7 +436,6 @@ export function SignInPage({
                     onChange={(event) => setConfirmPassword(event.target.value)}
                     autoComplete="new-password"
                     placeholder="Confirm new password"
-                    minLength={6}
                     maxLength={1024}
                     required
                   />

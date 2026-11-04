@@ -94,8 +94,8 @@ describe("SignInPage password reset flow", () => {
 
     fireEvent.change(emailInput, { target: { value: "user@example.test" } });
     fireEvent.change(codeInput, { target: { value: "123456" } });
-    fireEvent.change(passwordInput, { target: { value: "new-valid-password" } });
-    fireEvent.change(confirmPasswordInput, { target: { value: "new-valid-password" } });
+    fireEvent.change(passwordInput, { target: { value: "New-valid-password1" } });
+    fireEvent.change(confirmPasswordInput, { target: { value: "New-valid-password1" } });
 
     const submitBtn = screen.getByRole("button", { name: /update password/i });
     fireEvent.click(submitBtn);
@@ -104,7 +104,7 @@ describe("SignInPage password reset flow", () => {
       expect(apiClient.resetPasswordWithToken).toHaveBeenCalledWith("web", {
         email: "user@example.test",
         token: "123456",
-        newPassword: "new-valid-password",
+        newPassword: "New-valid-password1",
       });
     });
 
@@ -113,5 +113,38 @@ describe("SignInPage password reset flow", () => {
       expect(screen.getByRole("heading", { name: /sign in to your account/i })).toBeTruthy();
       expect(screen.getByText(/password updated successfully/i)).toBeTruthy();
     });
+  });
+
+  it("names the missing password rule and does not submit", async () => {
+    vi.mocked(apiClient.resetPasswordWithToken).mockResolvedValue(undefined);
+
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "reset-password",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    const emailInput = screen.getByPlaceholderText("name@company.com");
+    const codeInput = screen.getByPlaceholderText(/enter code from email/i);
+    const passwordInput = screen.getByPlaceholderText(/enter new password/i);
+    const confirmPasswordInput = screen.getByPlaceholderText(/confirm new password/i);
+
+    fireEvent.change(emailInput, { target: { value: "user@example.test" } });
+    fireEvent.change(passwordInput, { target: { value: "Aaaaaaa1!" } });
+    fireEvent.change(confirmPasswordInput, { target: { value: "Aaaaaaa1!" } });
+    fireEvent.click(screen.getByRole("button", { name: /update password/i }));
+    expect(apiClient.resetPasswordWithToken).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Enter the verification code sent to your email.");
+
+    fireEvent.change(codeInput, { target: { value: "123456" } });
+    fireEvent.change(passwordInput, { target: { value: "aaaaaaaa" } });
+    fireEvent.change(confirmPasswordInput, { target: { value: "aaaaaaaa" } });
+    fireEvent.click(screen.getByRole("button", { name: /update password/i }));
+    expect(apiClient.resetPasswordWithToken).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Please include a capital letter.");
   });
 });

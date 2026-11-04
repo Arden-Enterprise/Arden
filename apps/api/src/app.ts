@@ -1,7 +1,8 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument } from "@arden/domain";
+import { parseSemanticDocument, passwordIssue, passwordMessages, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
+import { PasswordRejectedError } from "./auth/password-rejection.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
@@ -176,7 +177,7 @@ export function buildApp(dependencies: AppDependencies) {
   app.post<{ Body: { password: string } }>("/api/v1/auth/password", {
     schema: {
       body: { type: "object", additionalProperties: false, required: ["password"], properties: {
-        password: { type: "string", minLength: 8, maxLength: 1024 },
+        password: { type: "string", minLength: 1, maxLength: 1024 },
       } },
     },
   }, async (request, reply) => {
@@ -187,12 +188,13 @@ export function buildApp(dependencies: AppDependencies) {
       const resolution = await dependencies.auth.resolveSession(tokens);
       if (resolution.kind !== "authenticated") return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
       if (!resolution.passwordSetupRequired) return reply.code(409).send(safeError("PASSWORD_ALREADY_INITIALIZED", "This account already has a password.", request.id));
+      const issue = passwordIssue(request.body.password);
+      if (issue) return reply.code(400).send(safeError("PASSWORD_REJECTED", issue, request.id));
       await dependencies.auth.setInitialPassword(tokens, request.body.password);
       return reply.code(204).send();
     } catch (error) {
-      if (error instanceof Error && error.message === "PASSWORD_REJECTED") {
-        return reply.code(400).send(safeError("PASSWORD_REJECTED", "Choose a stronger password and try again.", request.id));
-      }
+      const rejected = rejectedPasswordMessage(error);
+      if (rejected) return reply.code(400).send(safeError("PASSWORD_REJECTED", rejected, request.id));
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Initial password setup failed");
       return authUnavailable(reply, request);
     }
@@ -212,6 +214,8 @@ export function buildApp(dependencies: AppDependencies) {
     },
   }, async (request, reply) => {
     if (!dependencies.auth) return authUnavailable(reply, request);
+    const issue = passwordIssue(request.body.password);
+    if (issue) return reply.code(400).send(safeError("PASSWORD_REJECTED", issue, request.id));
     try {
       let validatedRedirectTo: string | undefined;
       if (request.body.redirectTo) {
@@ -253,6 +257,8 @@ export function buildApp(dependencies: AppDependencies) {
       if (error instanceof Error && error.message === "USER_ALREADY_EXISTS") {
         return reply.code(409).send(safeError("ACCOUNT_ALREADY_EXISTS", "An account with this email address already exists. Please sign in instead.", request.id));
       }
+      const rejected = rejectedPasswordMessage(error);
+      if (rejected) return reply.code(400).send(safeError("PASSWORD_REJECTED", rejected, request.id));
       if (error instanceof Error && error.message === "SIGNUP_REJECTED") {
         return reply.code(400).send(safeError("ACCOUNT_SETUP_UNAVAILABLE", "Account setup could not be completed. Check the password requirements or sign in.", request.id));
       }
@@ -342,12 +348,14 @@ export function buildApp(dependencies: AppDependencies) {
           token: { type: "string", minLength: 1, maxLength: 100 },
           accessToken: { type: "string", minLength: 10 },
           refreshToken: { type: "string", minLength: 10 },
-          newPassword: { type: "string", minLength: 6, maxLength: 1024 },
+          newPassword: { type: "string", minLength: 1, maxLength: 1024 },
         },
       },
     },
   }, async (request, reply) => {
     if (!dependencies.auth || !dependencies.auth.updateUserPassword) return authUnavailable(reply, request);
+    const issue = passwordIssue(request.body.newPassword);
+    if (issue) return reply.code(400).send(safeError("PASSWORD_REJECTED", issue, request.id));
     try {
       const email = request.body.email ? request.body.email.trim().toLowerCase() : undefined;
       const token = request.body.token ? request.body.token.trim() : undefined;
@@ -395,9 +403,8 @@ export function buildApp(dependencies: AppDependencies) {
       if (error instanceof Error && (error.message === "INVALID_OTP" || error.message === "INVALID_SESSION")) {
         return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link or code is invalid or has expired.", request.id));
       }
-      if (error instanceof Error && error.message === "PASSWORD_UPDATE_REJECTED") {
-        return reply.code(400).send(safeError("PASSWORD_REJECTED", "Password does not meet requirements.", request.id));
-      }
+      const rejected = rejectedPasswordMessage(error);
+      if (rejected) return reply.code(400).send(safeError("PASSWORD_REJECTED", rejected, request.id));
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password update failed");
       return authUnavailable(reply, request);
     }
@@ -1872,6 +1879,14 @@ function decodeCursor(value: string): DraftCursor | null {
   } catch {
     return null;
   }
+}
+
+function rejectedPasswordMessage(error: unknown): string | null {
+  if (error instanceof PasswordRejectedError) return error.message;
+  if (error instanceof Error && (error.message === "PASSWORD_REJECTED" || error.message === "PASSWORD_UPDATE_REJECTED")) {
+    return passwordMessages.unusable;
+  }
+  return null;
 }
 
 function safeError(code: string, message: string, requestId: string) {

@@ -1,4 +1,5 @@
 import { createClient, type Session, type SupabaseClient, type User } from "@supabase/supabase-js";
+import { isPasswordProviderFailure, PasswordRejectedError, passwordProviderMessage } from "./password-rejection.js";
 
 const userIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -98,6 +99,9 @@ export class SupabaseAuthProvider implements AuthProvider {
     });
     if (error) {
       if (isUserAlreadyRegistered(error)) throw new Error("USER_ALREADY_EXISTS");
+      if (isClientAuthFailure(error) && isPasswordProviderFailure(error)) {
+        throw new PasswordRejectedError(passwordProviderMessage(error, credentials.password));
+      }
       throw new Error(isClientAuthFailure(error) ? "SIGNUP_REJECTED" : "SUPABASE_AUTH_UNAVAILABLE");
     }
     if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
@@ -202,7 +206,7 @@ export class SupabaseAuthProvider implements AuthProvider {
       password,
       data: { ...session.data.user.user_metadata, arden_password_initialized: true },
     });
-    if (error) throw new Error(isClientAuthFailure(error) ? "PASSWORD_REJECTED" : "SUPABASE_AUTH_UNAVAILABLE");
+    if (error) throw passwordUpdateError(error, password);
   }
 
   async resetPasswordForEmail(email: string, redirectTo?: string): Promise<void> {
@@ -234,7 +238,7 @@ export class SupabaseAuthProvider implements AuthProvider {
     });
     if (sessionError) throw new Error(isClientAuthFailure(sessionError) ? "INVALID_SESSION" : "SUPABASE_AUTH_UNAVAILABLE");
     const { error } = await auth.updateUser({ password: newPassword });
-    if (error) throw new Error(isClientAuthFailure(error) ? "PASSWORD_UPDATE_REJECTED" : "SUPABASE_AUTH_UNAVAILABLE");
+    if (error) throw passwordUpdateError(error, newPassword);
   }
 
   async verifyLink(searchParams: string): Promise<string | null> {
@@ -308,6 +312,11 @@ function isExpiredJwt(token: string): boolean {
   } catch {
     return true;
   }
+}
+
+function passwordUpdateError(error: { message: string; status?: number; code?: string; reasons?: readonly string[] }, password: string): Error {
+  if (!isClientAuthFailure(error)) return new Error("SUPABASE_AUTH_UNAVAILABLE");
+  return new PasswordRejectedError(passwordProviderMessage(error, password));
 }
 
 function isClientAuthFailure(error: { status?: number }): boolean {

@@ -206,7 +206,7 @@ describe("API auth and private draft routes", () => {
     const updated = await app.inject({
       method: "POST", url: "/api/v1/auth/password",
       headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
-      payload: { password: "new-password" },
+      payload: { password: "New-password1" },
     });
     expect(updated.statusCode).toBe(204);
     const after = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
@@ -218,7 +218,7 @@ describe("API auth and private draft routes", () => {
     const conflict = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "existing@example.test", password: "secure-password", fullName: "Existing User" },
+      payload: { email: "existing@example.test", password: "Secure-password1", fullName: "Existing User" },
     });
     expect(conflict.statusCode).toBe(409);
     expect(conflict.json().error).toMatchObject({
@@ -230,12 +230,29 @@ describe("API auth and private draft routes", () => {
     const rejected = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "weak@example.test", password: "123", fullName: "Weak User" },
+      payload: { email: "weak@example.test", password: "Secure-password1", fullName: "Weak User" },
     });
     expect(rejected.statusCode).toBe(400);
     expect(rejected.json().error).toMatchObject({
       code: "ACCOUNT_SETUP_UNAVAILABLE",
     });
+    const tooShort = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "short@example.test", password: "123", fullName: "Short User" },
+    });
+    expect(tooShort.statusCode).toBe(400);
+    expect(tooShort.json().error).toMatchObject({
+      code: "PASSWORD_REJECTED",
+      message: "Please use at least 8 characters.",
+    });
+    const missingCapital = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "letters@example.test", password: "aaaaaaaa", fullName: "Letters User" },
+    });
+    expect(missingCapital.statusCode).toBe(400);
+    expect(missingCapital.json().error.message).toBe("Please include a capital letter.");
     authProvider.signUpBehavior = "success";
   });
 
@@ -264,17 +281,17 @@ describe("API auth and private draft routes", () => {
     const resetWithOtp = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "valid-token", newPassword: "new-secure-password" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "New-secure-password1" },
     });
     expect(resetWithOtp.statusCode).toBe(200);
     expect(resetWithOtp.json()).toEqual({ status: "password_updated" });
-    expect(authProvider.lastUpdatedPassword?.password).toBe("new-secure-password");
+    expect(authProvider.lastUpdatedPassword?.password).toBe("New-secure-password1");
     expect(cookieHeader(resetWithOtp.headers["set-cookie"])).toContain("arden_access=access-recovery");
 
     const invalidOtp = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "wrong-token", newPassword: "new-secure-password" },
+      payload: { email: "owner@example.test", token: "wrong-token", newPassword: "New-secure-password1" },
     });
     expect(invalidOtp.statusCode).toBe(401);
     expect(invalidOtp.json().error.code).toBe("INVALID_TOKEN");
@@ -282,7 +299,7 @@ describe("API auth and private draft routes", () => {
     const reusedOtp = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "valid-token", newPassword: "second-password" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "Second-password1" },
     });
     expect(reusedOtp.statusCode).toBe(401);
     expect(reusedOtp.json().error.code).toBe("INVALID_TOKEN");
@@ -291,11 +308,29 @@ describe("API auth and private draft routes", () => {
     const reusedAccessToken = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
       headers: { origin: "http://localhost:5180" },
-      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "third-password" },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "Third-password1" },
     });
     expect(reusedAccessToken.statusCode).toBe(401);
     expect(reusedAccessToken.json().error.code).toBe("INVALID_TOKEN");
     expect(reusedAccessToken.json().error.message).toBe("The reset code has already been used.");
+  });
+
+  it("refuses a weak reset password without consuming the code", async () => {
+    const weak = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "aaaaaaaa" },
+    });
+    expect(weak.statusCode).toBe(400);
+    expect(weak.json().error.message).toBe("Please include a capital letter.");
+
+    const accepted = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "Fresh-password1" },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json()).toEqual({ status: "password_updated" });
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
@@ -579,11 +614,11 @@ describe("API auth and private draft routes", () => {
   it("keeps invitation account setup non-enumerating and never starts an authenticated session", async () => {
     const existing = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up", headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", password: "synthetic-password", fullName: "Owner" },
+      payload: { email: "owner@example.test", password: "Synthetic-password1", fullName: "Owner" },
     });
     const newAccount = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up", headers: { origin: "http://localhost:5180" },
-      payload: { email: "new.member@example.test", password: "synthetic-password", fullName: "New Member" },
+      payload: { email: "new.member@example.test", password: "Synthetic-password1", fullName: "New Member" },
     });
     expect(existing.statusCode).toBe(202);
     expect(newAccount.statusCode).toBe(202);
@@ -598,7 +633,7 @@ describe("API auth and private draft routes", () => {
       headers: { origin: "http://localhost:5180" },
       payload: {
         email: "invited.member@example.test",
-        password: "synthetic-password",
+        password: "Synthetic-password1",
         fullName: "Invited Member",
         redirectTo: "http://localhost:5180/invite/test-token-123",
       },
@@ -611,7 +646,7 @@ describe("API auth and private draft routes", () => {
       headers: { origin: "http://localhost:5180" },
       payload: {
         email: "invited2@example.test",
-        password: "synthetic-password",
+        password: "Synthetic-password1",
         fullName: "Invited Member 2",
         redirectTo: "https://evil.site/phish",
       },
@@ -628,7 +663,7 @@ describe("API auth and private draft routes", () => {
       headers: { origin: "http://localhost:5180" },
       payload: {
         email: "invited.cookie@example.test",
-        password: "synthetic-password",
+        password: "Synthetic-password1",
         fullName: "Cookie Member",
         redirectTo: `http://localhost:5180/invite/${validToken}`,
       },
