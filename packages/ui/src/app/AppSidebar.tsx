@@ -24,6 +24,7 @@ type AppSidebarProps = {
   onCloseNavigation?: () => void;
   onNavigate: (view: WorkspaceView) => void;
   onSignOut: () => void;
+  onOpenSettings?: () => void;
 };
 
 export type NavigationItem = {
@@ -61,11 +62,12 @@ export function initialsOf(label: string): string {
   return label.split(/[\s.@]+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 }
 
-function SidebarAccountMenu({ memberName, memberRole, authenticated, onSignOut }: {
+function SidebarAccountMenu({ memberName, memberRole, authenticated, onSignOut, onOpenSettings }: {
   memberName: string;
   memberRole: string;
   authenticated: boolean;
   onSignOut: () => void;
+  onOpenSettings?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
@@ -108,7 +110,7 @@ function SidebarAccountMenu({ memberName, memberRole, authenticated, onSignOut }
         <div><strong>{memberName}</strong><span>{memberRole}</span></div>
       </button>
       {open && <div className="sidebar-account-menu" id={menuId} role="menu">
-        <button type="button" role="menuitem" disabled>Settings</button>
+        <button type="button" role="menuitem" onClick={() => { triggerRef.current?.focus(); setOpen(false); onOpenSettings?.(); }}>Settings</button>
         <button type="button" role="menuitem" ref={actionRef} onClick={() => { setOpen(false); onSignOut(); }}>{authenticated ? "Log out" : "Exit preview"}</button>
       </div>}
     </div>
@@ -136,6 +138,7 @@ export function AppSidebar({
   onCloseNavigation,
   onNavigate,
   onSignOut,
+  onOpenSettings,
 }: AppSidebarProps) {
   const organizationName = organizationLabel ?? organization?.name ?? "FPT Digital";
   const sessionLabel = environmentLabel ?? (authenticated ? "Signed in" : "Preview");
@@ -199,7 +202,7 @@ export function AppSidebar({
       </nav>
 
       <div className="sidebar-session">
-        <SidebarAccountMenu memberName={memberName} memberRole={memberRole} authenticated={authenticated} onSignOut={onSignOut} />
+        <SidebarAccountMenu memberName={memberName} memberRole={memberRole} authenticated={authenticated} onSignOut={onSignOut} onOpenSettings={onOpenSettings} />
         <span className="sidebar-platform">{platform === "desktop" ? "WINDOWS" : "WEB"} · {authenticated ? "SIGNED IN" : "SAMPLE SESSION"}</span>
       </div>
     </aside>

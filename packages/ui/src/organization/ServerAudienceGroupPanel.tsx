@@ -214,7 +214,20 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
           aria-invalid={nameSubmitted && !draft.name.trim()} aria-describedby="audience-group-name-help"
           onChange={event => setDraft({ ...draft, name: event.target.value })}/><small id="audience-group-name-help" className={nameSubmitted && !draft.name.trim() ? "field-error" : ""}>{nameSubmitted && !draft.name.trim() ? "Enter a group name." : ""}</small></label>
         <label className="organization-field"><span>Description (optional)</span><textarea maxLength={300} rows={3} value={draft.description} disabled={disabled} onChange={event => setDraft({ ...draft, description: event.target.value })}/></label>
-        {selected?.status === "ACTIVE" && <div className="role-config-danger-zone"><strong>Deactivate reader group</strong><button className="admin-text-danger" type="button" disabled={busy || dirty} onClick={() => setDeactivationOpen(true)}>Deactivate…</button></div>}
+        {selected?.status === "ACTIVE" && (
+          <div className="role-config-danger-zone">
+            <strong>Deactivate reader group</strong>
+            <p>This group must not be used by published documents or pending reviews.</p>
+            <button
+              className="secondary-button is-danger"
+              type="button"
+              disabled={busy || dirty}
+              onClick={() => setDeactivationOpen(true)}
+            >
+              Deactivate reader group
+            </button>
+          </div>
+        )}
       </div>}
       {section === "members" && <>
         {selected?.status === "ACTIVE" && <form className="audience-add" onSubmit={event => {

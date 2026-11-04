@@ -19,6 +19,7 @@ import { OrganizationSetupPage } from "../organization/OrganizationSetupPage";
 import { OrganizationAccessPage } from "../organization/OrganizationAccessPage";
 import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
 import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
+import { SettingsDialog } from "../settings";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
@@ -225,6 +226,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [contextOverlay, setContextOverlay] = useState(false);
   const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
   const shellRef = useRef<HTMLDivElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | null>(null);
   const [serverSession, setServerSession] = useState<CurrentSession | null>(null);
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
@@ -523,6 +525,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
    * Completes local session teardown and resets all workspace state to sign-in.
    */
   const finishSignOut = () => {
+    setSettingsOpen(false);
     setNavOpen(false);
     if (serverSession) void apiSignOut(platform).catch(() => undefined);
     setServerSession(null);
@@ -556,6 +559,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const contextControl = { contextOpen, onToggleContext: () => { setNavOpen(false); setContextOpen((open) => !open); } };
   const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
+  const memberName = serverSession ? serverSession.actor.fullName?.trim() || "Signed-in member" : previewMember?.name;
   const liveAdmin = activeMembership?.roleCodes.includes("ORG_ADMIN") ?? false;
   const isUnassignedMember = Boolean(serverSession && activeMembership && needsDepartmentAssignment(activeMembership));
   const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue" || activeView === "knowledge-handover";
@@ -591,9 +595,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         authenticated={Boolean(serverSession)}
         showAdmin={liveAdmin}
         isUnassigned={isUnassignedMember}
-        memberName={serverSession ? serverSession.actor.email ?? "Signed-in member" : previewMember?.name}
+        memberName={memberName}
         memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
-        memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : "Member") : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+        memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined}
         canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
@@ -603,6 +607,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         onCloseNavigation={() => setNavOpen(false)}
         onNavigate={navigate}
         onSignOut={signOut}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       {navOpen && <button type="button" className="shell-nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
       <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={(previewRole === "admin" && !serverSession) || liveAdmin}
@@ -652,6 +657,23 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
       {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close context" onClick={contextControl.onToggleContext} />}
       <KnowledgePane content={activeContext} open={contextOpen} onToggle={contextControl.onToggleContext} />
+      {settingsOpen && (
+        <SettingsDialog
+          platform={platform}
+          session={serverSession}
+          organization={organization}
+          organizationName={activeMembership?.organization.name}
+          memberName={memberName}
+          memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
+          memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+          onClose={() => setSettingsOpen(false)}
+          onRefreshSession={async () => {
+            const refreshed = await restoreSession(platform);
+            if (refreshed) acceptServerSession(refreshed);
+          }}
+          onSignOut={signOut}
+        />
+      )}
       {pendingAction && (
         <DiscardChangesDialog
           exiting={pendingAction === "exit"}

@@ -103,7 +103,15 @@
 .audience-members .island-icon-button { width: 28px; height: 28px; border-color: transparent; }
 .audience-save { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 1px solid var(--arden-accent-border); border-radius: 12px; background: var(--arden-accent-subtle); }
 .audience-save strong { flex: 1; font-size: 13px; }
-.admin-roles .role-config-danger-zone { border-color: var(--arden-danger-border); border-radius: 12px; }
+.admin-roles .role-config-danger-zone,
+.audience-details .role-config-danger-zone {
+  border-color: var(--arden-danger-border);
+  border-radius: 12px;
+}
+.role-config-danger-zone .secondary-button.is-danger {
+  justify-self: stretch;
+  margin-top: 4px;
+}
 
 /* Sample (preview) administration keeps its structure but uses the segmented island tabs. */
 .arden-app-shell .organization-tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 4px; border: 1px solid var(--arden-border); border-radius: 12px; background: var(--arden-bg-sidebar); }

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreateSharedDraftResult, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -175,7 +175,7 @@ describe("API auth and private draft routes", () => {
     const response = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      actor: { id: ownerId, email: "owner@example.test" },
+      actor: { id: ownerId, email: "owner@example.test", fullName: "Owner" },
       account: { passwordSetupRequired: false },
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
@@ -213,30 +213,56 @@ describe("API auth and private draft routes", () => {
     expect(after.json().account).toEqual({ passwordSetupRequired: false });
   });
 
-  it("handles sign-up validation and duplicate account rejection", async () => {
+  it("keeps sign-up confirmation non-enumerating and handles validation", async () => {
     authProvider.signUpBehavior = "already_exists";
     const conflict = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
       payload: { email: "existing@example.test", password: "secure-password", fullName: "Existing User" },
     });
-    expect(conflict.statusCode).toBe(409);
-    expect(conflict.json().error).toMatchObject({
-      code: "ACCOUNT_ALREADY_EXISTS",
-      message: "An account with this email address already exists. Please sign in instead.",
+    expect(conflict.statusCode).toBe(202);
+    authProvider.signUpBehavior = "success";
+    const signup = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "fresh@example.test", password: "secure-password", fullName: "New User" },
     });
+    expect(signup.statusCode).toBe(202);
+    expect(signup.json()).toEqual(conflict.json());
 
     authProvider.signUpBehavior = "rejected";
     const rejected = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "weak@example.test", password: "123", fullName: "Weak User" },
+      payload: { email: "weak@example.test", password: "12345678", fullName: "Weak User" },
     });
     expect(rejected.statusCode).toBe(400);
     expect(rejected.json().error).toMatchObject({
       code: "ACCOUNT_SETUP_UNAVAILABLE",
     });
     authProvider.signUpBehavior = "success";
+
+    const invalidEmail = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "123@gmail", password: "secure-password", fullName: "Invalid Email User" },
+    });
+    expect(invalidEmail.statusCode).toBe(400);
+    expect(invalidEmail.json().error).toMatchObject({
+      code: "INVALID_EMAIL",
+      message: "Enter a valid email address.",
+    });
+
+    const invalidSignIn = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "123@gmail", password: "secure-password" },
+    });
+    expect(invalidSignIn.statusCode).toBe(400);
+    expect(invalidSignIn.json().error).toMatchObject({
+      code: "INVALID_EMAIL",
+      message: "Enter a valid email address.",
+    });
   });
 
   it("handles forgot password requests, verification proxy, and password reset", async () => {
@@ -296,6 +322,74 @@ describe("API auth and private draft routes", () => {
     expect(reusedAccessToken.statusCode).toBe(401);
     expect(reusedAccessToken.json().error.code).toBe("INVALID_TOKEN");
     expect(reusedAccessToken.json().error.message).toBe("The reset code has already been used.");
+
+    const shortPassword = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "short" },
+    });
+    expect(shortPassword.statusCode).toBe(400);
+    expect(shortPassword.json().error.code).toBe("INVALID_PASSWORD");
+    expect(shortPassword.json().error.message).toBe("Password must be at least 8 characters long.");
+
+    const rejectedPassword = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token-2", newPassword: "rejected-password" },
+    });
+    expect(rejectedPassword.statusCode).toBe(400);
+    expect(rejectedPassword.json().error.code).toBe("PASSWORD_REJECTED");
+    expect(rejectedPassword.json().error.message).toBe("Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.");
+  });
+
+  it("requires a verified current password for account changes and rejects session-only recovery", async () => {
+    const signIn = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", password: "synthetic-password" },
+    });
+    const headers = { origin: "http://localhost:5180", cookie: cookieHeader(signIn.headers["set-cookie"]) };
+    const submit = (url: string, payload: object) => app.inject({ method: "POST", url, headers, payload });
+    const change = "/api/v1/auth/change-password";
+    const reset = "/api/v1/auth/reset-password";
+    const newPassword = "new-secure-password";
+    expect((await submit(reset, { newPassword })).statusCode).toBe(401);
+    expect((await submit(reset, { accessToken: "access-owner", refreshToken: "refresh-owner", newPassword })).statusCode).toBe(401);
+    expect((await submit(change, { newPassword })).statusCode).toBe(400);
+    const wrong = await submit(change, { currentPassword: "wrong", newPassword });
+    expect(wrong.statusCode).toBe(401);
+    expect(wrong.json().error.code).toBe("INVALID_CURRENT_PASSWORD");
+    expect(authProvider.lastUpdatedPassword).toBeNull();
+    const updated = await submit(change, { currentPassword: "synthetic-password", newPassword });
+    expect(updated.statusCode).toBe(200);
+    expect(authProvider.lastUpdatedPassword).toEqual({ token: "access-owner", password: newPassword });
+  });
+
+  it("binds a recovery-link update to the verified browser flow", async () => {
+    const verify = await app.inject({ method: "GET", url: "/verify?token=valid-link&type=recovery" });
+    const cookie = cookieHeader(verify.headers["set-cookie"]);
+    const reset = (refreshToken: string) => app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180", cookie },
+      payload: { accessToken: "access-recovery", refreshToken, newPassword: "new-secure-password" },
+    });
+    expect((await reset("different-refresh")).statusCode).toBe(401);
+    expect((await reset("refresh-recovery")).statusCode).toBe(200);
+    expect((await reset("refresh-recovery")).statusCode).toBe(401);
+  });
+
+  it("applies the eight-character minimum at sign-up without changing sign-in validation", async () => {
+    const headers = { origin: "http://localhost:5180" };
+    const signup = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up", headers,
+      payload: { email: "owner@example.test", password: "1234567", fullName: "Owner" },
+    });
+    expect(signup.statusCode).toBe(400);
+    expect(signup.json().error.code).toBe("INVALID_PASSWORD");
+    expect(authProvider.lastSignUpCredentials).toBeNull();
+    const signin = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in", headers, payload: { email: "owner@example.test", password: "" },
+    });
+    expect(signin.json().error.code).toBe("INVALID_REQUEST");
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
@@ -341,6 +435,22 @@ describe("API auth and private draft routes", () => {
       departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", departmentName: "Product",
     });
     expect(repository.createdOrganization).toMatchObject({ userId: ownerId, email: "owner@example.test", name: "Product Team" });
+  });
+
+  it("creates an organization without initial departments when departmentName is omitted", async () => {
+    const session = await desktopSession(app, "owner@example.test");
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/organizations",
+      headers: { cookie: session, origin: "http://localhost:5180" },
+      payload: { name: "Blank Org" },
+    });
+    expect(response.statusCode).toBe(201);
+    expect(response.json().organization).toEqual({
+      organizationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      name: "Blank Org",
+      departmentId: null,
+      departmentName: null,
+    });
   });
 
   it("exposes organization administration and audience/department mutations only to the Org Admin", async () => {
@@ -1166,7 +1276,7 @@ class FakeAuthProvider implements AuthProvider {
 
   async resolveSession(tokens: { accessToken: string }) {
     const user = this.usersByAccessToken.get(tokens.accessToken);
-    return user ? { kind: "authenticated" as const, ...user, fullName: null, emailVerified: true } : { kind: "unauthenticated" as const };
+    return user ? { kind: "authenticated" as const, ...user, fullName: user.userId === ownerId ? "Owner" : null, emailVerified: true } : { kind: "unauthenticated" as const };
   }
 
   async signOut(tokens: { accessToken: string }) {
@@ -1199,15 +1309,15 @@ class FakeAuthProvider implements AuthProvider {
   async verifyOtp(params: { email: string; token: string }) {
     const key = `${params.email}:${params.token}`;
     if (this.usedOtpTokens.has(key)) throw new Error("INVALID_OTP");
-    if (params.token !== "valid-token") throw new Error("INVALID_OTP");
+    if (params.token !== "valid-token" && params.token !== "valid-token-2") throw new Error("INVALID_OTP");
     this.usedOtpTokens.add(key);
-    const tokens = { accessToken: "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
+    const tokens = { accessToken: params.token === "valid-token-2" ? "access-recovery-2" : "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
     this.usersByAccessToken.set(tokens.accessToken, { userId: ownerId, email: params.email, passwordSetupRequired: false });
     return { tokens };
   }
 
   async updateUserPassword(tokens: { accessToken: string }, newPassword: string) {
-    if (newPassword.length < 6) throw new Error("PASSWORD_UPDATE_REJECTED");
+    if (newPassword === "rejected-password" || newPassword.length < 8) throw new Error("PASSWORD_UPDATE_REJECTED");
     this.lastUpdatedPassword = { token: tokens.accessToken, password: newPassword };
   }
 
@@ -1382,9 +1492,14 @@ class MemoryRepository implements ArdenDataRepository {
     return [{ organizationId, organizationName: "Arden Test Org", status: "ACTIVE", roleCodes: ["MEMBER"], canUsePrivateWorkspace: true }];
   }
 
-  async createOrganization(userId: string, email: string, _fullName: string | null, setup: { name: string; departmentName: string }): Promise<{ organizationId: string; name: string; departmentId: string; departmentName: string }> {
+  async createOrganization(userId: string, email: string, _fullName: string | null, setup: OrganizationSetup): Promise<CreatedOrganization> {
     this.createdOrganization = { userId, email, name: setup.name };
-    return { organizationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", name: setup.name, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", departmentName: setup.departmentName };
+    return {
+      organizationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+      name: setup.name,
+      departmentId: setup.departmentName ? "ffffffff-ffff-4fff-8fff-ffffffffffff" : null,
+      departmentName: setup.departmentName ?? null,
+    };
   }
 
   async getOrganizationAdministration(userId: string, requestedOrganization: string): Promise<OrganizationAdminData | null> {

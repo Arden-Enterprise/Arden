@@ -102,6 +102,14 @@ describe("invitation page feedback", () => {
     await waitFor(() => expect(acceptInvitation).toHaveBeenCalledTimes(2));
     expect(screen.getByRole("alert").textContent).toBe("Couldn’t confirm invitation acceptance.");
   });
+  it("asks for a password instead of calling the invitation invalid", async () => {
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token", onAccepted: vi.fn() }));
+    const email = await screen.findByRole("textbox", { name: "Email address" });
+    fireEvent.submit(email.closest("form")!);
+    expect((await screen.findByRole("alert")).textContent).toBe("Enter your password.");
+    expect(signIn).not.toHaveBeenCalled();
+  });
+
   it("passes redirectTo when creating account on invitation page", async () => {
     vi.mocked(signUp).mockResolvedValueOnce(undefined);
     render(

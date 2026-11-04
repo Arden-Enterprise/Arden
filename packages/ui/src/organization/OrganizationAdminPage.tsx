@@ -258,7 +258,22 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             departmentName={departmentName} departments={data.departments} audienceGroups={memberAudienceGroups} groupsLoading={memberGroupsLoading}
             feedback={message} feedbackError={error} busy={busy}
             grants={reviewerGrants.filter((grant) => grant.reviewerMembershipId === selectedMember.id && grant.status === "ACTIVE")}
-            onClose={() => setSelectedMemberId(null)} onDepartmentChange={(id) => void perform(() => changePrimaryDepartment(platform, organizationId, selectedMember.id, id), "Department updated.")}
+            onClose={() => setSelectedMemberId(null)}
+            onDepartmentChange={(targetDepartmentId) => {
+              const targetDept = data.departments.find((d) => d.id === targetDepartmentId);
+              const deptName = targetDept?.name ?? "selected department";
+              const isMoving = Boolean(selectedMember.departmentId);
+              setConfirmation({
+                title: isMoving
+                  ? `Move ${selectedMember.name} to ${deptName}?`
+                  : `Assign ${selectedMember.name} to ${deptName}?`,
+                description: isMoving
+                  ? `${selectedMember.name} will move from ${departmentName(selectedMember.departmentId)} to ${deptName}. Role assignments tied to the previous department will be removed.`
+                  : `${selectedMember.name} will be assigned to ${deptName} as their primary department.`,
+                action: isMoving ? "Move department" : "Assign department",
+                run: () => changePrimaryDepartment(platform, organizationId, selectedMember.id, targetDepartmentId),
+              });
+            }}
             onManageAudiences={() => { setSelectedMemberId(null); selectTab("audiences"); }}
             onRemoveFromAudience={(group, groupMembershipId) => setConfirmation({
               title: `Remove ${selectedMember.name} from ${group.name}?`, description: "Access through this group will be removed.", action: "Remove member",

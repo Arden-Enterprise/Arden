@@ -13,6 +13,11 @@ import { AuthLayout } from "./AuthLayout";
 
 export type SignInMode = "sign-in" | "register" | "forgot-password" | "reset-password";
 
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+function isValidEmail(value: string): boolean {
+  return EMAIL_PATTERN.test(value.trim());
+}
+
 function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -73,9 +78,53 @@ export function SignInPage({
   const [useResetCode, setUseResetCode] = useState(false);
   const usingRecoverySession = Boolean(recoveryTokens) && !useResetCode;
   const [notice, setNotice] = useState<{ text: string; isSuccess?: boolean } | null>(() => {
-    const status = new URLSearchParams(window.location.search).get("status");
+    if (typeof window === "undefined") return null;
+    const searchParams = new URLSearchParams(window.location.search);
+    const hash = window.location.hash;
+    const hashParams = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
+
+    const error = searchParams.get("error") || hashParams.get("error");
+    if (error) {
+      if (
+        error === "verification_failed" ||
+        error === "verify_unavailable" ||
+        error === "otp_expired"
+      ) {
+        return {
+          text: "Email confirmation link is invalid or has expired. Please try signing in or request a new link.",
+          isSuccess: false,
+        };
+      }
+      return { text: "Sign in could not be completed.", isSuccess: false };
+    }
+
+    const type = searchParams.get("type") || hashParams.get("type");
+    if (type === "signup" || type === "email_change") {
+      return {
+        text: "Your email has been confirmed successfully! You can now sign in to your account.",
+        isSuccess: true,
+      };
+    }
+
+    const status = searchParams.get("status");
     return status === "error" ? { text: "Sign in could not be completed." } : null;
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
+    if (
+      searchParams.has("type") ||
+      searchParams.has("error") ||
+      ["signup", "email_change"].includes(hashParams.get("type") ?? "") ||
+      hashParams.has("error")
+    ) {
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {}
+    }
+  }, []);
   const [busy, setBusy] = useState<"submit" | "google" | null>(null);
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
   const showPreview = new URLSearchParams(window.location.search).get("preview") === "1";
@@ -93,6 +142,14 @@ export function SignInPage({
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isValidEmail(email)) {
+      setNotice({ text: "Enter a valid email address." });
+      return;
+    }
+    if (!password) {
+      setNotice({ text: "Enter your password." });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
@@ -112,6 +169,18 @@ export function SignInPage({
 
   const handleSignUp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isValidEmail(email)) {
+      setNotice({ text: "Enter a valid email address." });
+      return;
+    }
+    if (!fullName.trim()) {
+      setNotice({ text: "Enter your name." });
+      return;
+    }
+    if ([...password].length < 8) {
+      setNotice({ text: "Password must be at least 8 characters long." });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
@@ -125,6 +194,8 @@ export function SignInPage({
       if (cause instanceof ApiError && (cause.code === "ACCOUNT_ALREADY_EXISTS" || cause.status === 409)) {
         setNotice({ text: "An account with this email address already exists. Please sign in instead." });
         setMode("sign-in");
+      } else if (cause instanceof ApiError && (cause.code === "INVALID_EMAIL" || cause.message === "Enter a valid email address.")) {
+        setNotice({ text: "Enter a valid email address." });
       } else if (cause instanceof ApiError && cause.message) {
         setNotice({ text: cause.message });
       } else {
@@ -138,6 +209,10 @@ export function SignInPage({
 
   const handleForgotPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!isValidEmail(email)) {
+      setNotice({ text: "Enter a valid email address." });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
@@ -158,6 +233,18 @@ export function SignInPage({
 
   const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!usingRecoverySession && !isValidEmail(email)) {
+      setNotice({ text: "Enter a valid email address." });
+      return;
+    }
+    if (!usingRecoverySession && !resetToken.trim()) {
+      setNotice({ text: "Enter the verification code sent to your email." });
+      return;
+    }
+    if (password.length < 8) {
+      setNotice({ text: "Password must be at least 8 characters long." });
+      return;
+    }
     if (password !== confirmPassword) {
       setNotice({ text: "Passwords do not match." });
       return;
@@ -225,7 +312,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleSignIn}>
+              <form noValidate onSubmit={handleSignIn}>
                 <label>
                   <span>Email address</span>
                   <input
@@ -277,7 +364,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleSignUp}>
+              <form noValidate onSubmit={handleSignUp}>
                 <label>
                   <span>Full name</span>
                   <input
@@ -309,7 +396,7 @@ export function SignInPage({
                     onChange={(event) => setPassword(event.target.value)}
                     autoComplete="new-password"
                     placeholder="Create a secure password"
-                    minLength={6}
+                    minLength={8}
                     maxLength={1024}
                     required
                   />
@@ -332,7 +419,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleForgotPassword}>
+              <form noValidate onSubmit={handleForgotPassword}>
                 <p className="auth-helper-text">
                   Enter your email address and we will send you instructions to reset your password.
                 </p>
@@ -375,7 +462,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleResetPassword}>
+              <form noValidate onSubmit={handleResetPassword}>
                 {!usingRecoverySession && (
                   <>
                     <label>
@@ -409,8 +496,8 @@ export function SignInPage({
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     autoComplete="new-password"
-                    placeholder="Enter new password (min. 6 characters)"
-                    minLength={6}
+                    placeholder="Enter new password (min. 8 characters)"
+                    minLength={8}
                     maxLength={1024}
                     required
                   />
@@ -423,7 +510,7 @@ export function SignInPage({
                     onChange={(event) => setConfirmPassword(event.target.value)}
                     autoComplete="new-password"
                     placeholder="Confirm new password"
-                    minLength={6}
+                    minLength={8}
                     maxLength={1024}
                     required
                   />

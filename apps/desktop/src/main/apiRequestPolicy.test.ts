@@ -63,6 +63,10 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/private-workspace/drafts`, method: "POST", body: "{}", idempotencyKey }), false);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/auth/password", method: "POST", body: JSON.stringify({ password: "synthetic-password" }) }), true);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/auth/password", method: "GET" }), false);
+    const changePassword = { path: "/api/v1/auth/change-password", method: "POST", body: "{}" };
+    assert.equal(validateDesktopApiRequest(changePassword), true);
+    assert.equal(validateDesktopApiRequest({ ...changePassword, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ ...changePassword, body: undefined }), false);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/invitations/4e-SL2tSdcYWMhj7HFTDKIcw5Vks-ygUeOY8JfkuZGg", method: "GET" }), true);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/invitations/4e-SL2tSdcYWMhj7HFTDKIcw5Vks-ygUeOY8JfkuZGg", method: "POST" }), false);
   });
