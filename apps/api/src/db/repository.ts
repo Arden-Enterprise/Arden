@@ -666,7 +666,7 @@ export class ArdenRepository implements ArdenDataRepository {
       [organizationId, membershipId, JSON.stringify({ departmentId, requestId })]);
 
       await client.query("COMMIT");
-      return { organizationId, name: setup.name, departmentId, departmentName: baseDepartmentName ?? null };
+      return { organizationId, name: setup.name, departmentId, departmentName: baseDepartmentName || null };
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Icon, type IconName } from "../shared/Icon";
 import type { SettingsSection, SettingsSectionProps } from "./types";
-import { getRegisteredSettingsSections } from "./registry";
+import { getRegisteredSettingsSections, subscribeSettingsSections } from "./registry";
 
 export type SettingsDialogProps = SettingsSectionProps & {
   open?: boolean;
@@ -18,10 +18,15 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const [registryVersion, setRegistryVersion] = useState(0);
+
+  useEffect(() => subscribeSettingsSections(() => {
+    setRegistryVersion((version) => version + 1);
+  }), []);
 
   const sections = useMemo(() => {
     return getRegisteredSettingsSections(extraSections);
-  }, [extraSections]);
+  }, [extraSections, registryVersion]);
 
   const [activeSectionId, setActiveSectionId] = useState<string>(
     initialSectionId ?? sections[0]?.id ?? "account"

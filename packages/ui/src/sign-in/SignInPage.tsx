@@ -94,8 +94,7 @@ export function SignInPage({
       ) {
         return {
           text: errorDescription
-            ? decodeURIComponent(errorDescription.replace(/\+/g, " "))
-            : "Email confirmation link is invalid or has expired. Please try signing in or request a new link.",
+            || "Email confirmation link is invalid or has expired. Please try signing in or request a new link.",
           isSuccess: false,
         };
       }
@@ -304,7 +303,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleSignIn}>
+              <form noValidate onSubmit={handleSignIn}>
                 <label>
                   <span>Email address</span>
                   <input
@@ -314,8 +313,6 @@ export function SignInPage({
                     autoComplete="username"
                     placeholder="name@company.com"
                     maxLength={320}
-                    pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-                    title="Enter a valid email address (e.g. name@company.com)"
                     required
                   />
                 </label>
@@ -358,7 +355,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleSignUp}>
+              <form noValidate onSubmit={handleSignUp}>
                 <label>
                   <span>Full name</span>
                   <input
@@ -379,8 +376,6 @@ export function SignInPage({
                     autoComplete="username"
                     placeholder="name@company.com"
                     maxLength={320}
-                    pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-                    title="Enter a valid email address (e.g. name@company.com)"
                     required
                   />
                 </label>
@@ -415,7 +410,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleForgotPassword}>
+              <form noValidate onSubmit={handleForgotPassword}>
                 <p className="auth-helper-text">
                   Enter your email address and we will send you instructions to reset your password.
                 </p>
@@ -428,8 +423,6 @@ export function SignInPage({
                     autoComplete="email"
                     placeholder="name@company.com"
                     maxLength={320}
-                    pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-                    title="Enter a valid email address (e.g. name@company.com)"
                     required
                   />
                 </label>
@@ -460,7 +453,7 @@ export function SignInPage({
                   {notice.text}
                 </div>
               )}
-              <form onSubmit={handleResetPassword}>
+              <form noValidate onSubmit={handleResetPassword}>
                 {!usingRecoverySession && (
                   <>
                     <label>
@@ -472,8 +465,6 @@ export function SignInPage({
                         autoComplete="email"
                         placeholder="name@company.com"
                         maxLength={320}
-                        pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-                        title="Enter a valid email address (e.g. name@company.com)"
                         required
                       />
                     </label>

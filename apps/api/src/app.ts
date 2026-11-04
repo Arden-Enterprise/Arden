@@ -383,6 +383,7 @@ export function buildApp(dependencies: AppDependencies) {
       const token = request.body.token ? request.body.token.trim() : undefined;
       const accessToken = request.body.accessToken ? request.body.accessToken.trim() : undefined;
       const tokenKey = email && token ? `otp:${email}:${token}` : (accessToken ? `access:${accessToken}` : null);
+      const recoveryRequest = Boolean((email && token) || (accessToken && request.body.refreshToken));
 
       if (tokenKey && isResetTokenConsumed(tokenKey)) {
         return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
@@ -406,7 +407,7 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid reset token or session is required.", request.id));
       }
 
-      if (tokens.accessToken && isResetTokenConsumed(`access:${tokens.accessToken}`)) {
+      if (recoveryRequest && tokens.accessToken && isResetTokenConsumed(`access:${tokens.accessToken}`)) {
         return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
       }
 
@@ -415,7 +416,7 @@ export function buildApp(dependencies: AppDependencies) {
       if (tokenKey) {
         markResetTokenConsumed(tokenKey);
       }
-      if (tokens.accessToken) {
+      if (recoveryRequest && tokens.accessToken) {
         markResetTokenConsumed(`access:${tokens.accessToken}`);
       }
 

@@ -268,7 +268,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                   ? `Move ${selectedMember.name} to ${deptName}?`
                   : `Assign ${selectedMember.name} to ${deptName}?`,
                 description: isMoving
-                  ? `${selectedMember.name}'s primary department will change from ${departmentName(selectedMember.departmentId)} to ${deptName}.`
+                  ? `${selectedMember.name} will move from ${departmentName(selectedMember.departmentId)} to ${deptName}. Access from the previous department will be removed.`
                   : `${selectedMember.name} will be assigned to ${deptName} as their primary department.`,
                 action: isMoving ? "Move department" : "Assign department",
                 run: () => changePrimaryDepartment(platform, organizationId, selectedMember.id, targetDepartmentId),

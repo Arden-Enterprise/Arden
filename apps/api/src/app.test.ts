@@ -338,6 +338,22 @@ describe("API auth and private draft routes", () => {
     expect(rejectedPassword.json().error.message).toBe("Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.");
   });
 
+  it("lets a signed-in account change its password more than once", async () => {
+    const first = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180", cookie: "arden_access=access-owner; arden_refresh=refresh-owner" },
+      payload: { newPassword: "first-session-password" },
+    });
+    expect(first.statusCode).toBe(200);
+    const second = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180", cookie: "arden_access=access-owner; arden_refresh=refresh-owner" },
+      payload: { newPassword: "second-session-password" },
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toEqual({ status: "password_updated" });
+  });
+
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
     const noLoginApp = buildApp({
       checkDatabase: async () => undefined,

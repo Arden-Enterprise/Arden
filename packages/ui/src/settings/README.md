@@ -64,7 +64,7 @@ That's it! Your section will automatically:
 If your feature is loaded dynamically or in a separate package, you can also register and unregister at runtime:
 
 ```tsx
-import { registerSettingsSection } from "@arden/ui/settings";
+import { registerSettingsSection } from "@arden/ui";
 
 const unregister = registerSettingsSection({
   id: "ai",

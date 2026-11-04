@@ -371,7 +371,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
               </p>
 
               {mode === "sign-in" ? (
-                <form onSubmit={(event) => void handleSignIn(event)}>
+                <form noValidate onSubmit={(event) => void handleSignIn(event)}>
                   <label>
                     <span>Email address</span>
                     <input
@@ -379,8 +379,6 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       type="email"
                       required
                       maxLength={320}
-                      pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-                      title="Enter a valid email address (e.g. name@company.com)"
                       placeholder="name@company.com"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
@@ -408,7 +406,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                   </button>
                 </form>
               ) : (
-                <form onSubmit={(event) => void handleSignUp(event)}>
+                <form noValidate onSubmit={(event) => void handleSignUp(event)}>
                   <label>
                     <span>Full name</span>
                     <input
@@ -428,8 +426,6 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       type="email"
                       required
                       maxLength={320}
-                      pattern="[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-                      title="Enter a valid email address (e.g. name@company.com)"
                       placeholder="name@company.com"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}

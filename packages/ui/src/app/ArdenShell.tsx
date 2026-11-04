@@ -525,6 +525,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
    * Completes local session teardown and resets all workspace state to sign-in.
    */
   const finishSignOut = () => {
+    setSettingsOpen(false);
     setNavOpen(false);
     if (serverSession) void apiSignOut(platform).catch(() => undefined);
     setServerSession(null);

@@ -18,6 +18,12 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
   };
 });
 
+function replacePageUrl(path: string): () => void {
+  const previous = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  window.history.replaceState(null, "", path);
+  return () => window.history.replaceState(null, "", previous || "/");
+}
+
 describe("SignInPage password reset flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -138,7 +144,6 @@ describe("SignInPage password reset flow", () => {
     fireEvent.click(submitBtn);
 
     expect(apiClient.signUp).not.toHaveBeenCalled();
-    expect(emailInput.getAttribute("pattern")).toBe("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
     expect(screen.getByRole("alert").textContent).toContain("Enter a valid email address.");
   });
 
@@ -163,14 +168,12 @@ describe("SignInPage password reset flow", () => {
     fireEvent.click(submitBtn);
 
     expect(apiClient.signIn).not.toHaveBeenCalled();
-    expect(emailInput.getAttribute("pattern")).toBe("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}");
     expect(screen.getByRole("alert").textContent).toContain("Enter a valid email address.");
   });
 
   it("displays success notice when URL contains type=signup from email confirmation", () => {
-    delete window.location;
-    window.location = new URL("http://localhost:5180/?type=signup#access_token=token&type=signup");
-
+    const restoreUrl = replacePageUrl("/?type=signup#access_token=token&type=signup");
+    try {
     render(
       createElement(SignInPage, {
         platform: "web",
@@ -182,12 +185,14 @@ describe("SignInPage password reset flow", () => {
     );
 
     expect(screen.getByRole("alert").textContent).toContain("Your email has been confirmed successfully!");
+    } finally {
+      restoreUrl();
+    }
   });
 
   it("displays error notice when URL contains error=verification_failed", () => {
-    delete window.location;
-    window.location = new URL("http://localhost:5180/?error=verification_failed");
-
+    const restoreUrl = replacePageUrl("/?error=verification_failed");
+    try {
     render(
       createElement(SignInPage, {
         platform: "web",
@@ -199,12 +204,14 @@ describe("SignInPage password reset flow", () => {
     );
 
     expect(screen.getByRole("alert").textContent).toContain("Email confirmation link is invalid or has expired.");
+    } finally {
+      restoreUrl();
+    }
   });
 
   it("shows specific error and blocks submission when reset password is under 8 characters", async () => {
-    delete window.location;
-    window.location = new URL("http://localhost:5180/");
-
+    const restoreUrl = replacePageUrl("/");
+    try {
     render(
       createElement(SignInPage, {
         platform: "web",
@@ -230,12 +237,14 @@ describe("SignInPage password reset flow", () => {
 
     expect(apiClient.resetPasswordWithToken).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("Password must be at least 8 characters long.");
+    } finally {
+      restoreUrl();
+    }
   });
 
   it("shows specific error and blocks submission when verification code is missing", async () => {
-    delete window.location;
-    window.location = new URL("http://localhost:5180/");
-
+    const restoreUrl = replacePageUrl("/");
+    try {
     render(
       createElement(SignInPage, {
         platform: "web",
@@ -259,5 +268,8 @@ describe("SignInPage password reset flow", () => {
 
     expect(apiClient.resetPasswordWithToken).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("Enter the verification code sent to your email.");
+    } finally {
+      restoreUrl();
+    }
   });
 });

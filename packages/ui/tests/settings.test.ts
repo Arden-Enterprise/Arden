@@ -79,6 +79,29 @@ describe("Settings Framework & Dialog", () => {
     }
   });
 
+  it("shows a section registered while settings is open", async () => {
+    render(
+      createElement(SettingsDialog, {
+        platform: "desktop",
+        session: null,
+        organization: null,
+        onClose: vi.fn(),
+      })
+    );
+    const unregister = registerSettingsSection({
+      id: "live-ai",
+      label: "Live AI",
+      icon: "chat",
+      component: () => createElement("div", null, "Live AI section"),
+      order: 30,
+    });
+    try {
+      expect(await screen.findByRole("tab", { name: /live ai/i })).toBeTruthy();
+    } finally {
+      unregister();
+    }
+  });
+
   it("calls onClose when close button is clicked", () => {
     const onClose = vi.fn();
     render(

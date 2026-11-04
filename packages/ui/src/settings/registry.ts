@@ -46,6 +46,11 @@ export const defaultSettingsSections: SettingsSection[] = [
  * Allows plugins or runtime modules to register custom sections without modifying core files.
  */
 const dynamicSections: Map<string, SettingsSection> = new Map();
+const sectionListeners = new Set<() => void>();
+
+function notifySettingsSections(): void {
+  for (const listener of sectionListeners) listener();
+}
 
 /**
  * Register a custom settings section dynamically.
@@ -53,8 +58,10 @@ const dynamicSections: Map<string, SettingsSection> = new Map();
  */
 export function registerSettingsSection(section: SettingsSection): () => void {
   dynamicSections.set(section.id, section);
+  notifySettingsSections();
   return () => {
     dynamicSections.delete(section.id);
+    notifySettingsSections();
   };
 }
 
@@ -63,6 +70,15 @@ export function registerSettingsSection(section: SettingsSection): () => void {
  */
 export function unregisterSettingsSection(id: string): void {
   dynamicSections.delete(id);
+  notifySettingsSections();
+}
+
+/** Refresh open settings dialogs when a section is registered or removed. */
+export function subscribeSettingsSections(listener: () => void): () => void {
+  sectionListeners.add(listener);
+  return () => {
+    sectionListeners.delete(listener);
+  };
 }
 
 /**
