@@ -281,6 +281,7 @@ const userErrorMessages: Record<string, string> = {
   INVALID_METADATA: "Check document details.",
   SOURCE_NOT_SUPPORTED: "Couldn’t copy this note.",
   IDEMPOTENCY_CONFLICT: "Request changed. Reopen to try again.",
+  INVALID_EMAIL: "Enter a valid email address.",
 };
 
 export class ApiError extends Error {
@@ -325,6 +326,15 @@ export async function resetPasswordWithToken(
 ): Promise<void> {
   await request(platform, "/api/v1/auth/reset-password", {
     method: "POST", body: JSON.stringify(params),
+  });
+}
+
+/**
+ * Updates the password for the currently authenticated account.
+ */
+export async function updateAccountPassword(platform: Platform, newPassword: string): Promise<void> {
+  await request(platform, "/api/v1/auth/reset-password", {
+    method: "POST", body: JSON.stringify({ newPassword }),
   });
 }
 

@@ -118,8 +118,18 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
 
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Enter a valid email address.");
+      setBusy(false);
+      return;
+    }
     if (invitation && email.trim().toLowerCase() !== invitation.email.toLowerCase()) {
       setError(`Use ${invitation.email}.`);
+      setBusy(false);
+      return;
+    }
+    if (!password) {
+      setError("Enter your password.");
       setBusy(false);
       return;
     }
@@ -151,8 +161,23 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
 
   const handleSignUp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Enter a valid email address.");
+      setBusy(false);
+      return;
+    }
     if (invitation && email.trim().toLowerCase() !== invitation.email.toLowerCase()) {
       setError(`Use ${invitation.email}.`);
+      setBusy(false);
+      return;
+    }
+    if (!fullName.trim()) {
+      setError("Enter your name.");
+      setBusy(false);
+      return;
+    }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters long.");
       setBusy(false);
       return;
     }
@@ -361,7 +386,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
               </p>
 
               {mode === "sign-in" ? (
-                <form onSubmit={(event) => void handleSignIn(event)}>
+                <form noValidate onSubmit={(event) => void handleSignIn(event)}>
                   <label>
                     <span>Email address</span>
                     <input
@@ -396,7 +421,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                   </button>
                 </form>
               ) : (
-                <form onSubmit={(event) => void handleSignUp(event)}>
+                <form noValidate onSubmit={(event) => void handleSignUp(event)}>
                   <label>
                     <span>Full name</span>
                     <input

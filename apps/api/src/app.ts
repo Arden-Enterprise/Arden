@@ -66,6 +66,23 @@ export function buildApp(dependencies: AppDependencies) {
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
+      const isEmailError = error.validation.some((v) =>
+        v.params?.format === "email" ||
+        v.instancePath === "/email" ||
+        (v.params as { missingProperty?: string } | undefined)?.missingProperty === "email"
+      );
+      if (isEmailError) {
+        return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
+      }
+      const isPasswordError = error.validation.some((v) =>
+        v.instancePath === "/password" ||
+        v.instancePath === "/newPassword" ||
+        (v.params as { missingProperty?: string } | undefined)?.missingProperty === "password" ||
+        (v.params as { missingProperty?: string } | undefined)?.missingProperty === "newPassword"
+      );
+      if (isPasswordError) {
+        return reply.code(400).send(safeError("INVALID_PASSWORD", "Password must be at least 8 characters long.", request.id));
+      }
       return reply.code(400).send(safeError("INVALID_REQUEST", "The request is invalid.", request.id));
     }
     if (error.statusCode === 413) {
@@ -109,8 +126,12 @@ export function buildApp(dependencies: AppDependencies) {
     },
   }, async (request, reply) => {
     if (!dependencies.auth) return authUnavailable(reply, request);
+    const normalizedEmail = request.body.email.trim().toLowerCase();
+    if (!isNormalizedEmail(normalizedEmail)) {
+      return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
+    }
     try {
-      const result = await dependencies.auth.signIn({ email: request.body.email.trim().toLowerCase(), password: request.body.password });
+      const result = await dependencies.auth.signIn({ email: normalizedEmail, password: request.body.password });
       setAuthCookies(reply, result.tokens, dependencies.secureCookies);
       return { authenticated: true };
     } catch (error) {
@@ -236,8 +257,13 @@ export function buildApp(dependencies: AppDependencies) {
         } catch {}
       }
 
+      const normalizedEmail = request.body.email.trim().toLowerCase();
+      if (!isNormalizedEmail(normalizedEmail)) {
+        return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
+      }
+
       await dependencies.auth.signUp({
-        email: request.body.email.trim().toLowerCase(),
+        email: normalizedEmail,
         password: request.body.password,
         fullName: request.body.fullName.trim(),
         redirectTo: validatedRedirectTo,
@@ -272,10 +298,14 @@ export function buildApp(dependencies: AppDependencies) {
     },
   }, async (request, reply) => {
     if (!dependencies.auth) return authUnavailable(reply, request);
+    const normalizedEmail = request.body.email.trim().toLowerCase();
+    if (!isNormalizedEmail(normalizedEmail)) {
+      return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
+    }
     try {
       if (dependencies.auth.resetPasswordForEmail) {
         const origin = request.headers.origin || dependencies.publicWebOrigin || "http://127.0.0.1:5180";
-        await dependencies.auth.resetPasswordForEmail(request.body.email.trim().toLowerCase(), `${origin}/reset-password`);
+        await dependencies.auth.resetPasswordForEmail(normalizedEmail, `${origin}/reset-password`);
       }
       return reply.code(202).send({
         status: "recovery_sent",
@@ -342,7 +372,7 @@ export function buildApp(dependencies: AppDependencies) {
           token: { type: "string", minLength: 1, maxLength: 100 },
           accessToken: { type: "string", minLength: 10 },
           refreshToken: { type: "string", minLength: 10 },
-          newPassword: { type: "string", minLength: 6, maxLength: 1024 },
+          newPassword: { type: "string", minLength: 8, maxLength: 1024 },
         },
       },
     },
@@ -353,6 +383,7 @@ export function buildApp(dependencies: AppDependencies) {
       const token = request.body.token ? request.body.token.trim() : undefined;
       const accessToken = request.body.accessToken ? request.body.accessToken.trim() : undefined;
       const tokenKey = email && token ? `otp:${email}:${token}` : (accessToken ? `access:${accessToken}` : null);
+      const recoveryRequest = Boolean((email && token) || (accessToken && request.body.refreshToken));
 
       if (tokenKey && isResetTokenConsumed(tokenKey)) {
         return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
@@ -376,7 +407,7 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid reset token or session is required.", request.id));
       }
 
-      if (tokens.accessToken && isResetTokenConsumed(`access:${tokens.accessToken}`)) {
+      if (recoveryRequest && tokens.accessToken && isResetTokenConsumed(`access:${tokens.accessToken}`)) {
         return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
       }
 
@@ -385,7 +416,7 @@ export function buildApp(dependencies: AppDependencies) {
       if (tokenKey) {
         markResetTokenConsumed(tokenKey);
       }
-      if (tokens.accessToken) {
+      if (recoveryRequest && tokens.accessToken) {
         markResetTokenConsumed(`access:${tokens.accessToken}`);
       }
 
@@ -395,8 +426,11 @@ export function buildApp(dependencies: AppDependencies) {
       if (error instanceof Error && (error.message === "INVALID_OTP" || error.message === "INVALID_SESSION")) {
         return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link or code is invalid or has expired.", request.id));
       }
-      if (error instanceof Error && error.message === "PASSWORD_UPDATE_REJECTED") {
-        return reply.code(400).send(safeError("PASSWORD_REJECTED", "Password does not meet requirements.", request.id));
+      if (error instanceof Error && (error.message === "PASSWORD_UPDATE_REJECTED" || error.message.toLowerCase().includes("password"))) {
+        const message = error.message !== "PASSWORD_UPDATE_REJECTED" && error.message.length > 5
+          ? error.message
+          : "Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.";
+        return reply.code(400).send(safeError("PASSWORD_REJECTED", message, request.id));
       }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password update failed");
       return authUnavailable(reply, request);
@@ -458,13 +492,13 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     const name = request.body.name.trim();
-    const departmentName = request.body.departmentName?.trim() || "General";
-    if (!isValidLabel(name, 120) || !isValidLabel(departmentName, 80) || !context.emailVerified || !isNormalizedEmail(context.email)) {
+    const departmentName = request.body.departmentName?.trim();
+    if (!isValidLabel(name, 120) || (departmentName && !isValidLabel(departmentName, 80)) || !context.emailVerified || !isNormalizedEmail(context.email)) {
       return reply.code(400).send(safeError("INVALID_ORGANIZATION", "Verified account details and non-empty names are required.", request.id));
     }
     try {
       const organization = await dependencies.repository.createOrganization(
-        context.userId, context.email, context.fullName, { name, departmentName }, request.id,
+        context.userId, context.email, context.fullName, { name, ...(departmentName ? { departmentName } : {}) }, request.id,
       );
       reply.header("Location", `/api/v1/organizations/${organization.organizationId}`);
       return reply.code(201).send({ organization });
@@ -579,6 +613,9 @@ export function buildApp(dependencies: AppDependencies) {
     const token = randomBytes(32).toString("base64url");
     const tokenHash = hashInvitationToken(token);
     const email = request.body.email.trim().toLowerCase();
+    if (!isNormalizedEmail(email)) {
+      return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
+    }
     const departmentId = request.body.departmentId ? request.body.departmentId.trim() : null;
     const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     try {

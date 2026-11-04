@@ -18,6 +18,12 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
   };
 });
 
+function replacePageUrl(path: string): () => void {
+  const previous = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  window.history.replaceState(null, "", path);
+  return () => window.history.replaceState(null, "", previous || "/");
+}
+
 describe("SignInPage password reset flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -113,5 +119,201 @@ describe("SignInPage password reset flow", () => {
       expect(screen.getByRole("heading", { name: /sign in to your account/i })).toBeTruthy();
       expect(screen.getByText(/password updated successfully/i)).toBeTruthy();
     });
+  });
+
+  it("shows an error notice and prevents sign-up when email format is invalid", async () => {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "register",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    const nameInput = screen.getByPlaceholderText("Your name");
+    const emailInput = screen.getByPlaceholderText("name@company.com");
+    const passwordInput = screen.getByPlaceholderText(/create a secure password/i);
+
+    fireEvent.change(nameInput, { target: { value: "LGK" } });
+    fireEvent.change(emailInput, { target: { value: "123@gmail" } });
+    fireEvent.change(passwordInput, { target: { value: "secure-password" } });
+
+    const submitBtn = screen.getByRole("button", { name: /create account/i });
+    fireEvent.click(submitBtn);
+
+    expect(apiClient.signUp).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Enter a valid email address.");
+  });
+
+  it("shows an error notice and prevents sign-in when email format is invalid", async () => {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "sign-in",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    const emailInput = screen.getByPlaceholderText("name@company.com");
+    const passwordInput = screen.getByPlaceholderText(/enter your password/i);
+
+    fireEvent.change(emailInput, { target: { value: "123@gmail" } });
+    fireEvent.change(passwordInput, { target: { value: "secure-password" } });
+
+    const submitBtn = screen.getByRole("button", { name: /^sign in$/i });
+    fireEvent.click(submitBtn);
+
+    expect(apiClient.signIn).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Enter a valid email address.");
+  });
+
+  it("asks for a password before sign-in and does not apply the registration length rule", () => {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "sign-in",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("name@company.com"), { target: { value: "user@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
+
+    expect(apiClient.signIn).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("Enter your password.");
+  });
+
+  it("asks for a name and a 6 character password before registration", () => {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "register",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("name@company.com"), { target: { value: "user@example.test" } });
+    fireEvent.change(screen.getByPlaceholderText(/create a secure password/i), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    expect(apiClient.signUp).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("Enter your name.");
+
+    fireEvent.change(screen.getByPlaceholderText("Your name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByPlaceholderText(/create a secure password/i), { target: { value: "short" } });
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    expect(apiClient.signUp).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("Password must be at least 6 characters long.");
+  });
+
+  it("displays success notice when URL contains type=signup from email confirmation", () => {
+    const restoreUrl = replacePageUrl("/?type=signup#access_token=token&type=signup");
+    try {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "sign-in",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("Your email has been confirmed successfully!");
+    } finally {
+      restoreUrl();
+    }
+  });
+
+  it("displays error notice when URL contains error=verification_failed", () => {
+    const restoreUrl = replacePageUrl("/?error=verification_failed");
+    try {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "sign-in",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("Email confirmation link is invalid or has expired.");
+    } finally {
+      restoreUrl();
+    }
+  });
+
+  it("shows specific error and blocks submission when reset password is under 8 characters", async () => {
+    const restoreUrl = replacePageUrl("/");
+    try {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "reset-password",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    const emailInput = screen.getByPlaceholderText("name@company.com");
+    const codeInput = screen.getByPlaceholderText(/enter code from email/i);
+    const passwordInput = screen.getByPlaceholderText(/enter new password/i);
+    const confirmPasswordInput = screen.getByPlaceholderText(/confirm new password/i);
+
+    fireEvent.change(emailInput, { target: { value: "user@example.test" } });
+    fireEvent.change(codeInput, { target: { value: "123456" } });
+    fireEvent.change(passwordInput, { target: { value: "short" } });
+    fireEvent.change(confirmPasswordInput, { target: { value: "short" } });
+
+    const submitBtn = screen.getByRole("button", { name: /update password/i });
+    fireEvent.click(submitBtn);
+
+    expect(apiClient.resetPasswordWithToken).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Password must be at least 8 characters long.");
+    } finally {
+      restoreUrl();
+    }
+  });
+
+  it("shows specific error and blocks submission when verification code is missing", async () => {
+    const restoreUrl = replacePageUrl("/");
+    try {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "reset-password",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    const emailInput = screen.getByPlaceholderText("name@company.com");
+    const passwordInput = screen.getByPlaceholderText(/enter new password/i);
+    const confirmPasswordInput = screen.getByPlaceholderText(/confirm new password/i);
+
+    fireEvent.change(emailInput, { target: { value: "user@example.test" } });
+    fireEvent.change(passwordInput, { target: { value: "valid-password-123" } });
+    fireEvent.change(confirmPasswordInput, { target: { value: "valid-password-123" } });
+
+    const form = screen.getByRole("button", { name: /update password/i }).closest("form")!;
+    fireEvent.submit(form);
+
+    expect(apiClient.resetPasswordWithToken).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Enter the verification code sent to your email.");
+    } finally {
+      restoreUrl();
+    }
   });
 });
