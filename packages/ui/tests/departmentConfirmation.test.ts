@@ -150,7 +150,7 @@ describe("OrganizationAdminPage department assignment confirmation", () => {
     // Confirmation dialog should appear with Move title
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: /move bob inengineering to product\?/i })).toBeTruthy();
-      expect(screen.getByText(/bob inengineering's primary department will change from engineering to product/i)).toBeTruthy();
+      expect(screen.getByText(/bob inengineering will move from engineering to product\. access from the previous department will be removed\./i)).toBeTruthy();
     });
 
     // Click confirm
