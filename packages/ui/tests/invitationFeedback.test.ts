@@ -116,14 +116,14 @@ describe("invitation page feedback", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret123" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Secret123!" } });
     fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
 
     await waitFor(() => {
       expect(signUp).toHaveBeenCalledWith(
         "web",
         "member@example.com",
-        "secret123",
+        "Secret123!",
         "New User",
         `${window.location.origin}/invite/invite-token-abc`,
       );
