@@ -128,6 +128,11 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       setBusy(false);
       return;
     }
+    if (!password) {
+      setError("Enter your password.");
+      setBusy(false);
+      return;
+    }
     try {
       const signedInSession = await signIn(platform, email.trim(), password);
       onSessionChange?.(signedInSession);
@@ -163,6 +168,16 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     }
     if (invitation && email.trim().toLowerCase() !== invitation.email.toLowerCase()) {
       setError(`Use ${invitation.email}.`);
+      setBusy(false);
+      return;
+    }
+    if (!fullName.trim()) {
+      setError("Enter your name.");
+      setBusy(false);
+      return;
+    }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters long.");
       setBusy(false);
       return;
     }

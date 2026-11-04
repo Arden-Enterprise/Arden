@@ -1,7 +1,7 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Icon, type IconName } from "../shared/Icon";
 import type { SettingsSection, SettingsSectionProps } from "./types";
-import { getRegisteredSettingsSections, subscribeSettingsSections } from "./registry";
+import { getRegisteredSettingsSections, getSettingsRegistryVersion, subscribeSettingsSections } from "./registry";
 
 export type SettingsDialogProps = SettingsSectionProps & {
   open?: boolean;
@@ -18,11 +18,11 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  const [registryVersion, setRegistryVersion] = useState(0);
-
-  useEffect(() => subscribeSettingsSections(() => {
-    setRegistryVersion((version) => version + 1);
-  }), []);
+  const registryVersion = useSyncExternalStore(
+    subscribeSettingsSections,
+    getSettingsRegistryVersion,
+    getSettingsRegistryVersion,
+  );
 
   const sections = useMemo(() => {
     return getRegisteredSettingsSections(extraSections);

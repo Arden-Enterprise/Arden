@@ -47,9 +47,16 @@ export const defaultSettingsSections: SettingsSection[] = [
  */
 const dynamicSections: Map<string, SettingsSection> = new Map();
 const sectionListeners = new Set<() => void>();
+let registryVersion = 0;
 
 function notifySettingsSections(): void {
+  registryVersion += 1;
   for (const listener of sectionListeners) listener();
+}
+
+/** Stable snapshot for an open settings dialog to subscribe to. */
+export function getSettingsRegistryVersion(): number {
+  return registryVersion;
 }
 
 /**

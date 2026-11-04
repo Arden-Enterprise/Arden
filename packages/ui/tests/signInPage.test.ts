@@ -171,6 +171,50 @@ describe("SignInPage password reset flow", () => {
     expect(screen.getByRole("alert").textContent).toContain("Enter a valid email address.");
   });
 
+  it("asks for a password before sign-in and does not apply the registration length rule", () => {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "sign-in",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("name@company.com"), { target: { value: "user@example.test" } });
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
+
+    expect(apiClient.signIn).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("Enter your password.");
+  });
+
+  it("asks for a name and a 6 character password before registration", () => {
+    render(
+      createElement(SignInPage, {
+        platform: "web",
+        initialMode: "register",
+        onEnterPreview: vi.fn(),
+        onOpenSetup: vi.fn(),
+        onAuthenticated: vi.fn(),
+      })
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("name@company.com"), { target: { value: "user@example.test" } });
+    fireEvent.change(screen.getByPlaceholderText(/create a secure password/i), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    expect(apiClient.signUp).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("Enter your name.");
+
+    fireEvent.change(screen.getByPlaceholderText("Your name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByPlaceholderText(/create a secure password/i), { target: { value: "short" } });
+    fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+
+    expect(apiClient.signUp).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toBe("Password must be at least 6 characters long.");
+  });
+
   it("displays success notice when URL contains type=signup from email confirmation", () => {
     const restoreUrl = replacePageUrl("/?type=signup#access_token=token&type=signup");
     try {

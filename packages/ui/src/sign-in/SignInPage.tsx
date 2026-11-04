@@ -149,6 +149,10 @@ export function SignInPage({
       setNotice({ text: "Enter a valid email address." });
       return;
     }
+    if (!password) {
+      setNotice({ text: "Enter your password." });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
@@ -170,6 +174,14 @@ export function SignInPage({
     event.preventDefault();
     if (!isValidEmail(email)) {
       setNotice({ text: "Enter a valid email address." });
+      return;
+    }
+    if (!fullName.trim()) {
+      setNotice({ text: "Enter your name." });
+      return;
+    }
+    if (password.length < 6) {
+      setNotice({ text: "Password must be at least 6 characters long." });
       return;
     }
     setBusy("submit");

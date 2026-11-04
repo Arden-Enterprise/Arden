@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { createElement } from "react";
+import { createElement, useLayoutEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import { SettingsDialog } from "../src/settings/SettingsDialog";
@@ -77,6 +77,35 @@ describe("Settings Framework & Dialog", () => {
     } finally {
       unregister();
     }
+  });
+
+  it("shows a section registered while the dialog is mounting", async () => {
+    function Registrar() {
+      useLayoutEffect(() => registerSettingsSection({
+        id: "during-mount",
+        label: "During mount",
+        component: () => createElement("div", null, "Mounted during open"),
+        order: 40,
+      }), []);
+      return null;
+    }
+
+    render(
+      createElement(SettingsDialog, {
+        platform: "desktop",
+        session: null,
+        organization: null,
+        onClose: vi.fn(),
+        extraSections: [{
+          id: "registrar",
+          label: "Registrar",
+          component: Registrar,
+          order: 5,
+        }],
+      })
+    );
+
+    expect(await screen.findByRole("tab", { name: /during mount/i })).toBeTruthy();
   });
 
   it("shows a section registered while settings is open", async () => {
