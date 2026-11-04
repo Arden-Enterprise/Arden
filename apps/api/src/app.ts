@@ -74,6 +74,15 @@ export function buildApp(dependencies: AppDependencies) {
       if (isEmailError) {
         return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
       }
+      const isPasswordError = error.validation.some((v) =>
+        v.instancePath === "/password" ||
+        v.instancePath === "/newPassword" ||
+        (v.params as { missingProperty?: string } | undefined)?.missingProperty === "password" ||
+        (v.params as { missingProperty?: string } | undefined)?.missingProperty === "newPassword"
+      );
+      if (isPasswordError) {
+        return reply.code(400).send(safeError("INVALID_PASSWORD", "Password must be at least 8 characters long.", request.id));
+      }
       return reply.code(400).send(safeError("INVALID_REQUEST", "The request is invalid.", request.id));
     }
     if (error.statusCode === 413) {
@@ -363,7 +372,7 @@ export function buildApp(dependencies: AppDependencies) {
           token: { type: "string", minLength: 1, maxLength: 100 },
           accessToken: { type: "string", minLength: 10 },
           refreshToken: { type: "string", minLength: 10 },
-          newPassword: { type: "string", minLength: 6, maxLength: 1024 },
+          newPassword: { type: "string", minLength: 8, maxLength: 1024 },
         },
       },
     },
@@ -416,8 +425,11 @@ export function buildApp(dependencies: AppDependencies) {
       if (error instanceof Error && (error.message === "INVALID_OTP" || error.message === "INVALID_SESSION")) {
         return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link or code is invalid or has expired.", request.id));
       }
-      if (error instanceof Error && error.message === "PASSWORD_UPDATE_REJECTED") {
-        return reply.code(400).send(safeError("PASSWORD_REJECTED", "Password does not meet requirements.", request.id));
+      if (error instanceof Error && (error.message === "PASSWORD_UPDATE_REJECTED" || error.message.toLowerCase().includes("password"))) {
+        const message = error.message !== "PASSWORD_UPDATE_REJECTED" && error.message.length > 5
+          ? error.message
+          : "Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.";
+        return reply.code(400).send(safeError("PASSWORD_REJECTED", message, request.id));
       }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password update failed");
       return authUnavailable(reply, request);

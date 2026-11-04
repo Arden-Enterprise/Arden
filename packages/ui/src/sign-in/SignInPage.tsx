@@ -78,9 +78,57 @@ export function SignInPage({
   const [useResetCode, setUseResetCode] = useState(false);
   const usingRecoverySession = Boolean(recoveryTokens) && !useResetCode;
   const [notice, setNotice] = useState<{ text: string; isSuccess?: boolean } | null>(() => {
-    const status = new URLSearchParams(window.location.search).get("status");
+    if (typeof window === "undefined") return null;
+    const searchParams = new URLSearchParams(window.location.search);
+    const hash = window.location.hash;
+    const hashParams = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash);
+
+    const error = searchParams.get("error") || hashParams.get("error");
+    const errorDescription = searchParams.get("error_description") || hashParams.get("error_description");
+    if (error) {
+      if (
+        error === "verification_failed" ||
+        error === "verify_unavailable" ||
+        error.includes("link") ||
+        (errorDescription && errorDescription.toLowerCase().includes("link"))
+      ) {
+        return {
+          text: errorDescription
+            ? decodeURIComponent(errorDescription.replace(/\+/g, " "))
+            : "Email confirmation link is invalid or has expired. Please try signing in or request a new link.",
+          isSuccess: false,
+        };
+      }
+      return { text: "Sign in could not be completed.", isSuccess: false };
+    }
+
+    const type = searchParams.get("type") || hashParams.get("type");
+    if (type === "signup" || type === "email_change") {
+      return {
+        text: "Your email has been confirmed successfully! You can now sign in to your account.",
+        isSuccess: true,
+      };
+    }
+
+    const status = searchParams.get("status");
     return status === "error" ? { text: "Sign in could not be completed." } : null;
   });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const searchParams = new URLSearchParams(window.location.search);
+    const hash = window.location.hash;
+    if (
+      searchParams.has("type") ||
+      searchParams.has("error") ||
+      hash.includes("type=signup") ||
+      hash.includes("error=")
+    ) {
+      try {
+        window.history.replaceState(null, "", window.location.pathname);
+      } catch {}
+    }
+  }, []);
   const [busy, setBusy] = useState<"submit" | "google" | null>(null);
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
   const showPreview = new URLSearchParams(window.location.search).get("preview") === "1";
@@ -179,6 +227,14 @@ export function SignInPage({
     event.preventDefault();
     if (!usingRecoverySession && !isValidEmail(email)) {
       setNotice({ text: "Enter a valid email address." });
+      return;
+    }
+    if (!usingRecoverySession && !resetToken.trim()) {
+      setNotice({ text: "Enter the verification code sent to your email." });
+      return;
+    }
+    if (password.length < 8) {
+      setNotice({ text: "Password must be at least 8 characters long." });
       return;
     }
     if (password !== confirmPassword) {
@@ -440,8 +496,8 @@ export function SignInPage({
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     autoComplete="new-password"
-                    placeholder="Enter new password (min. 6 characters)"
-                    minLength={6}
+                    placeholder="Enter new password (min. 8 characters)"
+                    minLength={8}
                     maxLength={1024}
                     required
                   />
@@ -454,7 +510,7 @@ export function SignInPage({
                     onChange={(event) => setConfirmPassword(event.target.value)}
                     autoComplete="new-password"
                     placeholder="Confirm new password"
-                    minLength={6}
+                    minLength={8}
                     maxLength={1024}
                     required
                   />

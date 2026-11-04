@@ -318,6 +318,24 @@ describe("API auth and private draft routes", () => {
     expect(reusedAccessToken.statusCode).toBe(401);
     expect(reusedAccessToken.json().error.code).toBe("INVALID_TOKEN");
     expect(reusedAccessToken.json().error.message).toBe("The reset code has already been used.");
+
+    const shortPassword = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token", newPassword: "short" },
+    });
+    expect(shortPassword.statusCode).toBe(400);
+    expect(shortPassword.json().error.code).toBe("INVALID_PASSWORD");
+    expect(shortPassword.json().error.message).toBe("Password must be at least 8 characters long.");
+
+    const rejectedPassword = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", token: "valid-token-2", newPassword: "rejected-password" },
+    });
+    expect(rejectedPassword.statusCode).toBe(400);
+    expect(rejectedPassword.json().error.code).toBe("PASSWORD_REJECTED");
+    expect(rejectedPassword.json().error.message).toBe("Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.");
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
@@ -1237,15 +1255,15 @@ class FakeAuthProvider implements AuthProvider {
   async verifyOtp(params: { email: string; token: string }) {
     const key = `${params.email}:${params.token}`;
     if (this.usedOtpTokens.has(key)) throw new Error("INVALID_OTP");
-    if (params.token !== "valid-token") throw new Error("INVALID_OTP");
+    if (params.token !== "valid-token" && params.token !== "valid-token-2") throw new Error("INVALID_OTP");
     this.usedOtpTokens.add(key);
-    const tokens = { accessToken: "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
+    const tokens = { accessToken: params.token === "valid-token-2" ? "access-recovery-2" : "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
     this.usersByAccessToken.set(tokens.accessToken, { userId: ownerId, email: params.email, passwordSetupRequired: false });
     return { tokens };
   }
 
   async updateUserPassword(tokens: { accessToken: string }, newPassword: string) {
-    if (newPassword.length < 6) throw new Error("PASSWORD_UPDATE_REJECTED");
+    if (newPassword === "rejected-password" || newPassword.length < 8) throw new Error("PASSWORD_UPDATE_REJECTED");
     this.lastUpdatedPassword = { token: tokens.accessToken, password: newPassword };
   }
 
