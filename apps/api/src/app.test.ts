@@ -175,7 +175,7 @@ describe("API auth and private draft routes", () => {
     const response = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      actor: { id: ownerId, email: "owner@example.test" },
+      actor: { id: ownerId, email: "owner@example.test", fullName: "Owner" },
       account: { passwordSetupRequired: false },
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
@@ -213,24 +213,28 @@ describe("API auth and private draft routes", () => {
     expect(after.json().account).toEqual({ passwordSetupRequired: false });
   });
 
-  it("handles sign-up validation and duplicate account rejection", async () => {
+  it("keeps sign-up confirmation non-enumerating and handles validation", async () => {
     authProvider.signUpBehavior = "already_exists";
     const conflict = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
       payload: { email: "existing@example.test", password: "secure-password", fullName: "Existing User" },
     });
-    expect(conflict.statusCode).toBe(409);
-    expect(conflict.json().error).toMatchObject({
-      code: "ACCOUNT_ALREADY_EXISTS",
-      message: "An account with this email address already exists. Please sign in instead.",
+    expect(conflict.statusCode).toBe(202);
+    authProvider.signUpBehavior = "success";
+    const signup = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "fresh@example.test", password: "secure-password", fullName: "New User" },
     });
+    expect(signup.statusCode).toBe(202);
+    expect(signup.json()).toEqual(conflict.json());
 
     authProvider.signUpBehavior = "rejected";
     const rejected = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "weak@example.test", password: "123", fullName: "Weak User" },
+      payload: { email: "weak@example.test", password: "12345678", fullName: "Weak User" },
     });
     expect(rejected.statusCode).toBe(400);
     expect(rejected.json().error).toMatchObject({
@@ -338,20 +342,54 @@ describe("API auth and private draft routes", () => {
     expect(rejectedPassword.json().error.message).toBe("Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.");
   });
 
-  it("lets a signed-in account change its password more than once", async () => {
-    const first = await app.inject({
-      method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180", cookie: "arden_access=access-owner; arden_refresh=refresh-owner" },
-      payload: { newPassword: "first-session-password" },
+  it("requires a verified current password for account changes and rejects session-only recovery", async () => {
+    const signIn = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", password: "synthetic-password" },
     });
-    expect(first.statusCode).toBe(200);
-    const second = await app.inject({
+    const headers = { origin: "http://localhost:5180", cookie: cookieHeader(signIn.headers["set-cookie"]) };
+    const submit = (url: string, payload: object) => app.inject({ method: "POST", url, headers, payload });
+    const change = "/api/v1/auth/change-password";
+    const reset = "/api/v1/auth/reset-password";
+    const newPassword = "new-secure-password";
+    expect((await submit(reset, { newPassword })).statusCode).toBe(401);
+    expect((await submit(reset, { accessToken: "access-owner", refreshToken: "refresh-owner", newPassword })).statusCode).toBe(401);
+    expect((await submit(change, { newPassword })).statusCode).toBe(400);
+    const wrong = await submit(change, { currentPassword: "wrong", newPassword });
+    expect(wrong.statusCode).toBe(401);
+    expect(wrong.json().error.code).toBe("INVALID_CURRENT_PASSWORD");
+    expect(authProvider.lastUpdatedPassword).toBeNull();
+    const updated = await submit(change, { currentPassword: "synthetic-password", newPassword });
+    expect(updated.statusCode).toBe(200);
+    expect(authProvider.lastUpdatedPassword).toEqual({ token: "access-owner", password: newPassword });
+  });
+
+  it("binds a recovery-link update to the verified browser flow", async () => {
+    const verify = await app.inject({ method: "GET", url: "/verify?token=valid-link&type=recovery" });
+    const cookie = cookieHeader(verify.headers["set-cookie"]);
+    const reset = (refreshToken: string) => app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180", cookie: "arden_access=access-owner; arden_refresh=refresh-owner" },
-      payload: { newPassword: "second-session-password" },
+      headers: { origin: "http://localhost:5180", cookie },
+      payload: { accessToken: "access-recovery", refreshToken, newPassword: "new-secure-password" },
     });
-    expect(second.statusCode).toBe(200);
-    expect(second.json()).toEqual({ status: "password_updated" });
+    expect((await reset("different-refresh")).statusCode).toBe(401);
+    expect((await reset("refresh-recovery")).statusCode).toBe(200);
+    expect((await reset("refresh-recovery")).statusCode).toBe(401);
+  });
+
+  it("applies the eight-character minimum at sign-up without changing sign-in validation", async () => {
+    const headers = { origin: "http://localhost:5180" };
+    const signup = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up", headers,
+      payload: { email: "owner@example.test", password: "1234567", fullName: "Owner" },
+    });
+    expect(signup.statusCode).toBe(400);
+    expect(signup.json().error.code).toBe("INVALID_PASSWORD");
+    expect(authProvider.lastSignUpCredentials).toBeNull();
+    const signin = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in", headers, payload: { email: "owner@example.test", password: "" },
+    });
+    expect(signin.json().error.code).toBe("INVALID_REQUEST");
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
@@ -1238,7 +1276,7 @@ class FakeAuthProvider implements AuthProvider {
 
   async resolveSession(tokens: { accessToken: string }) {
     const user = this.usersByAccessToken.get(tokens.accessToken);
-    return user ? { kind: "authenticated" as const, ...user, fullName: null, emailVerified: true } : { kind: "unauthenticated" as const };
+    return user ? { kind: "authenticated" as const, ...user, fullName: user.userId === ownerId ? "Owner" : null, emailVerified: true } : { kind: "unauthenticated" as const };
   }
 
   async signOut(tokens: { accessToken: string }) {

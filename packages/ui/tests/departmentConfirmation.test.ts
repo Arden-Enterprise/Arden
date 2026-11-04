@@ -21,7 +21,7 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
   };
 });
 
-const mockAdminData: apiClient.OrganizationAdminData = {
+const mockAdminData: apiClient.OrganizationAdministration = {
   departments: [
     { id: "dept-1", name: "Engineering", defaultRoleId: "role-1", defaultRoleName: "Engineer" },
     { id: "dept-2", name: "Product", defaultRoleId: "role-2", defaultRoleName: "Product Manager" },
@@ -76,6 +76,8 @@ describe("OrganizationAdminPage department assignment confirmation", () => {
         platform: "web",
         organizationId: "org-1",
         organizationName: "Test Org",
+        contextOpen: false,
+        onToggleContext: vi.fn(),
       })
     );
 
@@ -124,6 +126,8 @@ describe("OrganizationAdminPage department assignment confirmation", () => {
         platform: "web",
         organizationId: "org-1",
         organizationName: "Test Org",
+        contextOpen: false,
+        onToggleContext: vi.fn(),
       })
     );
 
@@ -150,7 +154,7 @@ describe("OrganizationAdminPage department assignment confirmation", () => {
     // Confirmation dialog should appear with Move title
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: /move bob inengineering to product\?/i })).toBeTruthy();
-      expect(screen.getByText(/bob inengineering will move from engineering to product\. access from the previous department will be removed\./i)).toBeTruthy();
+      expect(screen.getByText(/bob inengineering will move from engineering to product\. role assignments tied to the previous department will be removed\./i)).toBeTruthy();
     });
 
     // Click confirm

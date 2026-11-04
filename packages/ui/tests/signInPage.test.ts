@@ -31,6 +31,23 @@ describe("SignInPage password reset flow", () => {
 
   afterEach(cleanup);
 
+  it("uses fixed verification error copy and clears auth fragments", () => {
+    const restoreUrl = replacePageUrl("/?error=verification_failed&error_description=Follow%20a%20malicious%20link");
+    const props = { platform: "web" as const, onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn() };
+    try {
+      const { unmount } = render(createElement(SignInPage, props));
+      expect(screen.getByRole("alert").textContent).toContain("Email confirmation link is invalid");
+      expect(screen.queryByText("Follow a malicious link")).toBeNull();
+      unmount();
+      window.history.replaceState(null, "", "/#access_token=synthetic&refresh_token=synthetic&type=email_change");
+      render(createElement(SignInPage, props));
+      expect(window.location.hash).toBe("");
+      expect(screen.getByRole("alert").textContent).toContain("Your email has been confirmed");
+    } finally {
+      restoreUrl();
+    }
+  });
+
   it("does not render 'Have a reset code?' and transitions directly to reset-password on sending instructions", async () => {
     vi.mocked(apiClient.requestPasswordReset).mockResolvedValue(undefined);
 
@@ -212,7 +229,7 @@ describe("SignInPage password reset flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /create account/i }));
 
     expect(apiClient.signUp).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toBe("Password must be at least 6 characters long.");
+    expect(screen.getByRole("alert").textContent).toBe("Password must be at least 8 characters long.");
   });
 
   it("displays success notice when URL contains type=signup from email confirmation", () => {

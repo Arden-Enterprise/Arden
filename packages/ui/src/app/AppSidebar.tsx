@@ -110,7 +110,7 @@ function SidebarAccountMenu({ memberName, memberRole, authenticated, onSignOut, 
         <div><strong>{memberName}</strong><span>{memberRole}</span></div>
       </button>
       {open && <div className="sidebar-account-menu" id={menuId} role="menu">
-        <button type="button" role="menuitem" onClick={() => { setOpen(false); onOpenSettings?.(); }}>Settings</button>
+        <button type="button" role="menuitem" onClick={() => { triggerRef.current?.focus(); setOpen(false); onOpenSettings?.(); }}>Settings</button>
         <button type="button" role="menuitem" ref={actionRef} onClick={() => { setOpen(false); onSignOut(); }}>{authenticated ? "Log out" : "Exit preview"}</button>
       </div>}
     </div>

@@ -13,7 +13,7 @@ export type OrganizationMembership = {
   canUsePrivateWorkspace: boolean;
 };
 export type CurrentSession = {
-  actor: { id: string; email?: string };
+  actor: { id: string; email?: string; fullName?: string | null };
   account: { passwordSetupRequired: boolean };
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
@@ -332,9 +332,9 @@ export async function resetPasswordWithToken(
 /**
  * Updates the password for the currently authenticated account.
  */
-export async function updateAccountPassword(platform: Platform, newPassword: string): Promise<void> {
-  await request(platform, "/api/v1/auth/reset-password", {
-    method: "POST", body: JSON.stringify({ newPassword }),
+export async function updateAccountPassword(platform: Platform, currentPassword: string, newPassword: string): Promise<void> {
+  await request(platform, "/api/v1/auth/change-password", {
+    method: "POST", body: JSON.stringify({ currentPassword, newPassword }),
   });
 }
 

@@ -37,7 +37,7 @@ describe("Settings Framework & Dialog", () => {
     );
 
     expect(screen.getByRole("dialog")).toBeTruthy();
-    expect(screen.getByRole("tab", { name: /account/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /account/i })).toBeTruthy();
     expect(screen.getByRole("heading", { name: /account settings/i })).toBeTruthy();
     expect(screen.getByText("Lan Nguyen")).toBeTruthy();
   });
@@ -66,7 +66,7 @@ describe("Settings Framework & Dialog", () => {
         })
       );
 
-      const aiTab = screen.getByRole("tab", { name: /arden ai/i });
+      const aiTab = screen.getByRole("button", { name: /arden ai/i });
       expect(aiTab).toBeTruthy();
 
       // Click the custom AI tab
@@ -105,7 +105,7 @@ describe("Settings Framework & Dialog", () => {
       })
     );
 
-    expect(await screen.findByRole("tab", { name: /during mount/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /during mount/i })).toBeTruthy();
   });
 
   it("shows a section registered while settings is open", async () => {
@@ -125,7 +125,7 @@ describe("Settings Framework & Dialog", () => {
       order: 30,
     });
     try {
-      expect(await screen.findByRole("tab", { name: /live ai/i })).toBeTruthy();
+      expect(await screen.findByRole("button", { name: /live ai/i })).toBeTruthy();
     } finally {
       unregister();
     }
@@ -190,6 +190,8 @@ describe("AccountSettingsSection", () => {
     const confirmInput = screen.getByLabelText(/confirm password/i);
     const submitBtn = screen.getByRole("button", { name: /update password/i });
 
+    fireEvent.change(screen.getByLabelText(/current password/i), { target: { value: "OldSecurePassword" } });
+
     // Too short
     fireEvent.change(newPasswordInput, { target: { value: "123" } });
     fireEvent.change(confirmInput, { target: { value: "123" } });
@@ -227,6 +229,7 @@ describe("AccountSettingsSection", () => {
     const newPasswordInput = screen.getByLabelText(/new password/i);
     const confirmInput = screen.getByLabelText(/confirm password/i);
 
+    fireEvent.change(screen.getByLabelText(/current password/i), { target: { value: "OldSecurePassword" } });
     fireEvent.change(newPasswordInput, { target: { value: "NewSecurePassword123!" } });
     fireEvent.change(confirmInput, { target: { value: "NewSecurePassword123!" } });
 
@@ -234,7 +237,7 @@ describe("AccountSettingsSection", () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(updateSpy).toHaveBeenCalledWith("web", "NewSecurePassword123!");
+      expect(updateSpy).toHaveBeenCalledWith("web", "OldSecurePassword", "NewSecurePassword123!");
       expect(screen.getByRole("status").textContent).toContain("Password updated successfully");
     });
   });

@@ -116,7 +116,8 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     || (adminDepartmentActionPath.test(url.pathname) && (!request.body || request.body === "{}")))
     && request.method === "POST" && !request.ifMatch && !request.idempotencyKey;
   const accountPost = (url.pathname === "/api/v1/auth/sign-up" || url.pathname === "/api/v1/organizations"
-    || url.pathname === "/api/v1/invitations/accept" || url.pathname === "/api/v1/auth/password") && request.method === "POST"
+    || url.pathname === "/api/v1/invitations/accept" || url.pathname === "/api/v1/auth/password"
+    || url.pathname === "/api/v1/auth/change-password") && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const invitationGet = invitationPreview.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;

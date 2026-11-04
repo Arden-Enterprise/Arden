@@ -13,6 +13,7 @@ export type SettingsSectionProps = {
   platform: Platform;
   session: CurrentSession | null;
   organization: OrganizationPreview | null;
+  organizationName?: string;
   memberName?: string;
   memberRole?: string;
   memberDepartment?: string;
