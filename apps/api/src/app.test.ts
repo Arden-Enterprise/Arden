@@ -15,6 +15,7 @@ import { SystemAdministrationError, type SystemAdministrator, type SystemAdminis
 import { parseSemanticDocument } from "@arden/domain";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import type { AiAnswerRequest, AiAnswerResponse } from "./answers/contracts.js";
+import { validateSelection, type ReaderActor, type SelectionFacts } from "./target-readers/policy.js";
 
 const ownerId = "11111111-1111-4111-8111-111111111111";
 const otherId = "22222222-2222-4222-8222-222222222222";
@@ -27,6 +28,14 @@ const sharedVersionId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const createKey = "99999999-9999-4999-8999-999999999999";
 const systemAdminCandidateId = "33333333-3333-4333-8333-333333333333";
 const generationId = "44444444-4444-4444-8444-444444444444";
+const salesDepartmentId = "55555555-5555-4555-8555-555555555555";
+const engineeringDepartmentId = "66666666-6666-4666-8666-666666666666";
+const archivedDepartmentId = "77777777-7777-4777-8777-777777777777";
+const suspendedMemberId = "88888888-8888-4888-8888-888888888888";
+const foreignMemberId = "12121212-1212-4121-8121-121212121212";
+/** 101 distinct active members of the synthetic organization. */
+const activeMemberIds = Array.from({ length: 101 }, (_, index) =>
+  `00000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}`);
 
 function semanticDocumentText(body: string): string {
   const parsed = parseSemanticDocument(body);
@@ -95,7 +104,7 @@ describe("API auth and private draft routes", () => {
     repository.authorizedAiSources = [{
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
-      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION", targetReaders: null,
       chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
     }];
     askArden.sourceBlockIds = ["pdf-page-2", "pdf-page-2-heading"];
@@ -116,7 +125,7 @@ describe("API auth and private draft routes", () => {
     repository.authorizedAiSources = [{
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
-      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION", targetReaders: null,
       chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
     }];
     askArden.onAnswer = () => { repository.authorizedAiSources = []; };
@@ -137,7 +146,7 @@ describe("API auth and private draft routes", () => {
     repository.authorizedAiSources = [{
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
-      classification: "INTERNAL", targetScopeType: "ORGANIZATION",
+      classification: "INTERNAL", targetScopeType: "ORGANIZATION", targetReaders: null,
       chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null, ...patch }],
     }];
     const session = await desktopSession(app, "owner@example.test");
@@ -1132,6 +1141,178 @@ describe("API auth and private draft routes", () => {
     expect(semanticDocumentText((await app.inject({ method: "GET", url, headers })).json().body)).toBe("v2");
   });
 
+  describe("Target Readers on draft save (T1.4)", () => {
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    async function createDraft() {
+      const session = await desktopSession(app, "owner@example.test");
+      const headers = { cookie: session, origin: "http://localhost:5180" };
+      const created = await app.inject({ method: "POST", url: `${root}/drafts/new`,
+        headers: { ...headers, "idempotency-key": createKey },
+        payload: { title: "Readers", body: "Body", classification: "INTERNAL" } });
+      expect(created.statusCode).toBe(201);
+      return headers;
+    }
+    const save = (headers: Record<string, string>, version: number, payload: object) => app.inject({
+      method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+      headers: { ...headers, "if-match": `"${version}"` }, payload });
+
+    it.each([
+      { name: "1 member", targetReaders: { mode: "SELECTED_MEMBERS", memberIds: activeMemberIds.slice(0, 1) },
+        field: "targetReaders.memberIds" },
+      { name: "101 members", targetReaders: { mode: "SELECTED_MEMBERS", memberIds: activeMemberIds },
+        field: "targetReaders.memberIds" },
+      { name: "a suspended member", targetReaders: { mode: "SELECTED_MEMBERS",
+        memberIds: [activeMemberIds[0], suspendedMemberId] }, field: "targetReaders.memberIds" },
+      { name: "a member of another organization", targetReaders: { mode: "SELECTED_MEMBERS",
+        memberIds: [activeMemberIds[0], foreignMemberId] }, field: "targetReaders.memberIds" },
+      { name: "an archived department", targetReaders: { mode: "DEPARTMENT", departmentId: archivedDepartmentId },
+        field: "targetReaders.departmentId" },
+      { name: "a department without an ID", targetReaders: { mode: "DEPARTMENT" },
+        field: "targetReaders.departmentId" },
+      { name: "a repeated member", targetReaders: { mode: "SELECTED_MEMBERS",
+        memberIds: [activeMemberIds[0], activeMemberIds[0]] }, field: "targetReaders.memberIds" },
+    ])("rejects $name with 400 and a field error, leaving the draft unchanged", async ({ targetReaders, field }) => {
+      const headers = await createDraft();
+      const response = await save(headers, 1, { targetReaders });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatchObject({ code: "INVALID_TARGET_READERS", field });
+      const reread = await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers });
+      expect(reread.headers.etag).toBe('"1"');
+      expect(reread.json().targetReaders).toBeNull();
+    });
+
+    it.each([
+      { mode: "SELECTED_MEMBERS", departmentId: null,
+        memberIds: [activeMemberIds[2], activeMemberIds[0], activeMemberIds[1]] },
+      { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: activeMemberIds.slice(0, 100) },
+      { mode: "DEPARTMENT", departmentId: engineeringDepartmentId, memberIds: [] },
+      { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
+    ])("saves valid $mode readers with 200 and reads them back unchanged", async (targetReaders) => {
+      const headers = await createDraft();
+      const response = await save(headers, 1, { targetReaders });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().targetReaders).toEqual(targetReaders);
+      const reread = await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers });
+      expect(reread.json().targetReaders).toEqual(targetReaders);
+      const listed = await app.inject({ method: "GET", url: `${root}/drafts`, headers });
+      expect(listed.json().items[0].targetReaders).toEqual(targetReaders);
+    });
+
+    it("keeps saved readers when a later save omits them and freezes them at submit", async () => {
+      const headers = await createDraft();
+      const targetReaders = { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: activeMemberIds.slice(0, 2) };
+      expect((await save(headers, 1, { targetReaders })).statusCode).toBe(200);
+      const later = await save(headers, 2, { title: "Readers v2", responsibleDepartmentId: salesDepartmentId,
+        targetScopeType: "DEPARTMENT", audienceIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] });
+      expect(later.statusCode).toBe(200);
+      expect(later.json().targetReaders).toEqual(targetReaders);
+      const submit = await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
+        headers: { ...headers, "idempotency-key": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "if-match": '"3"' } });
+      expect(submit.statusCode).toBe(201);
+      expect(submit.json().proposedTargetReaders).toEqual(targetReaders);
+    });
+  });
+
+  describe("Target Readers enforced by the API, not only RLS (T1.3)", () => {
+    const root = `/api/v1/organizations/${organizationId}`;
+    const otherGenerationId = "13131313-1313-4131-8131-131313131313";
+    const missingVersionId = "14141414-1414-4141-8141-141414141414";
+    // The synthetic repository returns these rows to the owner, as if RLS allowed them;
+    // only TargetReaderPolicy in the route can hide them.
+    async function publish(targetReaders: PublishedKnowledge["targetReaders"]) {
+      const stored = await storage.write("Restricted runbook");
+      repository.publication = { id: versionId, draftId: sharedDraftId, title: "Restricted runbook",
+        classification: "INTERNAL", responsibleDepartmentId: engineeringDepartmentId,
+        contentHash: stored.contentHash, sourceUri: stored.sourceUri, audienceRoleIds: [], targetReaders,
+        publishedAt: new Date("2026-11-01T00:00:00.000Z"), validFrom: new Date("2026-11-01T00:00:00.000Z"),
+        validUntil: null };
+      repository.authorizedAiSources = [{
+        generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
+        publishedVersionId: versionId, draftId: sharedDraftId, title: "Restricted runbook", versionNo: 1,
+        classification: "INTERNAL", targetScopeType: "DEPARTMENT", targetReaders,
+        chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null }],
+      }];
+    }
+    async function ownerHeaders() {
+      return { cookie: await desktopSession(app, "owner@example.test"), origin: "http://localhost:5180" };
+    }
+
+    it.each([
+      { name: "a member outside the Department", readers: { mode: "DEPARTMENT" as const,
+        departmentId: engineeringDepartmentId, memberIds: [] } },
+      { name: "a member not in Selected Members", readers: { mode: "SELECTED_MEMBERS" as const,
+        departmentId: null, memberIds: [otherId, activeMemberIds[0]] } },
+    ])("hides the document from $name in list, detail and Ask Arden", async ({ readers }) => {
+      await publish(readers);
+      const headers = await ownerHeaders();
+      const list = await app.inject({ method: "GET", url: `${root}/knowledge/published`, headers });
+      expect(list.statusCode).toBe(200);
+      expect(list.json().items).toEqual([]);
+
+      const detail = await app.inject({ method: "GET", url: `${root}/knowledge/published/${versionId}`, headers });
+      const missing = await app.inject({ method: "GET", url: `${root}/knowledge/published/${missingVersionId}`, headers });
+      expect(detail.statusCode).toBe(404);
+      expect(missing.statusCode).toBe(404);
+      expect(detail.json().error.code).toBe("RESOURCE_NOT_AVAILABLE");
+      expect(detail.json().error.code).toBe(missing.json().error.code);
+      expect(detail.json().error.message).toBe(missing.json().error.message);
+      expect(detail.body).not.toContain("Restricted runbook");
+
+      const answer = await app.inject({ method: "POST", url: `${root}/ai/answers`, headers,
+        payload: { query: "What does the runbook say?" } });
+      expect(answer.statusCode).toBe(200);
+      expect(answer.json()).toMatchObject({ status: "INSUFFICIENT_EVIDENCE", citations: [] });
+      expect(askArden.lastRequest).toBeNull();
+    });
+
+    it("never cites an unreadable document even if the AI service returns it", async () => {
+      await publish({ mode: "DEPARTMENT", departmentId: engineeringDepartmentId, memberIds: [] });
+      repository.authorizedAiSources.push({ ...repository.authorizedAiSources[0]!, generationId: otherGenerationId,
+        publishedVersionId: missingVersionId, targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] } });
+      const answer = await app.inject({ method: "POST", url: `${root}/ai/answers`, headers: await ownerHeaders(),
+        payload: { query: "What does the runbook say?" } });
+      expect(askArden.lastRequest?.allowedGenerationIds).toEqual([otherGenerationId]);
+      expect(answer.statusCode).toBe(409);
+      expect(answer.body).not.toContain("Restricted runbook");
+    });
+
+    it.each([
+      { name: "a Department member", readers: { mode: "DEPARTMENT" as const,
+        departmentId: salesDepartmentId, memberIds: [] } },
+      { name: "a selected member", readers: { mode: "SELECTED_MEMBERS" as const,
+        departmentId: null, memberIds: [otherId, ownerId] } },
+      { name: "any active member for Organization", readers: { mode: "ORGANIZATION" as const,
+        departmentId: null, memberIds: [] } },
+      { name: "a legacy publication without readers", readers: null },
+    ])("lets $name list, open and cite the document", async ({ readers }) => {
+      await publish(readers);
+      const headers = await ownerHeaders();
+      const list = await app.inject({ method: "GET", url: `${root}/knowledge/published`, headers });
+      expect(list.json().items).toHaveLength(1);
+      expect(JSON.stringify(list.json())).not.toContain(otherId);
+      const detail = await app.inject({ method: "GET", url: `${root}/knowledge/published/${versionId}`, headers });
+      expect(detail.statusCode).toBe(200);
+      expect(detail.json().body).toBe("Restricted runbook");
+      expect(detail.json().targetReaders).toEqual(readers ? { mode: readers.mode, departmentId: readers.departmentId } : null);
+      const answer = await app.inject({ method: "POST", url: `${root}/ai/answers`, headers,
+        payload: { query: "What does the runbook say?" } });
+      expect(answer.statusCode).toBe(200);
+      expect(askArden.lastRequest?.allowedGenerationIds).toEqual([generationId]);
+      expect(answer.json().citations).toHaveLength(1);
+    });
+
+    it("denies a suspended member and a member whose department changed", async () => {
+      await publish({ mode: "DEPARTMENT", departmentId: salesDepartmentId, memberIds: [] });
+      const headers = await ownerHeaders();
+      repository.readerActors.set(ownerId, { membershipId: ownerId, organizationId, status: "ACTIVE",
+        departmentIds: [engineeringDepartmentId] });
+      expect((await app.inject({ method: "GET", url: `${root}/knowledge/published/${versionId}`, headers })).statusCode).toBe(404);
+      repository.readerActors.set(ownerId, { membershipId: ownerId, organizationId, status: "SUSPENDED",
+        departmentIds: [salesDepartmentId] });
+      expect((await app.inject({ method: "GET", url: `${root}/knowledge/published/${versionId}`, headers })).statusCode).toBe(404);
+    });
+  });
+
   it("routes submit, scoped review and preparation without exposing the private source", async () => {
     const ownerSession = await desktopSession(app, "owner@example.test");
     const reviewerSession = await desktopSession(app, "manager@example.test");
@@ -1475,6 +1656,23 @@ class MemoryRepository implements ArdenDataRepository {
   reviewerGrant: ReviewerGrantRecord | null = null;
   publication: PublishedKnowledge | null = null;
   authorizedAiSources: AuthorizedAiSource[] = [];
+  /** TargetReaderPolicy actors. Both synthetic users belong to the same organization. */
+  readerActors = new Map<string, ReaderActor>([
+    [ownerId, { membershipId: ownerId, organizationId, status: "ACTIVE", departmentIds: [salesDepartmentId] }],
+    [otherId, { membershipId: otherId, organizationId, status: "ACTIVE", departmentIds: [engineeringDepartmentId] }],
+  ]);
+  /** What the real repository would resolve for draft Target Readers validation. */
+  selectionFacts: SelectionFacts = {
+    organizationId,
+    departments: [
+      { departmentId: engineeringDepartmentId, organizationId, status: "ACTIVE" },
+      { departmentId: archivedDepartmentId, organizationId, status: "ARCHIVED" },
+    ],
+    members: [
+      ...activeMemberIds.map((membershipId) => ({ membershipId, organizationId, status: "ACTIVE" as const, accountActive: true })),
+      { membershipId: suspendedMemberId, organizationId, status: "SUSPENDED", accountActive: true },
+    ],
+  };
   private reviewRequestKey: string | null = null;
   sharedCreates = 0;
   failSharedCreate = false;
@@ -1600,7 +1798,7 @@ class MemoryRepository implements ArdenDataRepository {
       id: sharedDraftId, organizationId, title: input.expectedSource.title,
       classification: input.classification, sourcePrivateVersionId: input.sourceVersionId,
       responsibleDepartmentId: null, targetScopeType: null, teamTag: null, projectTag: null, audienceRoleIds: [],
-      versionId: sharedVersionId, sourceUri: input.copiedContent.sourceUri,
+      targetReaders: null, versionId: sharedVersionId, sourceUri: input.copiedContent.sourceUri,
       mimeType: input.copiedContent.mimeType, contentHash: input.copiedContent.contentHash,
       currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
     };
@@ -1623,7 +1821,7 @@ class MemoryRepository implements ArdenDataRepository {
     this.sharedDraft = {
       id: sharedDraftId, organizationId, title: input.title, classification: input.classification,
       sourcePrivateVersionId: null, responsibleDepartmentId: null, targetScopeType: null,
-      teamTag: null, projectTag: null, audienceRoleIds: [], versionId: sharedVersionId,
+      teamTag: null, projectTag: null, audienceRoleIds: [], targetReaders: null, versionId: sharedVersionId,
       sourceUri: input.content.sourceUri, mimeType: input.content.mimeType, contentHash: input.content.contentHash,
       currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
     };
@@ -1645,6 +1843,12 @@ class MemoryRepository implements ArdenDataRepository {
     const draft = await this.getKnowledgeDraft(userId, requestedOrganization, requestedDraft);
     if (!draft) return { kind: "not-found" };
     if (draft.currentVersion !== expectedVersion) return { kind: "conflict", currentVersion: draft.currentVersion };
+    let targetReaders = draft.targetReaders;
+    if (patch.targetReaders !== undefined) {
+      const validation = validateSelection(patch.targetReaders, this.selectionFacts);
+      if (!validation.ok) return { kind: "invalid-target-readers", field: validation.field, reason: validation.reason };
+      targetReaders = validation.selection;
+    }
     this.sharedDraft = {
       ...draft, title: patch.title ?? draft.title, classification: patch.classification ?? draft.classification,
       responsibleDepartmentId: patch.responsibleDepartmentId === undefined ? draft.responsibleDepartmentId : patch.responsibleDepartmentId,
@@ -1652,6 +1856,7 @@ class MemoryRepository implements ArdenDataRepository {
       teamTag: patch.teamTag === undefined ? draft.teamTag : patch.teamTag,
       projectTag: patch.projectTag === undefined ? draft.projectTag : patch.projectTag,
       audienceRoleIds: patch.audienceRoleIds ?? draft.audienceRoleIds,
+      targetReaders,
       sourceUri: content?.sourceUri ?? draft.sourceUri,
       contentHash: content?.contentHash ?? draft.contentHash,
       versionId: expectedVersion + 1 === 2
@@ -1673,7 +1878,7 @@ class MemoryRepository implements ArdenDataRepository {
       snapshotVersionId: draft.versionId, title: draft.title, classification: draft.classification,
       responsibleDepartmentId: draft.responsibleDepartmentId, targetScopeType: draft.targetScopeType,
       targetDepartmentId: draft.targetScopeType === "DEPARTMENT" ? draft.responsibleDepartmentId : null,
-      audienceRoleIds: draft.audienceRoleIds, contentHash: draft.contentHash,
+      audienceRoleIds: draft.audienceRoleIds, proposedTargetReaders: draft.targetReaders, contentHash: draft.contentHash,
       status: "PENDING_REVIEW", submittedAt: new Date("2026-10-10T10:00:00.000Z"), publishedVersionId: null,
       publicationState: "NONE",
       decisionComment: null,
@@ -1761,6 +1966,10 @@ class MemoryRepository implements ArdenDataRepository {
   async listAuthorizedAiSources(userId: string, requestedOrganization: string): Promise<AuthorizedAiSource[] | null> {
     if (requestedOrganization !== organizationId) return null;
     return userId === ownerId ? this.authorizedAiSources : [];
+  }
+
+  async getTargetReaderActor(userId: string, requestedOrganization: string): Promise<ReaderActor | null> {
+    return requestedOrganization === organizationId ? this.readerActors.get(userId) ?? null : null;
   }
 
   async canCreateDraft(userId: string, requestedOrganization: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }

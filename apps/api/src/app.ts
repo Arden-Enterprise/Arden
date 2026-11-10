@@ -11,6 +11,7 @@ import { registerSystemAdministrationRoutes } from "./system-administration/rout
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { citationPage } from "./answers/citation-page.js";
 import { citationMatchesManifest } from "./answers/contracts.js";
+import { canRead, readerModes, type ReaderActor, type ReaderSelection } from "./target-readers/policy.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -1111,6 +1112,12 @@ export function buildApp(dependencies: AppDependencies) {
           teamTag: { type: ["string", "null"], maxLength: 100 },
           projectTag: { type: ["string", "null"], maxLength: 100 },
           audienceIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
+          // Shape only; counts, duplicates and membership/department state are TargetReaderPolicy field errors.
+          targetReaders: { type: "object", additionalProperties: false, required: ["mode"], properties: {
+            mode: { type: "string", enum: [...readerModes] },
+            departmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
+            memberIds: { type: "array", maxItems: 500, items: { type: "string", pattern: uuidPattern } },
+          } },
         } },
       },
     }, async (request, reply) => {
@@ -1153,6 +1160,10 @@ export function buildApp(dependencies: AppDependencies) {
           if (stored) await dependencies.storage.remove(stored.sourceUri);
           if (result.kind === "conflict") return reply.code(412).send(safeError("VERSION_CONFLICT", "This draft changed. Reload it before saving again.", request.id));
           if (result.kind === "invalid-metadata") return reply.code(400).send(safeError("INVALID_METADATA", "The draft metadata is invalid.", request.id));
+          if (result.kind === "invalid-target-readers") {
+            return reply.code(400).send({ error: { code: "INVALID_TARGET_READERS", message: result.reason,
+              requestId: request.id, field: result.field } });
+          }
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
         const content: { body: string; pdfBase64?: string } = typeof semanticBody === "string" ? { body: semanticBody }
@@ -1423,11 +1434,15 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     try {
-      const items = await dependencies.repository.listPublishedKnowledge(context.userId, request.params.organizationId);
-      if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+      const { organizationId } = request.params;
+      const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
+      const items = actor ? await dependencies.repository.listPublishedKnowledge(context.userId, organizationId) : null;
+      if (!actor || !items) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
-      return { items: items.map(({ sourceUri: _sourceUri, audienceRoleIds, ...item }) => ({ ...item,
-        audienceIds: audienceRoleIds ?? [],
+      // T1.3: the API applies TargetReaderPolicy itself; publication RLS is defence in depth.
+      const readable = items.filter((item) => canRead(actor, { organizationId, readers: item.targetReaders }));
+      return { items: readable.map(({ sourceUri: _sourceUri, audienceRoleIds, targetReaders, ...item }) => ({ ...item,
+        audienceIds: audienceRoleIds ?? [], targetReaders: representReaderMode(targetReaders),
         publishedAt: item.publishedAt.toISOString(), validFrom: item.validFrom.toISOString(),
         validUntil: item.validUntil?.toISOString() ?? null })) };
     } catch (error) {
@@ -1456,8 +1471,13 @@ export function buildApp(dependencies: AppDependencies) {
       }
       try {
         const { organizationId } = request.params;
-        const before = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId);
-        if (!before) return reply.code(404).send(resourceNotAvailable(request.id));
+        const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
+        const candidates = actor ? await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId) : null;
+        if (!actor || !candidates) return reply.code(404).send(resourceNotAvailable(request.id));
+        // T1.3: only publications the actor can read enter the Arden-AI allow-list.
+        const readableSource = (readerActor: ReaderActor, source: { targetReaders: ReaderSelection | null }) =>
+          canRead(readerActor, { organizationId, readers: source.targetReaders });
+        const before = candidates.filter((source) => readableSource(actor, source));
         if (before.length === 0) {
           reply.header("Cache-Control", "no-store");
           return { status: "INSUFFICIENT_EVIDENCE", answer: "I could not find any indexed published knowledge you are allowed to read.", citations: [] };
@@ -1470,10 +1490,13 @@ export function buildApp(dependencies: AppDependencies) {
           query,
           allowedGenerationIds: before.map((source) => source.generationId),
         });
-        const after = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId,
+        const afterActor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
+        const afterCandidates = afterActor ? await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId,
           [...new Set(aiResponse.citations.map((citation) => citation.generationId))],
-          [...new Set(aiResponse.citations.map((citation) => citation.chunkId))]);
-        if (!after) return reply.code(404).send(resourceNotAvailable(request.id));
+          [...new Set(aiResponse.citations.map((citation) => citation.chunkId))]) : null;
+        if (!afterActor || !afterCandidates) return reply.code(404).send(resourceNotAvailable(request.id));
+        // Re-checked after generation so a citation never outlives a reader change.
+        const after = afterCandidates.filter((source) => readableSource(afterActor, source));
         const beforeByGeneration = new Map(before.map((source) => [source.generationId, source]));
         const afterByGeneration = new Map(after.map((source) => [source.generationId, source]));
         const citations = aiResponse.citations.map((citation) => {
@@ -1527,11 +1550,18 @@ export function buildApp(dependencies: AppDependencies) {
       if (!context) return;
       try {
         const { organizationId, publishedVersionId } = request.params;
-        const publication = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
+        // T1.3: unreadable and missing publications return the same 404 RESOURCE_NOT_AVAILABLE.
+        const readablePublication = async () => {
+          const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
+          if (!actor) return null;
+          const found = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
+          return found && canRead(actor, { organizationId, readers: found.targetReaders }) ? found : null;
+        };
+        const publication = await readablePublication();
         if (!publication) return reply.code(404).send(resourceNotAvailable(request.id));
         const mimeType = publication.sourceUri.endsWith(".pdf") ? "application/pdf" : "text/plain";
         const content = await readKnowledgeContent(dependencies.storage, publication.sourceUri, publication.contentHash, mimeType);
-        const stillAuthorized = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
+        const stillAuthorized = await readablePublication();
         if (!stillAuthorized || stillAuthorized.contentHash !== publication.contentHash) {
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
@@ -1541,6 +1571,7 @@ export function buildApp(dependencies: AppDependencies) {
           responsibleDepartmentId: publication.responsibleDepartmentId,
           ...content, mimeType, contentHash: publication.contentHash,
           audienceIds: publication.audienceRoleIds,
+          targetReaders: representReaderMode(publication.targetReaders),
           publishedAt: publication.publishedAt.toISOString(), validFrom: publication.validFrom.toISOString(),
           validUntil: publication.validUntil?.toISOString() ?? null };
       } catch (error) {
@@ -1894,6 +1925,7 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
     teamTag: draft.teamTag,
     projectTag: draft.projectTag,
     audienceIds: draft.audienceRoleIds,
+    targetReaders: representTargetReaders(draft.targetReaders),
     currentVersion: {
       id: draft.versionId,
       version: draft.currentVersion,
@@ -1922,6 +1954,7 @@ function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
     contentHash: draft.contentHash,
     currentVersion: draft.currentVersion,
     audienceIds: draft.audienceRoleIds ?? [],
+    targetReaders: representTargetReaders(draft.targetReaders),
     createdAt: draft.createdAt.toISOString(),
     updatedAt: draft.updatedAt.toISOString(),
   };
@@ -1938,6 +1971,7 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     targetScopeType: submission.targetScopeType,
     targetDepartmentId: submission.targetDepartmentId,
     audienceIds: submission.audienceRoleIds,
+    proposedTargetReaders: representTargetReaders(submission.proposedTargetReaders),
     contentHash: submission.contentHash,
     status: submission.status,
     publicationState: submission.publicationState,
@@ -1945,6 +1979,16 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     submittedAt: submission.submittedAt.toISOString(),
     publishedVersionId: submission.publishedVersionId,
   };
+}
+
+/** Full selection for the author and reviewers of a draft or submission. */
+function representTargetReaders(readers: ReaderSelection | null) {
+  return readers ? { mode: readers.mode, departmentId: readers.departmentId, memberIds: [...readers.memberIds] } : null;
+}
+
+/** Library readers see the mode only, never who else was selected. */
+function representReaderMode(readers: ReaderSelection | null) {
+  return readers ? { mode: readers.mode, departmentId: readers.departmentId } : null;
 }
 
 function parseEtag(value: string | undefined): number | "missing" | null {

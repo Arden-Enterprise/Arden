@@ -5,6 +5,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
 import { planReviewDecision, type ReviewAction, type ReviewDecisionPlan } from "../knowledge/review-decision.js";
+import { maxSelectedReaders, validateSelection, type ReaderActor, type ReaderMode, type ReaderSelection,
+  type SelectionFacts, type TargetReadersField, type TargetReadersInput } from "../target-readers/policy.js";
 
 export type MembershipStatus = "INVITED" | "ACTIVE" | "SUSPENDED" | "LEFT";
 export type MembershipSummary = {
@@ -54,6 +56,8 @@ export type SharedKnowledgeDraft = {
   teamTag: string | null;
   projectTag: string | null;
   audienceRoleIds: string[];
+  /** Target Readers saved on the draft (T1.4); null until the author chooses them. */
+  targetReaders: ReaderSelection | null;
   versionId: string;
   sourceUri: string;
   mimeType: string;
@@ -77,11 +81,14 @@ export type SharedDraftPatch = {
   teamTag?: string | null;
   projectTag?: string | null;
   audienceRoleIds?: string[];
+  /** Absent keeps the saved readers; present must pass TargetReaderPolicy.validateSelection. */
+  targetReaders?: TargetReadersInput;
 };
 export type UpdateSharedDraftResult =
   | { kind: "not-found" }
   | { kind: "conflict"; currentVersion: number }
   | { kind: "invalid-metadata" }
+  | { kind: "invalid-target-readers"; field: TargetReadersField; reason: string }
   | { kind: "updated"; draft: SharedKnowledgeDraft };
 export type SharedKnowledgeSubmission = {
   id: string;
@@ -93,6 +100,8 @@ export type SharedKnowledgeSubmission = {
   targetScopeType: "ORGANIZATION" | "DEPARTMENT";
   targetDepartmentId: string | null;
   audienceRoleIds: string[];
+  /** The draft's Target Readers frozen at submit (proposed_selection_id). */
+  proposedTargetReaders: ReaderSelection | null;
   contentHash: string;
   status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
   publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED";
@@ -145,6 +154,8 @@ export type PublishedKnowledge = {
   contentHash: string;
   sourceUri: string;
   audienceRoleIds: string[];
+  /** Approved Target Readers; null keeps the legacy audience behaviour. */
+  targetReaders: ReaderSelection | null;
   publishedAt: Date;
   validFrom: Date;
   validUntil: Date | null;
@@ -160,8 +171,33 @@ export type AuthorizedAiSource = {
   versionNo: number;
   classification: KnowledgeClassification;
   targetScopeType: "ORGANIZATION" | "DEPARTMENT";
+  /** Approved Target Readers; null keeps the legacy audience behaviour. */
+  targetReaders: ReaderSelection | null;
 };
-type SharedDraftRow = {
+type ReaderSelectionColumns = {
+  readers_selection_id: string | null;
+  readers_mode: ReaderMode | null;
+  readers_department_id: string | null;
+  readers_member_ids: string[] | null;
+};
+/**
+ * Selects one reader selection as readers_* columns. `selectionId` is an SQL expression.
+ * The member list keeps the author's order.
+ */
+function readerSelectionColumns(selectionId: string): string {
+  return `${selectionId} AS readers_selection_id,
+         (SELECT rs.reader_mode FROM reader_selection rs WHERE rs.selection_id = ${selectionId}) AS readers_mode,
+         (SELECT rs.department_id FROM reader_selection rs WHERE rs.selection_id = ${selectionId}) AS readers_department_id,
+         ARRAY(SELECT sr.membership_id::text FROM selected_reader sr
+                WHERE sr.selection_id = ${selectionId} ORDER BY sr.ordinal) AS readers_member_ids`;
+}
+function mapReaderSelection(row: ReaderSelectionColumns): ReaderSelection | null {
+  if (row.readers_selection_id === null) return null;
+  // A referenced selection that cannot be resolved fails closed: nobody is a reader.
+  if (row.readers_mode === null) return { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] };
+  return { mode: row.readers_mode, departmentId: row.readers_department_id, memberIds: row.readers_member_ids ?? [] };
+}
+type SharedDraftRow = ReaderSelectionColumns & {
   shared_draft_id: string;
   title: string;
   classification: KnowledgeClassification;
@@ -182,6 +218,7 @@ type SharedDraftRow = {
   created_at: Date;
   updated_at: Date;
   audience_role_ids: string[];
+  draft_selection_revision: number | null;
 };
 const sharedDraftSelect = `
   SELECT d.shared_draft_id, d.title, d.classification, d.source_private_version_id,
@@ -193,7 +230,10 @@ const sharedDraftSelect = `
                    AND pending.status = 'PENDING_REVIEW') AS has_pending_submission,
          v.shared_draft_version_id, v.content_uri, v.mime_type, v.content_hash,
          ARRAY(SELECT a.role_id::text FROM shared_draft_audience a
-               WHERE a.shared_draft_id = d.shared_draft_id ORDER BY a.role_id) AS audience_role_ids
+               WHERE a.shared_draft_id = d.shared_draft_id ORDER BY a.role_id) AS audience_role_ids,
+         (SELECT rs.revision FROM reader_selection rs
+           WHERE rs.selection_id = d.draft_selection_id) AS draft_selection_revision,
+         ${readerSelectionColumns("d.draft_selection_id")}
     FROM shared_draft d
     JOIN shared_draft_version v ON v.shared_draft_id = d.shared_draft_id
                                AND v.version_no = d.current_version_no`;
@@ -210,6 +250,7 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
     teamTag: row.team_tag,
     projectTag: row.project_tag,
     audienceRoleIds: row.audience_role_ids,
+    targetReaders: mapReaderSelection(row),
     versionId: row.shared_draft_version_id,
     sourceUri: row.content_uri,
     mimeType: row.mime_type,
@@ -220,7 +261,7 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
     updatedAt: row.updated_at,
   };
 }
-type SharedSubmissionRow = {
+type SharedSubmissionRow = ReaderSelectionColumns & {
   submission_id: string;
   shared_draft_id: string;
   shared_draft_version_id: string;
@@ -256,6 +297,7 @@ const submissionSelect = `
          s.target_department_id, s.audience_role_ids, s.content_hash, s.content_uri,
          s.mime_type, s.status, s.publication_state, s.submitted_at, s.submitted_by_membership_id,
          s.team_tag, s.project_tag, s.policy_version, s.review_rule,
+         ${readerSelectionColumns("s.proposed_selection_id")},
          (s.target_scope_type = 'ORGANIZATION' AND EXISTS (
            SELECT 1 FROM audience a WHERE a.organization_id = s.organization_id
               AND a.audience_id = ANY(s.audience_role_ids) AND a.kind = 'ORGANIZATION_ALL')) AS organization_wide,
@@ -276,6 +318,7 @@ function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmissio
     targetScopeType: row.target_scope_type,
     targetDepartmentId: row.target_department_id,
     audienceRoleIds: row.audience_role_ids,
+    proposedTargetReaders: mapReaderSelection(row),
     contentHash: row.content_hash,
     status: row.status,
     publicationState: row.publication_state,
@@ -327,7 +370,7 @@ function reviewAuthorizationFromRow(row: SharedSubmissionRow, organizationId: st
     audienceBreadth: row.organization_wide === false ? "LIMITED" as const : "ORGANIZATION_WIDE" as const,
   };
 }
-type PublishedKnowledgeRow = {
+type PublishedKnowledgeRow = ReaderSelectionColumns & {
   published_version_id: string;
   shared_draft_id: string;
   title: string;
@@ -340,7 +383,7 @@ type PublishedKnowledgeRow = {
   valid_from: Date;
   valid_until: Date | null;
 };
-type AuthorizedAiSourceRow = {
+type AuthorizedAiSourceRow = ReaderSelectionColumns & {
   chunks: unknown;
   generation_id: string;
   snapshot_version_id: string;
@@ -356,7 +399,8 @@ const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
          pv.responsible_department_id, pv.content_hash, pv.content_uri,
          pv.audience_role_ids, pv.published_at,
-         cp.valid_from, cp.valid_until
+         cp.valid_from, cp.valid_until,
+         ${readerSelectionColumns("publication_reader_selection_id(pv.submission_id)")}
     FROM knowledge_current_publication cp
     JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
@@ -369,6 +413,7 @@ function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
     contentHash: row.content_hash,
     sourceUri: row.content_uri,
     audienceRoleIds: row.audience_role_ids,
+    targetReaders: mapReaderSelection(row),
     publishedAt: row.published_at,
     validFrom: row.valid_from,
     validUntil: row.valid_until,
@@ -454,6 +499,8 @@ export interface ArdenDataRepository {
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
   listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null>;
+  /** The caller as a TargetReaderPolicy actor, or null when they are not an active member. */
+  getTargetReaderActor(userId: string, organizationId: string): Promise<ReaderActor | null>;
 }
 
 function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): string {
@@ -1414,10 +1461,20 @@ export class ArdenRepository implements ArdenDataRepository {
         [organizationId, next.audienceRoleIds, next.targetScopeType, next.responsibleDepartmentId]);
         if (audiences.rowCount !== next.audienceRoleIds.length) return { kind: "invalid-metadata" };
       }
+      let draftSelectionId: string | null = null;
+      if (patch.targetReaders !== undefined) {
+        const validation = validateSelection(patch.targetReaders,
+          await this.loadSelectionFacts(client, organizationId, patch.targetReaders));
+        if (!validation.ok) return { kind: "invalid-target-readers", field: validation.field, reason: validation.reason };
+        draftSelectionId = await this.insertReaderSelection(client, organizationId, validation.selection,
+          (row.draft_selection_revision ?? 0) + 1);
+      }
       await client.query(`UPDATE shared_draft SET title = $3, classification = $4,
-        responsible_department_id = $5, target_scope_type = $6, team_tag = $7, project_tag = $8
+        responsible_department_id = $5, target_scope_type = $6, team_tag = $7, project_tag = $8,
+        draft_selection_id = COALESCE($9::uuid, draft_selection_id)
         WHERE shared_draft_id = $1 AND organization_id = $2`, [draftId, organizationId, next.title,
-        next.classification, next.responsibleDepartmentId, next.targetScopeType, next.teamTag, next.projectTag]);
+        next.classification, next.responsibleDepartmentId, next.targetScopeType, next.teamTag, next.projectTag,
+        draftSelectionId]);
       if (patch.audienceRoleIds !== undefined) {
         await client.query(`DELETE FROM shared_draft_audience WHERE shared_draft_id = $1`, [draftId]);
         if (next.audienceRoleIds.length > 0) {
@@ -1497,14 +1554,17 @@ export class ArdenRepository implements ArdenDataRepository {
           snapshot_version_no,
           submitted_by_membership_id, target_scope_type, target_department_id,
           responsible_department_id, title, classification, team_tag, project_tag,
-          audience_role_ids, policy_version, content_uri, mime_type, content_hash, submit_request_id)
+          audience_role_ids, policy_version, content_uri, mime_type, content_hash, submit_request_id,
+          proposed_selection_id)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-          $13::uuid[], 1, $14, $15, $16, $17)
+          $13::uuid[], 1, $14, $15, $16, $17, $18::uuid)
         RETURNING submission_id`, [organizationId, draftId, row.shared_draft_version_id,
         row.current_version_no, row.author_membership_id, row.target_scope_type,
         row.target_scope_type === "DEPARTMENT" ? row.responsible_department_id : null,
         row.responsible_department_id, row.title, row.classification, row.team_tag, row.project_tag,
-        row.audience_role_ids, row.content_uri, row.mime_type, row.content_hash, idempotencyKey]);
+        row.audience_role_ids, row.content_uri, row.mime_type, row.content_hash, idempotencyKey,
+        // T1.4: the draft selection is frozen as the proposed readers; selections are immutable rows.
+        row.readers_selection_id]);
       const submissionId = submitted.rows[0]?.submission_id;
       if (!submissionId) throw new Error("Submission insert returned no identifier");
       await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type,
@@ -1728,6 +1788,7 @@ export class ArdenRepository implements ArdenDataRepository {
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
                pv.classification, cp.target_scope_type,
+               ${readerSelectionColumns("publication_reader_selection_id(pv.submission_id)")},
                CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
                  (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
                    WHERE $3::text[] IS NULL OR chunk->>'chunkId' = ANY($3::text[])) END AS chunks
@@ -1751,8 +1812,68 @@ export class ArdenRepository implements ArdenDataRepository {
         versionNo: row.version_no,
         classification: row.classification,
         targetScopeType: row.target_scope_type,
+        targetReaders: mapReaderSelection(row),
       }));
     });
+  }
+
+  async getTargetReaderActor(userId: string, organizationId: string): Promise<ReaderActor | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const result = await client.query<{ membership_id: string; status: ReaderActor["status"]; department_ids: string[] }>(`
+        SELECT om.membership_id, om.status,
+               ARRAY(SELECT dm.department_id::text FROM department_membership dm
+                       JOIN department d ON d.department_id = dm.department_id
+                                        AND d.organization_id = om.organization_id AND d.status = 'ACTIVE'
+                      WHERE dm.membership_id = om.membership_id AND dm.status = 'ACTIVE'
+                      ORDER BY dm.department_id) AS department_ids
+          FROM organization_membership om
+          JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
+          JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
+         WHERE om.user_id = $1 AND om.organization_id = $2`, [userId, organizationId]);
+      const row = result.rows[0];
+      return row ? { membershipId: row.membership_id, organizationId, status: row.status,
+        departmentIds: row.department_ids } : null;
+    });
+  }
+
+  /** Loads only the facts validateSelection needs, inside the caller's transaction and RLS context. */
+  private async loadSelectionFacts(client: PoolClient, organizationId: string,
+    input: TargetReadersInput): Promise<SelectionFacts> {
+    const departmentId = input.departmentId ?? null;
+    const memberIds = input.memberIds ?? [];
+    const departments = departmentId === null ? [] : (await client.query<{
+      department_id: string; organization_id: string; status: "ACTIVE" | "INACTIVE" | "ARCHIVED" }>(`
+      SELECT department_id, organization_id, status FROM department
+       WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId])).rows;
+    const members = memberIds.length === 0 || memberIds.length > maxSelectedReaders ? [] : (await client.query<{
+      membership_id: string; membership_status: SelectionFacts["members"][number]["status"]; account_active: boolean }>(`
+      SELECT membership_id, membership_status, account_active
+        FROM reader_selection_member_facts($1::uuid[])`, [memberIds])).rows;
+    return {
+      organizationId,
+      departments: departments.map(row => ({ departmentId: row.department_id, organizationId: row.organization_id,
+        status: row.status })),
+      members: members.map(row => ({ membershipId: row.membership_id, organizationId,
+        status: row.membership_status, accountActive: row.account_active })),
+    };
+  }
+
+  private async insertReaderSelection(client: PoolClient, organizationId: string, selection: ReaderSelection,
+    revision: number): Promise<string> {
+    const inserted = await client.query<{ selection_id: string }>(`
+      INSERT INTO reader_selection (organization_id, reader_mode, department_id, revision)
+      VALUES ($1, $2, $3, $4) RETURNING selection_id`,
+    [organizationId, selection.mode, selection.departmentId, revision]);
+    const selectionId = inserted.rows[0]?.selection_id;
+    if (!selectionId) throw new Error("Reader selection insert returned no identifier");
+    if (selection.memberIds.length > 0) {
+      await client.query(`
+        INSERT INTO selected_reader (selection_id, organization_id, membership_id, ordinal)
+        SELECT $1, $2, member.membership_id, member.ordinal
+          FROM unnest($3::uuid[]) WITH ORDINALITY AS member(membership_id, ordinal)`,
+      [selectionId, organizationId, selection.memberIds]);
+    }
+    return selectionId;
   }
 
   async canCreateDraft(userId: string, organizationId: string): Promise<boolean> {

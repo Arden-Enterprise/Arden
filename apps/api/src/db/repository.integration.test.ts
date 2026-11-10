@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository } from "./repository.js";
 import { PgIndexGenerationStore } from "../indexing/store.js";
 import type { IndexGenerationManifest } from "../indexing/contracts.js";
+import { canRead } from "../target-readers/policy.js";
 
 const databaseUrl = process.env.ARDEN_TEST_DATABASE_URL;
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null;
@@ -49,8 +50,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
          '0017_audience_and_instance_admin_foundation',
           '0018_flow3_contract_and_test_content_reset',
           '0019_flow3_durable_index_generations', '0020_permission_aware_answer_sources',
-          '0021_monotonic_publication_activation', '0022_organization_reviewer_grants')`);
-    if (migration.rows[0]?.count !== "10") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0021_monotonic_publication_activation', '0022_organization_reviewer_grants',
+          '0024_target_reader_selection')`);
+    if (migration.rows[0]?.count !== "11") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -143,6 +145,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("ALTER TABLE review_decision DISABLE TRIGGER USER");
           await client.query("ALTER TABLE published_knowledge_version DISABLE TRIGGER USER");
           await client.query("ALTER TABLE knowledge_current_publication DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE reader_selection DISABLE TRIGGER USER");
+          await client.query("ALTER TABLE selected_reader DISABLE TRIGGER USER");
           await client.query("DELETE FROM audit_event WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = $1", [ids.organization]);
           await client.query(`DELETE FROM published_knowledge_version
@@ -157,6 +161,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM reviewer_grant WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE author_membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM shared_draft WHERE author_membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM selected_reader WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM reader_selection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM draft_document WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM private_workspace WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
@@ -659,5 +665,46 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(sources).toEqual([expect.objectContaining({ generationId: newer.generationId, chunks: manifest.chunks })]);
     await expect(repository.listAuthorizedAiSources(ids.owner, ids.organization, [older.generationId])).resolves.toEqual([]);
 
+    // T1.3: once a publication has approved Target Readers, publication RLS still returns the row to the
+    // owner (legacy audience), and the API-level TargetReaderPolicy is what hides it. T2.1 will record
+    // approved readers through the review API; until then the fixture sets them directly.
+    const selectionId = await (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL search_path TO arden, public");
+        const selection = await client.query<{ selection_id: string }>(`INSERT INTO reader_selection
+          (organization_id, reader_mode) VALUES ($1, 'SELECTED_MEMBERS') RETURNING selection_id`, [ids.organization]);
+        const created = selection.rows[0]!.selection_id;
+        await client.query(`INSERT INTO selected_reader (selection_id, organization_id, membership_id, ordinal)
+          VALUES ($1, $2, $3, 1), ($1, $2, $4, 2)`,
+        [created, ids.organization, ids.managerMembership, ids.organizationReviewerMembership]);
+        await client.query(`UPDATE shared_submission SET approved_selection_id = $1 WHERE submission_id = $2`,
+          [created, newer.submissionId]);
+        await client.query("COMMIT");
+        return created;
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+    expect(selectionId).toMatch(/^[0-9a-f-]{36}$/);
+    const selectedReaders = { mode: "SELECTED_MEMBERS", departmentId: null,
+      memberIds: [ids.managerMembership, ids.organizationReviewerMembership] };
+    const ownerActor = await repository.getTargetReaderActor(ids.owner, ids.organization);
+    expect(ownerActor).toEqual({ membershipId: ids.ownerMembership, organizationId: ids.organization,
+      status: "ACTIVE", departmentIds: [ids.department] });
+    const restricted = await repository.listPublishedKnowledge(ids.owner, ids.organization);
+    expect(restricted).toEqual([expect.objectContaining({ title: "Newest active publication", targetReaders: selectedReaders })]);
+    expect(canRead(ownerActor, { organizationId: ids.organization, readers: restricted![0]!.targetReaders })).toBe(false);
+    const restrictedDetail = await repository.getPublishedKnowledge(ids.owner, ids.organization, restricted![0]!.id);
+    expect(restrictedDetail?.targetReaders).toEqual(selectedReaders);
+    const restrictedSources = await repository.listAuthorizedAiSources(ids.owner, ids.organization);
+    expect(restrictedSources?.filter((source) => source.generationId === newer.generationId))
+      .toEqual([expect.objectContaining({ targetReaders: selectedReaders })]);
+    expect(restrictedSources?.filter((source) => canRead(ownerActor,
+      { organizationId: ids.organization, readers: source.targetReaders }))).toEqual([]);
   });
 });
