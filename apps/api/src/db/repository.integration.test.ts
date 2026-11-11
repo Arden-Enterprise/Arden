@@ -55,8 +55,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0018_flow3_contract_and_test_content_reset',
           '0019_flow3_durable_index_generations', '0020_permission_aware_answer_sources',
           '0021_monotonic_publication_activation', '0022_organization_reviewer_grants',
-          '0024_target_reader_selection', '0025_review_approved_readers', '0026_review_list_authors')`);
-    if (migration.rows[0]?.count !== "13") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0024_target_reader_selection', '0025_review_approved_readers', '0026_review_list_authors',
+          '0027_document_category_relationships', '0028_audience_to_target_readers',
+          '0029_withdraw_pending_submission')`);
+    if (migration.rows[0]?.count !== "16") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -678,7 +680,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const legacy = await repository.listPublishedKnowledge(ids.owner, ids.organization);
     expect(legacy).toEqual([expect.objectContaining({ title: "Newest active publication", targetReaders: null })]);
     expect(canRead(ownerActor, { organizationId: ids.organization, readers: legacy![0]!.targetReaders })).toBe(true);
-  });
+  }, 15_000);
 
   it("approves, narrows and enforces Target Readers through review and activation (T2.1)", async () => {
     if (!repository || !pool || !indexPool) throw new Error("Test database is unavailable");

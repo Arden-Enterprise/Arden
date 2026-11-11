@@ -153,7 +153,7 @@ if (inventory && releaseMigrations) {
   test("checked-in policy keeps pending operator migrations blocked without banning future expand reviews", () => {
     const rows = inventory.loadMigrationInventory("apps/api/migrations");
     assert.ok(rows.length >= 23);
-    const operatorOnlyIds = new Set(["0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026"]);
+    const operatorOnlyIds = new Set(["0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029"]);
     for (const id of operatorOnlyIds) {
       assert.equal(rows.find(row => row.id === id)?.rollout, "operator", `Migration ${id} must remain operator-class`);
     }

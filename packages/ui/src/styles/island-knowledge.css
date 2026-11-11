@@ -44,6 +44,10 @@
 .contribution-reason { margin: 0; }
 .contribution-reason p { color: var(--arden-text-primary); }
 .contribution-actions { display: grid; gap: 8px; justify-items: start; }
+.contribution-withdraw { display: grid; gap: 8px; margin: 0; border-color: var(--arden-danger-border); }
+.contribution-withdraw p { margin: 0; color: var(--arden-text-secondary); }
+.contribution-withdraw-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.arden-app-shell .contribution-withdraw-confirm { border-color: var(--arden-danger-border); color: var(--arden-danger); }
 
 /* Reviews detail (REV-03 note/draft, REV-04 PDF): one island with a breadcrumb bar, the submitted document on
    the left and a properties/decision side panel on the right. Only the document and the side panel body

@@ -1222,6 +1222,29 @@ export function buildApp(dependencies: AppDependencies) {
       }
     });
 
+  // T5.1 (FR-DOC-06): the author withdraws their own pending submission; it leaves the review queue.
+  app.post<{ Params: { organizationId: string; submissionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/submissions/:submissionId/withdraw", {
+      schema: { params: { type: "object", required: ["organizationId", "submissionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, submissionId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.withdrawKnowledgeSubmission(context.userId,
+          request.params.organizationId, request.params.submissionId, request.id);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_NOT_PENDING",
+          "Only a submission that is still waiting for review can be withdrawn.", request.id));
+        reply.header("Cache-Control", "no-store");
+        return representSubmission(result.submission);
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge submission withdrawal failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
   app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/submissions", {
     schema: { params: { type: "object", required: ["organizationId"], properties: {
       organizationId: { type: "string", pattern: uuidPattern },

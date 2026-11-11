@@ -326,4 +326,255 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         readers: { mode: "DEPARTMENT", departmentId: ids.engineering, memberIds: [] } })).toBe(false);
     });
   });
+
+  const createDraft = async (userId: string, organizationId: string, membershipId: string, title: string) => {
+    if (!repository) throw new Error("Test database is unavailable");
+    const created = await repository.createNewKnowledgeDraft(userId, organizationId, {
+      actorMembershipId: membershipId, title, classification: "INTERNAL",
+      idempotencyKey: randomUUID(), requestId: "flow2-create",
+      content: { sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain", contentHash: "d".repeat(64) },
+    });
+    if (created.kind !== "created") throw new Error(`Draft fixture failed: ${created.kind}`);
+    return created.draft.id;
+  };
+
+  /** A pending legacy-audience submission of a new draft by the author (no Target Readers). */
+  const submitLegacyDraft = async (title: string) => {
+    if (!repository) throw new Error("Test database is unavailable");
+    const draftId = await createDraft(ids.author, ids.orgA, ids.authorM, title);
+    const configured = await repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, 1, {
+      responsibleDepartmentId: ids.sales, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.allMembersA],
+    }, null, "flow2-configure");
+    if (configured.kind !== "updated") throw new Error(`Configure fixture failed: ${configured.kind}`);
+    const submitted = await repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 2, randomUUID(), "flow2-submit");
+    if (submitted.kind !== "submitted") throw new Error(`Submit fixture failed: ${submitted.kind}`);
+    return { draftId, submissionId: submitted.submission.id };
+  };
+
+  describe("T3.1 categories, document metadata and relationships (migration 0027)", () => {
+    it("gives a new organization the five default categories, including one created by the runtime role", async () => {
+      const organizationId = id();
+      const codes = await asRuntime(ids.outsider, "", async (client) => {
+        await client.query("SELECT set_config('arden.organization_id', '', true)");
+        await client.query(`INSERT INTO organization (organization_id, name, slug, created_by_user_id)
+          VALUES ($1, 'Category fixture', $2, $3)`, [organizationId, `category-${organizationId}`, ids.outsider]);
+        await client.query("RESET ROLE");
+        return (await client.query<{ code: string; is_default: boolean }>(`SELECT code, is_default
+          FROM document_category WHERE organization_id = $1 ORDER BY sort_order`, [organizationId])).rows;
+      });
+      expect(codes).toEqual([
+        { code: "POLICY", is_default: false }, { code: "PROCEDURE", is_default: false },
+        { code: "GUIDE", is_default: false }, { code: "REFERENCE", is_default: false },
+        { code: "GENERAL", is_default: true }]);
+      const fixtureOrganizations = await asSuperuser((client) => client.query<{ organization_id: string; categories: string }>(`
+        SELECT o.organization_id, count(c.category_id)::text AS categories FROM organization o
+          LEFT JOIN document_category c ON c.organization_id = o.organization_id
+         WHERE o.organization_id = ANY($1::uuid[]) GROUP BY o.organization_id`, [[ids.orgA, ids.orgB]]));
+      expect(fixtureOrganizations.rows.map((row) => row.categories)).toEqual(["5", "5"]);
+    });
+
+    it("leaves no document that existed before 0027 without a category", async () => {
+      const missing = await asSuperuser((client) => client.query(`SELECT d.shared_draft_id FROM shared_draft d
+        JOIN public.arden_schema_migrations m ON m.migration_id = '0027_document_category_relationships'
+       WHERE d.created_at < m.applied_at AND d.category_id IS NULL`));
+      expect(missing.rowCount).toBe(0);
+    });
+
+    it("lets members read only their organization's categories and validates keywords", async () => {
+      const visible = await asRuntime(ids.engineer, ids.orgA, (client) => client.query<{ organization_id: string }>(
+        "SELECT DISTINCT organization_id FROM document_category"));
+      expect(visible.rows).toEqual([{ organization_id: ids.orgA }]);
+      await expect(asRuntime(ids.engineer, ids.orgB, (client) => client.query("SELECT 1 FROM document_category")))
+        .resolves.toMatchObject({ rowCount: 0 });
+      const draftId = await createDraft(ids.author, ids.orgA, ids.authorM, "Keyword fixture");
+      for (const keywords of [["  padded"], ["dup", "DUP"], [""], Array.from({ length: 21 }, (_, n) => `k${n}`)]) {
+        await expect(sqlState((client) => client.query("UPDATE shared_draft SET keywords = $2 WHERE shared_draft_id = $1",
+          [draftId, keywords]))).resolves.toBe("23514");
+      }
+      await expect(sqlState((client) => client.query(`UPDATE shared_draft SET keywords = $2,
+        category_id = (SELECT category_id FROM document_category WHERE organization_id = $3 AND code = 'POLICY')
+        WHERE shared_draft_id = $1`, [draftId, ["onboarding", "VPN"], ids.orgA]))).resolves.toBeNull();
+      await expect(sqlState((client) => client.query(`UPDATE shared_draft SET
+        category_id = (SELECT category_id FROM document_category WHERE organization_id = $2 AND code = 'POLICY')
+        WHERE shared_draft_id = $1`, [draftId, ids.orgB]))).resolves.toBe("23503");
+    });
+
+    it("links documents of one organization only, and only by the source document's author", async () => {
+      const source = await createDraft(ids.author, ids.orgA, ids.authorM, "Link source");
+      const target = await createDraft(ids.author, ids.orgA, ids.authorM, "Link target");
+      const foreign = await createDraft(ids.foreign, ids.orgB, ids.foreignM, "Foreign target");
+      const link = (client: PoolClient, organizationId: string, to: string, by = ids.authorM) => client.query(`
+        INSERT INTO document_relationship (organization_id, source_document_id, target_document_id, created_by_membership_id)
+        VALUES ($1, $2, $3, $4)`, [organizationId, source, to, by]);
+      await expect(sqlState((client) => link(client, ids.orgA, foreign))).resolves.toBe("23503");
+      await expect(sqlState((client) => link(client, ids.orgB, foreign, ids.foreignM))).resolves.toBe("23503");
+      await expect(sqlState((client) => link(client, ids.orgA, source))).resolves.toBe("23514");
+      await expect(asRuntime(ids.outsider, ids.orgA, (client) => link(client, ids.orgA, target, ids.outsiderM)))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(asRuntime(ids.author, ids.orgA, async (client) => {
+        await link(client, ids.orgA, target);
+        return (await client.query("SELECT target_document_id FROM document_relationship WHERE source_document_id = $1",
+          [source])).rows;
+      })).resolves.toEqual([{ target_document_id: target }]);
+    });
+  });
+
+  describe("T1.2 legacy audiences to Target Readers (migration 0028)", () => {
+    const groupRole = id();
+    const emptyRole = id();
+    const scopes = { sales: id(), engineering: id() };
+    const fixturePublications: string[] = [];
+
+    /** A legacy current publication (readers NULL). Only the columns the backfill reads are meaningful. */
+    const legacyPublication = (scope: "ORGANIZATION" | "DEPARTMENT", departmentId: string | null, roleIds: string[]) =>
+      asSuperuser(async (client) => {
+        const draftId = id();
+        const versionId = id();
+        // validate_current_publication re-checks the pointer against its knowledge base on every update.
+        const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
+            (organization_id, name, scope_type, department_id) VALUES ($1, 'Legacy fixture ' || $4, $2, $3)
+          RETURNING knowledge_base_id`, [ids.orgA, scope, departmentId, draftId]);
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
+            title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
+            audience_role_ids, valid_from)
+          VALUES ($1, $2, $3, 'Legacy publication', 1, 'arden-private-object://legacy', $4, $5, 'INTERNAL', $6, $7::uuid[], now())`,
+        [versionId, id(), knowledgeBase.rows[0]?.knowledge_base_id, "e".repeat(64), draftId, ids.sales, roleIds]);
+        await client.query(`INSERT INTO knowledge_current_publication (shared_draft_id, organization_id, published_version_id,
+            audience_role_ids, target_scope_type, target_department_id, valid_from)
+          VALUES ($1, $2, $3, $4::uuid[], $5, $6, now())`, [draftId, ids.orgA, versionId, roleIds, scope, departmentId]);
+        fixturePublications.push(versionId);
+        return draftId;
+      });
+
+    const report = (apply: boolean) => asSuperuser((client) => client.query<{ shared_draft_id: string; outcome: string;
+      reader_mode: string | null; audience_readers: number; target_readers: number; wider_readers: number }>(
+      "SELECT * FROM migrate_publication_readers($1, $2)", [apply, ids.orgA]));
+
+    beforeAll(async () => {
+      if (!fixtureReady) return;
+      await asSuperuser(async (client) => {
+        await client.query(`INSERT INTO role (role_id, organization_id, code, name) VALUES ($1, $3, $4, 'Group'), ($2, $3, $5, 'Empty')`,
+          [groupRole, emptyRole, ids.orgA, `GROUP_${groupRole.slice(0, 8).toUpperCase()}`, `EMPTY_${emptyRole.slice(0, 8).toUpperCase()}`]);
+        await client.query(`INSERT INTO role_permission (role_id, permission_id)
+          SELECT role_id, permission_id FROM unnest($1::uuid[]) AS role_id
+            CROSS JOIN permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`,
+        [[groupRole, emptyRole, ids.salesRole, ids.engineeringRole]]);
+        await client.query(`INSERT INTO access_scope (access_scope_id, organization_id, scope_type, department_id)
+          VALUES ($1, $3, 'DEPARTMENT', $4), ($2, $3, 'DEPARTMENT', $5)`,
+        [scopes.sales, scopes.engineering, ids.orgA, ids.sales, ids.engineering]);
+        // Sales readers: author and reviewer hold the department role; outsider is in Sales but does not.
+        await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
+          VALUES ($1, $4, $6), ($2, $4, $6), ($3, $5, $7), ($3, $8, $9)`,
+        [ids.authorM, ids.reviewerM, ids.engineerM, ids.salesRole, ids.engineeringRole, scopes.sales, scopes.engineering,
+          groupRole, ids.scopeA]);
+      });
+    });
+
+    afterAll(async () => {
+      if (!fixtureReady) return;
+      await asSuperuser(async (client) => {
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query("DELETE FROM knowledge_current_publication WHERE published_version_id = ANY($1::uuid[])", [fixturePublications]);
+        await client.query("DELETE FROM published_knowledge_version WHERE published_version_id = ANY($1::uuid[])", [fixturePublications]);
+        await client.query("DELETE FROM role_assignment WHERE role_id = ANY($1::uuid[])", [[groupRole, ids.salesRole, ids.engineeringRole]]);
+        await client.query("DELETE FROM role_permission WHERE role_id = ANY($1::uuid[])",
+          [[groupRole, emptyRole, ids.salesRole, ids.engineeringRole]]);
+        await client.query("DELETE FROM access_scope WHERE access_scope_id = ANY($1::uuid[])", [[scopes.sales, scopes.engineering]]);
+      });
+    });
+
+    it("maps every publication without widening its readers and reports before/after counts", async () => {
+      const organizationWide = await legacyPublication("ORGANIZATION", null, [ids.allMembersA]);
+      const engineering = await legacyPublication("DEPARTMENT", ids.engineering, [ids.engineeringRole]);
+      const partialSales = await legacyPublication("DEPARTMENT", ids.sales, [ids.salesRole]);
+      const oneMemberGroup = await legacyPublication("ORGANIZATION", null, [groupRole]);
+      const nobody = await legacyPublication("ORGANIZATION", null, [emptyRole]);
+      const expected = {
+        [organizationWide]: { reader_mode: "ORGANIZATION", audience_readers: 4, target_readers: 4 },
+        [engineering]: { reader_mode: "DEPARTMENT", audience_readers: 1, target_readers: 1 },
+        // Outsider is in Sales without the role today, so DEPARTMENT would widen: keep the exact readers.
+        [partialSales]: { reader_mode: "SELECTED_MEMBERS", audience_readers: 2, target_readers: 2 },
+        [oneMemberGroup]: { reader_mode: null, audience_readers: 1, target_readers: 0 },
+        [nobody]: { reader_mode: null, audience_readers: 0, target_readers: 0 },
+      };
+      const rows = (result: Awaited<ReturnType<typeof report>>) =>
+        Object.fromEntries(result.rows.filter((row) => row.shared_draft_id in expected).map((row) => [row.shared_draft_id, row]));
+
+      const dryRun = rows(await report(false));
+      for (const [draftId, row] of Object.entries(expected)) {
+        expect(dryRun[draftId]).toMatchObject({ ...row, wider_readers: 0,
+          outcome: row.reader_mode ? "WOULD_MAP" : "UNMAPPED" });
+      }
+      const unchanged = await asSuperuser((client) => client.query(`SELECT 1 FROM knowledge_current_publication
+        WHERE shared_draft_id = ANY($1::uuid[]) AND reader_selection_id IS NOT NULL`, [Object.keys(expected)]));
+      expect(unchanged.rowCount).toBe(0);
+
+      const applied = rows(await report(true));
+      for (const [draftId, row] of Object.entries(expected)) {
+        expect(applied[draftId]).toMatchObject({ ...row, wider_readers: 0, outcome: row.reader_mode ? "MAPPED" : "UNMAPPED" });
+      }
+      const after = rows(await report(false));
+      for (const [draftId, row] of Object.entries(expected)) {
+        expect(after[draftId]).toMatchObject({ ...row, wider_readers: 0, outcome: row.reader_mode ? "ALREADY_SET" : "UNMAPPED" });
+      }
+      const stored = await asSuperuser((client) => client.query<{ shared_draft_id: string; members: string[] }>(`
+        SELECT cp.shared_draft_id, ARRAY(SELECT sr.membership_id::text FROM selected_reader sr
+                 WHERE sr.selection_id = cp.reader_selection_id ORDER BY sr.membership_id) AS members
+          FROM knowledge_current_publication cp
+          JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
+                                             AND pv.reader_selection_id = cp.reader_selection_id
+         WHERE cp.shared_draft_id = $1`, [partialSales]));
+      expect(stored.rows[0]?.members).toEqual([ids.authorM, ids.reviewerM].sort());
+      // Effective access only narrows: the outsider never had the Sales role and still cannot read it.
+      const outsiderView = await asRuntime(ids.outsider, ids.orgA, (client) => client.query(
+        "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = ANY($1::uuid[])",
+        [[organizationWide, partialSales]]));
+      expect(outsiderView.rows).toEqual([{ shared_draft_id: organizationWide }]);
+    });
+
+    it("runs only for the trusted operator role", async () => {
+      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query("SELECT * FROM migrate_publication_readers(false)")))
+        .rejects.toMatchObject({ code: "42501" });
+    });
+  });
+
+  describe("T5.1 withdraw a pending submission (migration 0029)", () => {
+    it("withdraws only the author's pending submission, once, and refuses a decided one", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { draftId, submissionId } = await submitLegacyDraft("Withdrawal fixture");
+      await expect(repository.withdrawKnowledgeSubmission(ids.outsider, ids.orgA, submissionId, "flow2-withdraw"))
+        .resolves.toEqual({ kind: "not-found" });
+      await expect(repository.withdrawKnowledgeSubmission(ids.foreign, ids.orgA, submissionId, "flow2-withdraw"))
+        .resolves.toEqual({ kind: "not-found" });
+      await expect(repository.withdrawKnowledgeSubmission(ids.author, ids.orgA, submissionId, "flow2-withdraw"))
+        .resolves.toMatchObject({ kind: "withdrawn", submission: { id: submissionId, status: "WITHDRAWN" } });
+      await expect(repository.withdrawKnowledgeSubmission(ids.author, ids.orgA, submissionId, "flow2-withdraw"))
+        .resolves.toMatchObject({ kind: "replayed", submission: { status: "WITHDRAWN" } });
+      const evidence = await asSuperuser((client) => client.query<{ pending: string; audits: string }>(`
+        SELECT (SELECT count(*) FROM shared_submission WHERE shared_draft_id = $1 AND status = 'PENDING_REVIEW')::text AS pending,
+               (SELECT count(*) FROM audit_event WHERE event_type = 'KNOWLEDGE_SUBMISSION_WITHDRAWN'
+                  AND details_json->>'submissionId' = $2)::text AS audits`, [draftId, submissionId]));
+      expect(evidence.rows[0]).toEqual({ pending: "0", audits: "1" });
+      // A withdrawal is final, even for the database owner.
+      await expect(sqlState((client) => client.query(`UPDATE shared_submission SET status = 'PENDING_REVIEW'
+        WHERE submission_id = $1`, [submissionId]))).resolves.toBe("55000");
+    });
+
+    it("returns a conflict for an approved submission and blocks a direct runtime withdrawal by others", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const approved = await submitLegacyDraft("Approved fixture");
+      await asSuperuser((client) => client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'PREPARING'
+        WHERE submission_id = $1`, [approved.submissionId]));
+      await expect(repository.withdrawKnowledgeSubmission(ids.author, ids.orgA, approved.submissionId, "flow2-withdraw"))
+        .resolves.toEqual({ kind: "conflict" });
+      await expect(sqlState((client) => client.query(`UPDATE shared_submission SET status = 'WITHDRAWN', publication_state = 'NONE'
+        WHERE submission_id = $1`, [approved.submissionId]))).resolves.toBe("55000");
+
+      const pending = await submitLegacyDraft("Pending fixture");
+      const changed = await asRuntime(ids.reviewer, ids.orgA, (client) => client.query(`UPDATE shared_submission
+        SET status = 'WITHDRAWN' WHERE submission_id = $1`, [pending.submissionId]));
+      expect(changed.rowCount).toBe(0);
+    });
+  });
 });

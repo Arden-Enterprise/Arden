@@ -156,6 +156,24 @@
       "filename": "0026_review_list_authors.sql",
       "sha256": "df980a256ae59eb603bb2cbf90493f4ca3441f9062b8e6e8d6f136cee3568715",
       "rollout": "operator"
+    },
+    {
+      "id": "0027",
+      "filename": "0027_document_category_relationships.sql",
+      "sha256": "d4e42cab4266698a3074ac992a4007f6dd7a212ddfb9a62ee40424e68bfdc82c",
+      "rollout": "operator"
+    },
+    {
+      "id": "0028",
+      "filename": "0028_audience_to_target_readers.sql",
+      "sha256": "b51e6cc7ef406aadba1fe12e2a858509a9200e443a43c414e964f14236f29ed3",
+      "rollout": "operator"
+    },
+    {
+      "id": "0029",
+      "filename": "0029_withdraw_pending_submission.sql",
+      "sha256": "cdbc85f4cc5aec4f2d483752d6f5c3fc5160da0d442e0905fea2ad74db402807",
+      "rollout": "operator"
     }
   ]
 }
