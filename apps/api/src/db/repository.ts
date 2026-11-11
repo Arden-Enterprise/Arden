@@ -7,6 +7,7 @@ import { listAssignedReviews, type AssignedReview } from "../knowledge/review-qu
 import { planReviewDecision, type ReviewAction, type ReviewDecisionPlan } from "../knowledge/review-decision.js";
 import { maxSelectedReaders, validateSelection, type ReaderActor, type ReaderMode, type ReaderSelection,
   type SelectionFacts, type TargetReadersField, type TargetReadersInput } from "../target-readers/policy.js";
+import { sameReaders, type ApprovedReadersField } from "../target-readers/narrowing.js";
 
 export type MembershipStatus = "INVITED" | "ACTIVE" | "SUSPENDED" | "LEFT";
 export type MembershipSummary = {
@@ -102,6 +103,8 @@ export type SharedKnowledgeSubmission = {
   audienceRoleIds: string[];
   /** The draft's Target Readers frozen at submit (proposed_selection_id). */
   proposedTargetReaders: ReaderSelection | null;
+  /** The readers the reviewer approved (approved_selection_id); null until approved, and for legacy submissions. */
+  approvedTargetReaders: ReaderSelection | null;
   contentHash: string;
   status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
   publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED";
@@ -131,6 +134,24 @@ export type ReviewerGrantRecord = Omit<ReviewerGrantInput, "level"> & {
   status: "ACTIVE" | "INACTIVE";
   validFrom: Date;
 };
+/** Proposed readers resolved for the reviewer's narrowing UI (T2.1/T2.2). */
+export type ProposedReadersDetail = {
+  mode: ReaderMode;
+  department: { id: string; name: string } | null;
+  members: Array<{ membershipId: string; displayName: string | null }>;
+};
+export type DecidedReview = {
+  submissionId: string;
+  title: string;
+  departmentId: string;
+  classification: KnowledgeClassification;
+  versionNo: number;
+  decision: "APPROVED" | "REJECTED";
+  decidedAt: Date;
+  submittedAt: Date;
+  publicationState: SharedKnowledgeSubmission["publicationState"];
+  authorName: string | null;
+};
 export type ReviewDetail = {
   submission: SharedKnowledgeSubmission;
   sourceUri: string;
@@ -138,11 +159,14 @@ export type ReviewDetail = {
   submittedByMembershipId: string;
   teamTag: string | null;
   projectTag: string | null;
+  /** null for a legacy audience submission. */
+  proposedReaders: ProposedReadersDetail | null;
 };
 export type DecideReviewResult =
   | { kind: "decided"; submission: SharedKnowledgeSubmission }
   | { kind: "replayed"; submission: SharedKnowledgeSubmission }
-  | { kind: "denied"; reason: Extract<ReviewDecisionPlan, { kind: "DENIED" }>["reason"] }
+  | { kind: "denied"; reason: Extract<ReviewDecisionPlan, { kind: "DENIED" }>["reason"];
+      field?: ApprovedReadersField; message?: string }
   | { kind: "not-found" }
   | { kind: "conflict" };
 export type PublishedKnowledge = {
@@ -184,18 +208,32 @@ type ReaderSelectionColumns = {
  * Selects one reader selection as readers_* columns. `selectionId` is an SQL expression.
  * The member list keeps the author's order.
  */
-function readerSelectionColumns(selectionId: string): string {
-  return `${selectionId} AS readers_selection_id,
-         (SELECT rs.reader_mode FROM reader_selection rs WHERE rs.selection_id = ${selectionId}) AS readers_mode,
-         (SELECT rs.department_id FROM reader_selection rs WHERE rs.selection_id = ${selectionId}) AS readers_department_id,
+function readerSelectionColumns(selectionId: string, prefix = "readers"): string {
+  return `${selectionId} AS ${prefix}_selection_id,
+         (SELECT rs.reader_mode FROM reader_selection rs WHERE rs.selection_id = ${selectionId}) AS ${prefix}_mode,
+         (SELECT rs.department_id FROM reader_selection rs WHERE rs.selection_id = ${selectionId}) AS ${prefix}_department_id,
          ARRAY(SELECT sr.membership_id::text FROM selected_reader sr
-                WHERE sr.selection_id = ${selectionId} ORDER BY sr.ordinal) AS readers_member_ids`;
+                WHERE sr.selection_id = ${selectionId} ORDER BY sr.ordinal) AS ${prefix}_member_ids`;
+}
+function toReaderSelection(selectionId: string | null, mode: ReaderMode | null, departmentId: string | null,
+  memberIds: string[] | null): ReaderSelection | null {
+  if (selectionId === null) return null;
+  // A referenced selection that cannot be resolved fails closed: nobody is a reader.
+  if (mode === null) return { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] };
+  return { mode, departmentId, memberIds: memberIds ?? [] };
 }
 function mapReaderSelection(row: ReaderSelectionColumns): ReaderSelection | null {
-  if (row.readers_selection_id === null) return null;
-  // A referenced selection that cannot be resolved fails closed: nobody is a reader.
-  if (row.readers_mode === null) return { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] };
-  return { mode: row.readers_mode, departmentId: row.readers_department_id, memberIds: row.readers_member_ids ?? [] };
+  return toReaderSelection(row.readers_selection_id, row.readers_mode, row.readers_department_id, row.readers_member_ids);
+}
+type ApprovedReaderColumns = {
+  approved_selection_id: string | null;
+  approved_mode: ReaderMode | null;
+  approved_department_id: string | null;
+  approved_member_ids: string[] | null;
+};
+/** Audit summary: mode, department and member count, never member identities. */
+function readersAuditSummary(readers: ReaderSelection) {
+  return { mode: readers.mode, departmentId: readers.departmentId, memberCount: readers.memberIds.length };
 }
 type SharedDraftRow = ReaderSelectionColumns & {
   shared_draft_id: string;
@@ -261,7 +299,7 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
     updatedAt: row.updated_at,
   };
 }
-type SharedSubmissionRow = ReaderSelectionColumns & {
+type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
   submission_id: string;
   shared_draft_id: string;
   shared_draft_version_id: string;
@@ -298,6 +336,7 @@ const submissionSelect = `
          s.mime_type, s.status, s.publication_state, s.submitted_at, s.submitted_by_membership_id,
          s.team_tag, s.project_tag, s.policy_version, s.review_rule,
          ${readerSelectionColumns("s.proposed_selection_id")},
+         ${readerSelectionColumns("s.approved_selection_id", "approved")},
          (s.target_scope_type = 'ORGANIZATION' AND EXISTS (
            SELECT 1 FROM audience a WHERE a.organization_id = s.organization_id
               AND a.audience_id = ANY(s.audience_role_ids) AND a.kind = 'ORGANIZATION_ALL')) AS organization_wide,
@@ -319,6 +358,8 @@ function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmissio
     targetDepartmentId: row.target_department_id,
     audienceRoleIds: row.audience_role_ids,
     proposedTargetReaders: mapReaderSelection(row),
+    approvedTargetReaders: toReaderSelection(row.approved_selection_id, row.approved_mode,
+      row.approved_department_id, row.approved_member_ids),
     contentHash: row.content_hash,
     status: row.status,
     publicationState: row.publication_state,
@@ -400,7 +441,7 @@ const publishedKnowledgeSelect = `
          pv.responsible_department_id, pv.content_hash, pv.content_uri,
          pv.audience_role_ids, pv.published_at,
          cp.valid_from, cp.valid_until,
-         ${readerSelectionColumns("publication_reader_selection_id(pv.submission_id)")}
+         ${readerSelectionColumns("pv.reader_selection_id")}
     FROM knowledge_current_publication cp
     JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
@@ -492,10 +533,12 @@ export interface ArdenDataRepository {
   createReviewerGrant(userId: string, organizationId: string, input: ReviewerGrantInput, requestId: string): Promise<ReviewerGrantRecord | null>;
   deactivateReviewerGrant(userId: string, organizationId: string, grantId: string, requestId: string): Promise<boolean>;
   listAssignedReviews(userId: string, organizationId: string): Promise<AssignedReview[] | null>;
+  /** Submissions this reviewer already decided (REV-02 Approved / Rejected groups), newest first. */
+  listDecidedReviews(userId: string, organizationId: string): Promise<DecidedReview[] | null>;
   getAssignedReview(userId: string, organizationId: string, submissionId: string): Promise<ReviewDetail | null>;
   decideReview(userId: string, organizationId: string, submissionId: string, action: ReviewAction,
     expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
-    idempotencyKey: string, requestId: string): Promise<DecideReviewResult>;
+    idempotencyKey: string, requestId: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
   listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null>;
@@ -1665,14 +1708,49 @@ export class ArdenRepository implements ArdenDataRepository {
         snapshotId: row.shared_draft_version_id,
         title: row.title,
         submittedAt: row.submitted_at,
+        versionNo: row.snapshot_version_no,
         submission: reviewAuthorizationFromRow(row, organizationId),
         reviewerGrants: grants,
         effectivePolicyVersion: 1,
         audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids,
           row.target_scope_type, row.responsible_department_id),
       })));
-      return listAssignedReviews({ actor, now, candidates });
+      const assigned = listAssignedReviews({ actor, now, candidates });
+      // Names are resolved only for submissions the policy above already authorized.
+      const names = await this.reviewAuthorNames(client, assigned.map((item) => item.submissionId));
+      return assigned.map((item) => ({ ...item, authorName: names.get(item.submissionId) ?? null }));
     });
+  }
+
+  async listDecidedReviews(userId: string, organizationId: string): Promise<DecidedReview[] | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const actor = await this.activeActorReviewContext(client, userId, organizationId);
+      if (!actor) return null;
+      const result = await client.query<{ submission_id: string; title: string; responsible_department_id: string;
+        classification: KnowledgeClassification; snapshot_version_no: number; decision: "APPROVED" | "REJECTED";
+        decided_at: Date; submitted_at: Date; publication_state: SharedKnowledgeSubmission["publicationState"] }>(`
+        SELECT s.submission_id, s.title, s.responsible_department_id, s.classification, s.snapshot_version_no,
+               rd.decision, rd.decided_at, s.submitted_at, s.publication_state
+          FROM review_decision rd
+          JOIN shared_submission s ON s.submission_id = rd.submission_id
+         WHERE rd.flow2 AND rd.reviewer_membership_id = $1 AND s.organization_id = $2
+           AND s.shared_draft_version_id IS NOT NULL
+         ORDER BY rd.decided_at DESC, s.submission_id DESC LIMIT 100`, [actor.membershipId, organizationId]);
+      const names = await this.reviewAuthorNames(client, result.rows.map((row) => row.submission_id));
+      return result.rows.map((row) => ({
+        submissionId: row.submission_id, title: row.title, departmentId: row.responsible_department_id,
+        classification: row.classification, versionNo: row.snapshot_version_no, decision: row.decision,
+        decidedAt: row.decided_at, submittedAt: row.submitted_at, publicationState: row.publication_state,
+        authorName: names.get(row.submission_id) ?? null,
+      }));
+    });
+  }
+
+  private async reviewAuthorNames(client: PoolClient, submissionIds: string[]): Promise<Map<string, string>> {
+    if (submissionIds.length === 0) return new Map();
+    const result = await client.query<{ submission_id: string; display_name: string }>(`
+      SELECT submission_id, display_name FROM review_submission_authors($1::uuid[])`, [submissionIds.slice(0, 200)]);
+    return new Map(result.rows.map((row) => [row.submission_id, row.display_name]));
   }
 
   async getAssignedReview(userId: string, organizationId: string, submissionId: string): Promise<ReviewDetail | null> {
@@ -1697,20 +1775,25 @@ export class ArdenRepository implements ArdenDataRepository {
         submission: mapSharedSubmission(row), sourceUri: row.content_uri, mimeType: row.mime_type,
         submittedByMembershipId: row.submitted_by_membership_id,
         teamTag: row.team_tag, projectTag: row.project_tag,
+        // Resolved only after the exact review authorization above.
+        proposedReaders: await this.proposedReadersDetail(client, submissionId, mapReaderSelection(row)),
       };
     });
   }
 
   async decideReview(userId: string, organizationId: string, submissionId: string, action: ReviewAction,
     expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
-    idempotencyKey: string, requestId: string): Promise<DecideReviewResult> {
+    idempotencyKey: string, requestId: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const actor = await this.activeActorReviewContext(client, userId, organizationId);
       if (!actor) return { kind: "not-found" };
       const { membershipId } = actor;
       const requestedDecision = action === "APPROVE" ? "APPROVED" : "REJECTED";
-      const replay = await client.query<{ submission_id: string; decision: string; snapshot_version_id: string; content_hash: string; comment: string | null }>(`
-        SELECT submission_id, decision, snapshot_version_id, content_hash, comment FROM review_decision
+      const replay = await client.query<{ submission_id: string; decision: string; snapshot_version_id: string;
+        content_hash: string; comment: string | null } & ApprovedReaderColumns>(`
+        SELECT submission_id, decision, snapshot_version_id, content_hash, comment,
+               ${readerSelectionColumns("approved_selection_id", "approved")}
+          FROM review_decision
          WHERE reviewer_membership_id = $1 AND decision_request_id = $2 AND flow2`, [membershipId, idempotencyKey]);
       if (replay.rows[0]) {
         const previous = replay.rows[0];
@@ -1720,8 +1803,19 @@ export class ArdenRepository implements ArdenDataRepository {
           || previous.comment !== (comment?.trim() || null)) return { kind: "conflict" };
         const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
           WHERE s.organization_id = $1 AND s.submission_id = $2`, [organizationId, submissionId]);
-        return result.rows[0] ? { kind: "replayed", submission: mapSharedSubmission(result.rows[0]) }
-          : { kind: "not-found" };
+        const replayed = result.rows[0];
+        if (!replayed) return { kind: "not-found" };
+        // Same key, same readers (compared as a set; absent means "as proposed"), or it is a different request.
+        const previousApproved = toReaderSelection(previous.approved_selection_id, previous.approved_mode,
+          previous.approved_department_id, previous.approved_member_ids);
+        const expectedApproved = approvedReaders === undefined ? (previousApproved ? mapReaderSelection(replayed) : null)
+          : { mode: approvedReaders.mode, departmentId: approvedReaders.departmentId ?? null,
+            memberIds: approvedReaders.memberIds ?? [] };
+        if ((previousApproved === null) !== (expectedApproved === null)
+          || (previousApproved && expectedApproved && !sameReaders(previousApproved, expectedApproved))) {
+          return { kind: "conflict" };
+        }
+        return { kind: "replayed", submission: mapSharedSubmission(replayed) };
       }
       const selected = await client.query<SharedSubmissionRow>(`${submissionSelect}
         WHERE s.organization_id = $1 AND s.submission_id = $2 FOR UPDATE OF s`, [organizationId, submissionId]);
@@ -1729,6 +1823,11 @@ export class ArdenRepository implements ArdenDataRepository {
       if (!row) return { kind: "not-found" };
       if (row.status !== "PENDING_REVIEW") return { kind: "conflict" };
       const grants = await this.loadActorReviewerGrants(client, membershipId, organizationId);
+      const proposedReaders = mapReaderSelection(row);
+      // Facts are loaded inside the locked transaction; the plan checks authorization before using them.
+      const readerFacts: SelectionFacts = proposedReaders && approvedReaders !== undefined
+        ? await this.loadSelectionFacts(client, organizationId, approvedReaders)
+        : { organizationId, departments: [], members: [] };
       const plan = planReviewDecision({
         actor,
         submission: { ...reviewAuthorizationFromRow(row, organizationId),
@@ -1739,21 +1838,32 @@ export class ArdenRepository implements ArdenDataRepository {
           row.target_scope_type, row.responsible_department_id),
         policy: { kind: "SINGLE_REVIEWER" },
         now: new Date(),
-      }, { action, expectedSnapshotVersionId, expectedContentHash, comment });
-      if (plan.kind === "DENIED") return { kind: "denied", reason: plan.reason };
+        readers: { proposed: proposedReaders, facts: readerFacts },
+      }, { action, expectedSnapshotVersionId, expectedContentHash, comment, approvedReaders });
+      if (plan.kind === "DENIED") {
+        return plan.reason === "INVALID_READERS"
+          ? { kind: "denied", reason: plan.reason, field: plan.field, message: plan.message }
+          : { kind: "denied", reason: plan.reason };
+      }
+      const readers = plan.kind === "APPROVE_FOR_PREPARATION" ? plan.readers : null;
+      // A is always its own selection row, even when it equals P; P is never modified.
+      const approvedSelectionId = readers
+        ? await this.insertReaderSelection(client, organizationId, readers.approved, 1) : null;
       const decisionId = randomUUID();
       await client.query(`INSERT INTO review_decision (review_decision_id, submission_id,
         reviewer_membership_id, decision, comment, flow2, decision_request_id,
-        snapshot_version_id, content_hash)
-        VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8)`, [decisionId, submissionId,
+        snapshot_version_id, content_hash, approved_selection_id)
+        VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9)`, [decisionId, submissionId,
         membershipId, plan.decision, plan.comment, idempotencyKey,
-        row.shared_draft_version_id, row.content_hash]);
+        row.shared_draft_version_id, row.content_hash, approvedSelectionId]);
       await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id,
         review_decision_id, event_type, outcome, details_json)
         VALUES ($1, $2, $3, 'KNOWLEDGE_REVIEW_DECIDED', 'SUCCESS', $4::jsonb)`, [organizationId,
         membershipId, decisionId, JSON.stringify({ submissionId, snapshotVersionId: row.shared_draft_version_id,
           decision: plan.decision,
           selfApproved: actor.isOrganizationAdmin === true && membershipId === row.submitted_by_membership_id,
+          ...(readers ? { proposedReaders: readersAuditSummary(readers.proposed),
+            approvedReaders: readersAuditSummary(readers.approved), narrowed: readers.narrowed } : {}),
           requestId })]);
       const completed = await client.query<SharedSubmissionRow>(`${submissionSelect}
         WHERE s.organization_id = $1 AND s.submission_id = $2`, [organizationId, submissionId]);
@@ -1788,7 +1898,7 @@ export class ArdenRepository implements ArdenDataRepository {
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
                pv.classification, cp.target_scope_type,
-               ${readerSelectionColumns("publication_reader_selection_id(pv.submission_id)")},
+               ${readerSelectionColumns("pv.reader_selection_id")},
                CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
                  (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
                    WHERE $3::text[] IS NULL OR chunk->>'chunkId' = ANY($3::text[])) END AS chunks
@@ -1836,6 +1946,22 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
+  private async proposedReadersDetail(client: PoolClient, submissionId: string,
+    proposed: ReaderSelection | null): Promise<ProposedReadersDetail | null> {
+    if (!proposed) return null;
+    const department = proposed.departmentId === null ? null : (await client.query<{ department_id: string; name: string }>(`
+      SELECT department_id, name FROM department WHERE department_id = $1`, [proposed.departmentId])).rows[0] ?? null;
+    const names = proposed.memberIds.length === 0 ? new Map<string, string>() : new Map((await client.query<{
+      membership_id: string; display_name: string }>(`
+      SELECT membership_id, display_name FROM submission_proposed_reader_directory($1)`, [submissionId]))
+      .rows.map(member => [member.membership_id, member.display_name]));
+    return {
+      mode: proposed.mode,
+      department: department ? { id: department.department_id, name: department.name } : null,
+      members: proposed.memberIds.map(membershipId => ({ membershipId, displayName: names.get(membershipId) ?? null })),
+    };
+  }
+
   /** Loads only the facts validateSelection needs, inside the caller's transaction and RLS context. */
   private async loadSelectionFacts(client: PoolClient, organizationId: string,
     input: TargetReadersInput): Promise<SelectionFacts> {
@@ -1846,15 +1972,16 @@ export class ArdenRepository implements ArdenDataRepository {
       SELECT department_id, organization_id, status FROM department
        WHERE department_id = $1 AND organization_id = $2`, [departmentId, organizationId])).rows;
     const members = memberIds.length === 0 || memberIds.length > maxSelectedReaders ? [] : (await client.query<{
-      membership_id: string; membership_status: SelectionFacts["members"][number]["status"]; account_active: boolean }>(`
-      SELECT membership_id, membership_status, account_active
+      membership_id: string; membership_status: SelectionFacts["members"][number]["status"]; account_active: boolean;
+      department_ids: string[] }>(`
+      SELECT membership_id, membership_status, account_active, department_ids::text[] AS department_ids
         FROM reader_selection_member_facts($1::uuid[])`, [memberIds])).rows;
     return {
       organizationId,
       departments: departments.map(row => ({ departmentId: row.department_id, organizationId: row.organization_id,
         status: row.status })),
       members: members.map(row => ({ membershipId: row.membership_id, organizationId,
-        status: row.membership_status, accountActive: row.account_active })),
+        status: row.membership_status, accountActive: row.account_active, departmentIds: row.department_ids })),
     };
   }
 

@@ -11,7 +11,7 @@ import { registerSystemAdministrationRoutes } from "./system-administration/rout
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { citationPage } from "./answers/citation-page.js";
 import { citationMatchesManifest } from "./answers/contracts.js";
-import { canRead, readerModes, type ReaderActor, type ReaderSelection } from "./target-readers/policy.js";
+import { canRead, readerModes, type ReaderActor, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -19,6 +19,12 @@ const maxPdfBase64Length = Math.ceil(maxPdfBytes / 3) * 4;
 const maxTitleCodePoints = 200;
 const defaultListLimit = 50;
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+/** Request shape for Target Readers (draft save) and approved readers (review decision). */
+const targetReadersSchema = { type: "object", additionalProperties: false, required: ["mode"], properties: {
+  mode: { type: "string", enum: [...readerModes] },
+  departmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
+  memberIds: { type: "array", maxItems: 500, items: { type: "string", pattern: uuidPattern } },
+} } as const;
 
 type AppDependencies = {
   checkDatabase: () => Promise<void>;
@@ -1113,11 +1119,7 @@ export function buildApp(dependencies: AppDependencies) {
           projectTag: { type: ["string", "null"], maxLength: 100 },
           audienceIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
           // Shape only; counts, duplicates and membership/department state are TargetReaderPolicy field errors.
-          targetReaders: { type: "object", additionalProperties: false, required: ["mode"], properties: {
-            mode: { type: "string", enum: [...readerModes] },
-            departmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
-            memberIds: { type: "array", maxItems: 500, items: { type: "string", pattern: uuidPattern } },
-          } },
+          targetReaders: targetReadersSchema,
         } },
       },
     }, async (request, reply) => {
@@ -1337,9 +1339,13 @@ export function buildApp(dependencies: AppDependencies) {
     if (!context) return;
     try {
       const assigned = await dependencies.repository.listAssignedReviews(context.userId, request.params.organizationId);
-      if (!assigned) return reply.code(404).send(resourceNotAvailable(request.id));
+      const decided = assigned ? await dependencies.repository.listDecidedReviews(context.userId, request.params.organizationId) : null;
+      if (!assigned || !decided) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
-      return { items: assigned.map((item) => ({ ...item, submittedAt: item.submittedAt.toISOString() })) };
+      // REV-02: the pending queue plus the caller's own decided submissions.
+      return { items: assigned.map((item) => ({ ...item, submittedAt: item.submittedAt.toISOString() })),
+        decided: decided.map((item) => ({ ...item, submittedAt: item.submittedAt.toISOString(),
+          decidedAt: item.decidedAt.toISOString() })) };
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Review queue failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
@@ -1367,7 +1373,7 @@ export function buildApp(dependencies: AppDependencies) {
         reply.header("Cache-Control", "no-store");
         return { ...representSubmission(detail.submission), ...content, mimeType: detail.mimeType,
           submittedByMembershipId: detail.submittedByMembershipId,
-          teamTag: detail.teamTag, projectTag: detail.projectTag };
+          teamTag: detail.teamTag, projectTag: detail.projectTag, proposedReaders: detail.proposedReaders };
       } catch (error) {
         request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Review detail failed");
         return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
@@ -1377,6 +1383,7 @@ export function buildApp(dependencies: AppDependencies) {
   app.post<{ Params: { organizationId: string; submissionId: string }; Body: {
     action: "APPROVE" | "REJECT";
     expectedSnapshotVersionId: string; expectedContentHash: string; comment?: string | null;
+    approvedReaders?: TargetReadersInput;
   } }>("/api/v1/organizations/:organizationId/knowledge/reviews/:submissionId/decisions", {
     schema: {
       params: { type: "object", required: ["organizationId", "submissionId"], properties: {
@@ -1391,6 +1398,8 @@ export function buildApp(dependencies: AppDependencies) {
           expectedSnapshotVersionId: { type: "string", pattern: uuidPattern },
           expectedContentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
           comment: { anyOf: [{ type: "string", maxLength: 2000 }, { type: "null" }] },
+          // Shape only; validity and narrowing are decided after authorization (T2.1).
+          approvedReaders: targetReadersSchema,
         } },
     },
   }, async (request, reply) => {
@@ -1409,12 +1418,27 @@ export function buildApp(dependencies: AppDependencies) {
       const result = await dependencies.repository.decideReview(context.userId, request.params.organizationId,
         request.params.submissionId, request.body.action, request.body.expectedSnapshotVersionId,
         request.body.expectedContentHash, request.body.comment ?? null,
-        request.headers["idempotency-key"] as string, request.id);
+        request.headers["idempotency-key"] as string, request.id, request.body.approvedReaders);
       if (result.kind === "not-found" || (result.kind === "denied" && result.reason === "NOT_AUTHORIZED")) {
         return reply.code(404).send(resourceNotAvailable(request.id));
       }
       if (result.kind === "conflict") return reply.code(409).send(safeError("REVIEW_CONFLICT", "This submission changed. Reload it before deciding.", request.id));
       if (result.kind === "denied") {
+        if (result.reason === "INVALID_READERS") {
+          return reply.code(400).send({ error: { code: "INVALID_READERS",
+            message: result.message ?? "The approved readers are invalid.", requestId: request.id, field: result.field } });
+        }
+        if (result.reason === "INVALID_REQUEST") {
+          return reply.code(400).send(safeError("INVALID_REQUEST", "Approved readers apply only to an approval.", request.id));
+        }
+        if (result.reason === "READERS_NOT_SUPPORTED") {
+          return reply.code(400).send(safeError("READERS_NOT_SUPPORTED",
+            "This submission uses audiences; approve it without approved readers.", request.id));
+        }
+        if (result.reason === "READERS_WIDENED") {
+          return reply.code(409).send(safeError("READERS_WIDENED",
+            "Approved readers can keep or narrow the proposed readers, never widen them.", request.id));
+        }
         return reply.code(result.reason === "COMMENT_REQUIRED" ? 400 : 409)
           .send(safeError(result.reason, "This review decision cannot be applied.", request.id));
       }
@@ -1972,6 +1996,7 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     targetDepartmentId: submission.targetDepartmentId,
     audienceIds: submission.audienceRoleIds,
     proposedTargetReaders: representTargetReaders(submission.proposedTargetReaders),
+    approvedTargetReaders: representTargetReaders(submission.approvedTargetReaders),
     contentHash: submission.contentHash,
     status: submission.status,
     publicationState: submission.publicationState,

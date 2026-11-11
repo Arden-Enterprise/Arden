@@ -32,7 +32,9 @@ export type SelectionFacts = {
   /** Departments of the actor's organization that the caller could resolve. */
   departments: readonly { departmentId: string; organizationId: string; status: "ACTIVE" | "INACTIVE" | "ARCHIVED" }[];
   /** Memberships the caller could resolve; IDs from another organization are simply absent. */
-  members: readonly { membershipId: string; organizationId: string; status: MembershipStatus; accountActive: boolean }[];
+  members: readonly { membershipId: string; organizationId: string; status: MembershipStatus; accountActive: boolean;
+    /** Current departments (active membership in an active department); needed only for review narrowing. */
+    departmentIds?: readonly string[] }[];
 };
 
 export type TargetReadersField = "targetReaders.mode" | "targetReaders.departmentId" | "targetReaders.memberIds";

@@ -205,7 +205,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
 
     it("rejects archived departments, suspended or foreign readers, and changes to a saved selection", async () => {
       await expect(sqlState((client) => insertSelection(client, "DEPARTMENT", ids.archived))).resolves.toBe("23514");
-      await expect(sqlState((client) => insertSelection(client, "DEPARTMENT", ids.departmentB))).resolves.toBe("23503");
+      // The validation trigger rejects another organization's department/member before the composite FK would.
+      await expect(sqlState((client) => insertSelection(client, "DEPARTMENT", ids.departmentB))).resolves.toBe("23514");
       await expect(sqlState(async (client) => {
         const selectionId = await insertSelection(client, "SELECTED_MEMBERS", null);
         await addReader(client, selectionId, ids.authorM, 1);
@@ -215,7 +216,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         const selectionId = await insertSelection(client, "SELECTED_MEMBERS", null);
         await addReader(client, selectionId, ids.authorM, 1);
         await addReader(client, selectionId, ids.foreignM, 2);
-      })).resolves.toBe("23503");
+      })).resolves.toBe("23514");
       const saved = await asSuperuser(async (client) => {
         const selectionId = await insertSelection(client, "SELECTED_MEMBERS", null);
         await addReader(client, selectionId, ids.authorM, 1);
@@ -298,11 +299,14 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       const submitted = await repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 3, randomUUID(), "readers-submit");
       expect(submitted).toMatchObject({ kind: "submitted", submission: { proposedTargetReaders: department } });
       if (submitted.kind !== "submitted") return;
-      // The pending snapshot freezes the draft, including its readers.
-      await expect(save(3, { mode: "ORGANIZATION" })).rejects.toBeTruthy();
+      // Drafts stay editable while a snapshot is pending (decision 0011); the submitted readers do not change.
+      await expect(save(3, { mode: "ORGANIZATION" })).resolves.toMatchObject({ kind: "updated",
+        draft: { targetReaders: { mode: "ORGANIZATION" } } });
+      const pending = await repository.listKnowledgeSubmissions(ids.author, ids.orgA);
+      expect(pending?.find((item) => item.id === submitted.submission.id)?.proposedTargetReaders).toEqual(department);
       await expect(sqlState((client) => client.query(`UPDATE shared_submission SET proposed_selection_id = NULL
         WHERE submission_id = $1`, [submitted.submission.id]))).resolves.toBe("55000");
-      // Approved readers are recorded at most once (T2.1 will write them through the review API).
+      // Approved readers are recorded only by an approval decision, and only once (0025).
       await expect(sqlState(async (client) => {
         await client.query(`UPDATE shared_submission SET approved_selection_id = proposed_selection_id
           WHERE submission_id = $1`, [submitted.submission.id]);

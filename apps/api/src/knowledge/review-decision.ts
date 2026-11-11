@@ -1,4 +1,6 @@
 import { canRespondToSubmission, canReviewSnapshot, type MembershipActor } from "./policy.js";
+import { resolveApprovedReaders, type ApprovedReadersField } from "../target-readers/narrowing.js";
+import type { ReaderSelection, SelectionFacts, TargetReadersInput } from "../target-readers/policy.js";
 
 type ReviewAuthorization = Parameters<typeof canReviewSnapshot>[0];
 type ReviewerGrant = NonNullable<ReviewAuthorization["grant"]>;
@@ -19,6 +21,11 @@ export type ReviewDecisionFacts = {
   audienceEnforceable: boolean;
   policy: { kind: "SINGLE_REVIEWER" } | { kind: "UNSUPPORTED" };
   now: Date;
+  /**
+   * T2.1: the readers frozen at submit and the facts needed to check approved readers. A submission
+   * without proposed readers (legacy audience model) keeps today's behaviour. Omitted means legacy.
+   */
+  readers?: { proposed: ReaderSelection | null; facts: SelectionFacts };
 };
 
 export type ReviewDecisionRequest = {
@@ -26,12 +33,20 @@ export type ReviewDecisionRequest = {
   expectedSnapshotVersionId: string;
   expectedContentHash: string;
   comment: string | null;
+  /** Approved Target Readers; absent approves exactly the proposed readers. */
+  approvedReaders?: TargetReadersInput;
 };
 
+/** P and A for a Target Readers submission; null for a legacy audience submission. */
+export type ApprovedReadersPlan = { proposed: ReaderSelection; approved: ReaderSelection; narrowed: boolean };
+
 export type ReviewDecisionPlan =
-  | { kind: "DENIED"; reason: "INVALID_SNAPSHOT" | "STALE_SNAPSHOT" | "NOT_AUTHORIZED" | "AUDIENCE_NOT_ENFORCEABLE" | "UNSUPPORTED_POLICY" | "COMMENT_REQUIRED" }
+  | { kind: "DENIED"; reason: "INVALID_SNAPSHOT" | "STALE_SNAPSHOT" | "NOT_AUTHORIZED" | "AUDIENCE_NOT_ENFORCEABLE"
+      | "UNSUPPORTED_POLICY" | "COMMENT_REQUIRED" | "INVALID_REQUEST" | "READERS_NOT_SUPPORTED" | "READERS_WIDENED" }
+  | { kind: "DENIED"; reason: "INVALID_READERS"; field: ApprovedReadersField; message: string }
   | { kind: "RECORD_ONLY"; decision: "REJECTED"; comment: string }
-  | { kind: "APPROVE_FOR_PREPARATION"; decision: "APPROVED"; submissionId: string; snapshotVersionId: string; contentHash: string; comment: string | null };
+  | { kind: "APPROVE_FOR_PREPARATION"; decision: "APPROVED"; submissionId: string; snapshotVersionId: string;
+      contentHash: string; comment: string | null; readers: ApprovedReadersPlan | null };
 
 // This is a decision *plan*, not a database write. The caller must lock the
 // submission, rehydrate these facts, then commit the decision, PREPARING state
@@ -57,7 +72,9 @@ export function planReviewDecision(facts: ReviewDecisionFacts, request: ReviewDe
     : facts.reviewerGrants.some(authorize);
   if (!authorized) return { kind: "DENIED", reason: "NOT_AUTHORIZED" };
 
+  // Reader checks run only after authorization, so an unauthorized caller learns nothing about readers.
   if (request.action === "REJECT") {
+    if (request.approvedReaders !== undefined) return { kind: "DENIED", reason: "INVALID_REQUEST" };
     const comment = request.comment?.trim() ?? "";
     if (!comment) return { kind: "DENIED", reason: "COMMENT_REQUIRED" };
     return { kind: "RECORD_ONLY", decision: "REJECTED", comment };
@@ -80,6 +97,20 @@ export function planReviewDecision(facts: ReviewDecisionFacts, request: ReviewDe
     : facts.reviewerGrants.some(approveWith);
   if (!canApprove) return { kind: "DENIED", reason: "NOT_AUTHORIZED" };
 
+  let readers: ApprovedReadersPlan | null = null;
+  const proposed = facts.readers?.proposed ?? null;
+  if (proposed === null) {
+    if (request.approvedReaders !== undefined) return { kind: "DENIED", reason: "READERS_NOT_SUPPORTED" };
+  } else {
+    const resolved = resolveApprovedReaders(proposed, request.approvedReaders, facts.readers!.facts);
+    if (!resolved.ok) {
+      return resolved.reason === "INVALID_READERS"
+        ? { kind: "DENIED", reason: "INVALID_READERS", field: resolved.field, message: resolved.message }
+        : { kind: "DENIED", reason: "READERS_WIDENED" };
+    }
+    readers = { proposed, approved: resolved.selection, narrowed: resolved.narrowed };
+  }
+
   return {
     kind: "APPROVE_FOR_PREPARATION",
     decision: "APPROVED",
@@ -87,5 +118,6 @@ export function planReviewDecision(facts: ReviewDecisionFacts, request: ReviewDe
     snapshotVersionId: submission.snapshotVersionId,
     contentHash: submission.contentHash,
     comment: request.comment?.trim() || null,
+    readers,
   };
 }

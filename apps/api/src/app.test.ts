@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, DecidedReview, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -15,7 +15,8 @@ import { SystemAdministrationError, type SystemAdministrator, type SystemAdminis
 import { parseSemanticDocument } from "@arden/domain";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import type { AiAnswerRequest, AiAnswerResponse } from "./answers/contracts.js";
-import { validateSelection, type ReaderActor, type SelectionFacts } from "./target-readers/policy.js";
+import { validateSelection, type ReaderActor, type SelectionFacts, type TargetReadersInput } from "./target-readers/policy.js";
+import { resolveApprovedReaders, sameReaders } from "./target-readers/narrowing.js";
 
 const ownerId = "11111111-1111-4111-8111-111111111111";
 const otherId = "22222222-2222-4222-8222-222222222222";
@@ -1213,6 +1214,155 @@ describe("API auth and private draft routes", () => {
     });
   });
 
+  it("returns the pending queue with version and author plus the reviewer's decided submissions (REV-02)", async () => {
+    repository.sharedSubmission = { id: "abababab-abab-4aba-8aba-abababababab", draftId: sharedDraftId,
+      snapshotVersionId: sharedVersionId, title: "Runbook", classification: "INTERNAL",
+      responsibleDepartmentId: salesDepartmentId, targetScopeType: "ORGANIZATION", targetDepartmentId: null,
+      audienceRoleIds: [], proposedTargetReaders: null, approvedTargetReaders: null, contentHash: "a".repeat(64),
+      status: "PENDING_REVIEW", publicationState: "NONE", submittedAt: new Date("2026-11-10T09:00:00.000Z"),
+      publishedVersionId: null, decisionComment: null };
+    repository.reviewerGrant = { id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", reviewerMembershipId: otherId, scope: "DEPARTMENT",
+      departmentId: salesDepartmentId, classifications: ["INTERNAL"], level: "STANDARD", teamTag: null, projectTag: null,
+      status: "ACTIVE", validFrom: new Date("2026-11-01T00:00:00.000Z"), validUntil: null };
+    repository.decidedReviews = [{ submissionId: "cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd", title: "Old policy",
+      departmentId: salesDepartmentId, classification: "INTERNAL", versionNo: 4, decision: "REJECTED",
+      decidedAt: new Date("2026-11-09T10:00:00.000Z"), submittedAt: new Date("2026-11-08T10:00:00.000Z"),
+      publicationState: "NONE", authorName: "Owner" }];
+    const reviewer = { cookie: await desktopSession(app, "manager@example.test"), origin: "http://localhost:5180" };
+    const response = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/reviews`, headers: reviewer });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      items: [expect.objectContaining({ title: "Runbook", versionNo: 2, authorName: "Owner",
+        submittedAt: "2026-11-10T09:00:00.000Z" })],
+      decided: [expect.objectContaining({ title: "Old policy", decision: "REJECTED", versionNo: 4, authorName: "Owner",
+        decidedAt: "2026-11-09T10:00:00.000Z", submittedAt: "2026-11-08T10:00:00.000Z" })],
+    });
+    const other = await app.inject({ method: "GET", url: `/api/v1/organizations/${otherOrganizationId}/knowledge/reviews`, headers: reviewer });
+    expect(other.statusCode).toBe(404);
+  });
+
+  describe("Approve with approved readers (T2.1)", () => {
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const reviewKey = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
+    const engineeringMembers = activeMemberIds.slice(0, 5);
+    const salesMember = activeMemberIds[20]!;
+    type Readers = { mode: string; departmentId?: string | null; memberIds?: string[] };
+
+    /** Owner submits a draft with the given proposed readers; manager receives a reviewer grant. */
+    async function submitted(proposed: Readers | null) {
+      const owner = { cookie: await desktopSession(app, "owner@example.test"), origin: "http://localhost:5180" };
+      const reviewer = { cookie: await desktopSession(app, "manager@example.test"), origin: "http://localhost:5180" };
+      expect((await app.inject({ method: "POST", url: `${root}/drafts/new`, headers: { ...owner, "idempotency-key": createKey },
+        payload: { title: "Readers runbook", body: "Body", classification: "INTERNAL" } })).statusCode).toBe(201);
+      const saved = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+        headers: { ...owner, "if-match": '"1"' }, payload: { responsibleDepartmentId: salesDepartmentId,
+          targetScopeType: "ORGANIZATION", audienceIds: ["11111111-aaaa-4aaa-8aaa-111111111111"],
+          ...(proposed ? { targetReaders: proposed } : {}) } });
+      expect(saved.statusCode).toBe(200);
+      const submit = await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
+        headers: { ...owner, "idempotency-key": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "if-match": '"2"' } });
+      expect(submit.statusCode).toBe(201);
+      expect((await app.inject({ method: "POST", url: `${root}/reviewer-grants`, headers: owner,
+        payload: { reviewerMembershipId: otherId, departmentId: salesDepartmentId } })).statusCode).toBe(201);
+      const submissionId: string = submit.json().id;
+      const decide = (payload: Record<string, unknown>, key = reviewKey, headers = reviewer) => app.inject({
+        method: "POST", url: `${root}/reviews/${submissionId}/decisions`, headers: { ...headers, "idempotency-key": key },
+        payload: { action: "APPROVE", expectedSnapshotVersionId: saved.json().currentVersion.id,
+          expectedContentHash: saved.json().currentVersion.contentHash, ...payload } });
+      return { owner, reviewer, submissionId, decide };
+    }
+
+    it("returns the proposed readers to the reviewer and approves them as proposed by default", async () => {
+      const proposed = { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: activeMemberIds.slice(0, 3) };
+      const { owner, reviewer, submissionId, decide } = await submitted(proposed);
+      const detail = await app.inject({ method: "GET", url: `${root}/reviews/${submissionId}`, headers: reviewer });
+      expect(detail.json().proposedReaders).toEqual({ mode: "SELECTED_MEMBERS", department: null,
+        members: proposed.memberIds.map((membershipId) => ({ membershipId, displayName: `Member ${membershipId.slice(-3)}` })) });
+      expect((await app.inject({ method: "GET", url: `${root}/reviews/${submissionId}`, headers: owner })).statusCode).toBe(404);
+      const approved = await decide({});
+      expect(approved.statusCode).toBe(201);
+      expect(approved.json().approvedTargetReaders).toEqual(proposed);
+      const myWork = await app.inject({ method: "GET", url: `${root}/submissions`, headers: owner });
+      expect(myWork.json().items[0]).toMatchObject({ proposedTargetReaders: proposed, approvedTargetReaders: proposed });
+    });
+
+    it("narrows 10 proposed members to 5 and refuses adding an outsider", async () => {
+      const proposed = { mode: "SELECTED_MEMBERS", memberIds: activeMemberIds.slice(0, 10) };
+      const { decide } = await submitted(proposed);
+      const widened = await decide({ approvedReaders: { mode: "SELECTED_MEMBERS",
+        memberIds: [...activeMemberIds.slice(0, 5), activeMemberIds[30]!] } });
+      expect(widened.statusCode).toBe(409);
+      expect(widened.json().error.code).toBe("READERS_WIDENED");
+      expect(repository.sharedSubmission?.status).toBe("PENDING_REVIEW");
+      const narrowed = await decide({ approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: activeMemberIds.slice(0, 5) } });
+      expect(narrowed.statusCode).toBe(201);
+      expect(narrowed.json()).toMatchObject({ status: "APPROVED", proposedTargetReaders: { memberIds: activeMemberIds.slice(0, 10) },
+        approvedTargetReaders: { mode: "SELECTED_MEMBERS", memberIds: activeMemberIds.slice(0, 5) } });
+    });
+
+    it("keeps a Department proposal within the department", async () => {
+      const { decide } = await submitted({ mode: "DEPARTMENT", departmentId: engineeringDepartmentId });
+      for (const approvedReaders of [{ mode: "ORGANIZATION" },
+        { mode: "SELECTED_MEMBERS", memberIds: [engineeringMembers[0]!, salesMember] }]) {
+        const response = await decide({ approvedReaders });
+        expect(response.statusCode).toBe(409);
+        expect(response.json().error.code).toBe("READERS_WIDENED");
+      }
+      const narrowed = await decide({ approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: engineeringMembers.slice(0, 2) } });
+      expect(narrowed.statusCode).toBe(201);
+    });
+
+    it.each([
+      { name: "one member", approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: [activeMemberIds[0]] }, field: "approvedReaders.memberIds" },
+      { name: "a repeated member", approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: [activeMemberIds[0], activeMemberIds[0]] }, field: "approvedReaders.memberIds" },
+      { name: "a suspended member", approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: [activeMemberIds[0], suspendedMemberId] }, field: "approvedReaders.memberIds" },
+      { name: "another organization's member", approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: [activeMemberIds[0], foreignMemberId] }, field: "approvedReaders.memberIds" },
+      { name: "an archived department", approvedReaders: { mode: "DEPARTMENT", departmentId: archivedDepartmentId }, field: "approvedReaders.departmentId" },
+    ])("returns 400 INVALID_READERS for $name", async ({ approvedReaders, field }) => {
+      const { decide } = await submitted({ mode: "ORGANIZATION" });
+      const response = await decide({ approvedReaders });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toMatchObject({ code: "INVALID_READERS", field });
+      expect(repository.sharedSubmission?.status).toBe("PENDING_REVIEW");
+    });
+
+    it("refuses readers on a rejection and on a legacy audience submission", async () => {
+      const targetReaders = await submitted({ mode: "ORGANIZATION" });
+      const reject = await targetReaders.decide({ action: "REJECT", comment: "Clarify", approvedReaders: { mode: "ORGANIZATION" } });
+      expect(reject.statusCode).toBe(400);
+      expect(reject.json().error.code).toBe("INVALID_REQUEST");
+      expect((await targetReaders.decide({ action: "REJECT", comment: " " })).json().error.code).toBe("COMMENT_REQUIRED");
+    });
+
+    it("keeps legacy audience approvals unchanged", async () => {
+      const { decide } = await submitted(null);
+      const refused = await decide({ approvedReaders: { mode: "ORGANIZATION" } });
+      expect(refused.statusCode).toBe(400);
+      expect(refused.json().error.code).toBe("READERS_NOT_SUPPORTED");
+      const approved = await decide({});
+      expect(approved.statusCode).toBe(201);
+      expect(approved.json()).toMatchObject({ proposedTargetReaders: null, approvedTargetReaders: null });
+    });
+
+    it("replays the same key and readers, and conflicts on different readers", async () => {
+      const { decide } = await submitted({ mode: "SELECTED_MEMBERS", memberIds: activeMemberIds.slice(0, 4) });
+      const approvedReaders = { mode: "SELECTED_MEMBERS", memberIds: [activeMemberIds[1]!, activeMemberIds[0]!] };
+      expect((await decide({ approvedReaders })).statusCode).toBe(201);
+      const sameSet = await decide({ approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: [activeMemberIds[0]!, activeMemberIds[1]!] } });
+      expect(sameSet.statusCode).toBe(200);
+      const different = await decide({ approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: activeMemberIds.slice(2, 4) } });
+      expect(different.statusCode).toBe(409);
+      expect(different.json().error.code).toBe("REVIEW_CONFLICT");
+    });
+
+    it("answers an unauthorized caller with 404 before looking at readers", async () => {
+      const { owner, decide } = await submitted({ mode: "SELECTED_MEMBERS", memberIds: activeMemberIds.slice(0, 4) });
+      const response = await decide({ approvedReaders: { mode: "ORGANIZATION" } }, "cccccccc-dddd-4eee-8fff-aaaaaaaaaaaa", owner);
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error.code).toBe("RESOURCE_NOT_AVAILABLE");
+    });
+  });
+
   describe("Target Readers enforced by the API, not only RLS (T1.3)", () => {
     const root = `/api/v1/organizations/${organizationId}`;
     const otherGenerationId = "13131313-1313-4131-8131-131313131313";
@@ -1669,7 +1819,8 @@ class MemoryRepository implements ArdenDataRepository {
       { departmentId: archivedDepartmentId, organizationId, status: "ARCHIVED" },
     ],
     members: [
-      ...activeMemberIds.map((membershipId) => ({ membershipId, organizationId, status: "ACTIVE" as const, accountActive: true })),
+      ...activeMemberIds.map((membershipId, index) => ({ membershipId, organizationId, status: "ACTIVE" as const,
+        accountActive: true, departmentIds: [index < 5 ? engineeringDepartmentId : salesDepartmentId] })),
       { membershipId: suspendedMemberId, organizationId, status: "SUSPENDED", accountActive: true },
     ],
   };
@@ -1878,7 +2029,8 @@ class MemoryRepository implements ArdenDataRepository {
       snapshotVersionId: draft.versionId, title: draft.title, classification: draft.classification,
       responsibleDepartmentId: draft.responsibleDepartmentId, targetScopeType: draft.targetScopeType,
       targetDepartmentId: draft.targetScopeType === "DEPARTMENT" ? draft.responsibleDepartmentId : null,
-      audienceRoleIds: draft.audienceRoleIds, proposedTargetReaders: draft.targetReaders, contentHash: draft.contentHash,
+      audienceRoleIds: draft.audienceRoleIds, proposedTargetReaders: draft.targetReaders, approvedTargetReaders: null,
+      contentHash: draft.contentHash,
       status: "PENDING_REVIEW", submittedAt: new Date("2026-10-10T10:00:00.000Z"), publishedVersionId: null,
       publicationState: "NONE",
       decisionComment: null,
@@ -1918,7 +2070,14 @@ class MemoryRepository implements ArdenDataRepository {
       || !submission || submission.status !== "PENDING_REVIEW") return [];
     return [{ submissionId: submission.id, snapshotId: submission.snapshotVersionId,
       title: submission.title, departmentId: submission.responsibleDepartmentId,
-      classification: submission.classification, submittedAt: submission.submittedAt, approvalBlocked: false }];
+      classification: submission.classification, submittedAt: submission.submittedAt, approvalBlocked: false,
+      versionNo: 2, authorName: "Owner" }];
+  }
+
+  decidedReviews: DecidedReview[] = [];
+  async listDecidedReviews(userId: string, requestedOrganization: string): Promise<DecidedReview[] | null> {
+    if (requestedOrganization !== organizationId) return null;
+    return userId === otherId ? this.decidedReviews : [];
   }
 
   async getAssignedReview(userId: string, requestedOrganization: string, submissionId: string): Promise<ReviewDetail | null> {
@@ -1926,14 +2085,27 @@ class MemoryRepository implements ArdenDataRepository {
     if (!queue?.some((item) => item.submissionId === submissionId) || !this.sharedSubmission || !this.sharedDraft) return null;
     return { submission: this.sharedSubmission, sourceUri: this.sharedDraft.sourceUri,
       mimeType: this.sharedDraft.mimeType, submittedByMembershipId: ownerId,
-      teamTag: this.sharedDraft.teamTag, projectTag: this.sharedDraft.projectTag };
+      teamTag: this.sharedDraft.teamTag, projectTag: this.sharedDraft.projectTag,
+      proposedReaders: this.sharedSubmission.proposedTargetReaders ? {
+        mode: this.sharedSubmission.proposedTargetReaders.mode,
+        department: this.sharedSubmission.proposedTargetReaders.departmentId
+          ? { id: this.sharedSubmission.proposedTargetReaders.departmentId, name: "Engineering" } : null,
+        members: this.sharedSubmission.proposedTargetReaders.memberIds.map((membershipId) => ({
+          membershipId, displayName: `Member ${membershipId.slice(-3)}` })),
+      } : null };
   }
 
   async decideReview(userId: string, requestedOrganization: string, submissionId: string, action: ReviewAction,
     expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
-    idempotencyKey: string): Promise<DecideReviewResult> {
+    idempotencyKey: string, _requestId?: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult> {
     const submission = this.sharedSubmission;
     if (this.reviewRequestKey === idempotencyKey && submission && submissionId === submission.id) {
+      const expected = approvedReaders === undefined ? submission.proposedTargetReaders
+        : { mode: approvedReaders.mode, departmentId: approvedReaders.departmentId ?? null, memberIds: approvedReaders.memberIds ?? [] };
+      const previous = submission.approvedTargetReaders;
+      if ((previous === null) !== (expected === null) || (previous && expected && !sameReaders(previous, expected))) {
+        return { kind: "conflict" };
+      }
       return { kind: "replayed", submission };
     }
     if (userId !== otherId || requestedOrganization !== organizationId || !submission || submission.id !== submissionId
@@ -1942,11 +2114,26 @@ class MemoryRepository implements ArdenDataRepository {
     if (submission.snapshotVersionId !== expectedSnapshotVersionId || submission.contentHash !== expectedContentHash) {
       return { kind: "denied", reason: "STALE_SNAPSHOT" };
     }
+    if (action !== "APPROVE" && approvedReaders !== undefined) return { kind: "denied", reason: "INVALID_REQUEST" };
     if (action !== "APPROVE" && !comment?.trim()) return { kind: "denied", reason: "COMMENT_REQUIRED" };
+    let approvedTargetReaders: SharedKnowledgeSubmission["approvedTargetReaders"] = null;
+    if (action === "APPROVE") {
+      if (!submission.proposedTargetReaders) {
+        if (approvedReaders !== undefined) return { kind: "denied", reason: "READERS_NOT_SUPPORTED" };
+      } else {
+        const resolved = resolveApprovedReaders(submission.proposedTargetReaders, approvedReaders, this.selectionFacts);
+        if (!resolved.ok) {
+          return resolved.reason === "INVALID_READERS"
+            ? { kind: "denied", reason: resolved.reason, field: resolved.field, message: resolved.message }
+            : { kind: "denied", reason: resolved.reason };
+        }
+        approvedTargetReaders = resolved.selection;
+      }
+    }
     this.reviewRequestKey = idempotencyKey;
     if (action === "APPROVE") {
       this.sharedSubmission = { ...submission, status: "APPROVED", publicationState: "PREPARING", publishedVersionId: null,
-        decisionComment: comment?.trim() || null };
+        approvedTargetReaders, decisionComment: comment?.trim() || null };
     } else this.sharedSubmission = { ...submission, status: "REJECTED", publicationState: "NONE",
       decisionComment: comment?.trim() || null };
     if (this.sharedDraft) this.sharedDraft = { ...this.sharedDraft, hasPendingSubmission: false };
