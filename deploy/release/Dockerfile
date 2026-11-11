@@ -34,7 +34,7 @@ CMD ["node", "dist/index.js"]
 FROM nginx:stable-alpine@sha256:47928bf67eb62a1863cb08d9ecb52d3e704304ba614eaee17884204677702951 AS web
 # Alpine repositories prune superseded patch revisions. Take current security
 # patches from this digest-pinned base's repository; scanning still gates release.
-RUN apk upgrade --no-cache brotli-libs curl libcurl libexpat
+RUN apk upgrade --no-cache brotli-libs curl libcurl libexpat libxslt
 ARG REVISION
 ARG SOURCE_TREE
 ARG MIGRATIONS
