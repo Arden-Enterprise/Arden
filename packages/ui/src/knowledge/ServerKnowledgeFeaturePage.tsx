@@ -7,16 +7,17 @@ import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { validAudienceSelection } from "./audience-options";
 import {
-  ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listAssignedKnowledgeReviews,
+  ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listKnowledgeReviewBoard,
   listKnowledgeDrafts, listKnowledgeSubmissions, listPublishedKnowledge, loadKnowledgeDraft,
   loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, saveKnowledgeDraft,
-  submitKnowledgeDraft, type AssignedKnowledgeReview, type KnowledgeDraftRecord,
+  submitKnowledgeDraft, type AssignedKnowledgeReview, type DecidedKnowledgeReview, type KnowledgeDraftRecord,
   type KnowledgeDraftSummary, type KnowledgeOptions, type KnowledgeReviewDetail,
   type KnowledgeSubmission, type PublishedKnowledge,
 } from "../shared/api-client";
 import type { KnowledgeClassification } from "../shared/knowledge-classification";
 import type { Platform } from "../shared/types";
-import { PdfDocument, PdfViewer, pdfFileName, usePdfObjectUrl } from "./PdfDocument";
+import { PdfDocument, PdfViewer, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
+import { ReviewList, initialsOf } from "./ReviewList";
 import { libraryDateLabel, libraryTitleParts } from "./libraryDisplay";
 import { ReaderPicker } from "./ReaderPicker";
 import { addReader, onlyGroupReaders, ownerDepartment, readerChoices, removeReader, scopeForReaders } from "./readerSelection";
@@ -91,6 +92,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [submissions, setSubmissions] = useState<KnowledgeSubmission[]>([]);
   const [published, setPublished] = useState<PublishedKnowledge[]>([]);
   const [reviews, setReviews] = useState<AssignedKnowledgeReview[]>([]);
+  const [decidedReviews, setDecidedReviews] = useState<DecidedKnowledgeReview[]>([]);
   const [options, setOptions] = useState<KnowledgeOptions | null>(null);
   const [draft, setDraft] = useState<KnowledgeDraftRecord | null>(null);
   const [editor, setEditor] = useState<EditorValues | null>(null);
@@ -132,13 +134,14 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const pendingNextReview = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
-    const [nextDrafts, nextSubmissions, nextPublished, nextReviews, nextOptions] = await Promise.all([
+    const [nextDrafts, nextSubmissions, nextPublished, nextBoard, nextOptions] = await Promise.all([
       listKnowledgeDrafts(platform, organizationId), listKnowledgeSubmissions(platform, organizationId),
-      listPublishedKnowledge(platform, organizationId), listAssignedKnowledgeReviews(platform, organizationId),
+      listPublishedKnowledge(platform, organizationId), listKnowledgeReviewBoard(platform, organizationId),
       loadKnowledgeOptions(platform, organizationId),
     ]);
+    const nextReviews = nextBoard.items;
     setDrafts(nextDrafts); setSubmissions(nextSubmissions); setPublished(nextPublished);
-    setReviews(nextReviews); setOptions(nextOptions);
+    setReviews(nextReviews); setDecidedReviews(nextBoard.decided); setOptions(nextOptions);
     onAssignedReviewCount?.(nextReviews.length);
   }, [platform, organizationId, onAssignedReviewCount]);
 
@@ -368,6 +371,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   };
   const openCreate = (mode: "text" | "pdf") => { resetCreation(); setCreateMode(mode); setScreen("create"); };
   const readerPdfUrl = usePdfObjectUrl(screen === "document" && document?.mimeType === "application/pdf" ? document.pdfBase64 : null);
+  const reviewPdfUrl = usePdfObjectUrl(view === "review-queue" && review?.mimeType === "application/pdf" ? review.pdfBase64 : null);
+  /** REV-03/04 breadcrumb "Reviews": back to the REV-02 list, keeping an unsent note behind the discard guard. */
+  const backToAllReviews = () => guardDiscard(Boolean(comment.trim()), () => {
+    setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
+  });
   const librarySearch = view === "knowledge" && screen === "library"
     ? <SearchField value={query} onChange={setQuery} placeholder={libraryTab === "drafts" ? "Filter my contributions…" : "Search title, code, owner or summary…"} /> : undefined;
   const breadcrumb = view === "review-queue" ? `${organizationName} / Knowledge / Reviews`
@@ -380,103 +388,107 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
       search={librarySearch} searchActive={Boolean(librarySearch && query)} chrome={screen === "document" && document ? "reader" : "full"} />
     <div className={`knowledge-feature-page knowledge-live-page${view === "review-queue" && !loading ? " is-review" : ""}`}>
       {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-      {loading ? <div className="island island-empty" role="status">Loading documents…</div> : view === "review-queue" ? <div className="review-workspace">
-        <section className="review-pane review-queue" aria-labelledby="review-queue-title">
-          <div className="review-queue-heading"><h1 id="review-queue-title">Review queue</h1><span className="island-badge">{reviews.length}</span>
-            <button type="button" className="island-link-button" disabled={busy} onClick={() => void refresh()}>Refresh</button></div>
-          {reviews.length ? <div className="review-queue-list">{reviews.map((item) => {
-            const shown = libraryTitleParts(item.title, null);
-            return <button type="button" key={item.submissionId} className="review-queue-item" title={item.title}
-              aria-current={review?.id === item.submissionId ? "true" : undefined} onClick={() => openReview(item.submissionId)}>
-              {shown.code && <span className="review-queue-code">{shown.code}</span>}
-              <strong>{shown.title}</strong>
-              <span className="review-queue-meta">
-                <span>{departmentName(item.departmentId)} · {libraryDateLabel(item.submittedAt)}</span>
-                {item.classification !== "INTERNAL" && <span className={`island-chip review-mini-chip ${item.classification === "RESTRICTED" ? "tone-danger" : "tone-info"}`}>
-                  {item.classification === "RESTRICTED" && <Icon name="lock" size={10} />}{item.classification === "RESTRICTED" ? "RESTR." : "CONF."}</span>}
-                {item.approvalBlocked && <span className="review-blocked-dot" title="Approval blocked: an audience can no longer be enforced"><span className="sr-only">Approval blocked</span></span>}
-              </span>
-            </button>;
-          })}</div> : <div className="island-empty review-queue-empty"><h3>Nothing to review</h3><p>You’re caught up.</p></div>}
-        </section>
-        <article className="island review-pane review-submission" aria-label="Submission">
-          {review ? <>
-            <header className="review-document-header">
-              <div className="review-document-tags">
-                <Icon name={review.mimeType === "application/pdf" ? "pdf" : "document"} size={14} />
-                {reviewTitle?.code && <span className="review-document-code">{reviewTitle.code}</span>}
-                {review.classification !== "INTERNAL" && <KnowledgeClassificationChip classification={review.classification} />}
-              </div>
-              <h2 title={review.title}>{reviewTitle?.title ?? review.title}</h2>
-              <p className="review-document-meta">{departmentName(review.responsibleDepartmentId)} · Submitted {libraryDateLabel(review.submittedAt)}</p>
-            </header>
-            <div ref={reviewBodyRef} className={`review-document${review.mimeType === "application/pdf" && review.pdfBase64 ? " is-pdf" : ""}`} tabIndex={0} aria-label={`Submitted document: ${review.title}`}>
-              {review.mimeType === "application/pdf" && review.pdfBase64
-                ? <PdfDocument base64={review.pdfBase64} title={review.title} />
-                : <div className="review-document-text"><Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
-                  key={`review:${review.id}:${review.snapshotVersionId}`} body={review.body}
-                  instanceKey={`review:${review.id}:${review.snapshotVersionId}`} /></Suspense></div>}
-            </div>
-          </> : <div className="island-empty review-submission-empty"><span className="island-tile" aria-hidden="true"><Icon name="review" size={16} /></span>
-            <h3>{reviews.length ? "Select a submission" : "Nothing left to review"}</h3>
-            <p>{reviews.length ? "Choose one from the queue." : "Submissions waiting on you will show up here."}</p>
-            </div>}
-        </article>
-        {review && <aside className="island review-pane review-decision" aria-labelledby="review-decision-title">
-          <div className="review-decision-header">
-            <h2 id="review-decision-title">Decision</h2>
-            {reviewIndex >= 0 && <span className="island-meta">{reviewIndex + 1} of {reviews.length}</span>}
-            <span className="review-decision-nav">
-              <button type="button" className="island-icon-button review-nav-previous" aria-label="Previous submission" disabled={busy || reviewIndex <= 0}
-                onClick={() => { const previous = reviews[reviewIndex - 1]; if (previous) openReview(previous.submissionId); }}><Icon name="chevron" size={14} /></button>
-              <button type="button" className="island-icon-button" aria-label="Next submission" disabled={busy || reviewIndex < 0 || reviewIndex >= reviews.length - 1}
-                onClick={() => { const next = reviews[reviewIndex + 1]; if (next) openReview(next.submissionId); }}><Icon name="chevron" size={14} /></button>
+      {loading ? <div className="island island-empty" role="status">Loading documents…</div> : view === "review-queue" && !review ? <ReviewList pending={reviews} decided={decidedReviews}
+        departmentName={departmentName} busy={busy} onOpen={openReview} onRefresh={() => void refresh()} />
+      : view === "review-queue" && review ? <section className="island review-detail" aria-labelledby="review-detail-title">
+        <header className="review-detail-bar">
+          <nav className="review-detail-crumbs" aria-label="Breadcrumb">
+            <button type="button" className="review-crumb-link" disabled={busy} onClick={backToAllReviews}>Reviews</button>
+            <span className="review-crumb-separator" aria-hidden="true"><Icon name="chevron" size={11} /></span>
+            <span className="review-crumb-current" aria-current="page" title={review.title}>
+              {reviewTitle?.code && <span className="review-crumb-code">{reviewTitle.code}</span>}
+              <span>{reviewTitle?.title ?? review.title}</span>
             </span>
-          </div>
-          <div className="review-decision-body">
-            <section aria-labelledby="review-frozen-title">
-              <h3 id="review-frozen-title" className="review-section-label">SUBMITTED DETAILS</h3>
-              <dl className="review-frozen">
-                <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
-                <div><dt>Readers</dt><dd title={audienceNames(review.audienceIds)}>{audienceNames(review.audienceIds)}</dd></div>
-                <div><dt>Within</dt><dd>{review.targetScopeType === "DEPARTMENT" ? departmentName(review.targetDepartmentId ?? review.responsibleDepartmentId) : "Across departments"}</dd></div>
-                <div><dt>Team / project</dt><dd title={`${review.teamTag || "All teams"} · ${review.projectTag || "All projects"}`}>{review.teamTag || "All teams"} · {review.projectTag || "All projects"}</dd></div>
-              </dl>
-            </section>
-            {activeReview?.approvalBlocked && <p className="island-note is-warning review-blocked-note" role="note"><Icon name="warning" size={14} /><span>Reader selection is no longer valid.</span></p>}
-            <label className="review-note">
-              <span className="review-note-label"><span>Note to the author</span>
-                {noteRequired && <small className="is-required">Required</small>}</span>
-              <textarea ref={decisionReason} rows={5} maxLength={2000} value={comment} disabled={busy} aria-invalid={noteRequired} aria-describedby="knowledge-decision-help"
-                onChange={(event) => setComment(event.target.value)} placeholder="Add a note…" />
-            </label>
-          </div>
-          <footer className="review-decision-footer" role="group" aria-label="Review decision"
-            onKeyDown={(event) => { if (event.key === "Escape" && decisionToConfirm && !busy) { event.stopPropagation(); setDecisionToConfirm(null); } }}>
-            {decisionToConfirm ? <div className="review-confirm" role="alertdialog" aria-labelledby="review-confirm-title" aria-describedby="review-confirm-body">
-              <strong id="review-confirm-title">{decisionToConfirm === "APPROVE" ? "Approve this submission?" : "Reject this submission?"}</strong>
-              <p id="review-confirm-body">{decisionToConfirm === "APPROVE"
-                ? "This version will be prepared for publication."
-                : "Your note will be sent to the author."}</p>
-              {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-              <div className="review-decision-actions">
-                <button type="button" className="secondary-button" disabled={busy} onClick={() => setDecisionToConfirm(null)}>Cancel</button>
-                <button type="button" className={decisionToConfirm === "REJECT" ? "admin-danger-button review-confirm-action" : "primary-button review-confirm-action"} disabled={busy}
-                  onClick={() => decideAndAdvance(decisionToConfirm)}>{busy ? "Saving…" : decisionToConfirm === "APPROVE" ? "Approve" : "Reject"}</button>
+          </nav>
+          {reviewIndex >= 0 && <span className="review-detail-position">{reviewIndex + 1} / {reviews.length}</span>}
+          <span className="review-detail-nav">
+            <button type="button" className="island-icon-button" aria-label="Next submission" disabled={busy || reviewIndex < 0 || reviewIndex >= reviews.length - 1}
+              onClick={() => { const next = reviews[reviewIndex + 1]; if (next) openReview(next.submissionId); }}><Icon name="arrow-down" size={14} /></button>
+            <button type="button" className="island-icon-button" aria-label="Previous submission" disabled={busy || reviewIndex <= 0}
+              onClick={() => { const previous = reviews[reviewIndex - 1]; if (previous) openReview(previous.submissionId); }}><Icon name="arrow-up" size={14} /></button>
+          </span>
+        </header>
+        <div className="review-detail-body">
+          {review.mimeType === "application/pdf" && review.pdfBase64
+            ? <div ref={reviewBodyRef} className="review-detail-document is-pdf" aria-label={`Submitted PDF: ${review.title}`}>
+              <h1 id="review-detail-title" className="sr-only">{review.title}</h1>
+              <div className="review-pdf-toolbar">
+                <span className="review-pdf-icon" aria-hidden="true"><Icon name="pdf" size={14} /></span>
+                <span className="review-pdf-name" title={pdfFileName(review.title)}>{pdfFileName(review.title)}</span>
+                <span className="review-pdf-size">{pdfSizeLabel(review.pdfBase64)}</span>
+                <span className="review-pdf-spacer" />
+                {reviewPdfUrl && <>
+                  <a className="island-icon-button" href={reviewPdfUrl} download={pdfFileName(review.title)} aria-label="Download PDF" title="Download PDF"><Icon name="download" size={14} /></a>
+                  <a className="island-icon-button" href={reviewPdfUrl} target="_blank" rel="noopener noreferrer" aria-label="Open PDF in a new tab" title="Open in a new tab"><Icon name="open-external" size={14} /></a>
+                </>}
               </div>
-            </div> : <>
-              <button type="button" className="island-link-button" disabled={busy} onClick={() => guardDiscard(Boolean(comment.trim()), () => {
-                setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
-              })}>Back to queue</button>
-              <div className="review-decision-actions">
-                <button type="button" className="secondary-button review-reject" disabled={busy} onClick={() => { if (requireDecisionReason()) setDecisionToConfirm("REJECT"); }}>Reject</button>
-                <button type="button" className="primary-button review-approve" disabled={busy || activeReview?.approvalBlocked} onClick={() => setDecisionToConfirm("APPROVE")}><Icon name="check" size={14} />Approve</button>
+              <div className="review-pdf-canvas">
+                {reviewPdfUrl ? <PdfViewer url={reviewPdfUrl} title={review.title} /> : <p role="status">Preparing PDF preview…</p>}
               </div>
-              <small id="knowledge-decision-help" className="field-error" role={noteRequired ? "alert" : undefined}>{noteRequired ? "Enter a reason." : ""}</small>
-            </>}
-          </footer>
-        </aside>}
-      </div> : screen === "create" ? <>
+            </div>
+            : <div ref={reviewBodyRef} className="review-detail-document" tabIndex={0} aria-label={`Submitted document: ${review.title}`}>
+              <article className="review-detail-text">
+                <h1 id="review-detail-title">{reviewTitle?.title ?? review.title}</h1>
+                <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+                  key={`review:${review.id}:${review.snapshotVersionId}`} body={review.body}
+                  instanceKey={`review:${review.id}:${review.snapshotVersionId}`} /></Suspense>
+              </article>
+            </div>}
+          <aside className="review-detail-side" aria-label="Review decision">
+            <div className="review-detail-side-body">
+              <section aria-labelledby="review-properties-title">
+                <h2 id="review-properties-title" className="review-properties-label">Properties</h2>
+                <ul className="review-properties">
+                  <li><Icon name="branch" size={13} /><span>{activeReview?.versionNo
+                    ? `Version ${activeReview.versionNo}${activeReview.versionNo > 1 ? ` · replaces v${activeReview.versionNo - 1}` : " · new document"}`
+                    : "Submitted version"}</span></li>
+                  <li>{activeReview?.authorName
+                    ? <><span className="review-row-avatar" aria-hidden="true">{initialsOf(activeReview.authorName)}</span><span>{activeReview.authorName}</span></>
+                    : <><Icon name="people" size={13} /><span className="review-property-muted">Author unavailable</span></>}</li>
+                  <li><Icon name="calendar" size={13} /><span>Submitted {libraryDateLabel(review.submittedAt)}</span></li>
+                </ul>
+              </section>
+              <section aria-labelledby="review-frozen-title">
+                <h3 id="review-frozen-title" className="review-section-label">SUBMITTED DETAILS</h3>
+                <dl className="review-frozen">
+                  <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
+                  <div><dt>Readers</dt><dd title={audienceNames(review.audienceIds)}>{audienceNames(review.audienceIds)}</dd></div>
+                  <div><dt>Within</dt><dd>{review.targetScopeType === "DEPARTMENT" ? departmentName(review.targetDepartmentId ?? review.responsibleDepartmentId) : "Across departments"}</dd></div>
+                  <div><dt>Team / project</dt><dd title={`${review.teamTag || "All teams"} · ${review.projectTag || "All projects"}`}>{review.teamTag || "All teams"} · {review.projectTag || "All projects"}</dd></div>
+                </dl>
+              </section>
+              {activeReview?.approvalBlocked && <p className="island-note is-warning review-blocked-note" role="note"><Icon name="warning" size={14} /><span>Reader selection is no longer valid. You can still reject.</span></p>}
+              <label className="review-note">
+                <span className="review-note-label"><span>Note to the author</span>
+                  {noteRequired ? <small className="is-required">Required to reject</small> : <small>Optional to approve</small>}</span>
+                <textarea ref={decisionReason} rows={5} maxLength={2000} value={comment} disabled={busy} aria-invalid={noteRequired} aria-describedby="knowledge-decision-help"
+                  onChange={(event) => setComment(event.target.value)} placeholder="Explain what needs to change" />
+              </label>
+            </div>
+            <footer className="review-decision-footer" role="group" aria-label="Review decision"
+              onKeyDown={(event) => { if (event.key === "Escape" && decisionToConfirm && !busy) { event.stopPropagation(); setDecisionToConfirm(null); } }}>
+              {decisionToConfirm ? <div className="review-confirm" role="alertdialog" aria-labelledby="review-confirm-title" aria-describedby="review-confirm-body">
+                <strong id="review-confirm-title">{decisionToConfirm === "APPROVE" ? "Approve this submission?" : "Reject this submission?"}</strong>
+                <p id="review-confirm-body">{decisionToConfirm === "APPROVE"
+                  ? "This version will be prepared for publication."
+                  : "Your note will be sent to the author."}</p>
+                {error && <p role="alert" className="knowledge-live-error">{error}</p>}
+                <div className="review-decision-actions">
+                  <button type="button" className="secondary-button" disabled={busy} onClick={() => setDecisionToConfirm(null)}>Cancel</button>
+                  <button type="button" className={decisionToConfirm === "REJECT" ? "admin-danger-button review-confirm-action" : "primary-button review-confirm-action"} disabled={busy}
+                    onClick={() => decideAndAdvance(decisionToConfirm)}>{busy ? "Saving…" : decisionToConfirm === "APPROVE" ? "Approve" : "Reject"}</button>
+                </div>
+              </div> : <>
+                <div className="review-decision-actions">
+                  <button type="button" className="secondary-button review-reject" disabled={busy} onClick={() => { if (requireDecisionReason()) setDecisionToConfirm("REJECT"); }}>Reject</button>
+                  <button type="button" className="primary-button review-approve" disabled={busy || activeReview?.approvalBlocked} onClick={() => setDecisionToConfirm("APPROVE")}><Icon name="check" size={14} />Approve</button>
+                </div>
+                <small id="knowledge-decision-help" className="field-error" role={noteRequired ? "alert" : undefined}>{noteRequired ? "Enter a reason." : ""}</small>
+              </>}
+            </footer>
+          </aside>
+        </div>
+      </section> : screen === "create" ? <>
         <button type="button" className="knowledge-back-button knowledge-live-back" disabled={busy} onClick={cancelCreation}>← Back to library</button>
         <KnowledgeHeading eyebrow="KNOWLEDGE" title="New draft" />
         <form className="island island-panel knowledge-create-island" onSubmit={(event) => { event.preventDefault(); createDraft(); }}>

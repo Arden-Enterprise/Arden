@@ -9,6 +9,8 @@ export type ReviewQueueCandidate = {
   submissionId: string;
   snapshotId: string;
   title: string;
+  /** The frozen snapshot's draft version number (v1, v2…). */
+  versionNo: number;
   submittedAt: Date;
   submission: ReviewAuthorization["submission"];
   reviewerGrants: readonly ReviewerGrant[];
@@ -24,6 +26,9 @@ export type AssignedReview = {
   classification: ReviewAuthorization["submission"]["classification"];
   submittedAt: Date;
   approvalBlocked: boolean;
+  versionNo: number;
+  /** Filled by the repository after authorization; null when the name is unavailable. */
+  authorName: string | null;
 };
 
 export function listAssignedReviews(input: {
@@ -60,6 +65,8 @@ export function listAssignedReviews(input: {
       classification: candidate.submission.classification,
       submittedAt: candidate.submittedAt,
       approvalBlocked: !candidate.audienceEnforceable,
+      versionNo: candidate.versionNo,
+      authorName: null,
     });
   }
 

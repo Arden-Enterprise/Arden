@@ -4,6 +4,15 @@ export function pdfFileName(title: string): string {
   return `${title.replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]/g, "-")}.pdf`;
 }
 
+/** Decoded size of a base64 PDF, e.g. "412 KB". */
+export function pdfSizeLabel(base64: string): string {
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  const bytes = Math.max(0, Math.floor(base64.length * 3 / 4) - padding);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 /** Object URL for a base64 PDF; revoked when the PDF changes or the caller unmounts. */
 export function usePdfObjectUrl(base64: string | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);

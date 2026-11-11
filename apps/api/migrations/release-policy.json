@@ -144,6 +144,18 @@
       "filename": "0024_target_reader_selection.sql",
       "sha256": "dfb693efbe14b62cf25f189929a9c0e75d4a26adbf751ad35737c182ca495413",
       "rollout": "operator"
+    },
+    {
+      "id": "0025",
+      "filename": "0025_review_approved_readers.sql",
+      "sha256": "ffd762fdafb3d5a8e8a9f3c01eb6fc9299431ddf00f1a9407a0a55c46f4155df",
+      "rollout": "operator"
+    },
+    {
+      "id": "0026",
+      "filename": "0026_review_list_authors.sql",
+      "sha256": "df980a256ae59eb603bb2cbf90493f4ca3441f9062b8e6e8d6f136cee3568715",
+      "rollout": "operator"
     }
   ]
 }

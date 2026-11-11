@@ -27,6 +27,17 @@ export const iconGlyphs = {
   expand: "\uf153",
   pdf: "\uf66a",
   edit: "\ufa29",
+  filter: "\uf215",
+  sliders: "\ufbd1",
+  "status-pending": "\uf406",
+  "status-approved": "\uf3c4",
+  "status-rejected": "\uf4f4",
+  calendar: "\uf339",
+  branch: "\uf482",
+  "arrow-down": "\uf19c",
+  "arrow-up": "\uf19f",
+  download: "\uf591",
+  "open-external": "\uf1b3",
 } as const;
 
 export type IconName = keyof typeof iconGlyphs;

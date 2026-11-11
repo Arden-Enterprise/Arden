@@ -33,7 +33,7 @@ function mockKnowledge(publicationState: api.KnowledgeSubmission["publicationSta
   };
   vi.spyOn(api, "listKnowledgeDrafts").mockResolvedValue([]);
   vi.spyOn(api, "listPublishedKnowledge").mockResolvedValue([]);
-  vi.spyOn(api, "listAssignedKnowledgeReviews").mockResolvedValue([]);
+  vi.spyOn(api, "listKnowledgeReviewBoard").mockResolvedValue({ items: [], decided: [] });
   vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({
     departments: [{ id: "dept", name: "Engineering" }], audiences: [{ id: "readers", name: "Engineering", kind: "DEPARTMENT_ALL", departmentId: "dept" }],
     primaryDepartmentId: "dept", organizationReviewerAvailable: true,
@@ -79,10 +79,10 @@ describe("concise user-facing copy", () => {
       departments: [{ id: "dept", name: "Engineering" }], primaryDepartmentId: "dept",
       audiences: [{ id: "readers", name: "Project group", kind: "GROUP", departmentId: null }],
     });
-    vi.mocked(api.listAssignedKnowledgeReviews).mockResolvedValue([{
+    vi.mocked(api.listKnowledgeReviewBoard).mockResolvedValue({ items: [{
       submissionId: "submission", snapshotId: "version", title: "Group guide", departmentId: "dept",
       classification: "INTERNAL", submittedAt: "2026-10-01T00:00:00Z", approvalBlocked: false,
-    }]);
+    }], decided: [] });
     vi.spyOn(api, "loadKnowledgeReview").mockResolvedValue({
       id: "submission", draftId: "draft", snapshotVersionId: "version", title: "Group guide",
       classification: "INTERNAL", responsibleDepartmentId: "dept", targetScopeType: scope,
@@ -103,10 +103,10 @@ describe("concise user-facing copy", () => {
     expect(screen.queryByText("private-hash")).toBeNull();
     const decide = vi.spyOn(api, "decideKnowledgeReview");
     fireEvent.change(screen.getByRole("textbox", { name: /Note to the author/ }), { target: { value: "Unsent review note" } });
-    fireEvent.click(screen.getByRole("button", { name: "Back to queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reviews", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Keep working" }));
     expect((screen.getByRole("textbox", { name: /Note to the author/ }) as HTMLTextAreaElement).value).toBe("Unsent review note");
-    fireEvent.click(screen.getByRole("button", { name: "Back to queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reviews", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(screen.queryByRole("button", { name: "Approve", exact: true })).toBeNull();
     expect(decide).not.toHaveBeenCalled();

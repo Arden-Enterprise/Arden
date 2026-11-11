@@ -90,7 +90,15 @@ Target Readers are the per-document reader model planned to replace audience gro
 - **Provenance:** Flow 2 task list (team planning artifact, exported 2026-11-10; BM04 RF-03/RF-04), tasks T1.1, T1.3 and T1.4, requested by the maintainer for implementation. Accountable decision owner: unknown; confirmation needed. Decision state: proposed for the audience replacement (T1.2/T1.6 still need an informed decision against [0010](../decisions/0010-audiences-and-system-administration.md)); the additive slice below is implemented.
 - **Modes:** `ORGANIZATION` (every active member), `DEPARTMENT` (active members whose current department — an active department membership in an active department — matches), `SELECTED_MEMBERS` (2–100 distinct active members of the same organization).
 - **Save:** `PATCH /drafts/:id` accepts optional `targetReaders: { mode, departmentId?, memberIds? }`. Absent keeps the saved readers. Present must pass `TargetReaderPolicy.validateSelection`; otherwise 400 `INVALID_TARGET_READERS` with `error.field` (`targetReaders.mode`, `.departmentId` or `.memberIds`) and no new version. A valid save stores a new immutable `reader_selection` (revision + 1); reads return `targetReaders` with members in the author's order.
-- **Submit** freezes the draft selection as `shared_submission.proposed_selection_id` (returned as `proposedTargetReaders`). The snapshot trigger keeps it immutable; `approved_selection_id` can be recorded once (T2.1, not implemented).
+- **Submit** freezes the draft selection as `shared_submission.proposed_selection_id` (returned as `proposedTargetReaders`). The snapshot trigger keeps it immutable.
+- **Approve with approved readers (T2.1, migration 0025):** `POST /reviews/:id/decisions` accepts optional `approvedReaders: { mode, departmentId?, memberIds? }`.
+  - Absent: the approved readers (A) are a copy of the proposed readers (P), stored as their own `reader_selection` row.
+  - A may keep or narrow P, never widen it. ORGANIZATION → any valid mode; DEPARTMENT d → DEPARTMENT d, or 2–100 members whose current department is d at decision time; SELECTED_MEMBERS S → a subset of S with at least 2 members. Otherwise 409 `READERS_WIDENED`.
+  - A must also pass `validateSelection`; otherwise 400 `INVALID_READERS` with `error.field` (`approvedReaders.*`). REJECT with readers → 400 `INVALID_REQUEST`. A legacy submission without P approves as before; readers on it → 400 `READERS_NOT_SUPPORTED`.
+  - Reader checks run after snapshot and reviewer authorization in the same locked transaction, so an unauthorized caller gets 404. Replays compare readers as a set; the same key with different readers → 409 `REVIEW_CONFLICT`.
+  - The decision row carries `approved_selection_id`; the approval UPDATE copies it to the submission exactly once (trigger-enforced). The audit event adds `proposedReaders`, `approvedReaders` (mode, department, member count) and `narrowed`.
+  - `GET /reviews/:id` returns `proposedReaders` (`mode`, `department {id,name}`, `members [{membershipId, displayName}]`) for authorized reviewers. Submissions return `approvedTargetReaders`.
+  - Open question: a member approved under DEPARTMENT d → SELECTED_MEMBERS stays a reader if they later leave d, because A is a frozen list. Decision owner: unknown; confirmation needed.
 - Audience readiness rules for submit are unchanged in this slice.
 
 ## 4. Submitting
@@ -133,6 +141,7 @@ Target Readers are the per-document reader model planned to replace audience gro
   - A legacy organization-wide submission may also be decided by a Department grant for the responsible department with level `SPECIALIST` or `SENIOR`.
   - Legacy `CONFIDENTIAL` and `RESTRICTED` values keep their classification checks; `RESTRICTED` still needs `SPECIALIST` or `SENIOR`.
 - `GET /reviews` returns metadata (not protected text) for pending submissions the actor may decide. Organization Admin sees every pending submission in the organization.
+  - `items` also carry `versionNo` and `authorName`; `decided` lists the submissions this reviewer approved or rejected (newest first, up to 100, read-only) for the REV-02 Reviews list.
   - If the frozen audiences are no longer enforceable, the item is `approvalBlocked`: rejection remains possible, approval does not.
 - `GET /reviews/:submissionId` reauthorizes, loads the exact frozen content, and reauthorizes again before responding.
 - `POST /reviews/:submissionId/decisions`:
@@ -163,7 +172,7 @@ Approval hands the exact snapshot to the Mainflow 3 indexing pipeline (migration
 - Approving a snapshot does not make the reviewer or Organization Admin a reader. They need an audience rule like anyone else.
 - **Database bridge:** publication RLS (`actor_in_publication_audience`, migration 0012) still evaluates audiences through the legacy role projection kept by migration 0017. Audience IDs equal the legacy role IDs, and role-backed shadow data keeps those checks working. This bridge remains until the Phase 5 contraction in the [audience/system-admin implementation plan](audience-system-admin-implementation.md); it is not part of the product or API contract.
 - Only current active publications are eligible for Search and Ask Arden (Mainflow 3).
-- **Target Readers in the API (T1.3, closes BM02 R-01):** the library list, the document detail and the Ask Arden allow-list call `TargetReaderPolicy.canRead` in the route, not only RLS. A publication's readers are its approved submission's `approved_selection_id`; a publication without one keeps the audience behaviour above. Unreadable and missing documents return the same 404 `RESOURCE_NOT_AVAILABLE`; Ask Arden rechecks after generation, so an unreadable document is never cited. Library responses expose only `targetReaders.mode`/`departmentId`, never the member list. Until T2.1 records approved readers, every publication stays on the audience path.
+- **Target Readers in the API (T1.3, closes BM02 R-01):** the library list, the document detail and the Ask Arden allow-list call `TargetReaderPolicy.canRead` in the route, not only RLS. A publication's readers are `published_knowledge_version.reader_selection_id` (copied from the submission's approved readers on activation, and onto the current pointer); a publication without one keeps the audience behaviour above. From 0025 a restrictive RLS policy on the current pointer applies the same rule (`actor_in_reader_selection`), so the published version, Ask Arden generations and citations are narrowed in the database too; an approver or author outside A cannot read the publication. Unreadable and missing documents return the same 404 `RESOURCE_NOT_AVAILABLE`; Ask Arden rechecks after generation, so an unreadable document is never cited. Library responses expose only `targetReaders.mode`/`departmentId`, never the member list.
 
 ## 9. Error responses (current codes)
 
@@ -179,6 +188,8 @@ Approval hands the exact snapshot to the Mainflow 3 indexing pipeline (migration
 | Reject without a comment | 400 `COMMENT_REQUIRED` |
 | Invalid metadata, PDF or Semantic Document | 400 `INVALID_METADATA` / `INVALID_PDF` / `INVALID_DOCUMENT` |
 | Invalid Target Readers on draft save | 400 `INVALID_TARGET_READERS` with `error.field` |
+| Invalid approved readers / readers on a reject / readers on a legacy submission | 400 `INVALID_READERS` (with `error.field`) / `INVALID_REQUEST` / `READERS_NOT_SUPPORTED` |
+| Approved readers wider than proposed | 409 `READERS_WIDENED` |
 | Request body fails schema validation | 400 `INVALID_REQUEST` ("The request is invalid.") |
 
 The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) is the target. Some current codes still differ: `SUBMISSION_CONFLICT` rather than `OPEN_RELEASE_CANDIDATE_EXISTS`, and 412 rather than 409 for a stale save.
@@ -225,10 +236,14 @@ The migration ledger is `apps/api/migrations`. Flow 2 relies on:
 | `0019` / `0021` | Preparation and monotonic activation. |
 | `0022_organization_reviewer_grants.sql` | Grant scope and the frozen `review_rule`. |
 | `0024_target_reader_selection.sql` | Target Readers: `reader_selection`, `selected_reader`, draft/submission selection columns, RLS and freeze triggers (operator-class). |
+| `0025_review_approved_readers.sql` | Approved readers on the decision and submission, publication `reader_selection_id`, restrictive read policy, reviewer reader directory (operator-class). |
+| `0026_review_list_authors.sql` | Reviewer-only submitter display names for the Reviews list (REV-02); 19 postgres-owned SECURITY DEFINER routines in total (operator-class). |
 
 Run migrations before starting an API build that depends on them. The 0022 code reads `reviewer_grant.scope` and `shared_submission.review_rule`. The 0024 code reads `shared_draft.draft_selection_id`, the submission selection columns and `publication_reader_selection_id()`.
 
-**Target Readers evidence (0024):** `src/target-readers/policy.test.ts` and the T1.3/T1.4 request tests in `src/app.test.ts` run without a database. `src/target-readers/target-readers.integration.test.ts` and the Target Readers step in `src/db/repository.integration.test.ts` need `ARDEN_TEST_DATABASE_URL`; they had not run when 0024 was written. Migration 0024 has not been rehearsed on a staging copy.
+**Target Readers evidence (0024):** `src/target-readers/policy.test.ts` and the T1.3/T1.4 request tests in `src/app.test.ts` run without a database. `src/target-readers/target-readers.integration.test.ts` and the Target Readers step in `src/db/repository.integration.test.ts` need `ARDEN_TEST_DATABASE_URL`. On 2026-11-11 they ran on a disposable local PostgreSQL 17 (Docker) after a clean apply of 0001–0025 and the CI ownership handoff: full API suite 234 passed (only the real-Supabase auth test skipped), five consecutive runs. Migration 0024 has not been rehearsed on a staging copy.
+
+**Approved readers evidence (0025):** `src/target-readers/narrowing.test.ts`, the T2.1 cases in `src/knowledge/review-decision.test.ts` and the T2.1 request tests in `src/app.test.ts` run without a database. The T2.1 scenario in `src/db/repository.integration.test.ts` (widening refused with no decision/audit rows, narrowing, as-proposed copy, replay, legacy path, immutability, reviewer directory, activation and RLS/API reading) needs `ARDEN_TEST_DATABASE_URL`; it passed in the 2026-11-11 local PostgreSQL run above, and an end-to-end smoke through the running API (draft readers → submit → narrowed approval) passed. Not rehearsed on a staging copy. 0024/0025 add postgres-owned `SECURITY DEFINER` functions (18 in total); the operator repair script `deploy/release/security-definer-owner-repair.sql` still lists the reviewed 12 and will refuse until an operator reviews the new inventory.
 
 **Evidence obtained:**
 - API unit and request tests cover:

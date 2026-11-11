@@ -108,6 +108,23 @@ export type AssignedKnowledgeReview = {
   classification: KnowledgeClassification;
   submittedAt: string;
   approvalBlocked: boolean;
+  /** Snapshot draft version (v1, v2…); absent from older servers. */
+  versionNo?: number;
+  /** Submitter's display name, visible to reviewers; absent or null when unavailable. */
+  authorName?: string | null;
+};
+/** A submission the signed-in reviewer already decided (REV-02 history). */
+export type DecidedKnowledgeReview = {
+  submissionId: string;
+  title: string;
+  departmentId: string;
+  classification: KnowledgeClassification;
+  versionNo: number;
+  decision: "APPROVED" | "REJECTED";
+  decidedAt: string;
+  submittedAt: string;
+  publicationState: KnowledgeSubmission["publicationState"];
+  authorName: string | null;
 };
 export type KnowledgeReviewDetail = KnowledgeSubmission & {
   body: string;
@@ -228,8 +245,15 @@ export async function listKnowledgeSubmissions(platform: Platform, organizationI
 }
 
 export async function listAssignedKnowledgeReviews(platform: Platform, organizationId: string): Promise<AssignedKnowledgeReview[]> {
-  const result = await request<{ items: AssignedKnowledgeReview[] }>(platform, `${knowledgePath(organizationId)}/reviews`);
-  return result.items;
+  return (await listKnowledgeReviewBoard(platform, organizationId)).items;
+}
+
+/** Pending queue plus the reviewer's decided submissions; servers before REV-02 return no history. */
+export async function listKnowledgeReviewBoard(platform: Platform, organizationId: string):
+  Promise<{ items: AssignedKnowledgeReview[]; decided: DecidedKnowledgeReview[] }> {
+  const result = await request<{ items: AssignedKnowledgeReview[]; decided?: DecidedKnowledgeReview[] }>(
+    platform, `${knowledgePath(organizationId)}/reviews`);
+  return { items: result.items, decided: Array.isArray(result.decided) ? result.decided : [] };
 }
 
 export function loadKnowledgeReview(platform: Platform, organizationId: string, submissionId: string): Promise<KnowledgeReviewDetail> {

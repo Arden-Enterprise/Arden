@@ -28,7 +28,7 @@ describe("planReviewDecision", () => {
   it("plans publication preparation only for an authorized final one-step approval", () => {
     expect(planReviewDecision(facts, request)).toEqual({
       kind: "APPROVE_FOR_PREPARATION", decision: "APPROVED", submissionId: "submission",
-      snapshotVersionId: "version-2", contentHash: hash, comment: null,
+      snapshotVersionId: "version-2", contentHash: hash, comment: null, readers: null,
     });
   });
 
@@ -75,6 +75,54 @@ describe("planReviewDecision", () => {
     };
     expect(planReviewDecision(adminFacts, request)).toMatchObject({
       kind: "APPROVE_FOR_PREPARATION", decision: "APPROVED",
+    });
+  });
+
+  describe("approved Target Readers (T2.1)", () => {
+    const proposed = { mode: "DEPARTMENT" as const, departmentId: "engineering", memberIds: [] };
+    const readerFacts: ReviewDecisionFacts = { ...facts, readers: { proposed, facts: {
+      organizationId: "org",
+      departments: [{ departmentId: "engineering", organizationId: "org", status: "ACTIVE" }],
+      members: ["a", "b", "outsider"].map((membershipId) => ({ membershipId, organizationId: "org",
+        status: "ACTIVE" as const, accountActive: true,
+        departmentIds: [membershipId === "outsider" ? "sales" : "engineering"] })),
+    } } };
+
+    it("approves as proposed, narrows, and refuses widening or invalid readers", () => {
+      expect(planReviewDecision(readerFacts, request)).toMatchObject({ kind: "APPROVE_FOR_PREPARATION",
+        readers: { proposed, approved: proposed, narrowed: false } });
+      expect(planReviewDecision(readerFacts, { ...request, approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: ["b", "a"] } }))
+        .toMatchObject({ kind: "APPROVE_FOR_PREPARATION", readers: { narrowed: true,
+          approved: { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: ["b", "a"] } } });
+      expect(planReviewDecision(readerFacts, { ...request, approvedReaders: { mode: "ORGANIZATION" } }))
+        .toEqual({ kind: "DENIED", reason: "READERS_WIDENED" });
+      expect(planReviewDecision(readerFacts, { ...request, approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: ["a", "outsider"] } }))
+        .toEqual({ kind: "DENIED", reason: "READERS_WIDENED" });
+      expect(planReviewDecision(readerFacts, { ...request, approvedReaders: { mode: "SELECTED_MEMBERS", memberIds: ["a", "a"] } }))
+        .toMatchObject({ kind: "DENIED", reason: "INVALID_READERS", field: "approvedReaders.memberIds" });
+    });
+
+    it("refuses REJECT with approved readers, but still requires a reject comment", () => {
+      const reject = { ...request, action: "REJECT" as const, comment: "Not suitable" };
+      expect(planReviewDecision(readerFacts, { ...reject, approvedReaders: { mode: "ORGANIZATION" } }))
+        .toEqual({ kind: "DENIED", reason: "INVALID_REQUEST" });
+      expect(planReviewDecision(readerFacts, { ...reject, comment: " " })).toEqual({ kind: "DENIED", reason: "COMMENT_REQUIRED" });
+      expect(planReviewDecision(readerFacts, reject)).toEqual({ kind: "RECORD_ONLY", decision: "REJECTED", comment: "Not suitable" });
+    });
+
+    it("refuses an unauthorized actor before any reader check", () => {
+      const unauthorized = { ...readerFacts, reviewerGrants: [] };
+      for (const approvedReaders of [{ mode: "ORGANIZATION" as const }, { mode: "SELECTED_MEMBERS" as const, memberIds: ["a"] }]) {
+        expect(planReviewDecision(unauthorized, { ...request, approvedReaders })).toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
+        expect(planReviewDecision(unauthorized, { ...request, action: "REJECT", comment: "x", approvedReaders }))
+          .toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
+      }
+    });
+
+    it("keeps legacy audience submissions unchanged and rejects readers on them", () => {
+      expect(planReviewDecision(facts, request)).toMatchObject({ kind: "APPROVE_FOR_PREPARATION", readers: null });
+      expect(planReviewDecision(facts, { ...request, approvedReaders: { mode: "ORGANIZATION" } }))
+        .toEqual({ kind: "DENIED", reason: "READERS_NOT_SUPPORTED" });
     });
   });
 });
