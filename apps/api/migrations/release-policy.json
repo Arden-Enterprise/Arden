@@ -138,6 +138,12 @@
       "filename": "0023_invitation_optional_department.sql",
       "sha256": "ea78cd548c43ce908cf5ca80aed4c35a5bfa7b0228e59b8d1b7e77e05976ca1f",
       "rollout": "operator"
+    },
+    {
+      "id": "0024",
+      "filename": "0024_target_reader_selection.sql",
+      "sha256": "dfb693efbe14b62cf25f189929a9c0e75d4a26adbf751ad35737c182ca495413",
+      "rollout": "operator"
     }
   ]
 }

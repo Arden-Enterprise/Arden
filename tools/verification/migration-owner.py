@@ -23,7 +23,7 @@ def verify_full_schema(container):
             raise RuntimeError("Full-schema ownership rehearsal failed")
         return result.stdout.strip()
 
-    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "23":
+    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "24":
         raise ValueError("Review the full-schema ownership fixture when migrations change")
     sql(f"CREATE ROLE {role} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS "
         "NOCREATEDB NOCREATEROLE NOREPLICATION")
@@ -35,7 +35,7 @@ def verify_full_schema(container):
         raise AssertionError("Full-schema migration owner is not scoped correctly")
     preserved = sql("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
                     "WHERE n.nspname='arden' AND p.prosecdef AND p.proowner='postgres'::regrole")
-    if preserved != "12":
+    if preserved != "18":
         raise AssertionError("Reviewed SECURITY DEFINER execution identities were not preserved")
     print("PASS: full schema transferred; API suite will run with the real post-transfer ownership")
 

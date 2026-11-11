@@ -83,6 +83,16 @@ There are three ways to create a draft. Each requires a UUID `Idempotency-Key` h
   - `organizationReviewerAvailable` — only whether an active organization reviewer exists, never who.
 - The working draft stays editable while a submission is pending. The frozen submission does not change.
 
+### Target Readers (Flow 2 T1.1/T1.3/T1.4 — additive, in progress)
+
+Target Readers are the per-document reader model planned to replace audience groups. This slice adds them **alongside** audiences; nothing is removed.
+
+- **Provenance:** Flow 2 task list (team planning artifact, exported 2026-11-10; BM04 RF-03/RF-04), tasks T1.1, T1.3 and T1.4, requested by the maintainer for implementation. Accountable decision owner: unknown; confirmation needed. Decision state: proposed for the audience replacement (T1.2/T1.6 still need an informed decision against [0010](../decisions/0010-audiences-and-system-administration.md)); the additive slice below is implemented.
+- **Modes:** `ORGANIZATION` (every active member), `DEPARTMENT` (active members whose current department — an active department membership in an active department — matches), `SELECTED_MEMBERS` (2–100 distinct active members of the same organization).
+- **Save:** `PATCH /drafts/:id` accepts optional `targetReaders: { mode, departmentId?, memberIds? }`. Absent keeps the saved readers. Present must pass `TargetReaderPolicy.validateSelection`; otherwise 400 `INVALID_TARGET_READERS` with `error.field` (`targetReaders.mode`, `.departmentId` or `.memberIds`) and no new version. A valid save stores a new immutable `reader_selection` (revision + 1); reads return `targetReaders` with members in the author's order.
+- **Submit** freezes the draft selection as `shared_submission.proposed_selection_id` (returned as `proposedTargetReaders`). The snapshot trigger keeps it immutable; `approved_selection_id` can be recorded once (T2.1, not implemented).
+- Audience readiness rules for submit are unchanged in this slice.
+
 ## 4. Submitting
 
 - `POST /drafts/:id/submit` requires `If-Match` and an `Idempotency-Key`. It freezes the exact current version:
@@ -153,6 +163,7 @@ Approval hands the exact snapshot to the Mainflow 3 indexing pipeline (migration
 - Approving a snapshot does not make the reviewer or Organization Admin a reader. They need an audience rule like anyone else.
 - **Database bridge:** publication RLS (`actor_in_publication_audience`, migration 0012) still evaluates audiences through the legacy role projection kept by migration 0017. Audience IDs equal the legacy role IDs, and role-backed shadow data keeps those checks working. This bridge remains until the Phase 5 contraction in the [audience/system-admin implementation plan](audience-system-admin-implementation.md); it is not part of the product or API contract.
 - Only current active publications are eligible for Search and Ask Arden (Mainflow 3).
+- **Target Readers in the API (T1.3, closes BM02 R-01):** the library list, the document detail and the Ask Arden allow-list call `TargetReaderPolicy.canRead` in the route, not only RLS. A publication's readers are its approved submission's `approved_selection_id`; a publication without one keeps the audience behaviour above. Unreadable and missing documents return the same 404 `RESOURCE_NOT_AVAILABLE`; Ask Arden rechecks after generation, so an unreadable document is never cited. Library responses expose only `targetReaders.mode`/`departmentId`, never the member list. Until T2.1 records approved readers, every publication stays on the audience path.
 
 ## 9. Error responses (current codes)
 
@@ -167,6 +178,7 @@ Approval hands the exact snapshot to the Mainflow 3 indexing pipeline (migration
 | Stale snapshot or changed submission on decision | 409 `REVIEW_CONFLICT` or the denial reason |
 | Reject without a comment | 400 `COMMENT_REQUIRED` |
 | Invalid metadata, PDF or Semantic Document | 400 `INVALID_METADATA` / `INVALID_PDF` / `INVALID_DOCUMENT` |
+| Invalid Target Readers on draft save | 400 `INVALID_TARGET_READERS` with `error.field` |
 | Request body fails schema validation | 400 `INVALID_REQUEST` ("The request is invalid.") |
 
 The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) is the target. Some current codes still differ: `SUBMISSION_CONFLICT` rather than `OPEN_RELEASE_CANDIDATE_EXISTS`, and 412 rather than 409 for a stale save.
@@ -212,8 +224,11 @@ The migration ledger is `apps/api/migrations`. Flow 2 relies on:
 | `0017_audience_and_instance_admin_foundation.sql` | Audiences and their legacy bridge. |
 | `0019` / `0021` | Preparation and monotonic activation. |
 | `0022_organization_reviewer_grants.sql` | Grant scope and the frozen `review_rule`. |
+| `0024_target_reader_selection.sql` | Target Readers: `reader_selection`, `selected_reader`, draft/submission selection columns, RLS and freeze triggers (operator-class). |
 
-Run migrations before starting an API build that depends on them. The 0022 code reads `reviewer_grant.scope` and `shared_submission.review_rule`.
+Run migrations before starting an API build that depends on them. The 0022 code reads `reviewer_grant.scope` and `shared_submission.review_rule`. The 0024 code reads `shared_draft.draft_selection_id`, the submission selection columns and `publication_reader_selection_id()`.
+
+**Target Readers evidence (0024):** `src/target-readers/policy.test.ts` and the T1.3/T1.4 request tests in `src/app.test.ts` run without a database. `src/target-readers/target-readers.integration.test.ts` and the Target Readers step in `src/db/repository.integration.test.ts` need `ARDEN_TEST_DATABASE_URL`; they had not run when 0024 was written. Migration 0024 has not been rehearsed on a staging copy.
 
 **Evidence obtained:**
 - API unit and request tests cover:
