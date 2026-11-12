@@ -216,6 +216,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [pendingMemberEntry, setPendingMemberEntry] = useState<string | null>(null);
   const [organization, setOrganization] = useState<OrganizationPreview | null>(null);
   const [organizationDirty, setOrganizationDirty] = useState(false);
+  const [invitationBatchSending, setInvitationBatchSending] = useState(false);
   const [activeView, setActiveView] = useState<WorkspaceView>("my-work");
   const privateNotes = usePrivateNotes(initialNotes);
   const [contextOpen, setContextOpen] = useState(false);
@@ -322,6 +323,13 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       return undefined;
     }).catch(() => undefined);
   }, [platform]);
+
+  useEffect(() => {
+    if (!invitationBatchSending) return;
+    const warnOnLeave = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warnOnLeave);
+    return () => window.removeEventListener("beforeunload", warnOnLeave);
+  }, [invitationBatchSending]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -501,6 +509,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
    */
   const navigate = (view: WorkspaceView) => {
     setNavOpen(false);
+    if (invitationBatchSending && activeView === "organization-access" && view !== activeView) {
+      setIslandToast({ message: "Wait for invitations to finish before leaving Administration.", onDismiss: () => setIslandToast(null) });
+      return;
+    }
     if (view !== "knowledge") setKnowledgeCitationTarget(null);
     if (view === "ask-arden") setContextOpen(false);
     if (organizationDirty && activeView === "organization-access" && view !== activeView) {
@@ -549,6 +561,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
    * Initiates member sign-out, checking for unsaved changes before exiting.
    */
   const signOut = () => {
+    if (invitationBatchSending) {
+      setIslandToast({ message: "Wait for invitations to finish before signing out.", onDismiss: () => setIslandToast(null) });
+      return;
+    }
     if (organizationDirty || privateNotes.hasUnsavedDrafts) {
       setPendingAction("exit");
       return;
@@ -603,7 +619,13 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
         collapsed={navCollapsed}
         onToggleCollapsed={() => setNavCollapsed((collapsed) => !collapsed)}
-        onSwitchWorkspace={() => { setNavOpen(false); setContextOpen(false); setEntryView("workspace-select"); }}
+        onSwitchWorkspace={() => {
+          if (invitationBatchSending) {
+            setIslandToast({ message: "Wait for invitations to finish before switching workspaces.", onDismiss: () => setIslandToast(null) });
+            return;
+          }
+          setNavOpen(false); setContextOpen(false); setEntryView("workspace-select");
+        }}
         onCloseNavigation={() => setNavOpen(false)}
         onNavigate={navigate}
         onSignOut={signOut}
@@ -636,7 +658,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         ) : activeView === "my-work" ? (
           <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
         ) : activeView === "organization-access" && serverOrganizationId && activeMembership && liveAdmin ? (
-          <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} {...contextControl} />
+          <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} onSendingInvitationsChange={(sending) => { setInvitationBatchSending(sending); if (!sending) setIslandToast(null); }} {...contextControl} />
         ) : activeView === "organization-access" && organization && previewRole === "admin" ? (
           <OrganizationAccessPage organization={organization} onChange={setOrganization} onDirtyChange={setOrganizationDirty} onOpenSetup={() => { if (organizationDirty) setPendingAction("setup"); else setEntryView("setup"); }} onPreviewInvitation={(id) => { setInvitationId(id); setEntryView("invitation"); }} onPreviewAccess={(id) => { setAccessMemberId(id); setEntryView("access"); }} {...contextControl} />
         ) : activeView === "personal-workspace" ? (

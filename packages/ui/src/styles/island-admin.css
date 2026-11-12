@@ -30,6 +30,18 @@
 .admin-side-form .primary-button, .admin-form-island .admin-grant-actions .primary-button { justify-self: start; }
 .organization-live-admin .organization-field { display: grid; gap: 6px; }
 .organization-live-admin .organization-field small { color: var(--arden-text-secondary); font-size: 12px; font-weight: 400; }
+.admin-side-form #admin-invite-email { min-height: 108px; resize: vertical; }
+.admin-side-form #admin-invite-email::placeholder { color: var(--arden-text-muted); opacity: 1; }
+.admin-side-form #admin-invite-email:focus-visible { outline: 2px solid var(--arden-violet); outline-offset: 2px; }
+.admin-invite-preview, .admin-invite-report { display: grid; gap: 9px; min-width: 0; padding: 12px; border: 1px solid var(--arden-border); border-radius: 10px; background: var(--arden-surface-raised); }
+.admin-invite-preview > p, .admin-invite-report > p { margin: 0; color: var(--arden-text-secondary); font-size: 12px; font-weight: 600; }
+.admin-invite-preview > ul, .admin-invite-report > ul { display: grid; gap: 0; max-height: 220px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.admin-invite-preview li, .admin-invite-report li { display: grid; gap: 3px; min-width: 0; padding: 7px 0; border-top: 1px solid var(--arden-border); font-size: 12px; overflow-wrap: anywhere; }
+.admin-invite-preview li > small, .admin-invite-report li > small { font-size: 11px; }
+.admin-invite-preview .is-ready, .admin-invite-report .is-ready { color: var(--arden-success); }
+.admin-invite-preview .is-skipped, .admin-invite-report .is-skipped { color: var(--arden-warning); }
+.admin-invite-preview > small, .admin-invite-report > small { color: var(--arden-text-secondary); font-size: 11px; }
+.admin-invite-report > .secondary-button { justify-self: start; }
 .admin-grant-tags { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .admin-grant-scope .island-seg { width: 100%; }
 .admin-grant-scope .island-seg > button { flex: 1; }
