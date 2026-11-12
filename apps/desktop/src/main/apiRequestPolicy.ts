@@ -15,6 +15,8 @@ const reviewerGrantCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowl
 const newKnowledgeDraft = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/new$`);
 const pdfKnowledgeDraft = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/pdf$`);
 const knowledgeDraftItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}$`);
+const knowledgeDraftVersions = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/versions(?:/${uuid})?$`);
+const knowledgeDraftVersionItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/versions/${uuid}$`);
 const knowledgeDraftSubmit = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/submit$`);
 const knowledgeSubmissionWithdraw = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/submissions/${uuid}/withdraw$`);
 const knowledgeReviewItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}$`);
@@ -57,7 +59,7 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
 export function desktopApiResponseLimit(request: DesktopApiRequest): number {
   const pdfCreate = request.method === "POST" && pdfKnowledgeDraft.test(request.path);
   const knowledgeDetail = ((request.method === "GET" || request.method === "PATCH")
-    && knowledgeDraftItem.test(request.path))
+    && (knowledgeDraftItem.test(request.path) || knowledgeDraftVersionItem.test(request.path)))
     || (request.method === "GET" && (knowledgeReviewItem.test(request.path)
       || publishedKnowledgeItem.test(request.path)));
   return pdfCreate || knowledgeDetail ? 7_100_000 : 1024 * 1024;
@@ -79,6 +81,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const sharedDraftCreate = sharedDraftPath.test(url.pathname) && request.method === "POST" &&
     Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   const knowledgeGet = (knowledgeCollection.test(url.pathname) || knowledgeDraftItem.test(url.pathname)
+    || knowledgeDraftVersions.test(url.pathname)
     || knowledgeReviewItem.test(url.pathname) || publishedKnowledgeItem.test(url.pathname))
     && request.method === "GET" && !request.body && !request.ifMatch && !request.idempotencyKey;
   const knowledgeCreate = newKnowledgeDraft.test(url.pathname) && request.method === "POST"

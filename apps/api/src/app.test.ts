@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, DecidedReview, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult, WithdrawKnowledgeSubmissionResult } from "./db/repository.js";
+import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -1053,6 +1053,34 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, title: "Other" } })).statusCode).toBe(409);
   });
 
+  it("lists saved draft versions and reads old content only for the author", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const other = await desktopSession(app, "manager@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const created = await app.inject({ method: "POST", url: `${root}/new`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "idempotency-key": createKey },
+      payload: { title: "Runbook", body: "Original steps" } });
+    expect(created.statusCode).toBe(201);
+    const updated = await app.inject({ method: "PATCH", url: `${root}/${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
+      payload: { body: "Revised steps" } });
+    expect(updated.statusCode).toBe(200);
+    const listUrl = `${root}/${sharedDraftId}/versions`;
+    const listed = await app.inject({ method: "GET", url: listUrl, headers: { cookie: owner } });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers["cache-control"]).toBe("no-store");
+    expect(listed.json().items.map((item: { version: number }) => item.version)).toEqual([2, 1]);
+    expect(JSON.stringify(listed.json())).not.toContain("arden-private-object");
+    const old = await app.inject({ method: "GET", url: `${listUrl}/${sharedVersionId}`, headers: { cookie: owner } });
+    expect(old.statusCode).toBe(200);
+    expect(semanticDocumentText(old.json().body)).toBe("Original steps");
+    expect(JSON.stringify(old.json())).not.toContain("arden-private-object");
+    expect((await app.inject({ method: "GET", url: listUrl, headers: { cookie: other } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `${listUrl}/${sharedVersionId}`, headers: { cookie: other } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: listUrl })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: `${listUrl}/${versionId}`, headers: { cookie: owner } })).statusCode).toBe(404);
+  });
+
   it("accepts new drafts and reviewer grants without a classification (decision 0013)", async () => {
     const session = await desktopSession(app, "owner@example.test");
     const root = `/api/v1/organizations/${organizationId}/knowledge`;
@@ -1071,6 +1099,11 @@ describe("API auth and private draft routes", () => {
     expect(grant.statusCode).toBe(201);
     expect(repository.reviewerGrant?.classifications).toEqual(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"]);
     expect(repository.reviewerGrant).toMatchObject({ scope: "DEPARTMENT", level: "STANDARD" });
+    const duplicate = await app.inject({ method: "POST", url: `${root}/reviewer-grants`,
+      headers: { cookie: session, origin: "http://localhost:5180" },
+      payload: { reviewerMembershipId: otherId, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff" } });
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json().error.code).toBe("REVIEWER_GRANT_EXISTS");
   });
 
   it("creates whole-organization grants and rejects mismatched scope metadata (decision 0015)", async () => {
@@ -1098,6 +1131,10 @@ describe("API auth and private draft routes", () => {
       payload: { title: "Original PDF", pdfBase64, classification: "INTERNAL" } });
     expect(created.statusCode).toBe(201);
     expect(created.json()).toMatchObject({ body: "", pdfBase64, currentVersion: { mimeType: "application/pdf" } });
+    const historicPdf = await app.inject({ method: "GET",
+      url: `${root}/drafts/${sharedDraftId}/versions/${sharedVersionId}`, headers: { cookie: owner } });
+    expect(historicPdf.statusCode).toBe(200);
+    expect(historicPdf.json()).toMatchObject({ version: 1, mimeType: "application/pdf", pdfBase64 });
     const reopened = await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers: { cookie: owner } });
     expect(reopened.json().pdfBase64).toBe(pdfBase64);
     expect((await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers: { cookie: reviewer } })).statusCode).toBe(404);
@@ -1907,6 +1944,7 @@ class MemoryRepository implements ArdenDataRepository {
   currentVersion = 2;
   currentSource: StoredContentFields = { sourceUri: "arden-private-object://dddddddd-dddd-4ddd-8ddd-dddddddddddd", mimeType: "text/plain", contentHash: "not-used-in-forged-note" };
   sharedDraft: SharedKnowledgeDraft | null = null;
+  sharedVersions: KnowledgeDraftVersion[] = [];
   sharedSubmission: SharedKnowledgeSubmission | null = null;
   reviewerGrant: ReviewerGrantRecord | null = null;
   publication: PublishedKnowledge | null = null;
@@ -2058,6 +2096,9 @@ class MemoryRepository implements ArdenDataRepository {
       mimeType: input.copiedContent.mimeType, contentHash: input.copiedContent.contentHash,
       currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
     };
+    this.sharedVersions = [{ id: sharedVersionId, version: 1,
+      sourceUri: input.copiedContent.sourceUri, mimeType: input.copiedContent.mimeType,
+      contentHash: input.copiedContent.contentHash, createdAt: this.sharedDraft.createdAt }];
     return { kind: "created", draft: this.sharedDraft };
   }
 
@@ -2081,6 +2122,9 @@ class MemoryRepository implements ArdenDataRepository {
       sourceUri: input.content.sourceUri, mimeType: input.content.mimeType, contentHash: input.content.contentHash,
       currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
     };
+    this.sharedVersions = [{ id: sharedVersionId, version: 1,
+      sourceUri: input.content.sourceUri, mimeType: input.content.mimeType,
+      contentHash: input.content.contentHash, createdAt: this.sharedDraft.createdAt }];
     return { kind: "created", draft: this.sharedDraft };
   }
 
@@ -2092,6 +2136,18 @@ class MemoryRepository implements ArdenDataRepository {
   async getKnowledgeDraft(userId: string, requestedOrganization: string, requestedDraft: string): Promise<SharedKnowledgeDraft | null> {
     return userId === ownerId && requestedOrganization === organizationId && this.sharedDraft?.id === requestedDraft
       ? this.sharedDraft : null;
+  }
+
+  async listKnowledgeDraftVersions(userId: string, requestedOrganization: string,
+    requestedDraft: string): Promise<KnowledgeDraftVersion[] | null> {
+    if (!await this.getKnowledgeDraft(userId, requestedOrganization, requestedDraft)) return null;
+    return [...this.sharedVersions].reverse();
+  }
+
+  async getKnowledgeDraftVersion(userId: string, requestedOrganization: string,
+    requestedDraft: string, requestedVersion: string): Promise<KnowledgeDraftVersion | null> {
+    if (!await this.getKnowledgeDraft(userId, requestedOrganization, requestedDraft)) return null;
+    return this.sharedVersions.find((version) => version.id === requestedVersion) ?? null;
   }
 
   async updateKnowledgeDraft(userId: string, requestedOrganization: string, requestedDraft: string,
@@ -2119,6 +2175,9 @@ class MemoryRepository implements ArdenDataRepository {
         ? "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" : "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       currentVersion: expectedVersion + 1,
     };
+    this.sharedVersions.push({ id: this.sharedDraft.versionId, version: this.sharedDraft.currentVersion,
+      sourceUri: this.sharedDraft.sourceUri, mimeType: this.sharedDraft.mimeType,
+      contentHash: this.sharedDraft.contentHash, createdAt: this.sharedDraft.updatedAt });
     return { kind: "updated", draft: this.sharedDraft };
   }
 
@@ -2169,6 +2228,14 @@ class MemoryRepository implements ArdenDataRepository {
 
   async createReviewerGrant(userId: string, requestedOrganization: string, input: ReviewerGrantInput): Promise<ReviewerGrantRecord | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId || input.reviewerMembershipId !== otherId) return null;
+    if (this.reviewerGrant?.status === "ACTIVE" && this.reviewerGrant.scope === input.scope
+      && this.reviewerGrant.departmentId === input.departmentId
+      && this.reviewerGrant.teamTag === input.teamTag && this.reviewerGrant.projectTag === input.projectTag
+      && this.reviewerGrant.level === (input.level ?? "STANDARD")
+      && this.reviewerGrant.classifications.length === input.classifications.length
+      && input.classifications.every((classification) => this.reviewerGrant!.classifications.includes(classification))) {
+      throw new ReviewerGrantConflictError();
+    }
     this.reviewerGrant = { ...input, level: input.level ?? "STANDARD",
       id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", status: "ACTIVE",
       validFrom: new Date("2026-10-10T09:00:00.000Z") };

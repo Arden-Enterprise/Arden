@@ -197,6 +197,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const submitReviewerGrant = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setGrantSubmitted(true);
     if (!canGrant) { document.querySelector<HTMLElement>(!reviewerId ? "#admin-reviewer-select" : "#admin-review-department")?.focus(); return; }
+    if (overlappingGrant) return;
     void perform(async () => {
       const created = await createReviewerGrant(platform, organizationId, {
         reviewerMembershipId: reviewerId, scope: reviewScope,
@@ -221,7 +222,11 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const overlappingGrant = reviewerGrants.some((grant) => grant.status === "ACTIVE" && grant.reviewerMembershipId === reviewerId
     && grant.scope === reviewScope
-    && (reviewScope === "ORGANIZATION" || grant.departmentId === reviewDepartmentId));
+    && (reviewScope === "ORGANIZATION" || grant.departmentId === reviewDepartmentId)
+    && grant.teamTag === (teamTag.trim() || null) && grant.projectTag === (projectTag.trim() || null)
+    && grant.level === "STANDARD" && ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"].every((value) =>
+      grant.classifications.includes(value as ReviewerGrant["classifications"][number]))
+    && (!grant.validUntil || new Date(grant.validUntil).getTime() > Date.now()));
 
   const now = Date.now();
   const invitationCounts = countInvitations(data?.invitations ?? [], now);
@@ -347,7 +352,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               {shownInvitations.map((invitation) => {
                 const state = invitationState(invitation, now);
                 return <IslandRow key={invitation.id}>
-                  <IslandCell className="island-row-cell is-name"><strong className="island-row-title" title={invitation.email}>{invitation.email}</strong><small>Member</small></IslandCell>
+                  <IslandCell className="island-row-cell is-name"><strong className="island-row-title" title={invitation.email}>{invitation.email}</strong></IslandCell>
                   <IslandCell>{departmentName(invitation.departmentId)}</IslandCell>
                   <IslandCell className="island-row-cell is-number">{state === "PENDING" || state === "EXPIRED" ? new Date(invitation.expiresAt).toLocaleDateString() : "—"}</IslandCell>
                   <IslandCell><span className={`island-chip has-dot ${invitationTone[state]}`}>{titleCase(state)}</span></IslandCell>
@@ -426,8 +431,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
               <label className="organization-field"><span>Team tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={teamTag} onChange={(event) => setTeamTag(event.target.value)} /></label>
               <label className="organization-field"><span>Project tag <small>Optional</small></span><input maxLength={100} disabled={busy} value={projectTag} onChange={(event) => setProjectTag(event.target.value)} /></label>
             </div>
-            {overlappingGrant && <p className="admin-feedback is-warning">Review permission already assigned.</p>}
-            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Assign reviewer"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); setError(""); }}>Cancel</button></div>
+            {overlappingGrant && <p className="admin-feedback is-warning" role="status">Review permission already assigned for this scope and tags.</p>}
+            <div className="admin-grant-actions"><button type="submit" className="primary-button" disabled={busy || overlappingGrant}>{busy ? "Saving…" : "Assign reviewer"}</button><button type="button" className="secondary-button" disabled={busy} onClick={() => { setReviewerId(""); setReviewScope("DEPARTMENT"); setReviewDepartmentId(""); setTeamTag(""); setProjectTag(""); setGrantSubmitted(false); setError(""); }}>Cancel</button></div>
           </form>
           </div>
         </div>}

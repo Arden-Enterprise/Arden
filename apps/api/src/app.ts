@@ -2,7 +2,9 @@ import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } fr
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
-import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
+import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
+  type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
+  type SharedKnowledgeDraft, type SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
 import { allKnowledgeClassifications, defaultKnowledgeClassification, type KnowledgeClassification } from "./knowledge/policy.js";
@@ -1099,6 +1101,60 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  app.get<{ Params: { organizationId: string; draftId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId/versions", {
+      schema: { params: { type: "object", required: ["organizationId", "draftId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const versions = await dependencies.repository.listKnowledgeDraftVersions(context.userId,
+          request.params.organizationId, request.params.draftId);
+        if (!versions) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { items: versions.map(({ id, version, mimeType, createdAt }) => ({
+          id, version, mimeType, createdAt: createdAt.toISOString(),
+        })) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft version list failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string; draftId: string; versionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId/versions/:versionId", {
+      schema: { params: { type: "object", required: ["organizationId", "draftId", "versionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern },
+        versionId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, draftId, versionId } = request.params;
+        const version = await dependencies.repository.getKnowledgeDraftVersion(context.userId,
+          organizationId, draftId, versionId);
+        if (!version) return reply.code(404).send(resourceNotAvailable(request.id));
+        const content = await readKnowledgeContent(dependencies.storage, version.sourceUri,
+          version.contentHash, version.mimeType);
+        const stillAuthorized = await dependencies.repository.getKnowledgeDraftVersion(context.userId,
+          organizationId, draftId, versionId);
+        if (!stillAuthorized || stillAuthorized.contentHash !== version.contentHash
+          || stillAuthorized.sourceUri !== version.sourceUri) {
+          return reply.code(404).send(resourceNotAvailable(request.id));
+        }
+        reply.header("Cache-Control", "no-store");
+        return { id: version.id, version: version.version, mimeType: version.mimeType,
+          createdAt: version.createdAt.toISOString(), body: content.body,
+          ...(content.pdfBase64 ? { pdfBase64: content.pdfBase64 } : {}) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft version read failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
   app.patch<{ Params: { organizationId: string; draftId: string }; Body: Omit<SharedDraftPatch, "audienceRoleIds"> & { audienceIds?: string[]; pdfBase64?: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId", {
       bodyLimit: maxPdfBase64Length + maxBodyBytes,
@@ -1347,6 +1403,10 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(201).send({ ...grant, validFrom: grant.validFrom.toISOString(),
           validUntil: grant.validUntil?.toISOString() ?? null });
       } catch (error) {
+        if (error instanceof ReviewerGrantConflictError) {
+          return reply.code(409).send(safeError("REVIEWER_GRANT_EXISTS",
+            "Review permission already assigned for this scope and tags.", request.id));
+        }
         request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Reviewer grant creation failed");
         return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
       }

@@ -141,12 +141,23 @@ export type ReviewerGrantInput = {
   projectTag: string | null;
   validUntil: Date | null;
 };
+export type KnowledgeDraftVersion = {
+  id: string;
+  version: number;
+  sourceUri: string;
+  mimeType: string;
+  contentHash: string;
+  createdAt: Date;
+};
 export type ReviewerGrantRecord = Omit<ReviewerGrantInput, "level"> & {
   level: "STANDARD" | "SPECIALIST" | "SENIOR";
   id: string;
   status: "ACTIVE" | "INACTIVE";
   validFrom: Date;
 };
+export class ReviewerGrantConflictError extends Error {
+  constructor() { super("Reviewer permission already assigned for this scope and tags."); }
+}
 /** Proposed readers resolved for the reviewer's narrowing UI (T2.1/T2.2). */
 export type ProposedReadersDetail = {
   mode: ReaderMode;
@@ -561,6 +572,8 @@ export interface ArdenDataRepository {
   }): Promise<CreateSharedDraftResult>;
   listKnowledgeDrafts(userId: string, organizationId: string): Promise<SharedKnowledgeDraft[] | null>;
   getKnowledgeDraft(userId: string, organizationId: string, draftId: string): Promise<SharedKnowledgeDraft | null>;
+  listKnowledgeDraftVersions(userId: string, organizationId: string, draftId: string): Promise<KnowledgeDraftVersion[] | null>;
+  getKnowledgeDraftVersion(userId: string, organizationId: string, draftId: string, versionId: string): Promise<KnowledgeDraftVersion | null>;
   updateKnowledgeDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number,
     patch: SharedDraftPatch, content: StoredContentFields | null, requestId: string): Promise<UpdateSharedDraftResult>;
   submitKnowledgeDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number,
@@ -1506,6 +1519,43 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
+  async listKnowledgeDraftVersions(userId: string, organizationId: string, draftId: string): Promise<KnowledgeDraftVersion[] | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const draft = await client.query(`SELECT 1 FROM shared_draft
+        WHERE organization_id = $1 AND shared_draft_id = $2`, [organizationId, draftId]);
+      if (draft.rowCount === 0) return null;
+      const result = await client.query<{ shared_draft_version_id: string; version_no: number;
+        content_uri: string; mime_type: string; content_hash: string; created_at: Date }>(`
+        SELECT v.shared_draft_version_id, v.version_no, v.content_uri, v.mime_type,
+               v.content_hash, v.created_at
+          FROM shared_draft_version v
+          JOIN shared_draft d ON d.shared_draft_id = v.shared_draft_id
+         WHERE d.organization_id = $1 AND d.shared_draft_id = $2
+         ORDER BY v.version_no DESC`, [organizationId, draftId]);
+      return result.rows.map((row) => ({ id: row.shared_draft_version_id, version: row.version_no,
+        sourceUri: row.content_uri, mimeType: row.mime_type, contentHash: row.content_hash,
+        createdAt: row.created_at }));
+    });
+  }
+
+  async getKnowledgeDraftVersion(userId: string, organizationId: string, draftId: string,
+    versionId: string): Promise<KnowledgeDraftVersion | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const result = await client.query<{ shared_draft_version_id: string; version_no: number;
+        content_uri: string; mime_type: string; content_hash: string; created_at: Date }>(`
+        SELECT v.shared_draft_version_id, v.version_no, v.content_uri, v.mime_type,
+               v.content_hash, v.created_at
+          FROM shared_draft_version v
+          JOIN shared_draft d ON d.shared_draft_id = v.shared_draft_id
+         WHERE d.organization_id = $1 AND d.shared_draft_id = $2
+           AND v.shared_draft_version_id = $3`, [organizationId, draftId, versionId]);
+      const row = result.rows[0];
+      return row ? { id: row.shared_draft_version_id, version: row.version_no,
+        sourceUri: row.content_uri, mimeType: row.mime_type, contentHash: row.content_hash,
+        createdAt: row.created_at } : null;
+    });
+  }
+
   async updateKnowledgeDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number,
     patch: SharedDraftPatch, content: StoredContentFields | null, requestId: string): Promise<UpdateSharedDraftResult> {
     return this.withActorContext(userId, organizationId, async (client) => {
@@ -1767,7 +1817,21 @@ export class ArdenRepository implements ArdenDataRepository {
       if (target.rowCount === 0
         || (input.scope === "DEPARTMENT" && (!department || department.rowCount === 0))
         || (input.scope === "ORGANIZATION" && input.departmentId !== null)) return null;
+      // Serialize writes for the same reviewer in this organization so concurrent requests
+      // cannot both pass the duplicate check before either inserts a grant.
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1), hashtext($2))",
+        [organizationId, input.reviewerMembershipId]);
       const level = input.level ?? "STANDARD";
+      const duplicate = await client.query(`SELECT 1 FROM reviewer_grant
+        WHERE organization_id = $1 AND reviewer_membership_id = $2 AND scope = $3
+          AND department_id IS NOT DISTINCT FROM $4::uuid
+          AND team_tag IS NOT DISTINCT FROM $5::text
+          AND project_tag IS NOT DISTINCT FROM $6::text
+          AND level = $7 AND classifications @> $8::text[] AND classifications <@ $8::text[]
+          AND status = 'ACTIVE' AND (valid_until IS NULL OR valid_until > now())
+        LIMIT 1`, [organizationId, input.reviewerMembershipId, input.scope, input.departmentId,
+        input.teamTag, input.projectTag, level, input.classifications]);
+      if (duplicate.rowCount) throw new ReviewerGrantConflictError();
       const result = await client.query<ReviewerGrantRow>(`
         INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope, department_id,
           granted_by_membership_id, classifications, level, team_tag, project_tag, valid_until)
