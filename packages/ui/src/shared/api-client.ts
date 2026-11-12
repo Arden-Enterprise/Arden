@@ -65,6 +65,13 @@ export type KnowledgeDraftRecord = {
   createdAt: string;
   updatedAt: string;
 };
+export type KnowledgeDraftVersionSummary = {
+  id: string;
+  version: number;
+  mimeType: "text/plain" | "application/pdf";
+  createdAt: string;
+};
+export type KnowledgeDraftVersionRecord = KnowledgeDraftVersionSummary & { body: string; pdfBase64?: string };
 export type KnowledgeDraftSummary = {
   id: string;
   organizationId: string;
@@ -201,6 +208,18 @@ export async function listKnowledgeDrafts(platform: Platform, organizationId: st
 
 export function loadKnowledgeDraft(platform: Platform, organizationId: string, draftId: string): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`);
+}
+
+export async function listKnowledgeDraftVersions(platform: Platform, organizationId: string,
+  draftId: string): Promise<KnowledgeDraftVersionSummary[]> {
+  const response = await request<{ items: KnowledgeDraftVersionSummary[] }>(platform,
+    `${knowledgePath(organizationId)}/drafts/${draftId}/versions`);
+  return response.items;
+}
+
+export function loadKnowledgeDraftVersion(platform: Platform, organizationId: string,
+  draftId: string, versionId: string): Promise<KnowledgeDraftVersionRecord> {
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}/versions/${versionId}`);
 }
 
 export function createNewKnowledgeDraft(platform: Platform, organizationId: string,

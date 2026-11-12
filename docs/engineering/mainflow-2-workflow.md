@@ -59,6 +59,7 @@ There are three ways to create a draft. Each requires a UUID `Idempotency-Key` h
 ### Editing and sharing settings
 
 - `GET /drafts` lists only the actor's drafts. `GET /drafts/:id` reopens one.
+- `GET /drafts/:id/versions` lists the author's saved content-version IDs, numbers, MIME types and save times. `GET /drafts/:id/versions/:versionId` reads one immutable saved body or PDF for a read-only History preview. Both routes return 404 for another member or organization and `Cache-Control: no-store`; content URI/hash remain server-side. These version records do not snapshot the draft's mutable title or classification.
 - `PATCH /drafts/:id` saves a new immutable version.
   - It requires `If-Match: "<current version>"`: missing → 428 `PRECONDITION_REQUIRED`; stale → 412 `VERSION_CONFLICT`.
   - A PDF draft's body cannot be edited (400).
@@ -123,6 +124,7 @@ Target Readers are the per-document reader model planned to replace audience gro
   - `departmentId` is required for Department scope and forbidden for Organization scope (400 otherwise).
   - Optional team/project tags and `validUntil`.
   - `classifications` and `level` are optional legacy fields: new grants store all classifications and `STANDARD`, and the product no longer shows levels.
+  - A second effective grant with the same reviewer, scope, department, team/project tags and legacy classification/level coverage returns 409 `REVIEWER_GRANT_EXISTS`. Different tags are allowed. Migration `0027` deactivates earlier exact duplicates, keeps the oldest grant, and records an audit event; distinct legacy classification/level coverage remains available for frozen pending submissions. Apply it only through the reviewed migration path after a disposable database rehearsal.
 - `POST /reviewer-grants/:grantId/deactivate` deactivates a grant (204).
 - Every queue, detail and decision request rechecks the reviewer's current membership and grant.
 

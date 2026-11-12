@@ -156,6 +156,12 @@
       "filename": "0026_review_list_authors.sql",
       "sha256": "df980a256ae59eb603bb2cbf90493f4ca3441f9062b8e6e8d6f136cee3568715",
       "rollout": "operator"
+    },
+    {
+      "id": "0027",
+      "filename": "0027_deduplicate_reviewer_grants.sql",
+      "sha256": "e146840869449c9d0a120eda2ee3522440ec454700e6d9d89e948bf876b54275",
+      "rollout": "operator"
     }
   ]
 }

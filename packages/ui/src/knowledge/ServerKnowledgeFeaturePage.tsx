@@ -8,10 +8,12 @@ import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { validAudienceSelection } from "./audience-options";
 import {
   ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listKnowledgeReviewBoard,
-  listKnowledgeDrafts, listKnowledgeSubmissions, listPublishedKnowledge, loadKnowledgeDraft,
+  listKnowledgeDrafts, listKnowledgeDraftVersions, listKnowledgeSubmissions, listPublishedKnowledge,
+  loadKnowledgeDraft, loadKnowledgeDraftVersion,
   loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, saveKnowledgeDraft,
   submitKnowledgeDraft, type AssignedKnowledgeReview, type DecidedKnowledgeReview, type KnowledgeDraftRecord,
-  type KnowledgeDraftSummary, type KnowledgeOptions, type KnowledgeReviewDetail,
+  type KnowledgeDraftSummary, type KnowledgeDraftVersionRecord, type KnowledgeDraftVersionSummary,
+  type KnowledgeOptions, type KnowledgeReviewDetail,
   type KnowledgeSubmission, type PublishedKnowledge,
 } from "../shared/api-client";
 import type { KnowledgeClassification } from "../shared/knowledge-classification";
@@ -25,6 +27,7 @@ import { ActionToast } from "../shared/ActionToast";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
 import { KnowledgeDocumentDetail, readerDocumentStatusAt } from "./KnowledgeDocumentDetail";
+import { KnowledgeDialog } from "./KnowledgeDialog";
 import type { KnowledgeNavigationTarget } from "./knowledgeCitation";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
@@ -112,6 +115,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [screen, setScreen] = useState<"library" | "create" | "editor" | "document">("library");
   const [libraryTab, setLibraryTab] = useState<"drafts" | "published">("published");
   const [selectedContributionId, setSelectedContributionId] = useState<string | null>(null);
+  const [historyVersions, setHistoryVersions] = useState<{ draftId: string; items: KnowledgeDraftVersionSummary[] } | null>(null);
+  const [historyError, setHistoryError] = useState("");
+  const [historyRetry, setHistoryRetry] = useState(0);
+  const [viewedVersion, setViewedVersion] = useState<KnowledgeDraftVersionRecord | null>(null);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -160,6 +167,22 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     return () => window.removeEventListener("focus", onFocus);
   }, [active, reload]);
 
+  useEffect(() => { setViewedVersion(null); }, [active, organizationId]);
+
+  const historyDraftId = screen === "editor" ? draft?.id ?? null
+    : screen === "library" && libraryTab === "drafts" ? selectedContributionId : null;
+  const historyRevision = screen === "editor" ? draft?.currentVersion.version
+    : drafts.find((item) => item.id === selectedContributionId)?.currentVersion;
+  useEffect(() => {
+    if (!active || !historyDraftId) { setHistoryVersions(null); return; }
+    let present = true;
+    setHistoryVersions(null); setHistoryError("");
+    void listKnowledgeDraftVersions(platform, organizationId, historyDraftId)
+      .then((items) => { if (present) setHistoryVersions({ draftId: historyDraftId, items }); })
+      .catch((cause) => { if (present) setHistoryError(errorMessage(cause)); });
+    return () => { present = false; };
+  }, [active, historyDraftId, historyRevision, historyRetry, organizationId, platform]);
+
   useEffect(() => {
     if (!active || !createdDraftId || openedCreatedDraftId.current === createdDraftId) return;
     openedCreatedDraftId.current = createdDraftId;
@@ -191,6 +214,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     const loaded = await loadKnowledgeDraft(platform, organizationId, id);
     submitRequestKey.current = null;
     setDraft(loaded); setEditor(valuesFromDraft(loaded)); setScreen("editor");
+  });
+  const openHistoryVersion = (draftId: string, versionId: string) => void run(async () => {
+    const loaded = await loadKnowledgeDraftVersion(platform, organizationId, draftId, versionId);
+    setViewedVersion(loaded);
   });
 
   const createDraft = () => void run(async () => {
@@ -593,8 +620,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <span className="island-meta" aria-live="polite">{dirty ? "Unsaved changes · " : ""}{ownerOutOfSync && !dirty ? "Save changes before submitting." : submitHint}</span>
             </div>
             <section className="island-detail-section" aria-label="Review history"><h3>History</h3>
-              <ol className="island-timeline"><li><strong>v{draft.currentVersion.version} · {draft.hasPendingSubmission ? "awaiting review" : "working draft"}</strong><small>Updated {new Date(draft.updatedAt).toLocaleDateString()}</small></li>
-                {submissions.filter((item) => item.draftId === draft.id).map((item) => <li key={item.id}><strong>{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
+              <DraftVersionHistory draftId={draft.id} versions={historyVersions?.draftId === draft.id ? historyVersions.items : null}
+                error={historyError} currentVersion={draft.currentVersion.version} submissions={submissions}
+                busy={busy} onOpen={openHistoryVersion} onRetry={() => setHistoryRetry((value) => value + 1)} />
             </section>
           </aside>
         </div>
@@ -690,8 +718,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <dt>Readers</dt><dd>{audienceNames(selectedContribution.audienceIds)}</dd>
             </dl>
             <section className="island-detail-section" aria-label="History"><h3>History</h3>
-              <ol className="island-timeline"><li><strong>v{selectedContribution.currentVersion} · working version</strong><small>Updated {new Date(selectedContribution.updatedAt).toLocaleDateString()}</small></li>
-                {submissions.filter((item) => item.draftId === selectedContribution.id).map((item) => <li key={item.id}><strong>{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
+              <DraftVersionHistory draftId={selectedContribution.id}
+                versions={historyVersions?.draftId === selectedContribution.id ? historyVersions.items : null}
+                error={historyError} currentVersion={selectedContribution.currentVersion} submissions={submissions}
+                busy={busy} onOpen={openHistoryVersion} onRetry={() => setHistoryRetry((value) => value + 1)} />
             </section>
             <div className="island-side-footer contribution-actions"><button type="button" className="primary-button" disabled={busy} onClick={() => openDraft(selectedContribution.id)}>Open draft</button>
               </div>
@@ -700,10 +730,42 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
       </>}
     </div>
     <ActionToast message={message} onDismiss={() => setMessage("")} />
+    {viewedVersion && <KnowledgeDialog title={`Version v${viewedVersion.version}`} onClose={() => setViewedVersion(null)}>
+      <p className="island-meta">Saved {new Date(viewedVersion.createdAt).toLocaleString()} · Read only</p>
+      <div className="knowledge-version-preview">
+        {viewedVersion.mimeType === "application/pdf" && viewedVersion.pdfBase64
+          ? <PdfDocument base64={viewedVersion.pdfBase64} title={`Version v${viewedVersion.version}`} showToolbar={false} />
+          : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+            key={viewedVersion.id} body={viewedVersion.body} instanceKey={viewedVersion.id} /></Suspense>}
+      </div>
+    </KnowledgeDialog>}
     {discardAction && <DiscardChangesDialog exiting={false} onCancel={() => setDiscardAction(null)} onDiscard={() => {
       discardAction(); setDiscardAction(null);
     }} />}
   </main>;
+}
+
+function DraftVersionHistory({ draftId, versions, error, currentVersion, submissions, busy, onOpen, onRetry }: {
+  draftId: string; versions: KnowledgeDraftVersionSummary[] | null; error: string;
+  currentVersion: number; submissions: KnowledgeSubmission[]; busy: boolean;
+  onOpen: (draftId: string, versionId: string) => void;
+  onRetry: () => void;
+}) {
+  if (error) return <div className="knowledge-version-error" role="alert"><p className="field-error">{error}</p>
+    <button type="button" className="secondary-button" onClick={onRetry}>Retry history</button></div>;
+  if (!versions) return <p role="status" className="island-meta">Loading versions…</p>;
+  if (!versions.length) return <p className="island-meta">No saved versions yet.</p>;
+  return <ol className="island-timeline">
+    {versions.map((version) => {
+      const submission = submissions.find((item) => item.snapshotVersionId === version.id);
+      return <li key={version.id}><button type="button" className="knowledge-version-link" disabled={busy}
+        onClick={() => onOpen(draftId, version.id)} aria-label={`View version ${version.version}`}>
+        <strong>v{version.version}{version.version === currentVersion ? " · current version" : ""}</strong>
+        <small>Saved {new Date(version.createdAt).toLocaleDateString()}
+          {submission ? ` · ${statusLabel(submission.status)}` : ""}</small>
+      </button></li>;
+    })}
+  </ol>;
 }
 
 const statusChipTone: Record<string, string> = { "is-info": "tone-info", "is-success": "tone-success", "is-danger": "tone-danger", "is-attention": "tone-warning" };

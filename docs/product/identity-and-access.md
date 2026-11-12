@@ -23,6 +23,7 @@ Scope: verified-account bootstrap, departments, invitations, membership and auth
 | F02-AC1 | Bootstrap creates the correct initial authority exactly once; ordinary members cannot administer organizations, departments or other memberships. | API slices exist; real database/RLS and full UI acceptance remain distinct. |
 | F02-AC2 | Invitation issue/resend/revoke/accept handles wrong account, expired/revoked/used token, duplicate request and email failure without duplicate membership or token disclosure. | Follow current server policy, not historical preview expiry values. |
 | F02-AC3 | Pending/suspended/removed members lose relevant access; assignment/restoration and last-administrator safeguards follow an accepted lifecycle contract. | Remaining lifecycle/recovery choices must be decided, not guessed. |
+| F02-AC4 | Invitation rows show the recipient email clearly without attaching the Member role label to it. | Requested by the maintainer on 12 November 2026; verify the web administration list. |
 
 ## F03 Private notes
 
@@ -43,6 +44,7 @@ Scope: organization/department managed audiences and Org Admin-managed groups; r
 | F04-AC1 | Authorized group management and membership updates result in correct effective published readers, scoped to the organization/department. | Canonical API/migration foundation exists; migration 0017 rehearsal remains a recorded gate. |
 | F04-AC2 | Authors select only permitted target audiences; invalid/removed audiences fail safely at submission and approval. | Cover actual server/RLS checks, not UI filtering alone. |
 | F04-AC3 | Removal/revocation immediately affects read, search, graph, agent context and citations wherever implemented; audience membership never grants review/admin/private-original access. | Future consumers inherit this invariant; do not claim they already exist. |
+| F04-AC4 | Deactivated reader groups appear under Inactive, outside the active Groups section, while retaining their read-only details. | Requested by the maintainer on 12 November 2026; group state remains server-owned. |
 
 ## F05 Reviewer and organization authority
 
@@ -53,6 +55,7 @@ Scope: administration and explicit Reviewer Grants. Flow: authorized grant creat
 | F05-AC1 | Membership, frozen readers, disjoint grant scope, validity and tags determine queue/detail/decision access, with rechecks after protected-content reads; legacy pending snapshots retain their original rule. | ADR 0013–0015 explicitly confirmed on 29 October 2026; real migration/runtime-role tests remain required. |
 | F05-AC2 | Ordinary reviewers cannot self-review; Organization Admin retains final decision authority and audited self-approval under ADR 0011. | Preserve private-original isolation and source access independently of review authority. |
 | F05-AC3 | Grant/member removal and audience changes block unauthorized pending decisions; denial does not expose hidden content or alter another author's draft. | Actual-role and concurrency evidence required where affected. |
+| F05-AC4 | A reviewer cannot receive a second effective grant for the same scope, department and team/project tags through the UI or API; different tags remain assignable. Existing exact duplicate grants are deactivated with audit while one remains active. | Maintainer confirmed same-scope/tag deduplication on 12 November 2026. Legacy classification and level distinctions remain for frozen pending reviews; migration `0027` only cleans exact matches. Verify concurrent API writes and migration against disposable PostgreSQL. |
 
 ## F06 Installation administration
 

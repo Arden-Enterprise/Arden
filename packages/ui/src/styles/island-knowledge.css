@@ -29,6 +29,12 @@
 .island-timeline li::before { content: ""; position: absolute; left: 0; top: 6px; width: 8px; height: 8px; border-radius: 2px; background: var(--arden-border-strong); }
 .island-timeline li:first-child::before { background: var(--arden-violet-hover); }
 .island-timeline small { color: var(--arden-text-secondary); font-size: 12px; }
+.knowledge-version-link { display: grid; gap: 1px; width: 100%; padding: 2px 0; border: 0; background: transparent; color: var(--arden-text-primary); text-align: left; cursor: pointer; }
+.knowledge-version-link:hover strong, .knowledge-version-link:focus-visible strong { color: var(--arden-violet-hover); text-decoration: underline; }
+.knowledge-version-link:disabled { cursor: wait; opacity: .6; }
+.knowledge-version-error { display: grid; justify-items: start; gap: 8px; }
+.knowledge-version-preview { max-height: min(68vh, 760px); overflow: auto; }
+.knowledge-version-preview .knowledge-pdf-document { min-height: 460px; }
 
 /* Library */
 .knowledge-library-tabs { margin-top: -4px; }
