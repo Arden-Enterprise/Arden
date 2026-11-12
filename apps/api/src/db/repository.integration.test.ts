@@ -541,16 +541,23 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(submitted.kind).toBe("submitted");
     if (submitted.kind !== "submitted") return;
 
-    const grant = await repository.createReviewerGrant(ids.owner, ids.organization, {
+    const grantInput = {
       reviewerMembershipId: ids.managerMembership,
-      scope: "DEPARTMENT",
+      scope: "DEPARTMENT" as const,
       departmentId: ids.department,
-      classifications: ["INTERNAL"],
-      level: "STANDARD",
+      classifications: ["INTERNAL" as const],
+      level: "STANDARD" as const,
       teamTag: null,
       projectTag: null,
       validUntil: null,
-    }, "integration-flow2-reviewer-grant");
+    };
+    const existingGrant = (await repository.listReviewerGrants(ids.owner, ids.organization))?.find((item) =>
+      item.reviewerMembershipId === ids.managerMembership && item.scope === "DEPARTMENT"
+      && item.departmentId === ids.department && item.level === "STANDARD" && item.status === "ACTIVE"
+      && item.teamTag === null && item.projectTag === null && item.validUntil === null
+      && item.classifications.length === 1 && item.classifications[0] === "INTERNAL");
+    const grant = existingGrant ?? await repository.createReviewerGrant(ids.owner, ids.organization,
+      grantInput, "integration-flow2-reviewer-grant");
     expect(grant).not.toBeNull();
 
     const assigned = await repository.listAssignedReviews(ids.manager, ids.organization);
