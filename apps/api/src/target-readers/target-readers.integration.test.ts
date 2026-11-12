@@ -341,7 +341,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     return created.draft.id;
   };
 
-  /** A pending legacy-audience submission of a new draft by the author (no Target Readers). */
+  /** A pending submission with canonical intake fields and the fixture's legacy review projection. */
   const submitLegacyDraft = async (title: string) => {
     if (!repository) throw new Error("Test database is unavailable");
     const draftId = await createDraft(ids.author, ids.orgA, ids.authorM, title);
@@ -349,6 +349,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       responsibleDepartmentId: ids.sales, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.allMembersA],
     }, null, "flow2-configure");
     if (configured.kind !== "updated") throw new Error(`Configure fixture failed: ${configured.kind}`);
+    await prepareKnowledgeFixture(pool!, ids.orgA, draftId, [ids.authorM, ids.engineerM]);
     const submitted = await repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 2, randomUUID(), "flow2-submit");
     if (submitted.kind !== "submitted") throw new Error(`Submit fixture failed: ${submitted.kind}`);
     return { draftId, submissionId: submitted.submission.id };
