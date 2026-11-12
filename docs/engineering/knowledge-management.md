@@ -59,6 +59,12 @@ are compatibility storage, not a replacement for KM-v1 Type/Topic or an instruct
 to restore removed fields in the standardized form. Withdrawal retains the draft
 and immutable snapshot; its POST is explicitly allowed in Windows IPC.
 
+For mapped publications, Target Readers is authoritative, as explicitly confirmed
+in ADR 0020. Old Audience removal is not revocation of a selected reader. Use a
+governed reader change or membership suspension; unmapped rows keep legacy checks.
+Do not treat differences in the legacy mapping report after cutover as proof of a
+permission regression. Verify current runtime-authorized reader sets instead.
+
 1. Review the new SQL and API/client compatibility together. Do not edit 0001–0026.
 2. Back up the selected environment's DB/files/config and rehearse 0027–0030 on a
    restored disposable target. No full-chain replay or content reset on staging.

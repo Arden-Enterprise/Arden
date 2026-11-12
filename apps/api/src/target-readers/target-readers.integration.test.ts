@@ -535,6 +535,29 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = ANY($1::uuid[])",
         [[organizationWide, partialSales]]));
       expect(outsiderView.rows).toEqual([{ shared_draft_id: organizationWide }]);
+
+      // After cutover the frozen selection, not a legacy role assignment, is authoritative.
+      const selectedView = () => asRuntime(ids.author, ids.orgA, (client) => client.query(
+        "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = $1", [partialSales]));
+      expect((await selectedView()).rows).toEqual([{ shared_draft_id: partialSales }]);
+      try {
+        const revoked = await asSuperuser((client) => client.query(`UPDATE role_assignment SET status = 'REVOKED'
+          WHERE membership_id = $1 AND role_id = $2 AND access_scope_id = $3`,
+        [ids.authorM, ids.salesRole, scopes.sales]));
+        expect(revoked.rowCount).toBe(1);
+        const legacyReaders = await asSuperuser((client) => client.query<{ membership_id: string }>(`
+          SELECT audience_reader_memberships($1, $2::uuid[], 'DEPARTMENT', $3) AS membership_id`,
+        [ids.orgA, [ids.salesRole], ids.sales]));
+        expect(legacyReaders.rows.map((row) => row.membership_id)).not.toContain(ids.authorM);
+        expect((await selectedView()).rows).toEqual([{ shared_draft_id: partialSales }]);
+        const denied = await asRuntime(ids.outsider, ids.orgA, (client) => client.query(
+          "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = $1", [partialSales]));
+        expect(denied.rows).toEqual([]);
+      } finally {
+        await asSuperuser((client) => client.query(`UPDATE role_assignment SET status = 'ACTIVE'
+          WHERE membership_id = $1 AND role_id = $2 AND access_scope_id = $3`,
+        [ids.authorM, ids.salesRole, scopes.sales]));
+      }
     });
 
     it("runs only for the trusted operator role", async () => {

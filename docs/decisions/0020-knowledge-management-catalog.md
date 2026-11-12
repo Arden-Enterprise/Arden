@@ -43,9 +43,31 @@ It adds a bounded active-member
 display-name lookup for Target Readers. It exposes no email or private content.
 The combined reviewed trusted-function inventory becomes 21; preserve the existing
 postgres execution identities and rerun workflows after the ownership handoff.
-No applied migration or existing trusted routine body is rewritten. Approved
-Target Readers remain authoritative even across department boundaries; legacy
-audience policies and 0025's restrictive reader check remain in place.
+No applied migration or existing trusted routine body is rewritten.
+
+### Target Readers authority after legacy backfill
+
+On 12 November 2026 the requesting project maintainer explicitly confirmed Target
+Readers as the authoritative readership source after being shown the alternative
+dual-check contract and its revocation consequences. This supersedes PR #37's
+earlier T1.2 promise that removing a legacy Audience assignment still revokes a
+mapped reader. The earlier author's separate consultation is not established;
+the maintainer resolved the integration conflict explicitly. This record refines
+decision 0010 for publications with a non-null reader selection, not for unmapped
+legacy publications or reviewer authority.
+
+Removing a legacy Audience assignment does not revoke a mapped selected reader;
+adding one does not enlarge the frozen selection. Governed Target Readers changes
+or organization-membership suspension revoke access. Current account, organization,
+membership and applicable department eligibility remain enforced. Approved selected
+readers may be across departments. Unmapped publications retain legacy checks.
+
+Legacy policies remain for compatibility, alongside 0025's restrictive reader
+check and 0030's selection-authorized pointer policy. Initial backfill must preserve
+the exact current reader sets without widening; subsequent legacy-report differences
+are not the source of current entitlement. Physical legacy-schema removal remains
+a separately reviewed migration. Regression coverage must exercise actual runtime
+RLS after legacy-role removal, including an unselected reader's denial.
 
 Legacy publications/pending snapshots are not relabelled from filenames. Metadata
 backfill for an existing corpus requires an exact mapping and separate authorized
