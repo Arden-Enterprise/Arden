@@ -50,11 +50,20 @@ honestly, not inferred categories, dates or version labels.
 
 ## Safe rollout, separately authorized
 
+Integration allocation: PR #37 already reserves 0027–0029 for legacy category/
+relationship storage, conservative reader backfill and author withdrawal. The
+unapplied catalog migration is allocated to **0030** before staging integration;
+0001–0026 and PR #37's SQL bytes stay unchanged. The combined inventory has 30
+entries and 21 trusted SECURITY DEFINER routines. Legacy category/keywords columns
+are compatibility storage, not a replacement for KM-v1 Type/Topic or an instruction
+to restore removed fields in the standardized form. Withdrawal retains the draft
+and immutable snapshot; its POST is explicitly allowed in Windows IPC.
+
 1. Review the new SQL and API/client compatibility together. Do not edit 0001–0026.
-2. Back up the selected environment's DB/files/config and rehearse 0027 on a
+2. Back up the selected environment's DB/files/config and rehearse 0027–0030 on a
    restored disposable target. No full-chain replay or content reset on staging.
-3. Apply operator migration 0027 with the reviewed trusted-executor identity.
-   Confirm all 27 ledger checksums, forced RLS and the 20 reviewed SECURITY DEFINER
+3. Apply operator migrations 0027–0030 with the reviewed trusted-executor identity.
+   Confirm all 30 ledger checksums, forced RLS and the 21 reviewed SECURITY DEFINER
    routines. Use the normal ownership template; do not transfer trusted routines
    to the restricted migration owner or add BYPASSRLS to API/admin.
 4. Verify bootstrap, catalog/member denial, save/submit, immutable review,

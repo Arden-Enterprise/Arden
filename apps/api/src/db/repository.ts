@@ -126,6 +126,11 @@ export type SubmitKnowledgeDraftResult =
   | { kind: "not-found" }
   | { kind: "conflict" }
   | { kind: "not-ready" };
+export type WithdrawKnowledgeSubmissionResult =
+  | { kind: "withdrawn"; submission: SharedKnowledgeSubmission }
+  | { kind: "replayed"; submission: SharedKnowledgeSubmission }
+  | { kind: "not-found" }
+  | { kind: "conflict" };
 export type ReviewerGrantInput = {
   reviewerMembershipId: string;
   scope: "DEPARTMENT" | "ORGANIZATION";
@@ -561,6 +566,8 @@ export interface ArdenDataRepository {
   submitKnowledgeDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number,
     idempotencyKey: string, requestId: string): Promise<SubmitKnowledgeDraftResult>;
   listKnowledgeSubmissions(userId: string, organizationId: string): Promise<SharedKnowledgeSubmission[] | null>;
+  withdrawKnowledgeSubmission(userId: string, organizationId: string, submissionId: string,
+    requestId: string): Promise<WithdrawKnowledgeSubmissionResult>;
   listReviewerGrants(userId: string, organizationId: string): Promise<ReviewerGrantRecord[] | null>;
   createReviewerGrant(userId: string, organizationId: string, input: ReviewerGrantInput, requestId: string): Promise<ReviewerGrantRecord | null>;
   deactivateReviewerGrant(userId: string, organizationId: string, grantId: string, requestId: string): Promise<boolean>;
@@ -1703,6 +1710,36 @@ export class ArdenRepository implements ArdenDataRepository {
         WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2
         ORDER BY s.submitted_at DESC, s.submission_id DESC LIMIT 100`, [organizationId, membership]);
       return result.rows.map(mapSharedSubmission);
+    });
+  }
+
+  /**
+   * T5.1 (FR-DOC-06): the author withdraws their own pending submission. Another member's or an unknown
+   * submission is not-found; a decided one is a conflict. Repeating a completed withdrawal replays it.
+   */
+  async withdrawKnowledgeSubmission(userId: string, organizationId: string, submissionId: string,
+    requestId: string): Promise<WithdrawKnowledgeSubmissionResult> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const membership = await this.activeActorMembership(client, userId, organizationId);
+      if (!membership) return { kind: "not-found" };
+      const selected = await client.query<SharedSubmissionRow>(`${submissionSelect}
+        WHERE s.organization_id = $1 AND s.submission_id = $2 AND s.submitted_by_membership_id = $3`, [organizationId, submissionId, membership]);
+      const row = selected.rows[0];
+      if (!row) return { kind: "not-found" };
+      if (row.status === "WITHDRAWN") return { kind: "replayed", submission: mapSharedSubmission(row) };
+      if (row.status !== "PENDING_REVIEW") return { kind: "conflict" };
+      // No FOR UPDATE: RLS would hide a decided row from it. The guarded UPDATE is the atomic step.
+      const changed = await client.query(`UPDATE shared_submission SET status = 'WITHDRAWN'
+        WHERE submission_id = $1 AND status = 'PENDING_REVIEW'`, [submissionId]);
+      if (changed.rowCount !== 1) return { kind: "conflict" };
+      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type,
+        outcome, details_json) VALUES ($1, $2, 'KNOWLEDGE_SUBMISSION_WITHDRAWN', 'SUCCESS', $3::jsonb)`,
+      [organizationId, membership, JSON.stringify({ submissionId, draftId: row.shared_draft_id,
+        snapshotVersionId: row.shared_draft_version_id, requestId })]);
+      const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
+        WHERE s.submission_id = $1`, [submissionId]);
+      if (!result.rows[0]) throw new Error("Withdrawn submission is not readable");
+      return { kind: "withdrawn", submission: mapSharedSubmission(result.rows[0]) };
     });
   }
 

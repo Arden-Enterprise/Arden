@@ -9,6 +9,7 @@ import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import {
   ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listKnowledgeReviewBoard,
   listKnowledgeDrafts, listKnowledgeSubmissions, listPublishedKnowledge, loadKnowledgeDraft,
+  withdrawKnowledgeSubmission,
   loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, saveKnowledgeDraft, loadKnowledgeCatalog, replaceKnowledgePdf,
   submitKnowledgeDraft, type AssignedKnowledgeReview, type DecidedKnowledgeReview, type KnowledgeDraftRecord,
   type KnowledgeDraftSummary, type KnowledgeOptions, type KnowledgeReviewDetail,
@@ -106,6 +107,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const createRequestKey = useRef<string | null>(null);
   const newBodyBaseline = useRef(newBody);
   const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
+  const [withdrawConfirmId, setWithdrawConfirmId] = useState<string | null>(null);
   const submitRequestKey = useRef<string | null>(null);
   const decisionRequest = useRef<{ action: "APPROVE" | "REJECT"; key: string } | null>(null);
   const openedCreatedDraftId = useRef<string | null>(null);
@@ -223,6 +225,13 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     submitRequestKey.current = null;
     setDraft({ ...draft, hasPendingSubmission: true });
     setMessage(statusLabel(submission.status));
+    await refresh();
+  });
+
+  const withdrawSubmission = (submissionId: string) => void run(async () => {
+    const withdrawn = await withdrawKnowledgeSubmission(platform, organizationId, submissionId);
+    setWithdrawConfirmId(null);
+    setMessage(`Request ${statusLabel(withdrawn.status).toLowerCase()}`);
     await refresh();
   });
 
@@ -661,7 +670,18 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <ol className="island-timeline"><li><strong>Working draft</strong><small>Updated {new Date(selectedContribution.updatedAt).toLocaleDateString()}</small></li>
                 {submissions.filter((item) => item.draftId === selectedContribution.id).map((item) => <li key={item.id}><strong>{item.management?.version ? `Version ${item.management.version} · ` : ""}{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
             </section>
+            {selectedContributionLatest?.status === "PENDING_REVIEW" && withdrawConfirmId === selectedContributionLatest.id
+              && <div className="island-box contribution-withdraw" role="alertdialog" aria-labelledby="withdraw-title" aria-describedby="withdraw-body">
+                <strong id="withdraw-title">Withdraw this review request?</strong>
+                <p id="withdraw-body">Reviewers will no longer see this version. Your draft stays, and you can submit it again.</p>
+                <div className="contribution-withdraw-actions">
+                  <button type="button" className="secondary-button" disabled={busy} onClick={() => setWithdrawConfirmId(null)}>Keep request</button>
+                  <button type="button" className="secondary-button contribution-withdraw-confirm" disabled={busy} onClick={() => withdrawSubmission(selectedContributionLatest.id)}>{busy ? "Withdrawing…" : "Withdraw request"}</button>
+                </div>
+              </div>}
             <div className="island-side-footer contribution-actions"><button type="button" className="primary-button" disabled={busy} onClick={() => openDraft(selectedContribution.id)}>Open draft</button>
+              {selectedContributionLatest?.status === "PENDING_REVIEW" && withdrawConfirmId !== selectedContributionLatest.id
+                && <button type="button" className="secondary-button" disabled={busy} onClick={() => setWithdrawConfirmId(selectedContributionLatest.id)}>Withdraw request</button>}
               </div>
           </aside>}
         </div> : <div className="island island-empty"><h3>{drafts.length ? "No matching drafts" : "No contributions yet"}</h3>{drafts.length > 0 && <p>Try another title.</p>}<button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button></div>)}

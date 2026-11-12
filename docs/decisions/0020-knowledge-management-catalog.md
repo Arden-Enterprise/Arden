@@ -37,9 +37,11 @@ three lifecycle tables. API/domain validation owns its input shape; immutable SQ
 triggers protect snapshot identity and copying. The draft Topic foreign key is
 relational. This is not a general schema-less tag or custom-field system.
 
-Migration 0027 is additive and operator-class: it adds a bounded active-member
+Catalog migration 0030 is additive and operator-class (reallocated from the
+unapplied branch-only 0027 to preserve PR #37's 0027–0029 before integration).
+It adds a bounded active-member
 display-name lookup for Target Readers. It exposes no email or private content.
-The reviewed trusted-function inventory becomes 20; preserve the existing
+The combined reviewed trusted-function inventory becomes 21; preserve the existing
 postgres execution identities and rerun workflows after the ownership handoff.
 No applied migration or existing trusted routine body is rewritten. Approved
 Target Readers remain authoritative even across department boundaries; legacy

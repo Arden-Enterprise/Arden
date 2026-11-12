@@ -16,7 +16,7 @@ class SchemaRecoveryInventoryTests(unittest.TestCase):
             "[0-9][0-9][0-9][0-9]_*.sql"))
 
     def test_reviewed_catalog_migration_is_included(self):
-        self.assertEqual(self.paths[-1].name, "0027_knowledge_management_catalog.sql")
+        self.assertEqual(self.paths[-1].name, "0030_knowledge_management_catalog.sql")
         module.validate_migration_inventory(self.paths)
 
     def test_previous_inventory_missing_catalog_is_rejected(self):
@@ -25,7 +25,7 @@ class SchemaRecoveryInventoryTests(unittest.TestCase):
 
     def test_unreviewed_future_migration_is_rejected(self):
         with self.assertRaises(ValueError):
-            module.validate_migration_inventory(self.paths + [Path("0028_unreviewed.sql")])
+            module.validate_migration_inventory(self.paths + [Path("0031_unreviewed.sql")])
 
     def test_missing_or_duplicate_history_is_rejected(self):
         for paths in (self.paths[:10] + self.paths[11:],

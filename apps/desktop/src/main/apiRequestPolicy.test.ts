@@ -8,6 +8,17 @@ const idempotencyKey = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const sharedDraftPath = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
 
 describe("desktop API request allowlist", () => {
+  it("permits only the scoped bodyless submission withdrawal action", () => {
+    const path = `/api/v1/organizations/${organizationId}/knowledge/submissions/${sourcePrivateVersionId}/withdraw`;
+    assert.equal(validateDesktopApiRequest({ path, method: "POST" }), true);
+    assert.equal(validateDesktopApiRequest({ path, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path, method: "PATCH" }), false);
+    assert.equal(validateDesktopApiRequest({ path, method: "POST", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path, method: "POST", ifMatch: '"2"' }), false);
+    assert.equal(validateDesktopApiRequest({ path, method: "POST", idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${path}?scope=all`, method: "POST" }), false);
+    assert.equal(validateDesktopApiRequest({ path: path.replace("/submissions/", "/reviews/"), method: "POST" }), false);
+  });
   it("bounds audience-group routes and requires group-specific update preconditions", () => {
     const group = `/api/v1/organizations/${organizationId}/audience-groups/${sourcePrivateVersionId}`;
     assert.equal(validateDesktopApiRequest({ path: group, method: "GET" }), true);

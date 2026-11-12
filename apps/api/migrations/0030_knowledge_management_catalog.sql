@@ -1,4 +1,5 @@
 SET search_path TO arden, public;
+-- Catalog follows the separately reviewed category, reader backfill and withdrawal migrations.
 
 -- Additive KM-v1 catalog. Catalogs describe navigation, never reader entitlement.
 -- No existing snapshot is rewritten and no trusted function owner is changed.

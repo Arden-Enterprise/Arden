@@ -16,6 +16,7 @@ const newKnowledgeDraft = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/d
 const pdfKnowledgeDraft = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/pdf$`);
 const knowledgeDraftItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}$`);
 const knowledgeDraftSubmit = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/submit$`);
+const knowledgeSubmissionWithdraw = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/submissions/${uuid}/withdraw$`);
 const knowledgeReviewItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}$`);
 const knowledgeReviewDecision = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}/decisions$`);
 const publishedKnowledgeItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}$`);
@@ -90,6 +91,8 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && !request.body && Boolean(request.ifMatch) && Boolean(request.idempotencyKey);
   const knowledgeDecision = knowledgeReviewDecision.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
+  const knowledgeWithdraw = knowledgeSubmissionWithdraw.test(url.pathname) && request.method === "POST"
+    && !request.body && !request.ifMatch && !request.idempotencyKey;
   const grantCreate = reviewerGrantCollection.test(url.pathname)
     && request.method === "POST" && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const grantDeactivate = reviewerGrantDeactivate.test(url.pathname) && request.method === "POST"
@@ -141,7 +144,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const catalogQuery = catalogGet && url.pathname.endsWith("/readers")
     && [...url.searchParams.keys()].every(key => key === "q" || key === "ids");
   return (catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
-    || knowledgeSubmit || knowledgeDecision || grantCreate || grantDeactivate || aiAnswer || adminGet
+    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || grantCreate || grantDeactivate || aiAnswer || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke) && (!url.search || queryAllowed || catalogQuery);

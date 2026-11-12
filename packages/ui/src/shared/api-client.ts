@@ -292,6 +292,12 @@ export function submitKnowledgeDraft(platform: Platform, organizationId: string,
   });
 }
 
+/** T5.1: the author withdraws their own pending submission; it leaves the review queue. */
+export function withdrawKnowledgeSubmission(platform: Platform, organizationId: string,
+  submissionId: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/submissions/${submissionId}/withdraw`, { method: "POST" });
+}
+
 export async function listKnowledgeSubmissions(platform: Platform, organizationId: string): Promise<KnowledgeSubmission[]> {
   const result = await request<{ items: KnowledgeSubmission[] }>(platform, `${knowledgePath(organizationId)}/submissions`);
   return result.items;
