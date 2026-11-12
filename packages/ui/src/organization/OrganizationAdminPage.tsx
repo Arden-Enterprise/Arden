@@ -17,7 +17,10 @@ import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { Icon } from "../shared/Icon";
 import { IslandFilterMenu } from "../shared/IslandFilterMenu";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
-import { countInvitations, invitationFilters, invitationState, visibleInvitations, type InvitationFilter, type InvitationState } from "./invitationStatus";
+import {
+  countInvitations, invitationFilters, invitationSortOptions, invitationState, isInvitationSortOrder,
+  visibleInvitations, type InvitationFilter, type InvitationSortOrder, type InvitationState,
+} from "./invitationStatus";
 import { DepartmentDetailIsland, grantCoverageLabel, grantValidity, MemberDetailIsland, memberInitials, memberStatus as describeMemberStatus } from "./AdminDetailIslands";
 import { departmentDeletionSummary, filterOrganizationMembers, isOrganizationAdminMember, membersInDepartment } from "./memberAdministration";
 
@@ -38,6 +41,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null);
   const [invitationFilter, setInvitationFilter] = useState<InvitationFilter>("ALL");
+  const [invitationQuery, setInvitationQuery] = useState("");
+  const [invitationSortOrder, setInvitationSortOrder] = useState<InvitationSortOrder>("PENDING_FIRST");
   const [memberAudienceGroups, setMemberAudienceGroups] = useState<AudienceGroupRecord[]>([]);
   const [memberGroupsLoading, setMemberGroupsLoading] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
@@ -207,7 +212,9 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
 
   const now = Date.now();
   const invitationCounts = countInvitations(data?.invitations ?? [], now);
-  const shownInvitations = visibleInvitations(data?.invitations ?? [], invitationFilter, now);
+  const shownInvitations = visibleInvitations(data?.invitations ?? [], invitationFilter, now, {
+    query: invitationQuery, sortOrder: invitationSortOrder,
+  });
   const selectedDepartment = data?.departments.find((item) => item.id === selectedDepartmentId);
   const headerAction = tab === "members" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => focusTabForm("invitations", "#admin-invite-email")}><Icon name="plus" size={14} />Invite member</button>
     : tab === "departments" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => focusTabForm("departments", "#admin-department-name")}><Icon name="plus" size={14} />New department</button>
@@ -314,12 +321,19 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           members={data.members} departments={data.departments}
           onDirtyChange={reportAudienceDirty} onGroupsChanged={() => void reload().catch(() => setError("Audiences changed, but organization data could not refresh."))} createSignal={audienceCreateSignal} /></div>}
         {tab === "invitations" && <div role="tabpanel" aria-label="Invitations" className="admin-tabpanel">
+          <div className="admin-filters">
+            <label className="workspace-search admin-search"><Icon name="search" size={15} /><span className="sr-only">Search invitations</span>
+              <input type="search" placeholder="Search by email" value={invitationQuery} onChange={(event) => setInvitationQuery(event.target.value)} /></label>
+            <IslandFilterMenu label="Sort by status" value={invitationSortOrder}
+              onChange={(value) => { if (isInvitationSortOrder(value)) setInvitationSortOrder(value); }} options={invitationSortOptions} />
+          </div>
           <div className="island-seg is-filter" role="group" aria-label="Filter by status">{invitationFilters.map((filter) => <button key={filter} type="button"
             aria-pressed={invitationFilter === filter} onClick={() => setInvitationFilter(filter)}>{filter === "ALL" ? "All" : titleCase(filter)}<span className="island-badge">{invitationCounts[filter]}</span></button>)}</div>
           <div className="island-split">
           <div className="island-main">
             {shownInvitations.length ? <IslandTable label="Invitations" minWidth={680} columns="minmax(200px, 1.7fr) minmax(96px, .8fr) 108px 128px 104px"
-              headers={["EMAIL", "DEPARTMENT", "EXPIRES", "STATUS", <span className="sr-only">Actions</span>]}>
+              headers={["EMAIL", "DEPARTMENT", "EXPIRES", "STATUS", <span className="sr-only">Actions</span>]}
+              footer={<span aria-live="polite">Showing {shownInvitations.length} of {data.invitations.length} invitations</span>}>
               {shownInvitations.map((invitation) => {
                 const state = invitationState(invitation, now);
                 return <IslandRow key={invitation.id}>
@@ -337,7 +351,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                   })}><Icon name="close" size={14} /></button></> : <span className="island-action-slot" aria-hidden="true" />}</IslandCell>
                 </IslandRow>;
               })}
-            </IslandTable> : <div className="island island-empty"><h3>{data.invitations.length ? "No invitations with this status" : "No invitations yet"}</h3><p>{data.invitations.length ? "Choose another status." : "Send an invitation to add your first member."}</p></div>}
+            </IslandTable> : <div className="island island-empty"><h3 aria-live="polite">{data.invitations.length ? "No matching invitations" : "No invitations yet"}</h3>
+              <p>{data.invitations.length ? "Try another email or status." : "Send an invitation to add your first member."}</p>
+              {data.invitations.length > 0 && <button type="button" className="secondary-button" onClick={() => { setInvitationQuery(""); setInvitationFilter("ALL"); }}>Clear search and filters</button>}
+            </div>}
           </div>
           <aside className="island island-panel island-side admin-form-island" aria-labelledby="admin-invite-title">
             <h2 id="admin-invite-title">Invite people</h2>

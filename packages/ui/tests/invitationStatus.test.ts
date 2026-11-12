@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { countInvitations, invitationState, visibleInvitations } from "../src/organization/invitationStatus";
 
 const now = Date.parse("2026-10-23T12:00:00Z");
-const invitation = (status: string, expiresAt: string, id = status) => ({ id, status, expiresAt });
+const invitation = (status: string, expiresAt: string, id = status) => ({ id, email: `${id}@example.test`, status, expiresAt });
 
 describe("invitation status for the admin island list", () => {
   it("treats a pending invitation past expiry as expired", () => {
@@ -22,5 +22,19 @@ describe("invitation status for the admin island list", () => {
     expect(countInvitations(items, now)).toEqual({ ALL: 4, PENDING: 1, ACCEPTED: 1, EXPIRED: 1, REVOKED: 1 });
     expect(visibleInvitations(items, "ALL", now).map((item) => item.id)).toEqual(["p", "a", "late", "r"]);
     expect(visibleInvitations(items, "EXPIRED", now).map((item) => item.id)).toEqual(["late"]);
+  });
+
+  it("searches recipient email without changing effective status filtering", () => {
+    const items = [invitation("PENDING", "2026-10-30T00:00:00Z", "pending"), invitation("PENDING", "2026-10-20T00:00:00Z", "expired")];
+    expect(visibleInvitations(items, "ALL", now, { query: " EXPIRED@EXAMPLE.TEST " }).map((item) => item.id)).toEqual(["expired"]);
+    expect(visibleInvitations(items, "PENDING", now, { query: "expired" })).toEqual([]);
+    expect(visibleInvitations(items, "EXPIRED", now, { query: "expired" }).map((item) => item.id)).toEqual(["expired"]);
+  });
+
+  it("lets the administrator reverse the status order", () => {
+    const items = [invitation("REVOKED", "2026-10-30T00:00:00Z", "revoked"), invitation("ACCEPTED", "2026-10-01T00:00:00Z", "accepted"),
+      invitation("PENDING", "2026-10-30T00:00:00Z", "pending")];
+    expect(visibleInvitations(items, "ALL", now).map((item) => item.id)).toEqual(["pending", "accepted", "revoked"]);
+    expect(visibleInvitations(items, "ALL", now, { sortOrder: "REVOKED_FIRST" }).map((item) => item.id)).toEqual(["revoked", "accepted", "pending"]);
   });
 });

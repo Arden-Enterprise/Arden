@@ -23,6 +23,15 @@ Scope: verified-account bootstrap, departments, invitations, membership and auth
 | F02-AC1 | Bootstrap creates the correct initial authority exactly once; ordinary members cannot administer organizations, departments or other memberships. | API slices exist; real database/RLS and full UI acceptance remain distinct. |
 | F02-AC2 | Invitation issue/resend/revoke/accept handles wrong account, expired/revoked/used token, duplicate request and email failure without duplicate membership or token disclosure. | Follow current server policy, not historical preview expiry values. |
 | F02-AC3 | Pending/suspended/removed members lose relevant access; assignment/restoration and last-administrator safeguards follow an accepted lifecycle contract. | Remaining lifecycle/recovery choices must be decided, not guessed. |
+| F02-AC4 | An Org Admin can search invitations by recipient email, combine the search with the effective-status filter, choose pending-first or revoked-first status order, and clear search/status filters from an empty result. | Refinement requested directly by the user on 2026-11-06; invitation actions and server lifecycle remain unchanged. |
+
+### F02 invitation-list refinement
+
+- **Goal and path:** An Org Admin opening Administration → Invitations can find an invitation by recipient email, narrow the list by effective status, and choose which status appears first.
+- **Scope:** Search is case-insensitive and trims surrounding whitespace. Status filtering retains the existing counts and derives expired state from pending invitations past their expiry. The default order is Pending, Accepted, Expired, Revoked; the alternate order is its reverse. Clearing an empty result resets the search and status filter without changing invitations.
+- **Decision and provenance:** Accepted for this requested task by the requesting user on 2026-11-06. Originator: requesting user (not identified in public project records). Accountable decision owner: not independently established by the available public records. Record author: implementation contributor. Approval evidence: direct task instruction to add invitation search, filtering and status sorting.
+- **Specification revision:** Arden main `9fa3d34a19a559318eff87b4487f2113e6ee5a49`, inspected 2026-11-06; implementation is in `packages/ui/src/organization/OrganizationAdminPage.tsx` and `invitationStatus.ts`.
+- **Delivery evidence:** Implemented on local branch `feat/invitation-list-controls`; focused invitation tests and the root typecheck, test and build checks passed on 2026-11-06. Browser/Electron visual checks and integration remain pending. No API, permission or invitation-lifecycle change is included.
 
 ## F03 Private notes
 
