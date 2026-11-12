@@ -1,6 +1,6 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
+import { meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
@@ -19,6 +19,7 @@ const maxPdfBytes = 5 * 1024 * 1024;
 const maxPdfBase64Length = Math.ceil(maxPdfBytes / 3) * 4;
 const maxTitleCodePoints = 200;
 const defaultListLimit = 50;
+const accountPasswordRequirementsMessage = "Password must have at least 8 characters, one uppercase letter, and one special character.";
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
 /** Request shape for Target Readers (draft save) and approved readers (review decision). */
 const targetReadersSchema = { type: "object", additionalProperties: false, required: ["mode"], properties: {
@@ -103,7 +104,9 @@ export function buildApp(dependencies: AppDependencies) {
         v.instancePath === passwordField && v.keyword === "minLength"
       );
       if (isPasswordError) {
-        return reply.code(400).send(safeError("INVALID_PASSWORD", "Password must be at least 8 characters long.", request.id));
+        const message = route === "/api/v1/auth/sign-up" || route === "/api/v1/auth/password"
+          ? accountPasswordRequirementsMessage : "Password must be at least 8 characters long.";
+        return reply.code(400).send(safeError("INVALID_PASSWORD", message, request.id));
       }
       return reply.code(400).send(safeError("INVALID_REQUEST", "The request is invalid.", request.id));
     }
@@ -219,7 +222,7 @@ export function buildApp(dependencies: AppDependencies) {
   app.post<{ Body: { password: string } }>("/api/v1/auth/password", {
     schema: {
       body: { type: "object", additionalProperties: false, required: ["password"], properties: {
-        password: { type: "string", minLength: 8, maxLength: 1024 },
+        password: { type: "string", minLength: 8 },
       } },
     },
   }, async (request, reply) => {
@@ -230,6 +233,9 @@ export function buildApp(dependencies: AppDependencies) {
       const resolution = await dependencies.auth.resolveSession(tokens);
       if (resolution.kind !== "authenticated") return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
       if (!resolution.passwordSetupRequired) return reply.code(409).send(safeError("PASSWORD_ALREADY_INITIALIZED", "This account already has a password.", request.id));
+      if (!meetsAccountPasswordRequirements(request.body.password)) {
+        return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordRequirementsMessage, request.id));
+      }
       await dependencies.auth.setInitialPassword(tokens, request.body.password);
       return reply.code(204).send();
     } catch (error) {
@@ -247,7 +253,7 @@ export function buildApp(dependencies: AppDependencies) {
         type: "object", additionalProperties: false, required: ["email", "password", "fullName"],
         properties: {
           email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
-          password: { type: "string", minLength: 8, maxLength: 1024 },
+          password: { type: "string", minLength: 8 },
           fullName: { type: "string", minLength: 1, maxLength: 200 },
           redirectTo: { type: "string", minLength: 1, maxLength: 2048 },
         },
@@ -284,6 +290,10 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
       }
 
+      if (!meetsAccountPasswordRequirements(request.body.password)) {
+        return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordRequirementsMessage, request.id));
+      }
+
       try {
         await dependencies.auth.signUp({
           email: normalizedEmail,
@@ -304,7 +314,7 @@ export function buildApp(dependencies: AppDependencies) {
       });
     } catch (error) {
       if (error instanceof Error && error.message === "SIGNUP_REJECTED") {
-        return reply.code(400).send(safeError("ACCOUNT_SETUP_UNAVAILABLE", "Account setup could not be completed. Check the password requirements or sign in.", request.id));
+        return reply.code(400).send(safeError("ACCOUNT_SETUP_UNAVAILABLE", "Account setup could not be completed. Try a different password or sign in.", request.id));
       }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Supabase sign-up failed");
       return authUnavailable(reply, request);

@@ -236,7 +236,7 @@ describe("SignInPage password reset flow", () => {
     expect(screen.getByRole("alert").textContent).toBe("Enter your password.");
   });
 
-  it("asks for a name and a 6 character password before registration", () => {
+  it("asks for a name and rejects each missing account password requirement", () => {
     render(
       createElement(SignInPage, {
         platform: "web",
@@ -259,7 +259,85 @@ describe("SignInPage password reset flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /create account/i }));
 
     expect(apiClient.signUp).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toBe("Password must be at least 8 characters long.");
+    expect(screen.getByRole("alert").textContent).toContain("at least 8 characters");
+
+    for (const invalidPassword of ["abcdefgh!", "Abcdefgh"]) {
+      fireEvent.change(screen.getByLabelText("Password"), { target: { value: invalidPassword } });
+      fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+      expect(apiClient.signUp).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toContain("one uppercase letter, and one special character");
+    }
+  });
+
+  it("updates all three password checks while typing and lets the user show or hide the entry", () => {
+    render(createElement(SignInPage, {
+      platform: "web", initialMode: "register", onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+
+    const password = screen.getByLabelText("Password") as HTMLInputElement;
+    expect(password.hasAttribute("maxlength")).toBe(false);
+    const minimum = screen.getByText("At least 8 characters").closest("li");
+    const uppercase = screen.getByText("At least 1 uppercase letter").closest("li");
+    const special = screen.getByText("At least 1 special character").closest("li");
+    expect(minimum?.textContent).toContain("Pending:");
+    expect(screen.getByRole("status").textContent).toBe("No password entered.");
+    fireEvent.change(password, { target: { value: "short" } });
+    expect(minimum?.textContent).toContain("Not met:");
+    expect(uppercase?.textContent).toContain("Not met:");
+    expect(special?.textContent).toContain("Not met:");
+    fireEvent.change(password, { target: { value: "eight123" } });
+    expect(minimum?.textContent).toContain("Met:");
+    expect(uppercase?.textContent).toContain("Not met:");
+    expect(special?.textContent).toContain("Not met:");
+    fireEvent.change(password, { target: { value: "Eight123!" } });
+    expect(uppercase?.textContent).toContain("Met:");
+    expect(special?.textContent).toContain("Met:");
+    expect(screen.getByRole("status").textContent).toBe("3 of 3 password requirements met.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+    expect(password.type).toBe("text");
+    expect(password.value).toBe("Eight123!");
+    fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(password.type).toBe("password");
+    expect(apiClient.signUp).not.toHaveBeenCalled();
+  });
+
+  it("keeps a rejected registration password available to revise without claiming a specific provider rule", async () => {
+    vi.mocked(apiClient.signUp)
+      .mockRejectedValueOnce(new apiClient.ApiError(400, "Account setup could not be completed.", "ACCOUNT_SETUP_UNAVAILABLE"))
+      .mockResolvedValueOnce(undefined);
+    render(createElement(SignInPage, {
+      platform: "web", initialMode: "register", onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "new@example.test" } });
+    const password = screen.getByLabelText("Password") as HTMLInputElement;
+    fireEvent.change(password, { target: { value: "ValidPass1!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    await waitFor(() => expect(apiClient.signUp).toHaveBeenCalledTimes(1));
+    expect((await screen.findByRole("alert")).textContent).toContain("password meets the listed requirements");
+    expect(password.value).toBe("ValidPass1!");
+
+    fireEvent.change(password, { target: { value: "Better-password-123!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await waitFor(() => expect(apiClient.signUp).toHaveBeenCalledTimes(2));
+    expect((await screen.findByRole("alert")).textContent).toContain("Check your email to continue.");
+  });
+
+  it("clears the registration password when an existing account returns to sign-in", async () => {
+    vi.mocked(apiClient.signUp).mockRejectedValueOnce(new apiClient.ApiError(409, "Account already exists.", "ACCOUNT_ALREADY_EXISTS"));
+    render(createElement(SignInPage, {
+      platform: "web", initialMode: "register", onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "new@example.test" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Valid-password-123!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeTruthy());
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
   });
 
   it("displays success notice when URL contains type=signup from email confirmation", () => {
