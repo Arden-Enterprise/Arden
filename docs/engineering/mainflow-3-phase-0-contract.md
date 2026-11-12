@@ -23,6 +23,10 @@ APPROVED/PREPARING --pipeline fails--> APPROVED/FAILED --retry--> APPROVED/PREPA
 
 Only atomic activation may replace `knowledge_current_publication`. Search and RAG read that same active pointer under the same current AccessPolicy. `PREPARING`, `FAILED`, rejected and withdrawn snapshots are unavailable to both. Mainflow 3 has no human Publisher role and no request-revision decision.
 
+### Published owner display metadata
+
+Published list/detail responses include `responsibleDepartmentName` (nullable) alongside the responsible department ID, resolved within the publication's organization after existing publication authorization. Library rows, owner-name search and reader details use this display metadata rather than the author's permitted department-picker options. A reader can see a permitted document's owner without being able to author in that department. This additive field does not change ownership, Target Readers, RLS or selectable departments, and requires no schema migration. Older responses may use the existing picker lookup as a compatibility fallback.
+
 ## Error taxonomy
 
 | Condition | Stable API meaning |

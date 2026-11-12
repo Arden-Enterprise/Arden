@@ -140,6 +140,8 @@ export type PublishedKnowledge = {
   title: string;
   classification: KnowledgeClassification;
   responsibleDepartmentId: string;
+  /** Display metadata, independent of the author's permitted department choices. */
+  responsibleDepartmentName?: string | null;
   documentCode?: string;
   versionLabel?: string;
   summary?: string;

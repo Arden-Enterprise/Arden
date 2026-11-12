@@ -1373,6 +1373,7 @@ describe("API auth and private draft routes", () => {
       const stored = await storage.write("Restricted runbook");
       repository.publication = { id: versionId, draftId: sharedDraftId, title: "Restricted runbook",
         classification: "INTERNAL", responsibleDepartmentId: engineeringDepartmentId,
+        responsibleDepartmentName: "Engineering",
         contentHash: stored.contentHash, sourceUri: stored.sourceUri, audienceRoleIds: [], targetReaders,
         publishedAt: new Date("2026-11-01T00:00:00.000Z"), validFrom: new Date("2026-11-01T00:00:00.000Z"),
         validUntil: null };
@@ -1439,10 +1440,12 @@ describe("API auth and private draft routes", () => {
       const headers = await ownerHeaders();
       const list = await app.inject({ method: "GET", url: `${root}/knowledge/published`, headers });
       expect(list.json().items).toHaveLength(1);
+      expect(list.json().items[0].responsibleDepartmentName).toBe("Engineering");
       expect(JSON.stringify(list.json())).not.toContain(otherId);
       const detail = await app.inject({ method: "GET", url: `${root}/knowledge/published/${versionId}`, headers });
       expect(detail.statusCode).toBe(200);
       expect(detail.json().body).toBe("Restricted runbook");
+      expect(detail.json().responsibleDepartmentName).toBe("Engineering");
       expect(detail.json().targetReaders).toEqual(readers ? { mode: readers.mode, departmentId: readers.departmentId } : null);
       const answer = await app.inject({ method: "POST", url: `${root}/ai/answers`, headers,
         payload: { query: "What does the runbook say?" } });

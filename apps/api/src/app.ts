@@ -1593,6 +1593,7 @@ export function buildApp(dependencies: AppDependencies) {
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
           classification: publication.classification,
           responsibleDepartmentId: publication.responsibleDepartmentId,
+          responsibleDepartmentName: publication.responsibleDepartmentName,
           ...content, mimeType, contentHash: publication.contentHash,
           audienceIds: publication.audienceRoleIds,
           targetReaders: representReaderMode(publication.targetReaders),
