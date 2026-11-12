@@ -1,4 +1,13 @@
 import type { Platform } from "./types";
+import type { KnowledgeMetadata } from "@arden/domain";
+
+export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
+  departmentId: string | null; memberIds: string[] };
+export type KnowledgeCatalogEntry = { id: string; name: string; description: string; status: "ACTIVE" | "INACTIVE"; version: number };
+export type KnowledgeCollection = KnowledgeCatalogEntry & { cover: "handbook" | "production"; documentIds: string[] };
+export type KnowledgeCatalog = { canManage: boolean; topics: KnowledgeCatalogEntry[]; collections: KnowledgeCollection[] };
+export type KnowledgeCatalogWrite = { name: string; description: string; status: "ACTIVE" | "INACTIVE";
+  cover?: "handbook" | "production"; documentIds?: string[] };
 import { parseAudienceGroup, parseAudienceGroupList, type AudienceGroupRecord,
   type AudienceGroupWrite } from "./audience-group-contracts";
 import type {} from "./desktop-session";
@@ -48,6 +57,10 @@ export type KnowledgeOptions = {
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
 };
 export type KnowledgeDraftRecord = {
+  documentCode?: string;
+  management?: KnowledgeMetadata | null;
+  hasPublishedVersion?: boolean;
+  targetReaders?: TargetReaders | null;
   id: string;
   organizationId: string;
   title: string;
@@ -66,6 +79,10 @@ export type KnowledgeDraftRecord = {
   updatedAt: string;
 };
 export type KnowledgeDraftSummary = {
+  documentCode?: string;
+  management?: KnowledgeMetadata | null;
+  hasPublishedVersion?: boolean;
+  targetReaders?: TargetReaders | null;
   id: string;
   organizationId: string;
   title: string;
@@ -84,6 +101,10 @@ export type KnowledgeDraftSummary = {
   updatedAt: string;
 };
 export type KnowledgeSubmission = {
+  documentCode?: string | null;
+  management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
+  proposedTargetReaders?: TargetReaders | null;
+  approvedTargetReaders?: TargetReaders | null;
   id: string;
   draftId: string;
   snapshotVersionId: string;
@@ -142,7 +163,8 @@ export type PublishedKnowledge = {
   responsibleDepartmentId: string;
   /** Display metadata, independent of the author's permitted department choices. */
   responsibleDepartmentName?: string | null;
-  documentCode?: string;
+  documentCode?: string | null;
+  management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
   versionLabel?: string;
   summary?: string;
   audienceIds: string[];
@@ -213,25 +235,54 @@ export function createNewKnowledgeDraft(platform: Platform, organizationId: stri
 
 export async function createPdfKnowledgeDraft(platform: Platform, organizationId: string,
   input: { title: string; file: File; classification?: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
-  if (!/\.pdf$/i.test(input.file.name) || input.file.size === 0 || input.file.size > 5 * 1024 * 1024) {
+  const pdfBase64 = await encodeKnowledgePdf(input.file);
+  return request(platform, `${knowledgePath(organizationId)}/drafts/pdf`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ title: input.title, classification: input.classification, pdfBase64 }),
+  });
+}
+
+async function encodeKnowledgePdf(file: File): Promise<string> {
+  if (!/\.pdf$/i.test(file.name) || file.size === 0 || file.size > 5 * 1024 * 1024) {
     throw new ApiError(0, "Choose a PDF file up to 5 MB.");
   }
-  const bytes = new Uint8Array(await input.file.arrayBuffer());
+  const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
   }
-  return request(platform, `${knowledgePath(organizationId)}/drafts/pdf`, {
-    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ title: input.title, classification: input.classification, pdfBase64: btoa(binary) }),
+  return btoa(binary);
+}
+
+export async function replaceKnowledgePdf(platform: Platform, organizationId: string, draftId: string, version: number,
+  file: File, patch: Parameters<typeof saveKnowledgeDraft>[4]): Promise<KnowledgeDraftRecord> {
+  const pdfBase64 = await encodeKnowledgePdf(file);
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`, {
+    method: "PATCH", headers: { "If-Match": `"${version}"` }, body: JSON.stringify({ ...patch, pdfBase64 }),
   });
 }
 
 export function saveKnowledgeDraft(platform: Platform, organizationId: string, draftId: string, version: number,
-  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">>): Promise<KnowledgeDraftRecord> {
+  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">> & {
+    management?: KnowledgeMetadata; targetReaders?: TargetReaders }): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`, {
     method: "PATCH", headers: { "If-Match": `"${version}"` }, body: JSON.stringify(patch),
   });
+}
+
+export function loadKnowledgeCatalog(platform: Platform, organizationId: string): Promise<KnowledgeCatalog> {
+  return request(platform, `${knowledgePath(organizationId)}/catalog`);
+}
+export function saveKnowledgeCatalogEntry(platform: Platform, organizationId: string, kind: "topics" | "collections",
+  entry: KnowledgeCatalogEntry | null, input: KnowledgeCatalogWrite): Promise<KnowledgeCatalogEntry> {
+  return request(platform, `${knowledgePath(organizationId)}/catalog/${kind}${entry ? `/${entry.id}` : ""}`, {
+    method: entry ? "PATCH" : "POST", body: JSON.stringify(input),
+    headers: entry ? { "If-Match": `"catalog-${entry.version}"` } : {},
+  });
+}
+export async function findKnowledgeReaders(platform: Platform, organizationId: string, query: string, ids: string[] = []) {
+  return (await request<{ items: Array<{ id: string; name: string }> }>(platform,
+    `${knowledgePath(organizationId)}/catalog/readers?q=${encodeURIComponent(query)}&ids=${encodeURIComponent(ids.join(","))}`)).items;
 }
 
 export function submitKnowledgeDraft(platform: Platform, organizationId: string, draftId: string,
@@ -239,6 +290,12 @@ export function submitKnowledgeDraft(platform: Platform, organizationId: string,
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}/submit`, {
     method: "POST", headers: { "If-Match": `"${version}"`, "Idempotency-Key": idempotencyKey },
   });
+}
+
+/** T5.1: the author withdraws their own pending submission; it leaves the review queue. */
+export function withdrawKnowledgeSubmission(platform: Platform, organizationId: string,
+  submissionId: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/submissions/${submissionId}/withdraw`, { method: "POST" });
 }
 
 export async function listKnowledgeSubmissions(platform: Platform, organizationId: string): Promise<KnowledgeSubmission[]> {

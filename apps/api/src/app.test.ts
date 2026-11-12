@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, DecidedReview, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, DecidedReview, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult, WithdrawKnowledgeSubmissionResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -1142,6 +1142,35 @@ describe("API auth and private draft routes", () => {
     expect(semanticDocumentText((await app.inject({ method: "GET", url, headers })).json().body)).toBe("v2");
   });
 
+  it("replaces a PDF under the same draft identity and rejects stale, invalid and other-author writes", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const other = await desktopSession(app, "manager@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const headers = { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' };
+    const original = Buffer.from("%PDF-1.4\noriginal\n%%EOF\n").toString("base64");
+    const replacement = Buffer.from("%PDF-1.4\nreplacement\n%%EOF\n").toString("base64");
+    expect((await app.inject({ method: "POST", url: `${root}/pdf`, headers: { ...headers, "idempotency-key": createKey },
+      payload: { title: "Versioned PDF", pdfBase64: original } })).statusCode).toBe(201);
+    const url = `${root}/${sharedDraftId}`;
+    expect((await app.inject({ method: "PATCH", url, headers: { ...headers, cookie: other }, payload: { pdfBase64: replacement } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PATCH", url, headers, payload: { pdfBase64: Buffer.from("not a PDF").toString("base64") } })).statusCode).toBe(400);
+    const updated = await app.inject({ method: "PATCH", url, headers, payload: { pdfBase64: replacement } });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ id: sharedDraftId, pdfBase64: replacement, currentVersion: { version: 2, mimeType: "application/pdf" } });
+    expect((await app.inject({ method: "PATCH", url, headers, payload: { pdfBase64: original } })).statusCode).toBe(412);
+    expect((await app.inject({ method: "GET", url, headers: { cookie: owner } })).json().pdfBase64).toBe(replacement);
+  });
+
+  it("keeps an empty editor draft saveable but refuses to submit it as knowledge", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const headers = { cookie: owner, origin: "http://localhost:5180", "idempotency-key": createKey };
+    expect((await app.inject({ method: "POST", url: `${root}/new`, headers, payload: { title: "Incomplete", body: "   " } })).statusCode).toBe(201);
+    const result = await app.inject({ method: "POST", url: `${root}/${sharedDraftId}/submit`, headers: { ...headers, "if-match": '"1"' } });
+    expect(result.statusCode).toBe(409);
+    expect(result.json().error.message).toBe("Add document content before submitting.");
+  });
+
   describe("Target Readers on draft save (T1.4)", () => {
     const root = `/api/v1/organizations/${organizationId}/knowledge`;
     async function createDraft() {
@@ -1554,6 +1583,35 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"3"',
         "idempotency-key": "cccccccc-dddd-4eee-8fff-111111111111" } })).statusCode).toBe(201);
+  });
+
+  it("lets only the author withdraw a pending submission and refuses a decided one (T5.1)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const reviewer = await desktopSession(app, "manager@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    expect((await app.inject({ method: "POST", url: `${root}/drafts/new`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "idempotency-key": createKey },
+      payload: { title: "Runbook", body: "First version", classification: "INTERNAL" } })).statusCode).toBe(201);
+    expect((await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
+      payload: { responsibleDepartmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+        targetScopeType: "DEPARTMENT", audienceIds: ["11111111-aaaa-4aaa-8aaa-111111111111"] } })).statusCode).toBe(200);
+    const submitted = await app.inject({ method: "POST", url: `${root}/drafts/${sharedDraftId}/submit`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"2"',
+        "idempotency-key": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" } });
+    expect(submitted.statusCode).toBe(201);
+    const withdrawUrl = `${root}/submissions/${submitted.json().id}/withdraw`;
+
+    expect((await app.inject({ method: "POST", url: withdrawUrl,
+      headers: { cookie: reviewer, origin: "http://localhost:5180" } })).statusCode).toBe(404);
+    const withdrawn = await app.inject({ method: "POST", url: withdrawUrl,
+      headers: { cookie: owner, origin: "http://localhost:5180" } });
+    expect(withdrawn.statusCode).toBe(200);
+    expect(withdrawn.json()).toMatchObject({ id: submitted.json().id, status: "WITHDRAWN" });
+    expect((await app.inject({ method: "POST", url: withdrawUrl,
+      headers: { cookie: owner, origin: "http://localhost:5180" } })).statusCode).toBe(200);
+    expect((await app.inject({ method: "POST", url: `${root}/submissions/not-a-uuid/withdraw`,
+      headers: { cookie: owner, origin: "http://localhost:5180" } })).statusCode).toBe(400);
   });
 
   it("routes desktop-compatible sign-in through the same HttpOnly Supabase session", async () => {
@@ -2045,6 +2103,19 @@ class MemoryRepository implements ArdenDataRepository {
   async listKnowledgeSubmissions(userId: string, requestedOrganization: string): Promise<SharedKnowledgeSubmission[] | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId) return null;
     return this.sharedSubmission ? [this.sharedSubmission] : [];
+  }
+
+  async withdrawKnowledgeSubmission(userId: string, requestedOrganization: string,
+    submissionId: string): Promise<WithdrawKnowledgeSubmissionResult> {
+    const submission = this.sharedSubmission;
+    if (userId !== ownerId || requestedOrganization !== organizationId || submission?.id !== submissionId) {
+      return { kind: "not-found" };
+    }
+    if (submission.status === "WITHDRAWN") return { kind: "replayed", submission };
+    if (submission.status !== "PENDING_REVIEW") return { kind: "conflict" };
+    this.sharedSubmission = { ...submission, status: "WITHDRAWN" };
+    if (this.sharedDraft) this.sharedDraft = { ...this.sharedDraft, hasPendingSubmission: false };
+    return { kind: "withdrawn", submission: this.sharedSubmission };
   }
 
   async listReviewerGrants(userId: string, requestedOrganization: string): Promise<ReviewerGrantRecord[] | null> {

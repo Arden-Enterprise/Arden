@@ -1,4 +1,6 @@
 import type { Pool, PoolClient } from "pg";
+import { metadataSubmissionErrors, validKnowledgeMetadata, type KnowledgeMetadata } from "@arden/domain";
+import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledge/catalog-store.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -47,6 +49,9 @@ export type PrivateContributionSource = {
   contentHash: string;
 };
 export type SharedKnowledgeDraft = {
+  documentCode?: string;
+  management?: (KnowledgeMetadata & { schemaVersion?: number }) | null;
+  hasPublishedVersion?: boolean;
   id: string;
   organizationId: string;
   title: string;
@@ -74,6 +79,7 @@ export type CreateSharedDraftResult =
   | { kind: "unavailable" }
   | { kind: "idempotency-conflict" };
 export type SharedDraftPatch = {
+  management?: KnowledgeMetadata;
   title?: string;
   body?: string;
   classification?: KnowledgeClassification;
@@ -92,6 +98,8 @@ export type UpdateSharedDraftResult =
   | { kind: "invalid-target-readers"; field: TargetReadersField; reason: string }
   | { kind: "updated"; draft: SharedKnowledgeDraft };
 export type SharedKnowledgeSubmission = {
+  documentCode?: string | null;
+  management?: (KnowledgeMetadata & { topicName?: string }) | null;
   id: string;
   draftId: string;
   snapshotVersionId: string;
@@ -118,6 +126,11 @@ export type SubmitKnowledgeDraftResult =
   | { kind: "not-found" }
   | { kind: "conflict" }
   | { kind: "not-ready" };
+export type WithdrawKnowledgeSubmissionResult =
+  | { kind: "withdrawn"; submission: SharedKnowledgeSubmission }
+  | { kind: "replayed"; submission: SharedKnowledgeSubmission }
+  | { kind: "not-found" }
+  | { kind: "conflict" };
 export type ReviewerGrantInput = {
   reviewerMembershipId: string;
   scope: "DEPARTMENT" | "ORGANIZATION";
@@ -170,6 +183,8 @@ export type DecideReviewResult =
   | { kind: "not-found" }
   | { kind: "conflict" };
 export type PublishedKnowledge = {
+  documentCode?: string | null;
+  management?: (KnowledgeMetadata & { topicName?: string }) | null;
   id: string;
   draftId: string;
   title: string;
@@ -237,6 +252,9 @@ function readersAuditSummary(readers: ReaderSelection) {
   return { mode: readers.mode, departmentId: readers.departmentId, memberCount: readers.memberIds.length };
 }
 type SharedDraftRow = ReaderSelectionColumns & {
+  document_code: string;
+  management: KnowledgeMetadata | null;
+  has_published_version: boolean;
   shared_draft_id: string;
   title: string;
   classification: KnowledgeClassification;
@@ -261,6 +279,9 @@ type SharedDraftRow = ReaderSelectionColumns & {
 };
 const sharedDraftSelect = `
   SELECT d.shared_draft_id, d.title, d.classification, d.source_private_version_id,
+         d.document_code, d.management,
+         EXISTS (SELECT 1 FROM shared_submission prior WHERE prior.shared_draft_id = d.shared_draft_id
+           AND prior.publication_state IN ('ACTIVE', 'SUPERSEDED')) AS has_published_version,
          d.author_membership_id, d.status,
          d.responsible_department_id, d.target_scope_type, d.team_tag, d.project_tag,
          d.create_request_hash, d.current_version_no, d.created_at, d.updated_at,
@@ -279,6 +300,7 @@ const sharedDraftSelect = `
 
 function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnowledgeDraft {
   return {
+    documentCode: row.document_code, management: row.management, hasPublishedVersion: row.has_published_version,
     id: row.shared_draft_id,
     organizationId,
     title: row.title,
@@ -301,6 +323,8 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
   };
 }
 type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
+  document_code: string | null;
+  management: (KnowledgeMetadata & { topicName?: string }) | null;
   submission_id: string;
   shared_draft_id: string;
   shared_draft_version_id: string;
@@ -331,6 +355,7 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
 // so it is detected even when the reviewer cannot see the snapshot's group or department audiences.
 const submissionSelect = `
   SELECT s.submission_id, s.shared_draft_id, s.shared_draft_version_id,
+         s.document_code, s.management,
          s.snapshot_version_no,
          s.title, s.classification, s.responsible_department_id, s.target_scope_type,
          s.target_department_id, s.audience_role_ids, s.content_hash, s.content_uri,
@@ -349,6 +374,7 @@ const submissionSelect = `
     LEFT JOIN review_decision rd ON rd.submission_id = s.submission_id AND rd.flow2`;
 function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmission {
   return {
+    documentCode: row.document_code, management: row.management,
     id: row.submission_id,
     draftId: row.shared_draft_id,
     snapshotVersionId: row.shared_draft_version_id,
@@ -413,6 +439,8 @@ function reviewAuthorizationFromRow(row: SharedSubmissionRow, organizationId: st
   };
 }
 type PublishedKnowledgeRow = ReaderSelectionColumns & {
+  document_code: string | null;
+  management: (KnowledgeMetadata & { topicName?: string }) | null;
   published_version_id: string;
   shared_draft_id: string;
   title: string;
@@ -440,6 +468,7 @@ type AuthorizedAiSourceRow = ReaderSelectionColumns & {
 };
 const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
+         pv.document_code, pv.management,
          pv.responsible_department_id, pv.content_hash, pv.content_uri,
          owner_department.name AS responsible_department_name,
          pv.audience_role_ids, pv.published_at,
@@ -451,6 +480,7 @@ const publishedKnowledgeSelect = `
       AND owner_department.organization_id = cp.organization_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
   return {
+    documentCode: row.document_code, management: row.management,
     id: row.published_version_id,
     draftId: row.shared_draft_id,
     title: row.title,
@@ -489,6 +519,7 @@ export type DeleteDepartmentResult =
   | { success: false; errorReason: "NOT_FOUND" | "BASE_DEPARTMENT" };
 
 export interface ArdenDataRepository {
+  readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
   readonly systemAdministration?: SystemAdministrationStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
@@ -535,6 +566,8 @@ export interface ArdenDataRepository {
   submitKnowledgeDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number,
     idempotencyKey: string, requestId: string): Promise<SubmitKnowledgeDraftResult>;
   listKnowledgeSubmissions(userId: string, organizationId: string): Promise<SharedKnowledgeSubmission[] | null>;
+  withdrawKnowledgeSubmission(userId: string, organizationId: string, submissionId: string,
+    requestId: string): Promise<WithdrawKnowledgeSubmissionResult>;
   listReviewerGrants(userId: string, organizationId: string): Promise<ReviewerGrantRecord[] | null>;
   createReviewerGrant(userId: string, organizationId: string, input: ReviewerGrantInput, requestId: string): Promise<ReviewerGrantRecord | null>;
   deactivateReviewerGrant(userId: string, organizationId: string, grantId: string, requestId: string): Promise<boolean>;
@@ -588,9 +621,12 @@ function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): strin
 }
 
 export class ArdenRepository implements ArdenDataRepository {
+  readonly knowledgeCatalog: KnowledgeCatalogStore;
   readonly audienceGroups: AudienceGroupStore;
   readonly systemAdministration: SystemAdministrationStore;
   constructor(private readonly pool: Pool) {
+    this.knowledgeCatalog = new PgKnowledgeCatalogStore((user, org, work) => this.withActorContext(user, org, work),
+      (user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.systemAdministration = new PgSystemAdministrationStore((user, work) => this.withSystemAdmin(user, work));
   }
@@ -1480,6 +1516,23 @@ export class ArdenRepository implements ArdenDataRepository {
       if (!row) return { kind: "not-found" };
       if (row.current_version_no !== expectedVersion) return { kind: "conflict", currentVersion: row.current_version_no };
       const current = mapSharedDraft(row, organizationId);
+      let management: (KnowledgeMetadata & { schemaVersion?: number }) | null = current.management ?? null;
+      if (patch.management !== undefined) {
+        if (!validKnowledgeMetadata(patch.management)) return { kind: "invalid-metadata" };
+        // Snapshot display labels come from the catalog, never arbitrary client text.
+        const value = patch.management;
+        let topicName: string | null = null;
+        if (value.topicId) {
+          await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`arden:knowledge-catalog:${organizationId}`]);
+          const topic = await client.query<{ name: string }>(`SELECT name FROM knowledge_topic
+            WHERE topic_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [value.topicId, organizationId]);
+          if (!topic.rows[0]) return { kind: "invalid-metadata" };
+          topicName = topic.rows[0].name;
+        }
+        management = { schemaVersion: 1, type: value.type, topicId: value.topicId, version: value.version.trim(),
+          effectiveDate: value.effectiveDate, expirationDate: value.expirationDate, changeNote: value.changeNote.trim(),
+          ...(topicName ? { topicName } : {}) };
+      }
       // Decision 0014: the responsible department always follows the author's primary department.
       const responsible = resolveResponsibleDepartment(patch.responsibleDepartmentId,
         await this.actorPrimaryDepartment(client, userId, organizationId));
@@ -1493,6 +1546,19 @@ export class ArdenRepository implements ArdenDataRepository {
         projectTag: patch.projectTag === undefined ? current.projectTag : patch.projectTag,
         audienceRoleIds: patch.audienceRoleIds ?? current.audienceRoleIds,
       };
+      const effectiveReaders = patch.targetReaders ?? current.targetReaders;
+      if (management?.schemaVersion === 1 && effectiveReaders) {
+        // Compatibility audience is a database backstop, not the new reader
+        // entitlement. Limited proposals keep the author's department reviewer.
+        next.targetScopeType = effectiveReaders.mode === "ORGANIZATION" ? "ORGANIZATION" : "DEPARTMENT";
+        const audiences = await client.query<{ id: string }>(`SELECT audience_id AS id FROM audience
+          WHERE organization_id = $1 AND status = 'ACTIVE' AND
+          (($2 = 'ORGANIZATION' AND kind = 'ORGANIZATION_ALL') OR
+           ($2 = 'DEPARTMENT' AND kind = 'DEPARTMENT_ALL' AND department_id = $3))`,
+        [organizationId, next.targetScopeType, next.responsibleDepartmentId]);
+        next.audienceRoleIds = audiences.rows.map(audience => audience.id);
+        next.teamTag = null; next.projectTag = null;
+      }
       if (next.responsibleDepartmentId) {
         const department = await client.query(`SELECT 1 FROM department WHERE department_id = $1
           AND organization_id = $2 AND status = 'ACTIVE'`, [next.responsibleDepartmentId, organizationId]);
@@ -1521,10 +1587,11 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query(`UPDATE shared_draft SET title = $3, classification = $4,
         responsible_department_id = $5, target_scope_type = $6, team_tag = $7, project_tag = $8,
         draft_selection_id = COALESCE($9::uuid, draft_selection_id)
+        , management = $10::jsonb
         WHERE shared_draft_id = $1 AND organization_id = $2`, [draftId, organizationId, next.title,
         next.classification, next.responsibleDepartmentId, next.targetScopeType, next.teamTag, next.projectTag,
-        draftSelectionId]);
-      if (patch.audienceRoleIds !== undefined) {
+        draftSelectionId, management ? JSON.stringify(management) : null]);
+      if (patch.audienceRoleIds !== undefined || patch.targetReaders !== undefined || management?.schemaVersion === 1) {
         await client.query(`DELETE FROM shared_draft_audience WHERE shared_draft_id = $1`, [draftId]);
         if (next.audienceRoleIds.length > 0) {
           await client.query(`INSERT INTO shared_draft_audience (shared_draft_id, organization_id, role_id)
@@ -1566,6 +1633,15 @@ export class ArdenRepository implements ArdenDataRepository {
         return { kind: "not-found" };
       }
       if (row.current_version_no !== expectedVersion) return { kind: "conflict" };
+      if (!row.management || metadataSubmissionErrors(row.management, row.has_published_version).length
+        || !row.readers_selection_id) return { kind: "not-ready" };
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`arden:knowledge-catalog:${organizationId}`]);
+      const selectedTopic = await client.query(`SELECT 1 FROM knowledge_topic
+        WHERE topic_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [row.management.topicId, organizationId]);
+      if (!selectedTopic.rowCount) return { kind: "not-ready" };
+      const reusedVersion = await client.query(`SELECT 1 FROM shared_submission WHERE shared_draft_id = $1
+        AND publication_state IN ('ACTIVE', 'SUPERSEDED') AND management->>'version' = $2`, [draftId, row.management.version]);
+      if (reusedVersion.rowCount) return { kind: "not-ready" };
       if (!row.responsible_department_id || !row.target_scope_type) return { kind: "not-ready" };
       const audiences = await client.query<{ audience_id: string; organization_id: string;
         status: "ACTIVE" | "INACTIVE"; kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP";
@@ -1634,6 +1710,36 @@ export class ArdenRepository implements ArdenDataRepository {
         WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2
         ORDER BY s.submitted_at DESC, s.submission_id DESC LIMIT 100`, [organizationId, membership]);
       return result.rows.map(mapSharedSubmission);
+    });
+  }
+
+  /**
+   * T5.1 (FR-DOC-06): the author withdraws their own pending submission. Another member's or an unknown
+   * submission is not-found; a decided one is a conflict. Repeating a completed withdrawal replays it.
+   */
+  async withdrawKnowledgeSubmission(userId: string, organizationId: string, submissionId: string,
+    requestId: string): Promise<WithdrawKnowledgeSubmissionResult> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const membership = await this.activeActorMembership(client, userId, organizationId);
+      if (!membership) return { kind: "not-found" };
+      const selected = await client.query<SharedSubmissionRow>(`${submissionSelect}
+        WHERE s.organization_id = $1 AND s.submission_id = $2 AND s.submitted_by_membership_id = $3`, [organizationId, submissionId, membership]);
+      const row = selected.rows[0];
+      if (!row) return { kind: "not-found" };
+      if (row.status === "WITHDRAWN") return { kind: "replayed", submission: mapSharedSubmission(row) };
+      if (row.status !== "PENDING_REVIEW") return { kind: "conflict" };
+      // No FOR UPDATE: RLS would hide a decided row from it. The guarded UPDATE is the atomic step.
+      const changed = await client.query(`UPDATE shared_submission SET status = 'WITHDRAWN'
+        WHERE submission_id = $1 AND status = 'PENDING_REVIEW'`, [submissionId]);
+      if (changed.rowCount !== 1) return { kind: "conflict" };
+      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type,
+        outcome, details_json) VALUES ($1, $2, 'KNOWLEDGE_SUBMISSION_WITHDRAWN', 'SUCCESS', $3::jsonb)`,
+      [organizationId, membership, JSON.stringify({ submissionId, draftId: row.shared_draft_id,
+        snapshotVersionId: row.shared_draft_version_id, requestId })]);
+      const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
+        WHERE s.submission_id = $1`, [submissionId]);
+      if (!result.rows[0]) throw new Error("Withdrawn submission is not readable");
+      return { kind: "withdrawn", submission: mapSharedSubmission(result.rows[0]) };
     });
   }
 
@@ -1882,7 +1988,7 @@ export class ArdenRepository implements ArdenDataRepository {
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
       const result = await client.query<PublishedKnowledgeRow>(`${publishedKnowledgeSelect}
-        WHERE cp.organization_id = $1 ORDER BY pv.published_at DESC, pv.published_version_id DESC LIMIT 100`, [organizationId]);
+        WHERE cp.organization_id = $1 ORDER BY pv.published_at DESC, pv.published_version_id DESC`, [organizationId]);
       return result.rows.map(mapPublishedKnowledge);
     });
   }

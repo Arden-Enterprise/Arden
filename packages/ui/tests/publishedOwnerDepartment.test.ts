@@ -23,6 +23,7 @@ function setup(ownerName: string | null | undefined, ownerId = "hr") {
   vi.spyOn(api, "listKnowledgeReviewBoard").mockResolvedValue({ items: [], decided: [] });
   vi.spyOn(api, "listPublishedKnowledge").mockResolvedValue([publication]);
   vi.spyOn(api, "loadPublishedKnowledge").mockResolvedValue(publication);
+  vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
   // The reader may read the publication, but can only author in Engineering.
   vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({
     departments: [{ id: "engineering", name: "Engineering" }], primaryDepartmentId: "engineering",
@@ -39,13 +40,13 @@ describe("published owner department display", () => {
       platform, organizationId: "org", organizationName: "Example", view: "knowledge",
       active: true, createdDraftId: null, contextOpen: false, onToggleContext: vi.fn(),
     }));
-    const open = await screen.findByRole("button", { name: "Read Employee lifecycle guide" });
+    await screen.findByRole("button", { name: "Read Employee lifecycle guide" });
     expect(screen.getByText(owner)).toBeTruthy();
     expect(screen.queryByText("Unassigned")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Search (Ctrl K)" }));
     fireEvent.change(await screen.findByRole("searchbox"), { target: { value: owner } });
     expect(screen.getByRole("button", { name: "Read Employee lifecycle guide" })).toBeTruthy();
-    fireEvent.click(open);
+    fireEvent.click(screen.getByRole("button", { name: "Read Employee lifecycle guide" }));
     await screen.findByRole("heading", { name: "Document information" });
     expect(screen.getByText(owner)).toBeTruthy();
     expect(screen.queryByText("Unassigned")).toBeNull();

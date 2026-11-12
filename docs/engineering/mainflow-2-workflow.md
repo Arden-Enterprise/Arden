@@ -99,7 +99,19 @@ Target Readers are the per-document reader model planned to replace audience gro
   - The decision row carries `approved_selection_id`; the approval UPDATE copies it to the submission exactly once (trigger-enforced). The audit event adds `proposedReaders`, `approvedReaders` (mode, department, member count) and `narrowed`.
   - `GET /reviews/:id` returns `proposedReaders` (`mode`, `department {id,name}`, `members [{membershipId, displayName}]`) for authorized reviewers. Submissions return `approvedTargetReaders`.
   - Open question: a member approved under DEPARTMENT d → SELECTED_MEMBERS stays a reader if they later leave d, because A is a frozen list. Decision owner: unknown; confirmation needed.
+- **Legacy audiences → Target Readers (T1.2, migration 0028):** a forward-only backfill gives every current publication without readers a selection that admits nobody its legacy audience does not admit today. ALL_MEMBERS at organization scope → ORGANIZATION; a department scope whose current members all hold the department audience → DEPARTMENT; anything else (groups, partial departments, mixed audiences) → SELECTED_MEMBERS frozen to the exact current readers (2–100). A publication read by fewer than 2 (including nobody) or more than 100 members that fits no mode stays on the audience path and is reported as `UNMAPPED`. The migration raises a NOTICE with the before/after reader counts per publication and fails if any mapped publication would gain a reader. `SELECT * FROM arden.migrate_publication_readers(false)` prints the same report at any time (operator role only). Audience tables, columns and policies stay until T1.6.
+  - **Authority after cutover:** once a publication has Target Readers, that selection is the source of read entitlement. Removing someone from an old Audience does not revoke their Target Readers entitlement; adding someone to that Audience does not add them to a frozen selected-member list. Revoke through a governed Target Readers change or suspend organization membership. Current account/organization/membership and applicable department checks still apply. Publications reported as `UNMAPPED` retain the legacy audience path.
+  - **Decision provenance:** on 2026-11-12 the requesting maintainer explicitly chose Target Readers authority after comparing it with the earlier dual-check contract, including the lost legacy-Audience revocation effect. This supersedes the earlier T1.2 statement that both readership policies must admit every mapped reader, and refines [0010](../decisions/0010-audiences-and-system-administration.md) for mapped publications as recorded in [0020](../decisions/0020-knowledge-management-catalog.md). Separate consultation with the earlier author is not established. Physical removal of the legacy schema remains separate work; keeping it does not make it a second entitlement source. The operator report remains useful for initial mapping/legacy comparisons, not an ongoing Target Readers authorization audit.
 - Audience readiness rules for submit are unchanged in this slice.
+
+### Contribution metadata (Flow 2 T3.1, migration 0027)
+
+- **Integration status:** this section describes retained compatibility storage. [KM-v1](../product/graph-ai-and-work.md#knowledge-management-refinement-km-v1-accepted-12-november-2026) owns the standardized form: fixed Type (including Lessons Learned), one Topic and conditional Change Note. The legacy General category is not a canonical Type, and Keywords do not return to the form.
+- **Provenance:** Flow 2 task list T3.1 (BM04 RF-03), requested by the maintainer on 2026-11-11. The task does not name the categories; the maintainer confirmed on 2026-11-12 the five defaults proposed in the task conversation: Policy, Procedure, Guide, Reference and General (the default).
+- `document_category`: every organization has the five defaults, seeded by a trigger on organization creation and backfilled for existing organizations. A category is a browse/filter label and grants no access. Members read only their organization's categories.
+- `shared_draft` gains `category_id`, `keywords` (at most 20 distinct entries of 1–50 characters) and `change_description` (≤ 2000 characters). They are nullable working fields so Save draft accepts an incomplete form; T3.2 validates them on Submit. Existing documents got their organization's default category.
+- `shared_submission` gains frozen copies of the same three fields, part of the immutable snapshot tuple.
+- `document_relationship` links two documents (`RELATED`, `REFERENCES`, `SUPERSEDES`) of the same organization; composite foreign keys make a cross-organization link impossible, and only the source document's author can add or remove a link. The API and screens for these fields are T3.2/T3.3.
 
 ## 4. Submitting
 
@@ -114,6 +126,7 @@ Target Readers are the per-document reader model planned to replace audience gro
   - at least one valid, enforceable audience is chosen.
 - A draft that is not ready returns 409 `DRAFT_NOT_READY`. Another open submission, or an already-submitted version, returns 409 `SUBMISSION_CONFLICT`.
 - `GET /submissions` lists the actor's own submissions. My Contributions uses it for status and history.
+- **Withdraw (T5.1, FR-DOC-06, migration 0029):** `POST /submissions/:id/withdraw` lets the author withdraw their own `PENDING_REVIEW` submission. It becomes `WITHDRAWN`, leaves every review queue and frees the document for a new submission; the draft is kept. Another member's or an unknown submission → 404 `RESOURCE_NOT_AVAILABLE`; a decided one → 409 `SUBMISSION_NOT_PENDING`; repeating a completed withdrawal returns it again (200). A trigger makes `WITHDRAWN` reachable only from `PENDING_REVIEW` and final; an RLS policy lets only the submitting author make that change.
 
 ## 5. Reviewer grants (Organization Admin)
 
@@ -190,6 +203,7 @@ Approval hands the exact snapshot to the Mainflow 3 indexing pipeline (migration
 | Invalid Target Readers on draft save | 400 `INVALID_TARGET_READERS` with `error.field` |
 | Invalid approved readers / readers on a reject / readers on a legacy submission | 400 `INVALID_READERS` (with `error.field`) / `INVALID_REQUEST` / `READERS_NOT_SUPPORTED` |
 | Approved readers wider than proposed | 409 `READERS_WIDENED` |
+| Withdrawing a submission that is no longer pending | 409 `SUBMISSION_NOT_PENDING` |
 | Request body fails schema validation | 400 `INVALID_REQUEST` ("The request is invalid.") |
 
 The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) is the target. Some current codes still differ: `SUBMISSION_CONFLICT` rather than `OPEN_RELEASE_CANDIDATE_EXISTS`, and 412 rather than 409 for a stale save.
@@ -197,13 +211,13 @@ The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) i
 ## 10. Audit events
 
 - **Drafts:** `SHARED_DRAFT_CREATED`, `SHARED_DRAFT_UPDATED`.
-- **Submissions and decisions:** `KNOWLEDGE_SUBMITTED`, `KNOWLEDGE_REVIEW_DECIDED` (with `selfApproved` when an Organization Admin decides their own submission).
+- **Submissions and decisions:** `KNOWLEDGE_SUBMITTED`, `KNOWLEDGE_SUBMISSION_WITHDRAWN`, `KNOWLEDGE_REVIEW_DECIDED` (with `selfApproved` when an Organization Admin decides their own submission).
 - **Grants:** `REVIEWER_GRANT_CREATED` (including scope), `REVIEWER_GRANT_DEACTIVATED`.
 - **Activation:** `KNOWLEDGE_INDEX_ACTIVATED`, written by the indexing pipeline.
 
 ## 11. Described by decisions, not yet implemented
 
-- **Withdraw / cancel a pending submission.** The Mainflow 3 contract allows the author or Organization Admin to cancel. The `WITHDRAWN` status exists, but no route sets it.
+- **Organization Admin cancel of a pending submission.** The Mainflow 3 contract also lets an Organization Admin cancel; only the author's withdrawal (T5.1) is implemented.
 - **Unpublish.** Decision 0011 lets Organization Admin unpublish explicitly. The database keeps a monotonic publication high-water mark for it, but there is no API route or UI.
 - **Retry a `FAILED` preparation** from the product. The pipeline state machine allows `FAILED → PREPARING`; there is no Flow 2 control for it.
 - **Notifications** to reviewers or authors. None are sent; queues and lists are pulled.
@@ -216,7 +230,7 @@ The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) i
 | **Library → New shared draft** | Choose the content source (PDF or Arden editor) and the title. |
 | **Private Notes → Contribute a copy** | Copy one saved note version into a shared draft. It opens in the status island. |
 | **Draft editor → Before you submit** | Owner line, "Who can read it" picker, derived scope and reviewer, Advanced tags, readiness, Save version, Submit. |
-| **Library → My Contributions** | The author's drafts with status, reviewer note and history. |
+| **Library → My Contributions** | The author's drafts with status, reviewer note and history; "Withdraw request" with an in-place confirmation while a submission awaits review. |
 | **Reviews** | Queue, frozen document and decision island with a pinned Approve/Reject footer. Confirmation happens in place. |
 | **Library** | Current publications the member may read, and the document reader. |
 | **Administration → Reviewer access** | Create a "One department" or "Whole organization" grant, list grants, revoke. |
@@ -238,12 +252,17 @@ The migration ledger is `apps/api/migrations`. Flow 2 relies on:
 | `0024_target_reader_selection.sql` | Target Readers: `reader_selection`, `selected_reader`, draft/submission selection columns, RLS and freeze triggers (operator-class). |
 | `0025_review_approved_readers.sql` | Approved readers on the decision and submission, publication `reader_selection_id`, restrictive read policy, reviewer reader directory (operator-class). |
 | `0026_review_list_authors.sql` | Reviewer-only submitter display names for the Reviews list (REV-02); 19 postgres-owned SECURITY DEFINER routines in total (operator-class). |
+| `0027_document_category_relationships.sql` | Categories (five defaults per organization), document keywords/change description, frozen submission copies, `document_relationship`; adds the `seed_document_categories` trigger, 20 postgres-owned SECURITY DEFINER routines in total (operator-class, trusted superuser/BYPASSRLS only). |
+| `0028_audience_to_target_readers.sql` | Forward-only backfill of current publications from legacy audiences to Target Readers, with the operator report function (operator-class, trusted superuser/BYPASSRLS only). |
+| `0029_withdraw_pending_submission.sql` | Author withdrawal policy and the `PENDING_REVIEW → WITHDRAWN` (final) trigger (operator-class). |
 
 Run migrations before starting an API build that depends on them. The 0022 code reads `reviewer_grant.scope` and `shared_submission.review_rule`. The 0024 code reads `shared_draft.draft_selection_id`, the submission selection columns and `publication_reader_selection_id()`.
 
 **Target Readers evidence (0024):** `src/target-readers/policy.test.ts` and the T1.3/T1.4 request tests in `src/app.test.ts` run without a database. `src/target-readers/target-readers.integration.test.ts` and the Target Readers step in `src/db/repository.integration.test.ts` need `ARDEN_TEST_DATABASE_URL`. On 2026-11-11 they ran on a disposable local PostgreSQL 17 (Docker) after a clean apply of 0001–0025 and the CI ownership handoff: full API suite 234 passed (only the real-Supabase auth test skipped), five consecutive runs. Migration 0024 has not been rehearsed on a staging copy.
 
 **Approved readers evidence (0025):** `src/target-readers/narrowing.test.ts`, the T2.1 cases in `src/knowledge/review-decision.test.ts` and the T2.1 request tests in `src/app.test.ts` run without a database. The T2.1 scenario in `src/db/repository.integration.test.ts` (widening refused with no decision/audit rows, narrowing, as-proposed copy, replay, legacy path, immutability, reviewer directory, activation and RLS/API reading) needs `ARDEN_TEST_DATABASE_URL`; it passed in the 2026-11-11 local PostgreSQL run above, and an end-to-end smoke through the running API (draft readers → submit → narrowed approval) passed. Not rehearsed on a staging copy. 0024/0025 add postgres-owned `SECURITY DEFINER` functions (18 in total); the operator repair script `deploy/release/security-definer-owner-repair.sql` still lists the reviewed 12 and will refuse until an operator reviews the new inventory.
+
+**Categories, backfill and withdrawal evidence (0027–0029):** `src/target-readers/target-readers.integration.test.ts` covers T3.1 (five defaults for an organization created by the runtime role, no pre-0027 document without a category, member-only category reads, keyword rules, cross-organization category/link refusal, author-only links), T1.2 (dry run, apply and re-report of organization, department, partial-department, one-member group and empty audiences with zero wider readers; operator-only function) and T5.1 (author-only withdrawal, replay, audit, 409 for an approved submission, final state, no reviewer withdrawal). `src/app.test.ts` and `packages/ui/tests/withdrawSubmission.test.ts` cover the route and the My Contributions button. On 2026-11-11 the full API suite passed on the disposable local PostgreSQL 17 after applying 0027–0029 (244 passed, Supabase auth skipped; an earlier run hit the existing 5-second timeout once in the activation scenario under parallel load). 0027–0029 were also applied to the local anonymized staging sample (3 organizations → 15 categories, all 12 drafts categorized; it has no current publications, so 0028 mapped nothing there). Not rehearsed on a real staging copy; the repair script still lists 12 functions.
 
 **Evidence obtained:**
 - API unit and request tests cover:
