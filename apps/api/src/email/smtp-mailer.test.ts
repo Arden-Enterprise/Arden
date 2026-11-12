@@ -90,10 +90,21 @@ describe("SMTP runtime configuration", () => {
 
     // HTML assertions
     expect(sentArgs.html).toContain("<!DOCTYPE html>");
+    expect(sentArgs.html).toContain('<td align="center"');
+    expect(sentArgs.html).toContain('src="cid:arden-invitation-logo@arden.local" alt="Arden"');
+    expect(sentArgs.html.indexOf('src="cid:arden-invitation-logo@arden.local"')).toBeLessThan(sentArgs.html.indexOf("MEMBERSHIP INVITATION"));
     expect(sentArgs.html).toContain("FPT Digital &lt;Security &amp; Innovation&gt;");
     expect(sentArgs.html).toContain('href="https://arden.example.com/invite/tok123_abc"');
     expect(sentArgs.html).toContain("Accept Invitation &rarr;");
     expect(sentArgs.html).toContain("Your personal notes stay private");
     expect(sentArgs.html).toContain(expiresAt.toUTCString());
+    expect(sentArgs.attachments).toEqual([expect.objectContaining({
+      filename: "arden-logo.png",
+      contentType: "image/png",
+      contentDisposition: "inline",
+      cid: "arden-invitation-logo@arden.local",
+    })]);
+    expect(Buffer.isBuffer(sentArgs.attachments[0].content)).toBe(true);
+    expect(sentArgs.attachments[0].content.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
   });
 });

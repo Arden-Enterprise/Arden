@@ -99,6 +99,10 @@ In the sample knowledge workflow, an unchanged working copy that was approved sh
 
 The selected **Flux Circle — Equal rhythm spacing (option 2, v15)** artwork is delivered in [the final logo package](brand/arden-logo-final/README.md), with vector/raster variants, selection metadata, checksums and the Sora licence. The artwork was selected on 15 October 2026. This export package does not replace the current application icons, favicons or installer assets; adopting it in shipped surfaces requires a separate implementation and visual verification.
 
+## Invitation email
+
+Requested by the user on 7 November 2026. The organization invitation email keeps the Living Archive charcoal, warm white, amber and jade palette used by Arden's web entry screens. Center the current web Arden mark above the message, then present the invitation heading, explanation, primary action, expiry, fallback link and privacy note in that order. Embed the mark in the email itself and provide `Arden` alternative text; do not rely on a remote image URL. Keep the plain-text alternative and make the HTML card fit narrow phones without horizontal scrolling. This changes the invitation email presentation, not its token or acceptance rules.
+
 ## Future graph surface (planned)
 
 The planned graph home keeps the network dominant within its workspace, with a restrained dot grid, Zoom/Fit controls and a Knowledge Pane for the selected item's identity, provenance, freshness, context and connections. Shared items use solid-outline circles, personal items dashed-outline circles and external items squares, with neutral fills, visible labels and a legend. Selection uses the violet accent with a visible halo. At narrow widths provide a selected-item summary and a navigable item list; canvas interaction needs a keyboard-accessible alternative. These are requirements for future work, not a claim that the preview ships a graph.
