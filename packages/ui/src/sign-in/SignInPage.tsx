@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { meetsAccountPasswordRequirements } from "@arden/domain";
 import type { Platform } from "../shared/types";
 import {
   beginGoogleSignIn,
@@ -10,6 +11,7 @@ import {
   type CurrentSession,
 } from "../shared/api-client";
 import { AuthLayout } from "./AuthLayout";
+import { NewPasswordField, accountPasswordRequirementMessage } from "./NewPasswordField";
 
 export type SignInMode = "sign-in" | "register" | "forgot-password" | "reset-password";
 
@@ -177,8 +179,8 @@ export function SignInPage({
       setNotice({ text: "Enter your name." });
       return;
     }
-    if ([...password].length < 8) {
-      setNotice({ text: "Password must be at least 8 characters long." });
+    if (!meetsAccountPasswordRequirements(password)) {
+      setNotice({ text: accountPasswordRequirementMessage });
       return;
     }
     setBusy("submit");
@@ -190,20 +192,23 @@ export function SignInPage({
         isSuccess: true,
       });
       setMode("sign-in");
+      setPassword("");
     } catch (cause) {
       if (cause instanceof ApiError && (cause.code === "ACCOUNT_ALREADY_EXISTS" || cause.status === 409)) {
         setNotice({ text: "An account with this email address already exists. Please sign in instead." });
         setMode("sign-in");
+        setPassword("");
       } else if (cause instanceof ApiError && (cause.code === "INVALID_EMAIL" || cause.message === "Enter a valid email address.")) {
         setNotice({ text: "Enter a valid email address." });
+      } else if (cause instanceof ApiError && cause.code === "ACCOUNT_SETUP_UNAVAILABLE") {
+        setNotice({ text: "Your password meets the listed requirements, but account setup could not be completed. Try a different password or sign in." });
       } else if (cause instanceof ApiError && cause.message) {
         setNotice({ text: cause.message });
       } else {
-        setNotice({ text: "Account setup could not be completed. Check the password requirements or try signing in." });
+        setNotice({ text: "Account setup could not be completed. Try again or sign in." });
       }
     } finally {
       setBusy(null);
-      setPassword("");
     }
   };
 
@@ -388,19 +393,7 @@ export function SignInPage({
                     required
                   />
                 </label>
-                <label>
-                  <span>Password</span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete="new-password"
-                    placeholder="Create a secure password"
-                    minLength={8}
-                    maxLength={1024}
-                    required
-                  />
-                </label>
+                <NewPasswordField value={password} onChange={setPassword} />
                 <button type="submit" className="auth-primary" disabled={busy !== null}>
                   {busy === "submit" ? "Creating account..." : "Create account"}
                 </button>

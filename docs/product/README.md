@@ -12,7 +12,7 @@ Each group document distinguishes current main, branch-only alternatives, observ
 
 | ID | Feature group and paths | Specification / coverage map | Known boundary at this inspection |
 | --- | --- | --- | --- |
-| F01 | Account registration, sign-in, recovery and sessions | [Identity and access](identity-and-access.md#f01-accounts-and-sessions) | API/UI slices exist; complete live identity acceptance not established here |
+| F01 | Account registration, sign-in, recovery and sessions | [Identity and access](identity-and-access.md#f01-accounts-and-sessions) | Local `feat/signup-password-guidance` branch adds three-rule account setup guidance; live identity acceptance remains open |
 | F02 | Organization setup, invitations and membership | [Identity and access](identity-and-access.md#f02-organizations-and-membership) | Implemented slices; lifecycle and integration evidence remain |
 | F03 | Owner-private notes | [Identity and access](identity-and-access.md#f03-private-notes) | API/UI slices exist; privacy/conflict/platform acceptance required |
 | F04 | Published audiences and reader access | [Identity and access](identity-and-access.md#f04-published-audiences) | Decision 0010/code/migration foundation; database rehearsal boundary |

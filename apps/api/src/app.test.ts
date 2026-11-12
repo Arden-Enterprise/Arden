@@ -203,10 +203,22 @@ describe("API auth and private draft routes", () => {
 
     const before = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
     expect(before.json().account).toEqual({ passwordSetupRequired: true });
+    for (const password of ["Abcdef!", "abcdefgh!", "Abcdefgh"]) {
+      const invalid = await app.inject({
+        method: "POST", url: "/api/v1/auth/password",
+        headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
+        payload: { password },
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json().error.code).toBe("INVALID_PASSWORD");
+      expect(invalid.json().error.message).toBe("Password must have at least 8 characters, one uppercase letter, and one special character.");
+    }
+    const stillPending = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
+    expect(stillPending.json().account).toEqual({ passwordSetupRequired: true });
     const updated = await app.inject({
       method: "POST", url: "/api/v1/auth/password",
       headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
-      payload: { password: "new-password" },
+      payload: { password: "A!" + "a".repeat(1023) },
     });
     expect(updated.statusCode).toBe(204);
     const after = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
@@ -218,14 +230,14 @@ describe("API auth and private draft routes", () => {
     const conflict = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "existing@example.test", password: "secure-password", fullName: "Existing User" },
+      payload: { email: "existing@example.test", password: "Secure-password1!", fullName: "Existing User" },
     });
     expect(conflict.statusCode).toBe(202);
     authProvider.signUpBehavior = "success";
     const signup = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "fresh@example.test", password: "secure-password", fullName: "New User" },
+      payload: { email: "fresh@example.test", password: "Secure-password1!", fullName: "New User" },
     });
     expect(signup.statusCode).toBe(202);
     expect(signup.json()).toEqual(conflict.json());
@@ -234,18 +246,19 @@ describe("API auth and private draft routes", () => {
     const rejected = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "weak@example.test", password: "12345678", fullName: "Weak User" },
+      payload: { email: "rejected@example.test", password: "Secure-password1!", fullName: "Rejected User" },
     });
     expect(rejected.statusCode).toBe(400);
     expect(rejected.json().error).toMatchObject({
       code: "ACCOUNT_SETUP_UNAVAILABLE",
+      message: "Account setup could not be completed. Try a different password or sign in.",
     });
     authProvider.signUpBehavior = "success";
 
     const invalidEmail = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "123@gmail", password: "secure-password", fullName: "Invalid Email User" },
+      payload: { email: "123@gmail", password: "Secure-password1!", fullName: "Invalid Email User" },
     });
     expect(invalidEmail.statusCode).toBe(400);
     expect(invalidEmail.json().error).toMatchObject({
@@ -377,15 +390,28 @@ describe("API auth and private draft routes", () => {
     expect((await reset("refresh-recovery")).statusCode).toBe(401);
   });
 
-  it("applies the eight-character minimum at sign-up without changing sign-in validation", async () => {
+  it("enforces the three account-creation requirements without changing sign-in validation", async () => {
     const headers = { origin: "http://localhost:5180" };
+    for (const password of ["Abcdef!", "abcdefgh!", "Abcdefgh"]) {
+      const signup = await app.inject({
+        method: "POST", url: "/api/v1/auth/sign-up", headers,
+        payload: { email: "owner@example.test", password, fullName: "Owner" },
+      });
+      expect(signup.statusCode).toBe(400);
+      expect(signup.json().error.code).toBe("INVALID_PASSWORD");
+      expect(signup.json().error.message).toBe("Password must have at least 8 characters, one uppercase letter, and one special character.");
+      expect(authProvider.lastSignUpCredentials).toBeNull();
+    }
     const signup = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up", headers,
-      payload: { email: "owner@example.test", password: "1234567", fullName: "Owner" },
+      payload: { email: "owner@example.test", password: "Abcdefg!", fullName: "Owner" },
     });
-    expect(signup.statusCode).toBe(400);
-    expect(signup.json().error.code).toBe("INVALID_PASSWORD");
-    expect(authProvider.lastSignUpCredentials).toBeNull();
+    expect(signup.statusCode).toBe(202);
+    const longSignup = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up", headers,
+      payload: { email: "long@example.test", password: "A!" + "a".repeat(1023), fullName: "Long Password" },
+    });
+    expect(longSignup.statusCode).toBe(202);
     const signin = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers, payload: { email: "owner@example.test", password: "" },
     });
@@ -689,11 +715,11 @@ describe("API auth and private draft routes", () => {
   it("keeps invitation account setup non-enumerating and never starts an authenticated session", async () => {
     const existing = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up", headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", password: "synthetic-password", fullName: "Owner" },
+      payload: { email: "owner@example.test", password: "Synthetic-password1!", fullName: "Owner" },
     });
     const newAccount = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up", headers: { origin: "http://localhost:5180" },
-      payload: { email: "new.member@example.test", password: "synthetic-password", fullName: "New Member" },
+      payload: { email: "new.member@example.test", password: "Synthetic-password1!", fullName: "New Member" },
     });
     expect(existing.statusCode).toBe(202);
     expect(newAccount.statusCode).toBe(202);
@@ -708,7 +734,7 @@ describe("API auth and private draft routes", () => {
       headers: { origin: "http://localhost:5180" },
       payload: {
         email: "invited.member@example.test",
-        password: "synthetic-password",
+        password: "Synthetic-password1!",
         fullName: "Invited Member",
         redirectTo: "http://localhost:5180/invite/test-token-123",
       },
@@ -721,7 +747,7 @@ describe("API auth and private draft routes", () => {
       headers: { origin: "http://localhost:5180" },
       payload: {
         email: "invited2@example.test",
-        password: "synthetic-password",
+        password: "Synthetic-password1!",
         fullName: "Invited Member 2",
         redirectTo: "https://evil.site/phish",
       },
@@ -738,7 +764,7 @@ describe("API auth and private draft routes", () => {
       headers: { origin: "http://localhost:5180" },
       payload: {
         email: "invited.cookie@example.test",
-        password: "synthetic-password",
+        password: "Synthetic-password1!",
         fullName: "Cookie Member",
         redirectTo: `http://localhost:5180/invite/${validToken}`,
       },

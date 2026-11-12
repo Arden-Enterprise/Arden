@@ -102,6 +102,10 @@ The selected **Flux Circle — Equal rhythm spacing (option 2, v15)** artwork is
 
 The planned graph home keeps the network dominant within its workspace, with a restrained dot grid, Zoom/Fit controls and a Knowledge Pane for the selected item's identity, provenance, freshness, context and connections. Shared items use solid-outline circles, personal items dashed-outline circles and external items squares, with neutral fills, visible labels and a legend. Selection uses the violet accent with a visible halo. At narrow widths provide a selected-item summary and a navigable item list; canvas interaction needs a keyboard-accessible alternative. These are requirements for future work, not a claim that the preview ships a graph.
 
+## Account-entry password guidance
+
+Requested and refined by the user on 7 November 2026. New-account password entry on registration, invitation and Google setup keeps the Living Archive authentication palette. Show exactly three live, text-labelled checks: at least 8 characters, at least one uppercase letter and at least one special character. These are required for new-account setup at both the form and API. Use jade for met, coral for unmet and a neutral state before typing. The Show/Hide control works by keyboard and does not submit the form. Keep technical input limits out of the checklist. Account-setup rejection stays non-enumerating and leaves the entry available to revise.
+
 ## User-facing copy
 
 Approved by the requesting maintainer on 30 October 2026 (ARD-74). Prefer short task labels and statuses over explanations of implementation. Delete copy that repeats a title, field, action or status; do not replace it with longer prose or a tooltip. Avoid server/API, snapshot, grant, indexing, hash and schema vocabulary in routine user-facing text. Internal API/schema identifiers remain unchanged.
