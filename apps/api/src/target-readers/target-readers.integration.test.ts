@@ -568,7 +568,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     it("returns a conflict for an approved submission and blocks a direct runtime withdrawal by others", async () => {
       if (!repository) throw new Error("Test database is unavailable");
       const approved = await submitLegacyDraft("Approved fixture");
-      await asSuperuser((client) => client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'PREPARING'
+      await asSuperuser((client) => client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'PREPARING',
+        approved_selection_id = proposed_selection_id
         WHERE submission_id = $1`, [approved.submissionId]));
       await expect(repository.withdrawKnowledgeSubmission(ids.author, ids.orgA, approved.submissionId, "flow2-withdraw"))
         .resolves.toEqual({ kind: "conflict" });
