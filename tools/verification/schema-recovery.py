@@ -107,7 +107,7 @@ def main():
         except subprocess.CalledProcessError:
             assert snapshot() == before_reviewer_upgrade, "Failed reviewer upgrade changed baseline"
         sql(forward + "COMMIT;")
-        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"26"
+        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"27"
         assert sql("SELECT name FROM arden.knowledge_base;").strip() == b"Preserve on reviewer upgrade"
         assert sql("SELECT count(*) FROM arden.organization;").strip() == b"1"
         assert sql("SELECT column_default FROM information_schema.columns "

@@ -1,6 +1,6 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument } from "@arden/domain";
+import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
@@ -12,6 +12,7 @@ import type { AskArdenClient } from "./answers/ai-client.js";
 import { citationPage } from "./answers/citation-page.js";
 import { citationMatchesManifest } from "./answers/contracts.js";
 import { canRead, readerModes, type ReaderActor, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
+import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -71,6 +72,7 @@ export function buildApp(dependencies: AppDependencies) {
   const requestActor = (request: FastifyRequest, reply: FastifyReply) =>
     requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, dependencies.testActor);
   registerAudienceGroupRoutes(app, dependencies.repository.audienceGroups, requestActor, uuidPattern);
+  registerKnowledgeCatalogRoutes(app, dependencies.repository.knowledgeCatalog, requestActor, uuidPattern);
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
@@ -1102,8 +1104,9 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.patch<{ Params: { organizationId: string; draftId: string }; Body: Omit<SharedDraftPatch, "audienceRoleIds"> & { audienceIds?: string[] } }>(
+  app.patch<{ Params: { organizationId: string; draftId: string }; Body: Omit<SharedDraftPatch, "audienceRoleIds"> & { audienceIds?: string[]; pdfBase64?: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId", {
+      bodyLimit: maxPdfBase64Length + maxBodyBytes,
       schema: {
         params: { type: "object", required: ["organizationId", "draftId"], properties: {
           organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern },
@@ -1112,6 +1115,7 @@ export function buildApp(dependencies: AppDependencies) {
         body: { type: "object", additionalProperties: false, minProperties: 1, properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           body: { type: "string", maxLength: maxBodyBytes },
+          pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
           classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
           responsibleDepartmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
           targetScopeType: { enum: ["ORGANIZATION", "DEPARTMENT", null] },
@@ -1120,6 +1124,7 @@ export function buildApp(dependencies: AppDependencies) {
           audienceIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
           // Shape only; counts, duplicates and membership/department state are TargetReaderPolicy field errors.
           targetReaders: targetReadersSchema,
+          management: managementSchema,
         } },
       },
     }, async (request, reply) => {
@@ -1128,7 +1133,7 @@ export function buildApp(dependencies: AppDependencies) {
       const expectedVersion = parseEtag(request.headers["if-match"]);
       if (expectedVersion === "missing") return reply.code(428).send(safeError("PRECONDITION_REQUIRED", "Reload the draft before saving.", request.id));
       if (expectedVersion === null) return reply.code(400).send(safeError("INVALID_REQUEST", "The version precondition is invalid.", request.id));
-      const { audienceIds, ...patch } = request.body;
+      const { audienceIds, pdfBase64, ...patch } = request.body;
       if ((patch.title !== undefined && (!patch.title.trim() || !isValidText(patch.title, 800, maxTitleCodePoints)))
         || (patch.body !== undefined && !isValidText(patch.body, maxBodyBytes, maxBodyBytes))
         || (patch.teamTag !== undefined && patch.teamTag !== null && !patch.teamTag.trim())
@@ -1146,6 +1151,17 @@ export function buildApp(dependencies: AppDependencies) {
         }
         if (existing.mimeType === "application/pdf" && patch.body !== undefined) {
           return reply.code(400).send(safeError("INVALID_REQUEST", "Uploaded PDFs cannot be edited as text.", request.id));
+        }
+        if (pdfBase64 !== undefined && (existing.mimeType !== "application/pdf" || patch.body !== undefined)) {
+          return reply.code(400).send(safeError("INVALID_REQUEST", "Replace a PDF with another PDF.", request.id));
+        }
+        if (pdfBase64 !== undefined) {
+          const bytes = Buffer.from(pdfBase64, "base64");
+          if (bytes.length === 0 || bytes.length > maxPdfBytes || bytes.toString("base64") !== pdfBase64
+            || !bytes.subarray(0, 5).equals(Buffer.from("%PDF-")) || !bytes.subarray(-1024).toString("latin1").includes("%%EOF")) {
+            return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
+          }
+          stored = await dependencies.storage.writePdf(bytes);
         }
         const semanticBody = patch.body === undefined ? undefined : normalizeSharedDraftBody(patch.body);
         if (semanticBody === null) {
@@ -1206,14 +1222,20 @@ export function buildApp(dependencies: AppDependencies) {
         const currentDraft = await dependencies.repository.getKnowledgeDraft(context.userId,
           request.params.organizationId, request.params.draftId);
         if (currentDraft && currentDraft.currentVersion === expectedVersion) {
-          await readKnowledgeContent(dependencies.storage, currentDraft.sourceUri, currentDraft.contentHash, currentDraft.mimeType);
+          const content = await readKnowledgeContent(dependencies.storage, currentDraft.sourceUri, currentDraft.contentHash, currentDraft.mimeType);
+          if (currentDraft.mimeType === "text/plain") {
+            const parsed = parseSemanticDocument(content.body);
+            if (parsed.ok ? !semanticDocumentHasText(parsed.document) : !content.body.trim()) {
+              return reply.code(409).send(safeError("DRAFT_NOT_READY", "Add document content before submitting.", request.id));
+            }
+          }
         }
         const result = await dependencies.repository.submitKnowledgeDraft(context.userId,
           request.params.organizationId, request.params.draftId, expectedVersion,
           request.headers["idempotency-key"] as string, request.id);
         if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
         if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT", "Reload this draft and its review status.", request.id));
-        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Choose who can read this draft and save it before submitting. You need an active primary department; ask an Org Admin if you have none.", request.id));
+        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Complete document details and readers, then save before submitting.", request.id));
         reply.header("Cache-Control", "no-store");
         return reply.code(result.kind === "submitted" ? 201 : 200).send(representSubmission(result.submission));
       } catch (error) {
@@ -1591,6 +1613,7 @@ export function buildApp(dependencies: AppDependencies) {
         }
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
+          documentCode: publication.documentCode, management: publication.management,
           classification: publication.classification,
           responsibleDepartmentId: publication.responsibleDepartmentId,
           responsibleDepartmentName: publication.responsibleDepartmentName,
@@ -1938,6 +1961,7 @@ async function readKnowledgeContent(storage: PrivateContentStorage, sourceUri: s
 
 function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
   return {
+    documentCode: draft.documentCode, management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
     id: draft.id,
     organizationId: draft.organizationId,
     title: draft.title,
@@ -1964,6 +1988,7 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
 
 function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
   return {
+    documentCode: draft.documentCode, management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
     id: draft.id,
     organizationId: draft.organizationId,
     title: draft.title,
@@ -1987,6 +2012,7 @@ function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
 
 function representSubmission(submission: SharedKnowledgeSubmission) {
   return {
+    documentCode: submission.documentCode, management: submission.management,
     id: submission.id,
     draftId: submission.draftId,
     snapshotVersionId: submission.snapshotVersionId,

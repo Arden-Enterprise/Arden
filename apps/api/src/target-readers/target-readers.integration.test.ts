@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository } from "../db/repository.js";
+import { prepareKnowledgeFixture } from "../db/knowledge-fixture.test-support.js";
 import { canRead } from "./policy.js";
 
 // Flow 2 T1.1/T1.3/T1.4 against real PostgreSQL. This file never approves a submission, so it creates
@@ -148,6 +149,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
             (SELECT shared_draft_id FROM shared_draft WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
           await client.query("DELETE FROM shared_draft_audience WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM shared_draft WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM knowledge_topic WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM selected_reader WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM reader_selection WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM audience WHERE organization_id = ANY($1::uuid[])", [orgs]);
@@ -270,6 +272,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(created.kind).toBe("created");
       if (created.kind !== "created") return;
       const draftId = created.draft.id;
+      await prepareKnowledgeFixture(pool!, ids.orgA, draftId, [ids.authorM, ids.engineerM], false);
       const save = (version: number, targetReaders: Parameters<ArdenRepository["updateKnowledgeDraft"]>[4]["targetReaders"]) =>
         repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, version, { targetReaders }, null, "readers-save");
 

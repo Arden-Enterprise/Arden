@@ -22,7 +22,7 @@ Each group document distinguishes current main, branch-only alternatives, observ
 | F08 | Canonical document versions and import | [Knowledge lifecycle](knowledge-lifecycle.md#f08-content-versions-and-import) | Semantic Document contract is branch-only; import breadth not certified |
 | F09 | Immutable submission and review decisions | [Knowledge lifecycle](knowledge-lifecycle.md#f09-submission-and-review) | Material main/branch contract conflict G1/G3 |
 | F10 | Publication, activation and withdrawal | [Knowledge lifecycle](knowledge-lifecycle.md#f10-publication-and-activation) | Main/branch activation contract conflict G1 |
-| F11 | Published library and search | [Graph, AI and work](graph-ai-and-work.md#f11-library-and-search) | Published list/detail exist; full search/index acceptance not established |
+| F11 | Published library and search | [Graph, AI and work](graph-ai-and-work.md#f11-library-and-search) | KM-v1 catalog/metadata/Library refinement accepted 12 November; local implementation/evidence and separate rollout boundary in owning spec |
 | F12 | Graph navigation, selected-item details and context | [Graph, AI and work](graph-ai-and-work.md#f12-graph-and-context) | Planned; ARD-50 records requested UI and acceptance |
 | F13 | Permission-aware retrieval, answers and citations | [Graph, AI and work](graph-ai-and-work.md#f13-grounded-agent) | Separate AI source exists; core contract/integration conflict G1/G2 |
 | F14 | Permission-aware conversation history | [Graph, AI and work](graph-ai-and-work.md#f14-conversation-history) | Planned in ARD-59; no integrated completion established |

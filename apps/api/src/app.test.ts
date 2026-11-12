@@ -1142,6 +1142,35 @@ describe("API auth and private draft routes", () => {
     expect(semanticDocumentText((await app.inject({ method: "GET", url, headers })).json().body)).toBe("v2");
   });
 
+  it("replaces a PDF under the same draft identity and rejects stale, invalid and other-author writes", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const other = await desktopSession(app, "manager@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const headers = { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' };
+    const original = Buffer.from("%PDF-1.4\noriginal\n%%EOF\n").toString("base64");
+    const replacement = Buffer.from("%PDF-1.4\nreplacement\n%%EOF\n").toString("base64");
+    expect((await app.inject({ method: "POST", url: `${root}/pdf`, headers: { ...headers, "idempotency-key": createKey },
+      payload: { title: "Versioned PDF", pdfBase64: original } })).statusCode).toBe(201);
+    const url = `${root}/${sharedDraftId}`;
+    expect((await app.inject({ method: "PATCH", url, headers: { ...headers, cookie: other }, payload: { pdfBase64: replacement } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PATCH", url, headers, payload: { pdfBase64: Buffer.from("not a PDF").toString("base64") } })).statusCode).toBe(400);
+    const updated = await app.inject({ method: "PATCH", url, headers, payload: { pdfBase64: replacement } });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ id: sharedDraftId, pdfBase64: replacement, currentVersion: { version: 2, mimeType: "application/pdf" } });
+    expect((await app.inject({ method: "PATCH", url, headers, payload: { pdfBase64: original } })).statusCode).toBe(412);
+    expect((await app.inject({ method: "GET", url, headers: { cookie: owner } })).json().pdfBase64).toBe(replacement);
+  });
+
+  it("keeps an empty editor draft saveable but refuses to submit it as knowledge", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const headers = { cookie: owner, origin: "http://localhost:5180", "idempotency-key": createKey };
+    expect((await app.inject({ method: "POST", url: `${root}/new`, headers, payload: { title: "Incomplete", body: "   " } })).statusCode).toBe(201);
+    const result = await app.inject({ method: "POST", url: `${root}/${sharedDraftId}/submit`, headers: { ...headers, "if-match": '"1"' } });
+    expect(result.statusCode).toBe(409);
+    expect(result.json().error.message).toBe("Add document content before submitting.");
+  });
+
   describe("Target Readers on draft save (T1.4)", () => {
     const root = `/api/v1/organizations/${organizationId}/knowledge`;
     async function createDraft() {

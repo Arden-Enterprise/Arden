@@ -1,30 +1,31 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument } from "@arden/domain";
+import { emptyKnowledgeMetadata, metadataSubmissionErrors, applicabilityStatus, plainTextToSemanticDocument, serializeSemanticDocument, parseSemanticDocument, semanticDocumentHasText,
+  type KnowledgeMetadata } from "@arden/domain";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { SearchField } from "../shared/SearchField";
 import { KnowledgeHeading, KnowledgeNotice } from "./KnowledgePrimitives";
 import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
-import { validAudienceSelection } from "./audience-options";
 import {
   ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listKnowledgeReviewBoard,
   listKnowledgeDrafts, listKnowledgeSubmissions, listPublishedKnowledge, loadKnowledgeDraft,
-  loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, saveKnowledgeDraft,
+  loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, saveKnowledgeDraft, loadKnowledgeCatalog, replaceKnowledgePdf,
   submitKnowledgeDraft, type AssignedKnowledgeReview, type DecidedKnowledgeReview, type KnowledgeDraftRecord,
   type KnowledgeDraftSummary, type KnowledgeOptions, type KnowledgeReviewDetail,
-  type KnowledgeSubmission, type PublishedKnowledge,
+  type KnowledgeSubmission, type PublishedKnowledge, type KnowledgeCatalog, type TargetReaders,
 } from "../shared/api-client";
-import type { KnowledgeClassification } from "../shared/knowledge-classification";
 import type { Platform } from "../shared/types";
 import { PdfDocument, PdfViewer, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
 import { ReviewList, initialsOf } from "./ReviewList";
 import { libraryDateLabel, libraryTitleParts } from "./libraryDisplay";
-import { ReaderPicker } from "./ReaderPicker";
-import { addReader, onlyGroupReaders, ownerDepartment, readerChoices, removeReader, scopeForReaders } from "./readerSelection";
+import { ownerDepartment } from "./readerSelection";
+import { KnowledgeCatalogEditor } from "./KnowledgeCatalogEditor";
+import { KnowledgeLibraryBrowse, emptyLibraryFilters } from "./KnowledgeLibraryBrowse";
+import { KnowledgeMetadataFields, editableKnowledgeMetadata, targetReadersLabel } from "./KnowledgeMetadataFields";
 import { ActionToast } from "../shared/ActionToast";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
-import { KnowledgeDocumentDetail, readerDocumentStatusAt } from "./KnowledgeDocumentDetail";
+import { KnowledgeDocumentDetail } from "./KnowledgeDocumentDetail";
 import type { KnowledgeNavigationTarget } from "./knowledgeCitation";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
@@ -48,7 +49,7 @@ type Props = ContextControlProps & {
 };
 
 type EditorValues = Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" |
-  "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">;
+  "targetScopeType" | "teamTag" | "projectTag" | "audienceIds"> & { management: KnowledgeMetadata; targetReaders: TargetReaders | null };
 
 function valuesFromDraft(draft: KnowledgeDraftRecord): EditorValues {
   return {
@@ -56,34 +57,12 @@ function valuesFromDraft(draft: KnowledgeDraftRecord): EditorValues {
     responsibleDepartmentId: draft.responsibleDepartmentId,
     targetScopeType: draft.targetScopeType, teamTag: draft.teamTag,
     projectTag: draft.projectTag, audienceIds: [...draft.audienceIds],
+    management: editableKnowledgeMetadata(draft.management ?? emptyKnowledgeMetadata()), targetReaders: draft.targetReaders ?? null,
   };
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Couldn’t complete this action.";
-}
-
-function semanticSummary(body: string | undefined): string | null {
-  if (!body) return null;
-  const parsed = parseSemanticDocument(body);
-  if (!parsed.ok) return null;
-  const text: string[] = [];
-  const visit = (blocks: typeof parsed.document.blocks) => {
-    for (const block of blocks) {
-      if (block.type === "table") {
-        for (const row of block.content) for (const cell of row.cells) {
-          text.push(cell.flatMap((item) => item.type === "text" ? item.text : item.content.map((part) => part.text).join(" ")).join(" "));
-        }
-      } else if (block.type !== "asset") {
-        text.push(block.content.flatMap((item) => item.type === "text" ? item.text : item.content.map((part) => part.text).join(" ")).join(" "));
-      }
-      visit(block.children);
-    }
-  };
-  visit(parsed.document.blocks);
-  const summary = text.join(" ").replace(/\s+/g, " ").trim();
-  if (!summary) return null;
-  return summary.length <= 280 ? summary : `${summary.slice(0, 277).trimEnd()}...`;
 }
 
 export function ServerKnowledgeFeaturePage({ platform, organizationId, organizationName,
@@ -94,9 +73,13 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [reviews, setReviews] = useState<AssignedKnowledgeReview[]>([]);
   const [decidedReviews, setDecidedReviews] = useState<DecidedKnowledgeReview[]>([]);
   const [options, setOptions] = useState<KnowledgeOptions | null>(null);
+  const [catalog, setCatalog] = useState<KnowledgeCatalog | null>(null);
+  const [catalogError, setCatalogError] = useState("");
+  const [managingCatalog, setManagingCatalog] = useState(false);
+  const [libraryFilters, setLibraryFilters] = useState(emptyLibraryFilters);
   const [draft, setDraft] = useState<KnowledgeDraftRecord | null>(null);
   const [editor, setEditor] = useState<EditorValues | null>(null);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [replacementPdf, setReplacementPdf] = useState<File | null>(null);
   const [review, setReview] = useState<KnowledgeReviewDetail | null>(null);
   const [document, setDocument] = useState<PublishedKnowledge | null>(null);
   const [openedCitation, setOpenedCitation] = useState<KnowledgeNavigationTarget | null>(null);
@@ -110,7 +93,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [dragActive, setDragActive] = useState(false);
   const [createMode, setCreateMode] = useState<"text" | "pdf">("text");
   const [screen, setScreen] = useState<"library" | "create" | "editor" | "document">("library");
-  const [libraryTab, setLibraryTab] = useState<"drafts" | "published">("published");
+  const [libraryTab, setLibraryTab] = useState<"drafts" | "published" | "discover">("discover");
   const [selectedContributionId, setSelectedContributionId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
@@ -134,14 +117,17 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const pendingNextReview = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
-    const [nextDrafts, nextSubmissions, nextPublished, nextBoard, nextOptions] = await Promise.all([
+    const [nextDrafts, nextSubmissions, nextPublished, nextBoard, nextOptions, nextCatalog] = await Promise.all([
       listKnowledgeDrafts(platform, organizationId), listKnowledgeSubmissions(platform, organizationId),
       listPublishedKnowledge(platform, organizationId), listKnowledgeReviewBoard(platform, organizationId),
       loadKnowledgeOptions(platform, organizationId),
+      loadKnowledgeCatalog(platform, organizationId).then(value => { setCatalogError(""); return value; })
+        .catch(() => { setCatalogError("Catalog is unavailable. You can still browse documents."); return null; }),
     ]);
     const nextReviews = nextBoard.items;
     setDrafts(nextDrafts); setSubmissions(nextSubmissions); setPublished(nextPublished);
     setReviews(nextReviews); setDecidedReviews(nextBoard.decided); setOptions(nextOptions);
+    setCatalog(nextCatalog);
     onAssignedReviewCount?.(nextReviews.length);
   }, [platform, organizationId, onAssignedReviewCount]);
 
@@ -188,6 +174,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   };
 
   const openDraft = (id: string) => void run(async () => {
+    setReplacementPdf(null);
     const loaded = await loadKnowledgeDraft(platform, organizationId, id);
     submitRequestKey.current = null;
     setDraft(loaded); setEditor(valuesFromDraft(loaded)); setScreen("editor");
@@ -217,11 +204,14 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     if (!editor.title.trim()) { setError("The title cannot be empty."); return; }
     // With a derived owner the client sends no department; the server applies the author's primary department.
     const values = options?.primaryDepartmentId !== undefined ? { ...editor, responsibleDepartmentId: null } : editor;
-    const { body: _body, ...metadata } = values;
-    const saved = await saveKnowledgeDraft(platform, organizationId, draft.id, draft.currentVersion.version,
-      draft.currentVersion.mimeType === "application/pdf" ? metadata : values);
+    const { body, targetReaders, ...metadata } = values;
+    const patch = { ...metadata, ...(targetReaders ? { targetReaders } : {}), ...(draft.currentVersion.mimeType === "application/pdf" ? {} : { body }) };
+    const saved = replacementPdf
+      ? await replaceKnowledgePdf(platform, organizationId, draft.id, draft.currentVersion.version, replacementPdf, patch)
+      : await saveKnowledgeDraft(platform, organizationId, draft.id, draft.currentVersion.version, patch);
     submitRequestKey.current = null;
     setDraft(saved); setEditor(valuesFromDraft(saved));
+    setReplacementPdf(null);
     await refresh(); setMessage("Draft saved");
   });
 
@@ -279,9 +269,6 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     return () => { present = false; };
   }, [busy, review, reviews, platform, organizationId]);
 
-  // Advanced tags start open only for a draft that already uses them; afterwards the author controls it.
-  useEffect(() => { setAdvancedOpen(Boolean(draft?.teamTag || draft?.projectTag)); }, [draft?.id]);
-
   const openPublished = (id: string) => void run(async () => {
     const loaded = await loadPublishedKnowledge(platform, organizationId, id);
     setOpenedCitation(null); setDocument(loaded); setScreen("document");
@@ -316,7 +303,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     const previous = latestByDraft.get(submission.draftId);
     if (!previous || Date.parse(submission.submittedAt) > Date.parse(previous.submittedAt)) latestByDraft.set(submission.draftId, submission);
   }
-  const dirty = Boolean(draft && editor && JSON.stringify(editor) !== JSON.stringify(valuesFromDraft(draft)));
+  const dirty = Boolean(replacementPdf || (draft && editor && JSON.stringify(editor) !== JSON.stringify(valuesFromDraft(draft))));
   const creationDirty = Boolean(newTitle || newFile || newBody !== newBodyBaseline.current);
   const guardDiscard = (changed: boolean, action: () => void) => {
     if (busy) return;
@@ -330,6 +317,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const cancelCreation = () => guardDiscard(creationDirty, () => { resetCreation(); setError(""); setScreen("library"); });
   const cancelEditing = () => guardDiscard(dirty, () => {
     if (draft) setEditor(valuesFromDraft(draft));
+    setReplacementPdf(null);
     setError(""); setLibraryTab("drafts"); setScreen("library"); void refresh();
   });
   const latest = draft ? latestByDraft.get(draft.id) : undefined;
@@ -341,21 +329,26 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const { derived: ownerDerived, departmentId: ownerDepartmentId } = ownerDepartment(options?.primaryDepartmentId, editor?.responsibleDepartmentId ?? null);
   // A draft saved before decision 0014 (or before the author changed department) must be saved once to adopt it.
   const ownerOutOfSync = Boolean(ownerDerived && ownerDepartmentId && draft && draft.responsibleDepartmentId !== ownerDepartmentId);
-  const ready = Boolean(ownerDepartmentId && editor?.targetScopeType
-    && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType));
+  const metadataErrors = editor ? metadataSubmissionErrors(editor.management, draft?.hasPublishedVersion ?? false) : [];
+  const versionAlreadyPublished = Boolean(draft && editor && submissions.some(item => item.draftId === draft.id
+    && ["ACTIVE", "SUPERSEDED"].includes(item.publicationState) && item.management?.version === editor.management.version));
+  const readersReady = Boolean(editor?.targetReaders && (editor.targetReaders.mode === "ORGANIZATION"
+    || (editor.targetReaders.mode === "DEPARTMENT" && editor.targetReaders.departmentId)
+    || (editor.targetReaders.mode === "SELECTED_MEMBERS" && editor.targetReaders.memberIds.length >= 2)));
+  const parsedEditor = editor ? parseSemanticDocument(editor.body) : null;
+  const hasContent = Boolean(draft?.currentVersion.mimeType === "application/pdf" || (parsedEditor?.ok ? semanticDocumentHasText(parsedEditor.document) : editor?.body.trim()));
+  const ready = Boolean(ownerDepartmentId && editor?.title.trim() && hasContent && readersReady && !metadataErrors.length && !versionAlreadyPublished
+    && catalog?.topics.some(topic => topic.id === editor.management.topicId && topic.status === "ACTIVE"));
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
   const publicationDepartmentName = (item: PublishedKnowledge) =>
     item.responsibleDepartmentName?.trim() || departmentName(item.responsibleDepartmentId);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredDrafts = drafts.filter((item) => item.title.toLocaleLowerCase().includes(normalizedQuery));
-  const filteredPublished = published.filter((item) => [item.title, item.documentCode ?? "", item.summary ?? "",
-    publicationDepartmentName(item), item.classification]
-    .some((value) => value.toLocaleLowerCase().includes(normalizedQuery)));
   const submitHint = draft?.hasPendingSubmission ? "Awaiting review"
     : dirty ? "Save your changes before submitting."
-      : !ready ? "Complete document details."
-        : snapshotAlreadySubmitted ? "Already submitted"
-          : `Version ${draft?.currentVersion.version ?? 1} is ready to submit.`;
+      : versionAlreadyPublished ? "Enter a new version."
+        : !ready ? "Complete document details."
+        : snapshotAlreadySubmitted ? "Already submitted" : "Ready to submit";
   const chooseFile = (file: File | null) => { setNewFile(file); setNewFileError(file ? validatePdfFile(file) : ""); createRequestKey.current = null; };
 
   const audienceNames = (ids?: string[] | null) => (Array.isArray(ids) ? ids : []).map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? "Unavailable group").join(", ") || "None";
@@ -379,7 +372,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
   });
   const librarySearch = view === "knowledge" && screen === "library"
-    ? <SearchField value={query} onChange={setQuery} placeholder={libraryTab === "drafts" ? "Filter my contributions…" : "Search title, code, owner or summary…"} /> : undefined;
+    ? <SearchField value={query} onChange={setQuery} placeholder={libraryTab === "drafts" ? "Filter my contributions…" : "Search documents…"} /> : undefined;
   const breadcrumb = view === "review-queue" ? `${organizationName} / Knowledge / Reviews`
     : screen === "library" ? `${organizationName} / Knowledge / ${libraryTab === "drafts" ? "My Contributions" : "Library"}`
       : screen === "create" ? `${organizationName} / Knowledge / New draft`
@@ -441,8 +434,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <section aria-labelledby="review-properties-title">
                 <h2 id="review-properties-title" className="review-properties-label">Properties</h2>
                 <ul className="review-properties">
-                  <li><Icon name="branch" size={13} /><span>{activeReview?.versionNo
-                    ? `Version ${activeReview.versionNo}${activeReview.versionNo > 1 ? ` · replaces v${activeReview.versionNo - 1}` : " · new document"}`
+                  <li><Icon name="branch" size={13} /><span>{review.management?.version
+                    ? `Version ${review.management.version}${review.management.releaseKind === "NEW" ? " · new document" : review.management.releaseKind === "UPDATED" ? " · update" : ""}`
                     : "Submitted version"}</span></li>
                   <li>{activeReview?.authorName
                     ? <><span className="review-row-avatar" aria-hidden="true">{initialsOf(activeReview.authorName)}</span><span>{activeReview.authorName}</span></>
@@ -454,9 +447,19 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                 <h3 id="review-frozen-title" className="review-section-label">SUBMITTED DETAILS</h3>
                 <dl className="review-frozen">
                   <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
-                  <div><dt>Readers</dt><dd title={audienceNames(review.audienceIds)}>{audienceNames(review.audienceIds)}</dd></div>
-                  <div><dt>Within</dt><dd>{review.targetScopeType === "DEPARTMENT" ? departmentName(review.targetDepartmentId ?? review.responsibleDepartmentId) : "Across departments"}</dd></div>
-                  <div><dt>Team / project</dt><dd title={`${review.teamTag || "All teams"} · ${review.projectTag || "All projects"}`}>{review.teamTag || "All teams"} · {review.projectTag || "All projects"}</dd></div>
+                  <div><dt>Readers</dt><dd>{review.proposedTargetReaders ? targetReadersLabel(review.proposedTargetReaders, departmentName) : audienceNames(review.audienceIds)}</dd></div>
+                  {review.management ? <>
+                    <div><dt>Document code</dt><dd>{review.documentCode ?? "—"}</dd></div>
+                    <div><dt>Type</dt><dd>{review.management.type ?? "—"}</dd></div>
+                    <div><dt>Topic</dt><dd>{review.management.topicName ?? "—"}</dd></div>
+                    <div><dt>Version</dt><dd>{review.management.version}</dd></div>
+                    <div><dt>Effective Date</dt><dd>{review.management.effectiveDate ?? "—"}</dd></div>
+                    {review.management.expirationDate && <div><dt>Expiration Date</dt><dd>{review.management.expirationDate}</dd></div>}
+                    {review.management.changeNote && <div><dt>Change Note</dt><dd>{review.management.changeNote}</dd></div>}
+                  </> : <>
+                    <div><dt>Within</dt><dd>{review.targetScopeType === "DEPARTMENT" ? departmentName(review.targetDepartmentId ?? review.responsibleDepartmentId) : "Across departments"}</dd></div>
+                    <div><dt>Team / project</dt><dd>{review.teamTag || "All teams"} · {review.projectTag || "All projects"}</dd></div>
+                  </>}
                 </dl>
               </section>
               {activeReview?.approvalBlocked && <p className="island-note is-warning review-blocked-note" role="note"><Icon name="warning" size={14} /><span>Reader selection is no longer valid. You can still reject.</span></p>}
@@ -499,7 +502,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <label className={createMode === "text" ? "is-selected" : ""}><input type="radio" name="knowledge-create-mode" checked={createMode === "text"} onChange={() => { setCreateMode("text"); createRequestKey.current = null; }} /><span className="island-tile" aria-hidden="true"><Icon name="document" size={16} /></span><span><strong>Write a document</strong></span></label>
           </fieldset>
           <div className="knowledge-create-fields">
-            <label className="island-field">Title<input id="knowledge-new-title" maxLength={160} value={newTitle} disabled={busy} aria-invalid={Boolean(newTitleError)} aria-describedby="knowledge-new-title-help" onChange={(event) => { setNewTitle(event.target.value); setNewTitleError(""); createRequestKey.current = null; }} /><small id="knowledge-new-title-help" className={newTitleError ? "field-error" : ""}>{newTitleError}</small></label>
+            <label className="island-field"><span>Title *</span><input aria-label="Title" id="knowledge-new-title" maxLength={160} value={newTitle} disabled={busy} aria-invalid={Boolean(newTitleError)} aria-describedby="knowledge-new-title-help" onChange={(event) => { setNewTitle(event.target.value); setNewTitleError(""); createRequestKey.current = null; }} /><small id="knowledge-new-title-help" className={newTitleError ? "field-error" : ""}>{newTitleError}</small></label>
           </div>
           {createMode === "pdf" ? <div className={`knowledge-pdf-choose${dragActive ? " is-drag-active" : ""}`} onDragOver={(event) => { event.preventDefault(); setDragActive(true); }} onDragLeave={() => setDragActive(false)} onDrop={(event) => { event.preventDefault(); setDragActive(false); chooseFile(event.dataTransfer.files[0] ?? null); }}>
             <span className="island-tile" aria-hidden="true"><Icon name="pdf" size={18} /></span>
@@ -523,13 +526,18 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <article className="island draft-document" aria-label="Draft">
             <div className="draft-document-toolbar">
               <span className={`island-chip has-dot ${chipTone(currentDraftStatus?.tone ?? "")}`}>{currentDraftStatus?.label}</span>
-              <span className="island-meta">v{draft.currentVersion.version} · {draft.currentVersion.mimeType === "application/pdf" ? "PDF original" : "Text"}{dirty ? " · Unsaved changes" : ""}</span>
+              <span className="island-meta">{draft.documentCode}{draft.documentCode ? " · " : ""}{draft.currentVersion.mimeType === "application/pdf" ? "PDF" : "Text"}{dirty ? " · Unsaved changes" : ""}</span>
+              {draft.currentVersion.mimeType === "application/pdf" && <label className="km-replace-pdf secondary-button">
+                {replacementPdf ? replacementPdf.name : "Replace PDF"}<input type="file" accept=".pdf,application/pdf" disabled={busy}
+                  aria-label="Replace PDF" onChange={event => { const file = event.target.files?.[0] ?? null;
+                    const validation = file ? validatePdfFile(file) : ""; setError(validation); if (!validation) setReplacementPdf(file); }} />
+              </label>}
             </div>
             {latest?.status === "REJECTED" && latest.decisionComment && <KnowledgeNotice title="Reviewer note" tone="danger">
               {latest.decisionComment}
             </KnowledgeNotice>}
             <div className="draft-document-body knowledge-live-form">
-              <label className="draft-title-field"><span className="sr-only">Title</span><input maxLength={160} disabled={busy} value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
+              <label className="draft-title-field"><span className="sr-only">Title</span><span aria-hidden="true" className="km-title-required">Title *</span><input maxLength={160} disabled={busy} value={editor.title} onChange={(event) => setEditor({ ...editor, title: event.target.value })} /></label>
               {draft.currentVersion.mimeType === "application/pdf" && draft.pdfBase64
                 ? <PdfDocument base64={draft.pdfBase64} title={draft.title} />
                 : <div className="arden-document-field"><span className="sr-only">Document text</span>
@@ -541,7 +549,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             </div>
           </article>
           <aside className="island island-panel draft-metadata knowledge-live-form" aria-labelledby="draft-metadata-title">
-            <h2 id="draft-metadata-title">Before you submit</h2>
+            <h2 id="draft-metadata-title">Document details</h2>
             {ownerDerived ? <p className={`draft-owner${ownerDepartmentId ? "" : " is-missing"}`}>
               <Icon name={ownerDepartmentId ? "people" : "warning"} size={14} />
               <span>{ownerDepartmentId ? <>Department: <strong>{departmentName(ownerDepartmentId)}</strong></>
@@ -552,49 +560,29 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                 const audience = options?.audiences.find((item) => item.id === id);
                 return audience?.kind === "ORGANIZATION_ALL" || !audience?.departmentId || audience.departmentId === responsibleDepartmentId;
               });
-              setEditor({ ...editor, responsibleDepartmentId, audienceIds, targetScopeType: scopeForReaders(audienceIds, options?.audiences ?? [], editor.targetScopeType) });
+              setEditor({ ...editor, responsibleDepartmentId, audienceIds });
             }}>
               <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             </>}
-            <fieldset className="draft-readers" disabled={busy}><legend>Who can read it</legend>
-              <ReaderPicker choices={readerChoices(options?.audiences ?? [], ownerDepartmentId)} selectedIds={editor.audienceIds}
-                audiences={options?.audiences ?? []} disabled={busy}
-                departmentHint={ownerDepartmentId ? undefined : ownerDerived ? "Department not assigned." : "Choose a department."}
-                onAdd={(id) => { const audienceIds = addReader(editor.audienceIds, id, options?.audiences ?? []);
-                  setEditor({ ...editor, audienceIds, targetScopeType: scopeForReaders(audienceIds, options?.audiences ?? [], editor.targetScopeType) }); }}
-                onRemove={(id) => { const audienceIds = removeReader(editor.audienceIds, id);
-                  setEditor({ ...editor, audienceIds, targetScopeType: scopeForReaders(audienceIds, options?.audiences ?? [], editor.targetScopeType) }); }} />
-              {onlyGroupReaders(editor.audienceIds, options?.audiences ?? []) && ownerDepartmentId && <label className="draft-readers-limit">
-                <input type="checkbox" checked={editor.targetScopeType === "DEPARTMENT"} onChange={(event) => setEditor({ ...editor, targetScopeType: event.target.checked ? "DEPARTMENT" : "ORGANIZATION" })} />
-                <span>Only group members who are also in {departmentName(ownerDepartmentId)}</span></label>}
-            </fieldset>
-            <p className="island-note">Reviewer: {editor.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
+            <KnowledgeMetadataFields value={editor.management} readers={editor.targetReaders} topics={catalog?.topics ?? []}
+              departments={options?.departments ?? []} busy={busy} isUpdate={draft.hasPublishedVersion ?? false}
+              platform={platform} organizationId={organizationId}
+              onChange={management => setEditor({ ...editor, management })} onReaders={targetReaders => setEditor({ ...editor, targetReaders })} />
+            <p className="island-note">Reviewer: {editor.targetReaders?.mode === "ORGANIZATION"
               ? "Organization reviewer" : ownerDepartmentId ? `${departmentName(ownerDepartmentId)} reviewer` : "Department reviewer"}</p>
-            {editor.audienceIds.some((id) => options?.audiences.find((item) => item.id === id)?.kind === "ORGANIZATION_ALL")
+            {editor.targetReaders?.mode === "ORGANIZATION"
               && options?.organizationReviewerAvailable === false
               && <p className="island-note is-warning" role="note"><Icon name="warning" size={14} />
                 <span>No organization reviewer assigned.</span></p>}
-            <details className="draft-advanced" open={advancedOpen} onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}>
-              <summary>Review filters</summary>
-              <div className="admin-grant-tags">
-                <label className="island-field">Team tag<input maxLength={100} placeholder="Optional" disabled={busy} value={editor.teamTag ?? ""} onChange={(event) => setEditor({ ...editor, teamTag: event.target.value || null })} /></label>
-                <label className="island-field">Project tag<input maxLength={100} placeholder="Optional" disabled={busy} value={editor.projectTag ?? ""} onChange={(event) => setEditor({ ...editor, projectTag: event.target.value || null })} /></label>
-              </div>
-            </details>
-            <ul className="draft-readiness" aria-label="Submission readiness">
-              {([["Title", Boolean(editor.title.trim())], [ownerDerived ? "Your department" : "Responsible department", Boolean(ownerDepartmentId)],
-                ["Readers", Boolean(editor.targetScopeType) && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType)]] as const).map(([label, done]) =>
-                <li key={label} className={done ? "is-done" : ""}><Icon name={done ? "check" : "close"} size={12} />{label}<small>{done ? "Done" : "Missing"}</small></li>)}
-            </ul>
             <div className="draft-actions" role="group" aria-label="Draft actions">
               <button type="button" className="secondary-button" disabled={busy} onClick={cancelEditing}>{dirty ? "Cancel" : "Back"}</button>
               <button type="button" className="secondary-button" disabled={busy || !(dirty || ownerOutOfSync)} onClick={saveDraft}>{busy ? "Saving…" : "Save changes"}</button>
-              <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || ownerOutOfSync || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit v{draft.currentVersion.version} for review</button>
+              <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || ownerOutOfSync || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit for review</button>
               <span className="island-meta" aria-live="polite">{dirty ? "Unsaved changes · " : ""}{ownerOutOfSync && !dirty ? "Save changes before submitting." : submitHint}</span>
             </div>
             <section className="island-detail-section" aria-label="Review history"><h3>History</h3>
-              <ol className="island-timeline"><li><strong>v{draft.currentVersion.version} · {draft.hasPendingSubmission ? "awaiting review" : "working draft"}</strong><small>Updated {new Date(draft.updatedAt).toLocaleDateString()}</small></li>
-                {submissions.filter((item) => item.draftId === draft.id).map((item) => <li key={item.id}><strong>{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
+              <ol className="island-timeline"><li><strong>{draft.hasPendingSubmission ? "Awaiting review" : "Working draft"}</strong><small>Updated {new Date(draft.updatedAt).toLocaleDateString()}</small></li>
+                {submissions.filter((item) => item.draftId === draft.id).map((item) => <li key={item.id}><strong>{item.management?.version ? `Version ${item.management.version} · ` : ""}{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
             </section>
           </aside>
         </div>
@@ -604,10 +592,13 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           title: document.title,
           documentCode: document.documentCode ?? "Not assigned",
           ownerDepartment: publicationDepartmentName(document),
-          summary: document.summary ?? semanticSummary(document.body) ?? "No summary was supplied for this publication.",
+          summary: document.summary ?? "",
+          type: document.management?.type ?? undefined, topic: document.management?.topicName,
+          publishedDate: document.publishedAt, expirationDate: document.management?.expirationDate ?? undefined,
           activeVersionId: document.id,
-          versions: [{ id: document.id, label: document.versionLabel ?? "Current", status: readerDocumentStatusAt(document.validFrom, document.validUntil, new Date()), effectiveDate: document.validFrom }],
-          sensitiveLabel: document.classification === "INTERNAL" ? undefined : document.classification,
+          versions: [{ id: document.id, label: document.management?.version || document.versionLabel || "Current",
+            status: (applicabilityStatus(document.management, new Date().toLocaleDateString("en-CA"))?.toUpperCase() ?? "PUBLISHED") as "EFFECTIVE" | "UPCOMING" | "EXPIRED" | "PUBLISHED",
+            effectiveDate: document.management?.effectiveDate ?? "" }],
         }}
         onBack={() => { setOpenedCitation(null); setScreen("library"); }}
         surfaceActions={readerPdfUrl && <a className="secondary-button" href={readerPdfUrl} download={pdfFileName(document.title)}>Download PDF</a>}
@@ -620,57 +611,34 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : "Knowledge Library"}
           description={libraryTab === "drafts" ? ""
             : `${published.length} ${published.length === 1 ? "document" : "documents"} you can read in ${organizationName}`}
-          action={<div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
+          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
+            {catalog?.canManage && libraryTab !== "discover" && <button type="button" className="secondary-button" onClick={() => setManagingCatalog(true)}>Manage catalog</button>}
             <button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button>
             <button type="button" className="primary-button" onClick={() => openCreate("pdf")}><Icon name="plus" size={14} />Create from PDF</button></div>} />
-        <div className="island-seg knowledge-library-tabs" role="tablist" aria-label="Knowledge library">
-          <button type="button" role="tab" aria-selected={libraryTab === "published"} onClick={() => setLibraryTab("published")}>Library<span className="island-badge">{published.length}</span></button>
+        {!managingCatalog && <div className="island-seg knowledge-library-tabs" role="tablist" aria-label="Knowledge library">
+          <button type="button" role="tab" aria-selected={libraryTab === "discover"} onClick={() => setLibraryTab("discover")}>Discover</button>
+          <button type="button" role="tab" aria-selected={libraryTab === "published"} onClick={() => setLibraryTab("published")}>All documents<span className="island-badge">{published.length}</span></button>
           <button type="button" role="tab" aria-selected={libraryTab === "drafts"} onClick={() => setLibraryTab("drafts")}>My Contributions<span className="island-badge">{drafts.length}</span></button>
-        </div>
-        {libraryTab === "published" && (filteredPublished.length ? <IslandTable label="Accessible published knowledge" minWidth={780}
-          columns="minmax(320px, 3fr) minmax(130px, 1fr) 72px 128px 112px"
-          headers={["DOCUMENT", "DEPARTMENT", "VERSION", "EFFECTIVE DATE", "STATUS"]}>
-          {filteredPublished.map((item) => {
-            const publicationStatus = readerDocumentStatusAt(item.validFrom, item.validUntil, new Date());
-            const shown = libraryTitleParts(item.title, item.documentCode);
-            const isPdf = item.mimeType === "application/pdf";
-            const sensitive = item.classification === "INTERNAL" ? null : item.classification;
-            return <IslandRow key={item.id} className="library-row">
-              <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name library-row-name"
-                onClick={() => openPublished(item.id)} aria-label={`Read ${item.title}`} title={item.title}>
-                <span className="library-row-icon" aria-hidden="true"><Icon name={isPdf ? "pdf" : "document"} size={16} /></span>
-                <span className="library-row-copy">
-                  {shown.code && <span className="library-row-code">{shown.code}</span>}
-                  <strong className="library-row-title">{shown.title}</strong>
-                  {(isPdf || sensitive) && <span className="library-row-meta">{isPdf && <span>PDF</span>}
-                    {sensitive && <KnowledgeClassificationChip classification={sensitive} />}</span>}
-                </span>
-              </button></IslandCell>
-              <IslandCell className="island-row-cell library-row-secondary">{publicationDepartmentName(item)}</IslandCell>
-              <IslandCell className="island-row-cell library-row-secondary">{item.versionLabel ?? <span className="library-row-empty"><span aria-hidden="true">—</span><span className="sr-only">No version label</span></span>}</IslandCell>
-              <IslandCell className="island-row-cell library-row-date">{libraryDateLabel(item.validFrom)}</IslandCell>
-              <IslandCell>{publicationStatus === "EFFECTIVE"
-                ? <span className="library-row-effective">Effective</span>
-                : <span className={`island-chip knowledge-reader-status is-${publicationStatus.toLowerCase()}`}>{publicationStatus === "UPCOMING" ? "Upcoming" : "Expired"}</span>}</IslandCell>
-            </IslandRow>;
-          })}
-        </IslandTable>
-          : <div className="island island-empty"><h3>{published.length ? "No results" : "No documents available"}</h3>{published.length > 0 && <p>Try another search.</p>}</div>)}
-        {libraryTab === "drafts" && (filteredDrafts.length ? <div className="island-split">
+        </div>}
+        {managingCatalog && catalog?.canManage ? <KnowledgeCatalogEditor platform={platform} organizationId={organizationId}
+          catalog={catalog} publications={published} onSaved={reload} onClose={() => setManagingCatalog(false)} />
+          : libraryTab !== "drafts" && <KnowledgeLibraryBrowse items={published.map(item => ({ ...item, responsibleDepartmentName: publicationDepartmentName(item) }))} catalog={catalog} catalogError={catalogError}
+            query={query} filters={libraryFilters} onFilters={setLibraryFilters} discover={libraryTab === "discover"}
+            onBrowse={() => setLibraryTab("published")} onOpen={openPublished} onManage={() => setManagingCatalog(true)} />}
+        {!managingCatalog && libraryTab === "drafts" && (filteredDrafts.length ? <div className="island-split">
           <div className="island-main"><IslandTable label="My contributions" minWidth={620} columns="minmax(240px, 1.8fr) minmax(110px, 1fr) 110px minmax(150px, auto)"
             headers={["DOCUMENT", "DEPARTMENT", "UPDATED", "STATUS"]}>
             {filteredDrafts.map((item) => {
               const status = draftStatus(item, latestByDraft.get(item.id));
               const shown = libraryTitleParts(item.title, null);
-              const sensitive = item.classification === "INTERNAL" ? null : item.classification;
               return <IslandRow key={item.id} selected={selectedContributionId === item.id} className="library-row">
                 <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name library-row-name" onClick={() => setSelectedContributionId(item.id)}
                   aria-label={`Open details for ${item.title}`} title={item.title}>
                   <span className="library-row-icon" aria-hidden="true"><Icon name={item.mimeType === "application/pdf" ? "pdf" : "document"} size={16} /></span>
                   <span className="library-row-copy">
                     {shown.code && <span className="library-row-code">{shown.code}</span>}
-                    <span className="library-row-heading"><strong className="library-row-title">{shown.title}</strong><span className="library-row-version">v{item.currentVersion}</span></span>
-                    <span className="library-row-meta">{sensitive && <KnowledgeClassificationChip classification={sensitive} />}<span className="library-row-audience">{audienceNames(item.audienceIds)}</span></span>
+                    <span className="library-row-heading"><strong className="library-row-title">{shown.title}</strong>{item.management?.version && <span className="library-row-version">{item.management.version}</span>}</span>
+                    <span className="library-row-meta"><span className="library-row-audience">{targetReadersLabel(item.targetReaders, departmentName)}</span></span>
                   </span></button></IslandCell>
                 <IslandCell className="island-row-cell library-row-secondary">{departmentName(item.responsibleDepartmentId)}</IslandCell>
                 <IslandCell className="island-row-cell library-row-date">{libraryDateLabel(item.updatedAt)}</IslandCell>
@@ -680,18 +648,18 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           </IslandTable></div>
           {selectedContribution && <aside className="island island-panel island-side contribution-side" aria-labelledby="contribution-title">
             <div className="island-side-header"><div>
-              <span className="island-chip-row"><span className={`island-chip has-dot ${chipTone(draftStatus(selectedContribution, selectedContributionLatest).tone)}`}>{draftStatus(selectedContribution, selectedContributionLatest).label}</span><span className="island-meta">v{selectedContribution.currentVersion}</span></span>
+              <span className="island-chip-row"><span className={`island-chip has-dot ${chipTone(draftStatus(selectedContribution, selectedContributionLatest).tone)}`}>{draftStatus(selectedContribution, selectedContributionLatest).label}</span><span className="island-meta">{selectedContribution.management?.version}</span></span>
               <h2 id="contribution-title">{selectedContribution.title}</h2></div>
               <button type="button" className="island-icon-button" onClick={() => setSelectedContributionId(null)} aria-label="Close contribution details"><Icon name="close" size={14} /></button></div>
             {selectedContributionLatest?.decisionComment && <blockquote className="island-box contribution-reason"><strong>Reviewer note</strong><p>{selectedContributionLatest.decisionComment}</p></blockquote>}
             <dl className="island-kv">
-              <dt>Classification</dt><dd>{selectedContribution.classification.toLowerCase().replace(/^./, (letter) => letter.toUpperCase())}</dd>
+              <dt>Type</dt><dd>{selectedContribution.management?.type ?? "—"}</dd>
               <dt>Department</dt><dd>{departmentName(selectedContribution.responsibleDepartmentId)}</dd>
-              <dt>Readers</dt><dd>{audienceNames(selectedContribution.audienceIds)}</dd>
+              <dt>Readers</dt><dd>{targetReadersLabel(selectedContribution.targetReaders, departmentName)}</dd>
             </dl>
             <section className="island-detail-section" aria-label="History"><h3>History</h3>
-              <ol className="island-timeline"><li><strong>v{selectedContribution.currentVersion} · working version</strong><small>Updated {new Date(selectedContribution.updatedAt).toLocaleDateString()}</small></li>
-                {submissions.filter((item) => item.draftId === selectedContribution.id).map((item) => <li key={item.id}><strong>{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
+              <ol className="island-timeline"><li><strong>Working draft</strong><small>Updated {new Date(selectedContribution.updatedAt).toLocaleDateString()}</small></li>
+                {submissions.filter((item) => item.draftId === selectedContribution.id).map((item) => <li key={item.id}><strong>{item.management?.version ? `Version ${item.management.version} · ` : ""}{statusLabel(item.status)}</strong><small>Submitted {new Date(item.submittedAt).toLocaleDateString()}</small></li>)}</ol>
             </section>
             <div className="island-side-footer contribution-actions"><button type="button" className="primary-button" disabled={busy} onClick={() => openDraft(selectedContribution.id)}>Open draft</button>
               </div>
@@ -708,8 +676,3 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
 
 const statusChipTone: Record<string, string> = { "is-info": "tone-info", "is-success": "tone-success", "is-danger": "tone-danger", "is-attention": "tone-warning" };
 function chipTone(tone: string): string { return statusChipTone[tone] ?? ""; }
-
-const classificationChipTone: Record<KnowledgeClassification, string> = { INTERNAL: "tone-strong", CONFIDENTIAL: "tone-info", RESTRICTED: "tone-danger" };
-function KnowledgeClassificationChip({ classification }: { classification: KnowledgeClassification }) {
-  return <span className={`island-chip ${classificationChipTone[classification]}`}>{classification === "RESTRICTED" && <Icon name="lock" size={11} />}{classification.toLowerCase().replace(/^./, (letter) => letter.toUpperCase())}</span>;
-}

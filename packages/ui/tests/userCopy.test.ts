@@ -39,6 +39,7 @@ function mockKnowledge(publicationState: api.KnowledgeSubmission["publicationSta
     primaryDepartmentId: "dept", organizationReviewerAvailable: true,
   });
   vi.spyOn(api, "loadKnowledgeDraft").mockResolvedValue(draft);
+  vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
   vi.spyOn(api, "listKnowledgeSubmissions").mockResolvedValue([{
     id: "submission", draftId: "draft", snapshotVersionId: "version", title: draft.title,
     classification: "INTERNAL", responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT",
@@ -57,7 +58,7 @@ describe("concise user-facing copy", () => {
       platform: "web", organizationId: "org", organizationName: "Example", view: "knowledge",
       active: true, createdDraftId: "draft", contextOpen: false, onToggleContext: vi.fn(),
     }));
-    await screen.findByRole("heading", { name: "Before you submit" });
+    await screen.findByRole("heading", { name: "Document details" });
     expect(screen.getByText("Reviewer: Engineering reviewer")).toBeTruthy();
     await waitFor(() => expect(screen.getAllByText(label)).toHaveLength(1));
     expect(screen.queryByText("private-hash")).toBeNull();
@@ -152,14 +153,14 @@ describe("concise user-facing copy", () => {
       platform: "web", organizationId: "org", organizationName: "Example", view: "knowledge",
       active: true, createdDraftId: "draft", contextOpen: false, onToggleContext: vi.fn(),
     }));
-    await screen.findByRole("heading", { name: "Before you submit" });
+    await screen.findByRole("heading", { name: "Document details" });
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved title" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Keep working" }));
     expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("Unsaved title");
     fireEvent.click(screen.getByRole("button", { name: "← My Contributions" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(screen.queryByRole("heading", { name: "Before you submit" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Document details" })).toBeNull();
     expect(save).not.toHaveBeenCalled();
   });
 

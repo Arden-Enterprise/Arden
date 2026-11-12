@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository } from "./repository.js";
+import { prepareKnowledgeFixture, submitLegacyKnowledgeFixture } from "./knowledge-fixture.test-support.js";
+import { registerKnowledgeCatalogVerification } from "../knowledge/catalog.integration.verification.js";
 import { PgIndexGenerationStore } from "../indexing/store.js";
 import type { IndexGenerationManifest } from "../indexing/contracts.js";
 import { canRead, type TargetReadersInput } from "../target-readers/policy.js";
@@ -84,6 +86,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query(`INSERT INTO role (role_id, organization_id, code, name)
         VALUES ($1, $2, 'ALL_MEMBERS', 'Everyone in organization')`,
       [ids.organizationAudience, ids.organization]);
+      await client.query(`INSERT INTO audience
+        (audience_id, organization_id, kind, name, department_id, is_managed, legacy_role_id)
+        VALUES ($1, $2, 'DEPARTMENT_ALL', 'Synthetic department', $3, true, $1)`,
+      [ids.ownerRole, ids.organization, ids.department]);
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`,
       [ids.organizationAudience]);
@@ -152,6 +158,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("ALTER TABLE reader_selection DISABLE TRIGGER USER");
           await client.query("ALTER TABLE selected_reader DISABLE TRIGGER USER");
           await client.query("DELETE FROM audit_event WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM knowledge_collection_document WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM knowledge_collection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = $1", [ids.organization]);
           await client.query(`DELETE FROM published_knowledge_version
             WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
@@ -165,6 +173,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM reviewer_grant WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE author_membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM shared_draft WHERE author_membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM knowledge_topic WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM selected_reader WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM reader_selection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
@@ -398,6 +407,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       });
       expect(created.kind).toBe("created");
       if (created.kind !== "created") throw new Error("Knowledge draft was not created");
+      await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership]);
       const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
         created.draft.id, created.draft.currentVersion, {
           responsibleDepartmentId: ids.department,
@@ -502,12 +512,15 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     if (created.kind !== "created") return;
 
     const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
+      // Legacy audience/reviewer fixture, upgraded with explicit reader metadata.
       responsibleDepartmentId: ids.department,
       targetScopeType: "ORGANIZATION",
       audienceRoleIds: [ids.readerAudience],
     }, null, "integration-flow2-configure");
     expect(configured).toMatchObject({ kind: "updated", draft: { currentVersion: 2 } });
     if (configured.kind !== "updated") return;
+
+    await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership]);
 
     const submitted = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
       created.draft.id, configured.draft.currentVersion, randomUUID(), "integration-flow2-submit");
@@ -598,7 +611,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     ]);
 
     const revised = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
-      created.draft.id, configured.draft.currentVersion, { title: "Replacement candidate" }, null,
+      created.draft.id, configured.draft.currentVersion, { title: "Replacement candidate",
+        management: { type: "Guide", topicId: configured.draft.management?.topicId ?? (await repository.getKnowledgeDraft(ids.owner, ids.organization, created.draft.id))!.management!.topicId,
+          version: "2.0", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "Updated guidance." } }, null,
       "integration-flow3-revise");
     expect(revised).toMatchObject({ kind: "updated", draft: { currentVersion: 3 } });
     if (revised.kind !== "updated") return;
@@ -671,12 +686,12 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(sources).toEqual([expect.objectContaining({ generationId: newer.generationId, chunks: manifest.chunks })]);
     await expect(repository.listAuthorizedAiSources(ids.owner, ids.organization, [older.generationId])).resolves.toEqual([]);
 
-    // Legacy audience publications carry no Target Readers and stay on the audience path.
+    // The upgraded current workflow preserves the explicit approved readers.
     const ownerActor = await repository.getTargetReaderActor(ids.owner, ids.organization);
     expect(ownerActor).toEqual({ membershipId: ids.ownerMembership, organizationId: ids.organization,
       status: "ACTIVE", departmentIds: [ids.department] });
     const legacy = await repository.listPublishedKnowledge(ids.owner, ids.organization);
-    expect(legacy).toEqual([expect.objectContaining({ title: "Newest active publication", targetReaders: null })]);
+    expect(legacy).toEqual([expect.objectContaining({ title: "Newest active publication", targetReaders: expect.objectContaining({ mode: "SELECTED_MEMBERS" }) })]);
     expect(canRead(ownerActor, { organizationId: ids.organization, readers: legacy![0]!.targetReaders })).toBe(true);
   });
 
@@ -729,13 +744,16 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           contentHash: randomUUID().replaceAll("-", "").padEnd(64, "0") }, requestId: `t21-${title}-create`,
       });
       if (created.kind !== "created") throw new Error("Draft was not created");
+      await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership], targetReaders !== null);
       const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
         responsibleDepartmentId: ids.department, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.organizationAudience],
         ...(targetReaders ? { targetReaders } : {}),
       }, null, `t21-${title}-configure`);
       if (configured.kind !== "updated") throw new Error(`Draft was not configured: ${configured.kind}`);
-      const submitted = await repository.submitKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 2,
-        randomUUID(), `t21-${title}-submit`);
+      const legacyId = targetReaders === null ? await submitLegacyKnowledgeFixture(pool, ids.organization, created.draft.id) : null;
+      const submitted = legacyId ? { kind: "submitted" as const, submission: (await repository.listKnowledgeSubmissions(ids.owner, ids.organization))!.find(item => item.id === legacyId)! }
+        : await repository.submitKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 2,
+          randomUUID(), `t21-${title}-submit`);
       if (submitted.kind !== "submitted") throw new Error("Draft was not submitted");
       const submission = submitted.submission;
       const decide = (approvedReaders?: TargetReadersInput, key = randomUUID(), action: "APPROVE" | "REJECT" = "APPROVE") =>
@@ -898,3 +916,5 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.getPublishedKnowledge(crossReader, randomUUID(), crossPublication.id)).resolves.toBeNull();
   }, 30_000);
 });
+
+registerKnowledgeCatalogVerification();
