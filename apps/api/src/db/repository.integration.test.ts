@@ -844,6 +844,11 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     });
     expect(authorsForMember).toBe(0);
 
+    // A reader from the second department may read this publication, but may not
+    // select its owning department when authoring their own draft.
+    const crossDepartment = await submit("Owner name across departments", { mode: "ORGANIZATION" });
+    await expect(crossDepartment.decide()).resolves.toMatchObject({ kind: "decided" });
+
     // 5. Activate every queued generation; the narrowed publication admits A only, in RLS and in the API policy.
     const store = new PgIndexGenerationStore(indexPool);
     const workerId = randomUUID();
@@ -879,5 +884,17 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           FROM published_knowledge_version WHERE submission_id = $1`, [listed.submission.id]))).rows[0]!.id);
       expect(detailRead !== null).toBe(readable);
     }
+
+    const crossReader = readerFixtures[5]!.userId;
+    const choices = await repository.getKnowledgeOptions(crossReader, ids.organization);
+    expect(choices?.departments.map((item) => item.id)).toEqual([ids.secondDepartment]);
+    const crossPublication = (await repository.listPublishedKnowledge(crossReader, ids.organization))
+      ?.find((item) => item.draftId === crossDepartment.draftId);
+    expect(crossPublication).toMatchObject({ responsibleDepartmentId: ids.department,
+      responsibleDepartmentName: "Synthetic department" });
+    if (!crossPublication) throw new Error("Cross-department publication missing");
+    await expect(repository.getPublishedKnowledge(crossReader, ids.organization, crossPublication.id))
+      .resolves.toMatchObject({ responsibleDepartmentName: "Synthetic department" });
+    await expect(repository.getPublishedKnowledge(crossReader, randomUUID(), crossPublication.id)).resolves.toBeNull();
   }, 30_000);
 });

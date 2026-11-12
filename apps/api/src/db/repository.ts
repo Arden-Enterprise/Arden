@@ -175,6 +175,7 @@ export type PublishedKnowledge = {
   title: string;
   classification: KnowledgeClassification;
   responsibleDepartmentId: string;
+  responsibleDepartmentName: string | null;
   contentHash: string;
   sourceUri: string;
   audienceRoleIds: string[];
@@ -417,6 +418,7 @@ type PublishedKnowledgeRow = ReaderSelectionColumns & {
   title: string;
   classification: KnowledgeClassification;
   responsible_department_id: string;
+  responsible_department_name: string | null;
   content_hash: string;
   content_uri: string;
   audience_role_ids: string[];
@@ -439,11 +441,14 @@ type AuthorizedAiSourceRow = ReaderSelectionColumns & {
 const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
          pv.responsible_department_id, pv.content_hash, pv.content_uri,
+         owner_department.name AS responsible_department_name,
          pv.audience_role_ids, pv.published_at,
          cp.valid_from, cp.valid_until,
          ${readerSelectionColumns("pv.reader_selection_id")}
     FROM knowledge_current_publication cp
-    JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id`;
+    JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
+    LEFT JOIN department owner_department ON owner_department.department_id = pv.responsible_department_id
+      AND owner_department.organization_id = cp.organization_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
   return {
     id: row.published_version_id,
@@ -451,6 +456,7 @@ function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
     title: row.title,
     classification: row.classification,
     responsibleDepartmentId: row.responsible_department_id,
+    responsibleDepartmentName: row.responsible_department_name,
     contentHash: row.content_hash,
     sourceUri: row.content_uri,
     audienceRoleIds: row.audience_role_ids,

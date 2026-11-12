@@ -344,10 +344,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const ready = Boolean(ownerDepartmentId && editor?.targetScopeType
     && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType));
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
+  const publicationDepartmentName = (item: PublishedKnowledge) =>
+    item.responsibleDepartmentName?.trim() || departmentName(item.responsibleDepartmentId);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredDrafts = drafts.filter((item) => item.title.toLocaleLowerCase().includes(normalizedQuery));
   const filteredPublished = published.filter((item) => [item.title, item.documentCode ?? "", item.summary ?? "",
-    departmentName(item.responsibleDepartmentId), item.classification]
+    publicationDepartmentName(item), item.classification]
     .some((value) => value.toLocaleLowerCase().includes(normalizedQuery)));
   const submitHint = draft?.hasPendingSubmission ? "Awaiting review"
     : dirty ? "Save your changes before submitting."
@@ -601,7 +603,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         metadata={{
           title: document.title,
           documentCode: document.documentCode ?? "Not assigned",
-          ownerDepartment: departmentName(document.responsibleDepartmentId),
+          ownerDepartment: publicationDepartmentName(document),
           summary: document.summary ?? semanticSummary(document.body) ?? "No summary was supplied for this publication.",
           activeVersionId: document.id,
           versions: [{ id: document.id, label: document.versionLabel ?? "Current", status: readerDocumentStatusAt(document.validFrom, document.validUntil, new Date()), effectiveDate: document.validFrom }],
@@ -644,7 +646,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                     {sensitive && <KnowledgeClassificationChip classification={sensitive} />}</span>}
                 </span>
               </button></IslandCell>
-              <IslandCell className="island-row-cell library-row-secondary">{departmentName(item.responsibleDepartmentId)}</IslandCell>
+              <IslandCell className="island-row-cell library-row-secondary">{publicationDepartmentName(item)}</IslandCell>
               <IslandCell className="island-row-cell library-row-secondary">{item.versionLabel ?? <span className="library-row-empty"><span aria-hidden="true">—</span><span className="sr-only">No version label</span></span>}</IslandCell>
               <IslandCell className="island-row-cell library-row-date">{libraryDateLabel(item.validFrom)}</IslandCell>
               <IslandCell>{publicationStatus === "EFFECTIVE"
