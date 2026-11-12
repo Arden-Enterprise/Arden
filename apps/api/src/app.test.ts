@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
 import type { ActiveMembership, ArdenDataRepository, DecidedReview, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult, WithdrawKnowledgeSubmissionResult } from "./db/repository.js";
@@ -275,7 +275,7 @@ describe("API auth and private draft routes", () => {
     });
   });
 
-  it("handles forgot password requests, verification proxy, and password reset", async () => {
+  it("sends a recovery link and accepts only its verified browser session", async () => {
     const forgot = await app.inject({
       method: "POST", url: "/api/v1/auth/forgot-password",
       headers: { origin: "http://localhost:5180" },
@@ -284,12 +284,15 @@ describe("API auth and private draft routes", () => {
     expect(forgot.statusCode).toBe(202);
     expect(forgot.json().status).toBe("recovery_sent");
     expect(authProvider.lastResetEmail).toBe("owner@example.test");
+    expect(authProvider.lastResetRedirectTo).toBe("http://localhost:5180/reset-password");
 
     const verify = await app.inject({
       method: "GET", url: "/auth/v1/verify?token=valid-link&type=recovery",
     });
     expect(verify.statusCode).toBe(303);
     expect(verify.headers.location).toContain("reset-password");
+    const recoveryCookie = cookieHeader(verify.headers["set-cookie"]);
+    expect(recoveryCookie).toContain("arden_recovery=");
 
     const rootVerify = await app.inject({
       method: "GET", url: "/verify?token=valid-link&type=recovery",
@@ -297,46 +300,33 @@ describe("API auth and private draft routes", () => {
     expect(rootVerify.statusCode).toBe(303);
     expect(rootVerify.headers.location).toContain("reset-password");
 
-    const resetWithOtp = await app.inject({
+    const invalidLink = await app.inject({
+      method: "GET", url: "/auth/v1/verify?token=wrong-link&type=recovery",
+    });
+    expect(invalidLink.statusCode).toBe(303);
+    expect(invalidLink.headers.location).toBe("/reset-password?error=verification_failed");
+    expect(invalidLink.headers["set-cookie"]).toBeUndefined();
+
+    const resetWithCode = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
       headers: { origin: "http://localhost:5180" },
       payload: { email: "owner@example.test", token: "valid-token", newPassword: "new-secure-password" },
     });
-    expect(resetWithOtp.statusCode).toBe(200);
-    expect(resetWithOtp.json()).toEqual({ status: "password_updated" });
-    expect(authProvider.lastUpdatedPassword?.password).toBe("new-secure-password");
-    expect(cookieHeader(resetWithOtp.headers["set-cookie"])).toContain("arden_access=access-recovery");
+    expect(resetWithCode.statusCode).toBe(400);
+    expect(authProvider.lastUpdatedPassword).toBeNull();
 
-    const invalidOtp = await app.inject({
+    const missingProof = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "wrong-token", newPassword: "new-secure-password" },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "new-secure-password" },
     });
-    expect(invalidOtp.statusCode).toBe(401);
-    expect(invalidOtp.json().error.code).toBe("INVALID_TOKEN");
-
-    const reusedOtp = await app.inject({
-      method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "valid-token", newPassword: "second-password" },
-    });
-    expect(reusedOtp.statusCode).toBe(401);
-    expect(reusedOtp.json().error.code).toBe("INVALID_TOKEN");
-    expect(reusedOtp.json().error.message).toBe("The reset code has already been used.");
-
-    const reusedAccessToken = await app.inject({
-      method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180" },
-      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "third-password" },
-    });
-    expect(reusedAccessToken.statusCode).toBe(401);
-    expect(reusedAccessToken.json().error.code).toBe("INVALID_TOKEN");
-    expect(reusedAccessToken.json().error.message).toBe("The reset code has already been used.");
+    expect(missingProof.statusCode).toBe(401);
+    expect(missingProof.json().error.code).toBe("INVALID_TOKEN");
 
     const shortPassword = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "valid-token", newPassword: "short" },
+      headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "short" },
     });
     expect(shortPassword.statusCode).toBe(400);
     expect(shortPassword.json().error.code).toBe("INVALID_PASSWORD");
@@ -344,12 +334,50 @@ describe("API auth and private draft routes", () => {
 
     const rejectedPassword = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "valid-token-2", newPassword: "rejected-password" },
+      headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "rejected-password" },
     });
     expect(rejectedPassword.statusCode).toBe(400);
     expect(rejectedPassword.json().error.code).toBe("PASSWORD_REJECTED");
-    expect(rejectedPassword.json().error.message).toBe("Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.");
+    expect(authProvider.lastUpdatedPassword).toBeNull();
+
+    const resetWithLink = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "new-secure-password" },
+    });
+    expect(resetWithLink.statusCode).toBe(200);
+    expect(resetWithLink.json()).toEqual({ status: "password_updated" });
+    expect(authProvider.lastUpdatedPassword?.password).toBe("new-secure-password");
+    expect(cookieHeader(resetWithLink.headers["set-cookie"])).toContain("arden_access=access-recovery");
+
+    const reusedLink = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "second-password" },
+    });
+    expect(reusedLink.statusCode).toBe(401);
+    expect(reusedLink.json().error.code).toBe("INVALID_TOKEN");
+    expect(reusedLink.json().error.message).toBe("The reset link has already been used.");
+  });
+
+  it("rejects a recovery proof after its ten-minute lifetime", async () => {
+    const verify = await app.inject({ method: "GET", url: "/verify?token=valid-link&type=recovery" });
+    const recoveryCookie = cookieHeader(verify.headers["set-cookie"]);
+    const afterExpiry = Date.now() + 601_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(afterExpiry);
+    try {
+      const reset = await app.inject({
+        method: "POST", url: "/api/v1/auth/reset-password",
+        headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+        payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "new-secure-password" },
+      });
+      expect(reset.statusCode).toBe(401);
+      expect(reset.json().error.code).toBe("INVALID_TOKEN");
+      expect(authProvider.lastUpdatedPassword).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("requires a verified current password for account changes and rejects session-only recovery", async () => {
@@ -1642,6 +1670,7 @@ class FakeAuthProvider implements AuthProvider {
   readonly revokedSessions: string[] = [];
   signUpBehavior: "success" | "already_exists" | "rejected" = "success";
   lastResetEmail: string | null = null;
+  lastResetRedirectTo: string | null = null;
   lastUpdatedPassword: { token: string; password: string } | null = null;
   lastSignUpCredentials: SupabaseSignUp | null = null;
   private readonly usersByAccessToken = new Map<string, { userId: string; email: string; passwordSetupRequired: boolean }>();
@@ -1692,20 +1721,9 @@ class FakeAuthProvider implements AuthProvider {
     user.passwordSetupRequired = false;
   }
 
-  async resetPasswordForEmail(email: string) {
+  async resetPasswordForEmail(email: string, redirectTo?: string) {
     this.lastResetEmail = email;
-  }
-
-  private readonly usedOtpTokens = new Set<string>();
-
-  async verifyOtp(params: { email: string; token: string }) {
-    const key = `${params.email}:${params.token}`;
-    if (this.usedOtpTokens.has(key)) throw new Error("INVALID_OTP");
-    if (params.token !== "valid-token" && params.token !== "valid-token-2") throw new Error("INVALID_OTP");
-    this.usedOtpTokens.add(key);
-    const tokens = { accessToken: params.token === "valid-token-2" ? "access-recovery-2" : "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
-    this.usersByAccessToken.set(tokens.accessToken, { userId: ownerId, email: params.email, passwordSetupRequired: false });
-    return { tokens };
+    this.lastResetRedirectTo = redirectTo ?? null;
   }
 
   async updateUserPassword(tokens: { accessToken: string }, newPassword: string) {

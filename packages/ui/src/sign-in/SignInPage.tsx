@@ -5,13 +5,13 @@ import {
   signIn,
   signUp,
   requestPasswordReset,
-  resetPasswordWithToken,
+  resetPasswordFromLink,
   ApiError,
   type CurrentSession,
 } from "../shared/api-client";
 import { AuthLayout } from "./AuthLayout";
 
-export type SignInMode = "sign-in" | "register" | "forgot-password" | "reset-password";
+export type SignInMode = "sign-in" | "register" | "forgot-password" | "check-email" | "reset-password";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function isValidEmail(value: string): boolean {
@@ -74,9 +74,7 @@ export function SignInPage({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [resetToken, setResetToken] = useState("");
-  const [useResetCode, setUseResetCode] = useState(false);
-  const usingRecoverySession = Boolean(recoveryTokens) && !useResetCode;
+  const checkEmailHeading = useRef<HTMLHeadingElement>(null);
   const [notice, setNotice] = useState<{ text: string; isSuccess?: boolean } | null>(() => {
     if (typeof window === "undefined") return null;
     const searchParams = new URLSearchParams(window.location.search);
@@ -125,6 +123,9 @@ export function SignInPage({
       } catch {}
     }
   }, []);
+  useEffect(() => {
+    if (mode === "check-email") checkEmailHeading.current?.focus();
+  }, [mode]);
   const [busy, setBusy] = useState<"submit" | "google" | null>(null);
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
   const showPreview = new URLSearchParams(window.location.search).get("preview") === "1";
@@ -137,7 +138,6 @@ export function SignInPage({
     setNotice(null);
     setPassword("");
     setConfirmPassword("");
-    setResetToken("");
   };
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
@@ -217,11 +217,7 @@ export function SignInPage({
     setNotice(null);
     try {
       await requestPasswordReset(platform, email.trim());
-      setNotice({
-        text: "A verification code has been sent to your email. Enter the code and your new password below.",
-        isSuccess: true,
-      });
-      setMode("reset-password");
+      setMode("check-email");
     } catch (cause) {
       setNotice({
         text: cause instanceof ApiError ? cause.message : "Password reset could not be requested. Try again later.",
@@ -233,12 +229,8 @@ export function SignInPage({
 
   const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!usingRecoverySession && !isValidEmail(email)) {
-      setNotice({ text: "Enter a valid email address." });
-      return;
-    }
-    if (!usingRecoverySession && !resetToken.trim()) {
-      setNotice({ text: "Enter the verification code sent to your email." });
+    if (!recoveryTokens) {
+      setNotice({ text: "This reset link is invalid or has expired. Request a new link." });
       return;
     }
     if (password.length < 8) {
@@ -252,19 +244,11 @@ export function SignInPage({
     setBusy("submit");
     setNotice(null);
     try {
-      if (usingRecoverySession && recoveryTokens) {
-        await resetPasswordWithToken(platform, {
-          accessToken: recoveryTokens.accessToken,
-          refreshToken: recoveryTokens.refreshToken,
-          newPassword: password,
-        });
-      } else {
-        await resetPasswordWithToken(platform, {
-          email: email.trim(),
-          token: resetToken.trim(),
-          newPassword: password,
-        });
-      }
+      await resetPasswordFromLink(platform, {
+        accessToken: recoveryTokens.accessToken,
+        refreshToken: recoveryTokens.refreshToken,
+        newPassword: password,
+      });
       if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
         try { window.history.replaceState(null, "", "/"); } catch {}
       }
@@ -272,7 +256,6 @@ export function SignInPage({
         text: "Password updated successfully. You can now sign in with your new password.",
         isSuccess: true,
       });
-      setResetToken("");
       setMode("sign-in");
     } catch (cause) {
       setNotice({
@@ -421,7 +404,7 @@ export function SignInPage({
               )}
               <form noValidate onSubmit={handleForgotPassword}>
                 <p className="auth-helper-text">
-                  Enter your email address and we will send you instructions to reset your password.
+                  Enter your email address and we will send you a password reset link.
                 </p>
                 <label>
                   <span>Email address</span>
@@ -436,7 +419,7 @@ export function SignInPage({
                   />
                 </label>
                 <button type="submit" className="auth-primary" disabled={busy !== null}>
-                  {busy === "submit" ? "Sending instructions..." : "Send reset instructions"}
+                  {busy === "submit" ? "Sending link..." : "Send reset link"}
                 </button>
                 <div className="auth-footer-links">
                   <button
@@ -451,90 +434,84 @@ export function SignInPage({
             </>
           )}
 
+          {mode === "check-email" && (
+            <>
+              <h1 id="auth-title" ref={checkEmailHeading} tabIndex={-1}>Check your email</h1>
+              <div className="auth-message is-success" role="status">
+                If an account with this email exists, check your inbox for a password reset link. Open it to set a new password.
+              </div>
+              <button type="button" className="auth-primary" onClick={() => switchMode("forgot-password")}>Send another link</button>
+              <div className="auth-footer-links">
+                <button type="button" className="auth-text-link" onClick={() => switchMode("sign-in")}>← Back to sign in</button>
+              </div>
+            </>
+          )}
+
           {mode === "reset-password" && (
             <>
-              <h1 id="auth-title">Set a new password</h1>
-              <p className="auth-new-account">
-                Return to sign in? <button type="button" onClick={() => switchMode("sign-in")}>Sign in</button>
-              </p>
-              {notice && (
+              <h1 id="auth-title">{recoveryTokens ? "Set a new password" : "Reset link unavailable"}</h1>
+              {notice && recoveryTokens && (
                 <div className={`auth-message ${notice.isSuccess ? "is-success" : ""}`} role="alert">
                   {notice.text}
                 </div>
               )}
-              <form noValidate onSubmit={handleResetPassword}>
-                {!usingRecoverySession && (
-                  <>
-                    <label>
-                      <span>Email address</span>
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                        autoComplete="email"
-                        placeholder="name@company.com"
-                        maxLength={320}
-                        required
-                      />
-                    </label>
-                    <label>
-                      <span>Verification code</span>
-                      <input
-                        type="text"
-                        value={resetToken}
-                        onChange={(event) => setResetToken(event.target.value)}
-                        placeholder="Enter code from email"
-                        required
-                      />
-                    </label>
-                  </>
-                )}
-                <label>
-                  <span>New password</span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete="new-password"
-                    placeholder="Enter new password (min. 8 characters)"
-                    minLength={8}
-                    maxLength={1024}
-                    required
-                  />
-                </label>
-                <label>
-                  <span>Confirm new password</span>
-                  <input
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    autoComplete="new-password"
-                    placeholder="Confirm new password"
-                    minLength={8}
-                    maxLength={1024}
-                    required
-                  />
-                </label>
-                <button type="submit" className="auth-primary" disabled={busy !== null}>
-                  {busy === "submit" ? "Updating password..." : "Update password"}
-                </button>
-                <div className="auth-footer-links">
-                  <button
-                    type="button"
-                    className="auth-text-link"
-                    onClick={() => switchMode("sign-in")}
-                  >
-                    ← Back to sign in
+              {!recoveryTokens ? (
+                <>
+                  <p className="auth-helper-text">This reset link is invalid or has expired. Request a new link to continue.</p>
+                  <button type="button" className="auth-primary" onClick={() => switchMode("forgot-password")}>Request a new link</button>
+                  <div className="auth-footer-links">
+                    <button type="button" className="auth-text-link" onClick={() => switchMode("sign-in")}>← Back to sign in</button>
+                  </div>
+                </>
+              ) : (
+                <form noValidate onSubmit={handleResetPassword}>
+                  <label>
+                    <span>New password</span>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(event) => setPassword(event.target.value)}
+                      autoComplete="new-password"
+                      placeholder="Enter new password (min. 8 characters)"
+                      minLength={8}
+                      maxLength={1024}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Confirm new password</span>
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      autoComplete="new-password"
+                      placeholder="Confirm new password"
+                      minLength={8}
+                      maxLength={1024}
+                      required
+                    />
+                  </label>
+                  <button type="submit" className="auth-primary" disabled={busy !== null}>
+                    {busy === "submit" ? "Updating password..." : "Update password"}
                   </button>
-                  <button
-                    type="button"
-                    className="auth-text-link"
-                    onClick={() => { setUseResetCode(true); switchMode("forgot-password"); }}
-                  >
-                    Request new code
-                  </button>
-                </div>
-              </form>
+                  <div className="auth-footer-links">
+                    <button
+                      type="button"
+                      className="auth-text-link"
+                      onClick={() => switchMode("sign-in")}
+                    >
+                      ← Back to sign in
+                    </button>
+                    <button
+                      type="button"
+                      className="auth-text-link"
+                      onClick={() => switchMode("forgot-password")}
+                    >
+                      Request a new link
+                    </button>
+                  </div>
+                </form>
+              )}
             </>
           )}
         </div>
