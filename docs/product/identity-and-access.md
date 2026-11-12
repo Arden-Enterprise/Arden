@@ -21,8 +21,18 @@ Scope: verified-account bootstrap, departments, invitations, membership and auth
 | Acceptance ID | Complete path to verify | Evidence / remaining |
 | --- | --- | --- |
 | F02-AC1 | Bootstrap creates the correct initial authority exactly once; ordinary members cannot administer organizations, departments or other memberships. | API slices exist; real database/RLS and full UI acceptance remain distinct. |
-| F02-AC2 | Invitation issue/resend/revoke/accept handles wrong account, expired/revoked/used token, duplicate request and email failure without duplicate membership or token disclosure. | Follow current server policy, not historical preview expiry values. |
+| F02-AC2 | Invitation issue (single or batch), then per-invitation resend, revoke and accept handle wrong account, expired/revoked/used token, duplicate request and email failure without duplicate membership or token disclosure. A batch shows each unique address's outcome truthfully. | Follow current server policy, not historical preview expiry values. Batch UI verification is recorded below; live SMTP and database acceptance remain separate. |
 | F02-AC3 | Pending/suspended/removed members lose relevant access; assignment/restoration and last-administrator safeguards follow an accepted lifecycle contract. | Remaining lifecycle/recovery choices must be decided, not guessed. |
+
+### F02-AC2 batch invitation refinement (2026-11-07)
+
+Decision state: accepted for this scoped addition by the requesting user in the current Arden task. The requester originated the batch-invite request and is the accountable owner for this addition; the coding agent authored this record. The task request is the approval evidence; no private chat transcript or personal identity is copied here. Specification revision: 2026-11-07 on `feat/batch-invitations`, based on Arden main `9fa3d34a19a559318eff87b4487f2113e6ee5a49`. Integration and deployment remain pending.
+
+An Organization Admin can enter one or up to 20 unique work email addresses in the existing Invitations form, separated by commas, semicolons or whitespace. The shared web/desktop UI previews normalized destinations before the admin presses Send. Duplicate entries are ignored; malformed addresses, existing members and active pending invitations are shown as skipped. A batch above the limit sends nothing. Eligible recipients are sent sequentially through the existing authenticated single-invitation API; each retains server authorization, hashed single-use token and audit behavior. An invalid or duplicate address does not prevent other eligible recipients from being invited.
+
+The result names each unique address and distinguishes email sent, local-only save, saved invitation with failed email delivery, concurrent duplicate, server rejection, unconfirmed outcome and not-sent remainder. A delivery failure never claims email was sent and directs the admin to Resend from the invitation list. Authorization, configuration or uncertain failures stop further sends; the admin checks the refreshed list before retrying. Cancel clears an unsent draft. While sending, the form and administration tabs are disabled, workspace navigation and sign-out are held, and the client requests a browser exit warning. This refinement does not change acceptance or membership creation, add a new batch API endpoint, or send email without the admin's explicit form action.
+
+Evidence at this local revision: focused parser/delivery, rendered-form and shell-navigation tests cover deduplication, invalid/existing/pending entries, limit, cancellation, single-address compatibility, partial SMTP failure, authorization stop, uncertain network stop, and holding navigation/sign-out during sending. Root checks, visual review, live SMTP and real database paths are reported separately in the task handoff; this paragraph does not assert publication or deployment.
 
 ## F03 Private notes
 

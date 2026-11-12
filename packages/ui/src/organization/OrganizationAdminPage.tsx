@@ -20,8 +20,9 @@ import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { countInvitations, invitationFilters, invitationState, visibleInvitations, type InvitationFilter, type InvitationState } from "./invitationStatus";
 import { DepartmentDetailIsland, grantCoverageLabel, grantValidity, MemberDetailIsland, memberInitials, memberStatus as describeMemberStatus } from "./AdminDetailIslands";
 import { departmentDeletionSummary, filterOrganizationMembers, isOrganizationAdminMember, membersInDepartment } from "./memberAdministration";
+import { MAX_INVITATIONS_PER_BATCH, planInvitationBatch, sendInvitationBatch, type InvitationBatchPlan, type InvitationSendResult } from "./invitationBatch";
 
-type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void } & ContextControlProps;
+type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void; onSendingInvitationsChange?: (sending: boolean) => void } & ContextControlProps;
 type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers";
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
 const tabNames: Record<AdminTab, string> = {
@@ -29,8 +30,21 @@ const tabNames: Record<AdminTab, string> = {
 };
 const invitationTone: Record<InvitationState, string> = { PENDING: "tone-info", ACCEPTED: "tone-success", EXPIRED: "", REVOKED: "" };
 function titleCase(value: string): string { return value[0] + value.slice(1).toLowerCase(); }
+const invitationCandidateLabels = { ready: "Ready", invalid: "Invalid email", member: "Already a member", pending: "Invitation pending" } as const;
+function invitationResultLabel(result: InvitationSendResult): string {
+  switch (result.status) {
+    case "sent": return "Email sent";
+    case "saved-locally": return "Saved locally · no email sent";
+    case "delivery-failed": return "Saved · email not delivered. Use Resend in the list.";
+    case "conflict": return "Invitation already pending";
+    case "rejected": return "Not sent · invalid email";
+    case "blocked": return `Not sent · ${result.message ?? "Invitations unavailable"}`;
+    case "unconfirmed": return "Could not confirm · check the list before retrying";
+    case "not-sent": return "Not sent · batch stopped";
+  }
+}
 
-export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext, onDirtyChange }: Props) {
+export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext, onDirtyChange, onSendingInvitationsChange }: Props) {
   const [data, setData] = useState<OrganizationAdministration | null>(null);
   const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
   const [tab, setTab] = useState<AdminTab>("members");
@@ -52,12 +66,13 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [departmentNameInput, setDepartmentNameInput] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteError, setInviteError] = useState("");
+  const [inviteProgress, setInviteProgress] = useState<{ current: number; total: number } | null>(null);
+  const [inviteReport, setInviteReport] = useState<{ plan: InvitationBatchPlan; results: InvitationSendResult[] } | null>(null);
   const [departmentError, setDepartmentError] = useState("");
   const [grantSubmitted, setGrantSubmitted] = useState(false);
   const [lastCreatedGrantId, setLastCreatedGrantId] = useState<string | null>(null);
   const [audienceCreateSignal, setAudienceCreateSignal] = useState(0);
   const [pendingTab, setPendingTab] = useState<AdminTab | null>(null);
-  const [inviteSuccess, setInviteSuccess] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -119,6 +134,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     finally { setBusy(false); }
   };
   const selectTab = (next: AdminTab) => {
+    if (inviteProgress) return;
     if (tab === "audiences" && next !== "audiences" && audienceDirty) { setPendingTab(next); return; }
     setError(""); setMessage(""); setTab(next);
     document.querySelector(".organization-live-admin .workspace-scroll-region")?.scrollTo(0, 0);
@@ -160,21 +176,23 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const submitInvite = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const email = inviteEmail.trim();
-    const lowered = email.toLocaleLowerCase();
-    const validation = !email ? "Enter an email address."
-      : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? "Enter a valid email, like name@company.com."
-        : data?.members.some((item) => item.email.toLocaleLowerCase() === lowered) ? "This person is already a member."
-          : data?.invitations.some((item) => item.email.toLocaleLowerCase() === lowered && item.status === "PENDING" && new Date(item.expiresAt).getTime() > Date.now()) ? "An invitation to this address is already pending." : "";
+    if (busy || !data) return;
+    const plan = planInvitationBatch(inviteEmail, data, Date.now());
+    const readyEmails = plan.candidates.filter((candidate) => candidate.status === "ready").map((candidate) => candidate.email);
+    const validation = !plan.candidates.length ? "Enter at least one email address."
+      : plan.overLimit ? `Enter no more than ${MAX_INVITATIONS_PER_BATCH} unique email addresses at a time.`
+        : !readyEmails.length ? "No new addresses to invite. Check the addresses below." : "";
     if (validation) { setInviteError(validation); document.getElementById("admin-invite-email")?.focus(); return; }
-    setInviteError(""); setInviteSuccess("");
-    void perform(async () => {
-      const result = await inviteOrganizationMember(platform, organizationId, null, email);
-      setInviteEmail("");
-      const success = result.deliveryMode === "local-test-no-email" ? `Invitation for ${email} saved locally. No email was sent.` : `Invitation email sent to ${email}.`;
-      setInviteSuccess(success);
-      return success;
-    }, "Invitation email sent.");
+    setInviteError(""); setInviteReport(null); setError(""); setMessage(""); setBusy(true); onSendingInvitationsChange?.(true);
+    void sendInvitationBatch(readyEmails, (email) => inviteOrganizationMember(platform, organizationId, null, email),
+      (current, total) => setInviteProgress({ current, total }))
+      .then(async (results) => {
+        setInviteReport({ plan, results });
+        setInviteEmail("");
+        try { await reload(); } catch { setError("Invitations processed, but the list could not refresh. Refresh before retrying any uncertain addresses."); }
+      })
+      .catch(() => setInviteError("The batch could not be completed. Check the invitation list before retrying."))
+      .finally(() => { setInviteProgress(null); setBusy(false); onSendingInvitationsChange?.(false); });
   };
   const submitReviewerGrant = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setGrantSubmitted(true);
@@ -208,6 +226,12 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const now = Date.now();
   const invitationCounts = countInvitations(data?.invitations ?? [], now);
   const shownInvitations = visibleInvitations(data?.invitations ?? [], invitationFilter, now);
+  const invitePlan = data ? planInvitationBatch(inviteEmail, data, now) : null;
+  const readyInviteCount = invitePlan?.candidates.filter((candidate) => candidate.status === "ready").length ?? 0;
+  const skippedInviteCount = (invitePlan?.candidates.length ?? 0) - readyInviteCount + (invitePlan?.duplicateCount ?? 0);
+  const sentInviteCount = inviteReport?.results.filter((result) => result.status === "sent").length ?? 0;
+  const localInviteCount = inviteReport?.results.filter((result) => result.status === "saved-locally").length ?? 0;
+  const reportAttentionCount = inviteReport ? inviteReport.plan.candidates.length - sentInviteCount - localInviteCount : 0;
   const selectedDepartment = data?.departments.find((item) => item.id === selectedDepartmentId);
   const headerAction = tab === "members" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => focusTabForm("invitations", "#admin-invite-email")}><Icon name="plus" size={14} />Invite member</button>
     : tab === "departments" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => focusTabForm("departments", "#admin-department-name")}><Icon name="plus" size={14} />New department</button>
@@ -220,7 +244,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       <WorkspacePageHeader className="organization-access-heading" eyebrow="MANAGE ORGANIZATION" title={tabNames[tab]}
         titleId="organization-live-admin-title" action={headerAction} />
       <div className="island-seg admin-tabs" role="tablist" aria-label="Administration sections">{(Object.keys(tabNames) as AdminTab[]).map((name) => <button key={name}
-        type="button" role="tab" aria-selected={tab === name} onClick={() => selectTab(name)}>{tabNames[name]}
+        type="button" role="tab" aria-selected={tab === name} disabled={Boolean(inviteProgress)} onClick={() => selectTab(name)}>{tabNames[name]}
         {name !== "audiences" && <span className="island-badge">{tabCount[name]}</span>}</button>)}</div>
     </div>}>
       {loading ? <div role="status" className="admin-loading island"><span className="sr-only">Loading organization data…</span>{[0, 1, 2].map((index) => <div key={index} className="admin-skeleton-row" aria-hidden="true"><span /><div><span /><span /></div></div>)}</div> : error && !data ? <div className="organization-notice is-danger" role="alert"><strong>Couldn’t load members.</strong><span>Try again.</span><button type="button" className="secondary-button" onClick={() => { setLoading(true); setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")).finally(() => setLoading(false)); }}>Try again</button></div> : data && <>
@@ -342,10 +366,26 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           <aside className="island island-panel island-side admin-form-island" aria-labelledby="admin-invite-title">
             <h2 id="admin-invite-title">Invite people</h2>
             <form className="admin-side-form" noValidate onSubmit={submitInvite}>
-              <label className="organization-field"><span>Work email</span><input id="admin-invite-email" type="email" maxLength={320} placeholder="name@company.com" value={inviteEmail} disabled={busy} aria-invalid={Boolean(inviteError)} aria-describedby="admin-invite-help" onChange={(event) => { setInviteEmail(event.target.value); setInviteError(""); setInviteSuccess(""); }} /><small id="admin-invite-help" className={inviteError ? "field-error" : ""}>{inviteError || `They’ll receive a link to join ${organizationName}.`}</small></label>
-              <button className="primary-button" type="submit" disabled={busy}>{busy ? "Sending…" : "Send invitation"}</button>
-              {(inviteEmail || inviteError) && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setInviteEmail(""); setInviteError(""); setInviteSuccess(""); setError(""); }}>Cancel</button>}
-              {inviteSuccess && <p className="admin-inline-success" role="status">{inviteSuccess}</p>}
+              <label className="organization-field"><span id="admin-invite-label">Work emails</span><textarea id="admin-invite-email" rows={4} inputMode="email" spellCheck={false} placeholder={"name@company.com\ncolleague@company.com"} value={inviteEmail} disabled={busy} aria-invalid={Boolean(inviteError || invitePlan?.overLimit)} aria-labelledby="admin-invite-label" aria-describedby="admin-invite-help" onChange={(event) => { setInviteEmail(event.target.value); setInviteError(""); setInviteReport(null); }} /><small id="admin-invite-help" className={inviteError || invitePlan?.overLimit ? "field-error" : ""}>{inviteError || (invitePlan?.overLimit ? `Enter no more than ${MAX_INVITATIONS_PER_BATCH} unique email addresses at a time.` : `Enter up to ${MAX_INVITATIONS_PER_BATCH} emails, separated by commas, semicolons, spaces or new lines. Results will show who was emailed a link to join ${organizationName}.`)}</small></label>
+              {invitePlan && invitePlan.candidates.length > 0 && <div className="admin-invite-preview">
+                <p aria-live="polite">{readyInviteCount} ready · {skippedInviteCount} skipped{invitePlan.duplicateCount > 0 ? ` (${invitePlan.duplicateCount} duplicate${invitePlan.duplicateCount === 1 ? "" : "s"} ignored)` : ""}</p>
+                <ul aria-label="Email addresses to review">{invitePlan.candidates.slice(0, MAX_INVITATIONS_PER_BATCH).map((candidate) => <li key={candidate.email}><span>{candidate.email}</span><small className={candidate.status === "ready" ? "is-ready" : "is-skipped"}>{invitationCandidateLabels[candidate.status]}</small></li>)}</ul>
+                {invitePlan.overLimit && <small>Showing the first {MAX_INVITATIONS_PER_BATCH} addresses. Remove extras before sending.</small>}
+              </div>}
+              <button className="primary-button" type="submit" disabled={busy}>{inviteProgress ? `Sending ${inviteProgress.current} of ${inviteProgress.total}…` : busy ? "Please wait…" : invitePlan?.overLimit ? `Reduce to ${MAX_INVITATIONS_PER_BATCH} emails` : readyInviteCount <= 1 ? "Send invitation" : `Send ${readyInviteCount} invitations`}</button>
+              <p className="sr-only" role="status">{inviteProgress ? `Sending invitation ${inviteProgress.current} of ${inviteProgress.total}.` : ""}</p>
+              {(inviteEmail || inviteError) && <button type="button" className="secondary-button" disabled={busy} onClick={() => { setInviteEmail(""); setInviteError(""); setInviteReport(null); }}>Cancel</button>}
+              {inviteReport && <div className="admin-invite-report">
+                <p role="status">Batch finished: {sentInviteCount} email{sentInviteCount === 1 ? "" : "s"} sent, {localInviteCount} saved locally, {reportAttentionCount} to review.</p>
+                <ul aria-label="Invitation results">{inviteReport.plan.candidates.map((candidate) => {
+                  const result = inviteReport.results.find((item) => item.email === candidate.email);
+                  const label = result ? invitationResultLabel(result) : invitationCandidateLabels[candidate.status];
+                  const succeeded = result?.status === "sent" || result?.status === "saved-locally";
+                  return <li key={candidate.email}><span>{candidate.email}</span><small className={succeeded ? "is-ready" : "is-skipped"}>{label}</small></li>;
+                })}</ul>
+                {inviteReport.plan.duplicateCount > 0 && <small>{inviteReport.plan.duplicateCount} duplicate address{inviteReport.plan.duplicateCount === 1 ? " was" : "es were"} ignored.</small>}
+                <button type="button" className="secondary-button" onClick={() => setInviteReport(null)}>Clear results</button>
+              </div>}
             </form>
           </aside>
           </div>
