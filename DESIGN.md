@@ -46,6 +46,8 @@ spacing:
 
 On 23 October 2026 the user accepted the **Island system** ([design canvas](https://claude.ai/code/artifact/78a3072a-46d4-4575-a1a6-65ff52221b89)) for every workspace destination. It supersedes the 13 October charcoal/ivory/amber workspace palette and the Sora/DM Sans workspace typography. Authentication/onboarding retain their original appearance; do not restyle those screens by changing root tokens.
 
+Password recovery follows one visible path: request by email, show a neutral check-email screen with an option to request another reset link, then open the new-password form when the link supplies a recovery session. The API verifies the link proof before changing the password. A missing or expired link shows a new-link action. No verification-code field appears in this flow. This shared authentication UI keeps the Living Archive appearance on web and desktop.
+
 The palette is low-saturation graphite with one violet accent. Violet marks only the active place, the primary action, AI work and focus. Everything else is told apart by tone, not colour. Status colours (sage success, amber warning, coral danger, blue info) each have a 12% `subtle` fill and 30% border for chips and never mean "selected". Pair every status colour with a visible label or icon. No gradients, glows, rainbow decoration or fabricated analytics.
 
 Depth comes from tone: each layer is one step lighter (app → sidebar → surface → raised) plus a 1px border. Only floating islands (status island, detail and form islands, dialogs, mobile tab bar) carry the soft island shadow.

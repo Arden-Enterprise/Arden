@@ -65,7 +65,8 @@ describe("ArdenShell password recovery priority", () => {
 
     render(createElement(ArdenShell, { platform: "web" }));
 
-    expect(await screen.findByRole("heading", { name: /set a new password/i })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /reset link unavailable/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /update password/i })).toBeNull();
     expect(screen.queryByText(/join/i)).toBeNull();
   });
 });

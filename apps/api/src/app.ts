@@ -41,6 +41,17 @@ type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification?: 
 export function buildApp(dependencies: AppDependencies) {
   const app = Fastify({
     logger: {
+      // Recovery verification URLs can contain one-time credentials in the query string.
+      serializers: {
+        req(request) {
+          return {
+            method: request.method,
+            url: request.url.split("?", 1)[0],
+            host: request.headers.host,
+            remoteAddress: request.ip,
+          };
+        },
+      },
       redact: {
         paths: ["req.headers.authorization", "req.headers.cookie", "req.body.password", "req.body.currentPassword", "req.body.newPassword",
           "req.body.token", "req.body.accessToken", "req.body.refreshToken", "res.headers.set-cookie"],
@@ -301,16 +312,14 @@ export function buildApp(dependencies: AppDependencies) {
       },
     },
   }, async (request, reply) => {
-    if (!dependencies.auth) return authUnavailable(reply, request);
+    if (!dependencies.auth?.resetPasswordForEmail) return authUnavailable(reply, request);
     const normalizedEmail = request.body.email.trim().toLowerCase();
     if (!isNormalizedEmail(normalizedEmail)) {
       return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
     }
     try {
-      if (dependencies.auth.resetPasswordForEmail) {
-        const origin = request.headers.origin || dependencies.publicWebOrigin || "http://127.0.0.1:5180";
-        await dependencies.auth.resetPasswordForEmail(normalizedEmail, `${origin}/reset-password`);
-      }
+      const origin = request.headers.origin || dependencies.publicWebOrigin || "http://127.0.0.1:5180";
+      await dependencies.auth.resetPasswordForEmail(normalizedEmail, `${origin}/reset-password`);
       return reply.code(202).send({
         status: "recovery_sent",
         message: "If an account with this email exists, a password reset email has been sent.",
@@ -344,14 +353,16 @@ export function buildApp(dependencies: AppDependencies) {
   };
 
   const handleVerify = async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!dependencies.auth || !dependencies.auth.verifyLink) {
-      return reply.redirect("/?error=verify_unavailable", 303);
-    }
     const query = new URL(request.url, "http://localhost").search.slice(1);
+    const isRecovery = new URLSearchParams(query).get("type") === "recovery";
+    const failureUrl = isRecovery ? "/reset-password?error=verification_failed" : "/?error=verification_failed";
+    if (!dependencies.auth || !dependencies.auth.verifyLink) {
+      return reply.redirect(isRecovery ? "/reset-password?error=verify_unavailable" : "/?error=verify_unavailable", 303);
+    }
     try {
       const location = await dependencies.auth.verifyLink(query);
       if (location) {
-        if (new URLSearchParams(query).get("type") === "recovery") {
+        if (isRecovery) {
           const target = new URL(location);
           const fragment = new URLSearchParams(target.hash.slice(1));
           const access = fragment.get("access_token");
@@ -367,10 +378,10 @@ export function buildApp(dependencies: AppDependencies) {
         }
         return reply.redirect(location, 303);
       }
-      return reply.redirect("/?error=verification_failed", 303);
+      return reply.redirect(failureUrl, 303);
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Auth verification failed");
-      return reply.redirect("/?error=verification_failed", 303);
+      return reply.redirect(failureUrl, 303);
     }
   };
 
@@ -403,13 +414,11 @@ export function buildApp(dependencies: AppDependencies) {
     consumedResetTokens.set(tokenKey, Date.now());
   };
 
-  app.post<{ Body: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string } }>("/api/v1/auth/reset-password", {
+  app.post<{ Body: { accessToken?: string; refreshToken?: string; newPassword: string } }>("/api/v1/auth/reset-password", {
     schema: {
       body: {
         type: "object", additionalProperties: false, required: ["newPassword"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
-          token: { type: "string", minLength: 1, maxLength: 100 },
           accessToken: { type: "string", minLength: 10 },
           refreshToken: { type: "string", minLength: 10 },
           newPassword: { type: "string", minLength: 8, maxLength: 1024 },
@@ -419,52 +428,28 @@ export function buildApp(dependencies: AppDependencies) {
   }, async (request, reply) => {
     if (!dependencies.auth || !dependencies.auth.updateUserPassword) return authUnavailable(reply, request);
     try {
-      const email = request.body.email ? request.body.email.trim().toLowerCase() : undefined;
-      const token = request.body.token ? request.body.token.trim() : undefined;
-      const accessToken = request.body.accessToken ? request.body.accessToken.trim() : undefined;
-      const tokenKey = email && token ? `otp:${email}:${token}` : (accessToken ? `access:${accessToken}` : null);
-
-      if (tokenKey && isResetTokenConsumed(tokenKey)) {
-        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
+      const accessToken = request.body.accessToken?.trim();
+      const refreshToken = request.body.refreshToken?.trim();
+      if (!accessToken || !refreshToken) {
+        return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid password reset link is required.", request.id));
       }
-
-      let tokens: AuthSessionTokens | null = null;
-      if (accessToken && request.body.refreshToken && !email && !token) {
-        if (!hasRecoveryProof(request.headers.cookie, accessToken, request.body.refreshToken)) {
-          return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link or code is invalid or has expired.", request.id));
-        }
-        tokens = { accessToken, refreshToken: request.body.refreshToken, expiresIn: 3600 };
-      } else if (email && token && !accessToken && !request.body.refreshToken && dependencies.auth.verifyOtp) {
-        const verified = await dependencies.auth.verifyOtp({
-          email,
-          token,
-          type: "recovery",
-        });
-        tokens = verified.tokens;
+      if (isResetTokenConsumed(`access:${accessToken}`)) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link has already been used.", request.id));
       }
-
-      if (!tokens) {
-        return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid password reset link or code is required.", request.id));
+      if (!hasRecoveryProof(request.headers.cookie, accessToken, refreshToken)) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link is invalid or has expired.", request.id));
       }
-
-      if (tokens.accessToken && isResetTokenConsumed(`access:${tokens.accessToken}`)) {
-        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
-      }
+      const tokens: AuthSessionTokens = { accessToken, refreshToken, expiresIn: 3600 };
 
       await dependencies.auth.updateUserPassword(tokens, request.body.newPassword);
 
-      if (tokenKey) {
-        markResetTokenConsumed(tokenKey);
-      }
-      if (tokens.accessToken) {
-        markResetTokenConsumed(`access:${tokens.accessToken}`);
-      }
+      markResetTokenConsumed(`access:${accessToken}`);
 
       setAuthCookies(reply, tokens, dependencies.secureCookies, [recoveryCookie("", 0)]);
       return reply.code(200).send({ status: "password_updated" });
     } catch (error) {
-      if (error instanceof Error && (error.message === "INVALID_OTP" || error.message === "INVALID_SESSION")) {
-        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link or code is invalid or has expired.", request.id));
+      if (error instanceof Error && error.message === "INVALID_SESSION") {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link is invalid or has expired.", request.id));
       }
       if (error instanceof Error && error.message === "PASSWORD_UPDATE_REJECTED") {
         return passwordRejected(reply, request);

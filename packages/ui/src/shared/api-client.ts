@@ -320,9 +320,9 @@ export async function requestPasswordReset(platform: Platform, email: string): P
   });
 }
 
-export async function resetPasswordWithToken(
+export async function resetPasswordFromLink(
   platform: Platform,
-  params: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string }
+  params: { accessToken: string; refreshToken: string; newPassword: string }
 ): Promise<void> {
   await request(platform, "/api/v1/auth/reset-password", {
     method: "POST", body: JSON.stringify(params),
