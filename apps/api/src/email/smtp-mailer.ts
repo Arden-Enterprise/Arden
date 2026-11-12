@@ -1,4 +1,5 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import { invitationLogoCid, invitationLogoPng } from "./invitation-logo.js";
 
 export type InvitationEmail = {
   to: string;
@@ -43,23 +44,16 @@ export function renderInvitationEmailHtml(message: InvitationEmail): string {
   <title>Invitation to join ${escapedOrg} on Arden</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #1c1e20; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f4f3ef;">
-  <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #1c1e20; width: 100%; padding: 40px 16px;">
+  <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="background-color: #1c1e20; width: 100%; table-layout: fixed;">
     <tr>
-      <td align="center">
-        <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="max-width: 560px; background-color: #242628; border: 1px solid #33373a; border-radius: 8px; overflow: hidden;">
+      <td align="center" style="padding: 40px 16px;">
+        <table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" style="width: 100%; max-width: 560px; table-layout: fixed; background-color: #242628; border: 1px solid #33373a; border-radius: 8px; overflow: hidden;">
           <tr>
             <td style="height: 3px; background-color: #e7b970; line-height: 3px; font-size: 3px;">&nbsp;</td>
           </tr>
           <tr>
-            <td style="padding: 32px 36px 20px 36px;">
-              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%">
-                <tr>
-                  <td>
-                    <span style="display: inline-block; font-size: 18px; font-weight: 700; letter-spacing: 2px; color: #f4f3ef; text-transform: uppercase;">ARDEN</span>
-                    <span style="display: block; font-size: 11px; font-weight: 500; letter-spacing: 1.5px; color: #929698; text-transform: uppercase; margin-top: 4px;">ORGANIZATIONAL MEMORY &amp; CONTEXT</span>
-                  </td>
-                </tr>
-              </table>
+            <td align="center" style="padding: 30px 36px 26px 36px; text-align: center;">
+              <img src="cid:${invitationLogoCid}" alt="Arden" width="72" height="72" style="display: block; width: 72px; height: 72px; margin: 0 auto; border: 0; outline: none; text-decoration: none;">
             </td>
           </tr>
           <tr>
@@ -70,7 +64,7 @@ export function renderInvitationEmailHtml(message: InvitationEmail): string {
           <tr>
             <td style="padding: 28px 36px 32px 36px;">
               <div style="display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; color: #80c5b8; margin-bottom: 12px;">MEMBERSHIP INVITATION</div>
-              <h1 style="margin: 0 0 16px 0; font-size: 22px; font-weight: 600; line-height: 1.35; color: #f4f3ef;">
+              <h1 style="margin: 0 0 16px 0; font-size: 22px; font-weight: 600; line-height: 1.35; color: #f4f3ef; word-break: break-word;">
                 You&#39;ve been invited to join <span style="color: #e7b970;">${escapedOrg}</span>
               </h1>
               <p style="margin: 0 0 24px 0; font-size: 14px; line-height: 1.6; color: #d4d5d5;">
@@ -94,9 +88,9 @@ export function renderInvitationEmailHtml(message: InvitationEmail): string {
                   <a href="${safeUrl}" style="color: #e7b970; text-decoration: underline;">${safeUrl}</a>
                 </p>
               </div>
-              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="border-left: 3px solid #80c5b8; background-color: #2d3032; border-radius: 0 6px 6px 0; padding: 12px 14px; margin-top: 20px;">
+              <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="width: 100%; table-layout: fixed; border-left: 3px solid #80c5b8; background-color: #2d3032; border-radius: 0 6px 6px 0; margin-top: 20px;">
                 <tr>
-                  <td>
+                  <td style="padding: 12px 14px;">
                     <p style="margin: 0; font-size: 12px; line-height: 1.5; color: #d4d5d5;">
                       <strong style="color: #80c5b8;">Your personal notes stay private:</strong> Joining an organization never shares your personal drafts or private documents with colleagues or administrators.
                     </p>
@@ -142,6 +136,13 @@ export function createSmtpMailer(configuration: SmtpConfiguration): InvitationMa
         subject: `Invitation to join ${message.organizationName} on Arden`,
         text: `You have been invited to join ${message.organizationName} on Arden.\n\nOpen this link to sign in or create an account and accept the invitation:\n${message.invitationUrl}\n\nThis link expires on ${message.expiresAt.toISOString()}. If you were not expecting this invitation, you can ignore this email.`,
         html: renderInvitationEmailHtml(message),
+        attachments: [{
+          filename: "arden-logo.png",
+          content: invitationLogoPng,
+          contentType: "image/png",
+          contentDisposition: "inline",
+          cid: invitationLogoCid,
+        }],
       });
     },
     close() { transporter.close(); },
