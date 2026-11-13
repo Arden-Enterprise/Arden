@@ -5,9 +5,10 @@ import { ArdenRepository } from "../db/repository.js";
 import { prepareKnowledgeFixture } from "../db/knowledge-fixture.test-support.js";
 import { canRead } from "./policy.js";
 
-// Flow 2 T1.1/T1.3/T1.4 against real PostgreSQL. This file never approves a submission, so it creates
-// no index jobs and cannot race repository.integration.test.ts, which owns the publish/activate path. Requires a disposable, fully migrated
-// database named arden_test_* (ARDEN_TEST_DATABASE_URL); skipped otherwise.
+// Flow 2 T1.1/T1.3/T1.4 against real PostgreSQL. Cleanup disables user triggers and holds
+// SHARE ROW EXCLUSIVE locks until commit. vitest.config.ts runs API files one at a time when
+// ARDEN_TEST_DATABASE_URL is set, so this cleanup cannot deadlock with another file's writes.
+// Requires a disposable, fully migrated database named arden_test_* ; skipped otherwise.
 const databaseUrl = process.env.ARDEN_TEST_DATABASE_URL;
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null;
 const repository = pool ? new ArdenRepository(pool) : null;

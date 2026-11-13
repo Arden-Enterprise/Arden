@@ -141,6 +141,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     }
   });
 
+  // Trigger cleanup locks the same tables as target-readers.integration.test.ts.
+  // The API Vitest config keeps these files from running together on one database.
   afterAll(async () => {
     if (!pool) return;
     try {
