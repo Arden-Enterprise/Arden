@@ -13,8 +13,8 @@ describe("Google account password setup", () => {
     render(createElement(SetPasswordPage, { platform: "web", email: "new@example.test", onComplete }));
 
     const password = screen.getByLabelText("New password") as HTMLInputElement;
-    expect(password.hasAttribute("maxlength")).toBe(false);
-    expect((screen.getByLabelText("Confirm password") as HTMLInputElement).hasAttribute("maxlength")).toBe(false);
+    expect(password.maxLength).toBe(100);
+    expect((screen.getByLabelText("Confirm password") as HTMLInputElement).maxLength).toBe(100);
     fireEvent.change(password, { target: { value: "short" } });
     expect(screen.getByText("At least 8 characters").closest("li")?.textContent).toContain("Not met:");
     expect(screen.getByText("At least 1 uppercase letter").closest("li")?.textContent).toContain("Not met:");

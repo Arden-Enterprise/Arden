@@ -68,9 +68,8 @@ describe("SignInPage password reset flow", () => {
 
     await waitFor(() => {
       expect(apiClient.requestPasswordReset).toHaveBeenCalledWith("web", "test@example.com");
-      expect(screen.getByRole("heading", { name: /check your email/i })).toBeTruthy();
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: /check your email/i }));
     });
-    expect(document.activeElement).toBe(screen.getByRole("heading", { name: /check your email/i }));
     expect(screen.getByRole("status").textContent).toContain("If an account with this email exists");
     expect(screen.getByRole("status").textContent).toContain("password reset link");
     expect(screen.queryByRole("textbox", { name: /email address/i })).toBeNull();
@@ -275,7 +274,7 @@ describe("SignInPage password reset flow", () => {
     }));
 
     const password = screen.getByLabelText("Password") as HTMLInputElement;
-    expect(password.hasAttribute("maxlength")).toBe(false);
+    expect(password.maxLength).toBe(100);
     const minimum = screen.getByText("At least 8 characters").closest("li");
     const uppercase = screen.getByText("At least 1 uppercase letter").closest("li");
     const special = screen.getByText("At least 1 special character").closest("li");

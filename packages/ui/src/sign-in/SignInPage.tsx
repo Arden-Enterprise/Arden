@@ -127,10 +127,10 @@ export function SignInPage({
       } catch {}
     }
   }, []);
-  useEffect(() => {
-    if (mode === "check-email") checkEmailHeading.current?.focus();
-  }, [mode]);
   const [busy, setBusy] = useState<"submit" | "google" | null>(null);
+  useEffect(() => {
+    if (mode === "check-email" && busy === null) checkEmailHeading.current?.focus();
+  }, [mode, busy]);
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
   const showPreview = new URLSearchParams(window.location.search).get("preview") === "1";
 
