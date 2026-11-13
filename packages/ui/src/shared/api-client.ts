@@ -46,6 +46,8 @@ export type KnowledgeOptions = {
   organizationReviewerAvailable?: boolean;
   audiences: Array<{ id: string; name: string; departmentId: string | null;
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
+  /** Active document categories (T3.2); undefined means the server predates categories. */
+  categories?: Array<{ id: string; code: string; name: string; isDefault: boolean }>;
 };
 export type KnowledgeDraftRecord = {
   id: string;
@@ -64,6 +66,13 @@ export type KnowledgeDraftRecord = {
   currentVersion: { id: string; version: number; mimeType: "text/plain" | "application/pdf"; contentHash: string };
   createdAt: string;
   updatedAt: string;
+  /** T3.2 contribution form fields (absent from older servers). Dates are YYYY-MM-DD. */
+  categoryId?: string | null;
+  keywords?: string[];
+  changeDescription?: string | null;
+  effectiveDate?: string | null;
+  expirationDate?: string | null;
+  relatedDocumentIds?: string[];
 };
 export type KnowledgeDraftSummary = {
   id: string;
@@ -82,6 +91,8 @@ export type KnowledgeDraftSummary = {
   hasPendingSubmission: boolean;
   createdAt: string;
   updatedAt: string;
+  /** T3.2: absent from older servers. */
+  categoryId?: string | null;
 };
 export type KnowledgeSubmission = {
   id: string;
@@ -99,6 +110,9 @@ export type KnowledgeSubmission = {
   submittedAt: string;
   publishedVersionId: string | null;
   decisionComment: string | null;
+  /** T6.1: CONTENT, or a READER_CHANGE / WITHDRAWAL request about the current publication. */
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+  requestReason?: string | null;
 };
 export type AssignedKnowledgeReview = {
   submissionId: string;
@@ -112,6 +126,8 @@ export type AssignedKnowledgeReview = {
   versionNo?: number;
   /** Submitter's display name, visible to reviewers; absent or null when unavailable. */
   authorName?: string | null;
+  /** T6.1: what the request asks for; absent from older servers means CONTENT. */
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
 };
 /** A submission the signed-in reviewer already decided (REV-02 history). */
 export type DecidedKnowledgeReview = {
@@ -226,7 +242,7 @@ export async function createPdfKnowledgeDraft(platform: Platform, organizationId
 }
 
 export function saveKnowledgeDraft(platform: Platform, organizationId: string, draftId: string, version: number,
-  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">>): Promise<KnowledgeDraftRecord> {
+  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceIds" | "categoryId">>): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`, {
     method: "PATCH", headers: { "If-Match": `"${version}"` }, body: JSON.stringify(patch),
   });

@@ -26,6 +26,8 @@ export type ReviewDecisionFacts = {
    * without proposed readers (legacy audience model) keeps today's behaviour. Omitted means legacy.
    */
   readers?: { proposed: ReaderSelection | null; facts: SelectionFacts };
+  /** T6.1: a reader-change or withdrawal request can be rejected but not yet approved (T6.2). Omitted means CONTENT. */
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
 };
 
 export type ReviewDecisionRequest = {
@@ -42,7 +44,8 @@ export type ApprovedReadersPlan = { proposed: ReaderSelection; approved: ReaderS
 
 export type ReviewDecisionPlan =
   | { kind: "DENIED"; reason: "INVALID_SNAPSHOT" | "STALE_SNAPSHOT" | "NOT_AUTHORIZED" | "AUDIENCE_NOT_ENFORCEABLE"
-      | "UNSUPPORTED_POLICY" | "COMMENT_REQUIRED" | "INVALID_REQUEST" | "READERS_NOT_SUPPORTED" | "READERS_WIDENED" }
+      | "UNSUPPORTED_POLICY" | "COMMENT_REQUIRED" | "INVALID_REQUEST" | "READERS_NOT_SUPPORTED" | "READERS_WIDENED"
+      | "REQUEST_NOT_SUPPORTED" }
   | { kind: "DENIED"; reason: "INVALID_READERS"; field: ApprovedReadersField; message: string }
   | { kind: "RECORD_ONLY"; decision: "REJECTED"; comment: string }
   | { kind: "APPROVE_FOR_PREPARATION"; decision: "APPROVED"; submissionId: string; snapshotVersionId: string;
@@ -96,6 +99,7 @@ export function planReviewDecision(facts: ReviewDecisionFacts, request: ReviewDe
     ? approveWith(null)
     : facts.reviewerGrants.some(approveWith);
   if (!canApprove) return { kind: "DENIED", reason: "NOT_AUTHORIZED" };
+  if ((facts.requestType ?? "CONTENT") !== "CONTENT") return { kind: "DENIED", reason: "REQUEST_NOT_SUPPORTED" };
 
   let readers: ApprovedReadersPlan | null = null;
   const proposed = facts.readers?.proposed ?? null;

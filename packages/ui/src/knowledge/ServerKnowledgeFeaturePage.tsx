@@ -49,14 +49,14 @@ type Props = ContextControlProps & {
 };
 
 type EditorValues = Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" |
-  "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">;
+  "targetScopeType" | "teamTag" | "projectTag" | "audienceIds"> & { categoryId: string | null };
 
 function valuesFromDraft(draft: KnowledgeDraftRecord): EditorValues {
   return {
     title: draft.title, body: draft.body, classification: draft.classification,
     responsibleDepartmentId: draft.responsibleDepartmentId,
     targetScopeType: draft.targetScopeType, teamTag: draft.teamTag,
-    projectTag: draft.projectTag, audienceIds: [...draft.audienceIds],
+    projectTag: draft.projectTag, audienceIds: [...draft.audienceIds], categoryId: draft.categoryId ?? null,
   };
 }
 
@@ -218,7 +218,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     if (!draft || !editor) return;
     if (!editor.title.trim()) { setError("The title cannot be empty."); return; }
     // With a derived owner the client sends no department; the server applies the author's primary department.
-    const values = options?.primaryDepartmentId !== undefined ? { ...editor, responsibleDepartmentId: null } : editor;
+    const derivedOwner = options?.primaryDepartmentId !== undefined ? { ...editor, responsibleDepartmentId: null } : editor;
+    // A server without categories (older API) rejects an unknown field, so send the category only when it has them.
+    const { categoryId, ...withoutCategory } = derivedOwner;
+    const values = options?.categories ? { ...withoutCategory, categoryId } : withoutCategory;
     const { body: _body, ...metadata } = values;
     const saved = await saveKnowledgeDraft(platform, organizationId, draft.id, draft.currentVersion.version,
       draft.currentVersion.mimeType === "application/pdf" ? metadata : values);
@@ -350,8 +353,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const { derived: ownerDerived, departmentId: ownerDepartmentId } = ownerDepartment(options?.primaryDepartmentId, editor?.responsibleDepartmentId ?? null);
   // A draft saved before decision 0014 (or before the author changed department) must be saved once to adopt it.
   const ownerOutOfSync = Boolean(ownerDerived && ownerDepartmentId && draft && draft.responsibleDepartmentId !== ownerDepartmentId);
+  // T3.2: Submit requires a category whenever the server offers categories.
+  const categoryRequired = Boolean(options?.categories);
+  const categoryName = (id: string | null | undefined) => options?.categories?.find((item) => item.id === id)?.name ?? null;
   const ready = Boolean(ownerDepartmentId && editor?.targetScopeType
-    && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType));
+    && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType)
+    && (!categoryRequired || categoryName(editor.categoryId)));
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredDrafts = drafts.filter((item) => item.title.toLocaleLowerCase().includes(normalizedQuery));
@@ -549,6 +556,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           </article>
           <aside className="island island-panel draft-metadata knowledge-live-form" aria-labelledby="draft-metadata-title">
             <h2 id="draft-metadata-title">Before you submit</h2>
+            {options?.categories && <label className="island-field">Category<select disabled={busy} required
+              value={editor.categoryId ?? ""} onChange={(event) => setEditor({ ...editor, categoryId: event.target.value || null })}>
+              <option value="">Choose category</option>
+              {/* A saved category that is no longer active stays visible until the author picks another. */}
+              {editor.categoryId && !categoryName(editor.categoryId) && <option value={editor.categoryId}>Unavailable category</option>}
+              {options.categories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
             {ownerDerived ? <p className={`draft-owner${ownerDepartmentId ? "" : " is-missing"}`}>
               <Icon name={ownerDepartmentId ? "people" : "warning"} size={14} />
               <span>{ownerDepartmentId ? <>Department: <strong>{departmentName(ownerDepartmentId)}</strong></>
@@ -589,7 +602,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               </div>
             </details>
             <ul className="draft-readiness" aria-label="Submission readiness">
-              {([["Title", Boolean(editor.title.trim())], [ownerDerived ? "Your department" : "Responsible department", Boolean(ownerDepartmentId)],
+              {([["Title", Boolean(editor.title.trim())],
+                ...(categoryRequired ? [["Category", Boolean(categoryName(editor.categoryId))] as const] : []),
+                [ownerDerived ? "Your department" : "Responsible department", Boolean(ownerDepartmentId)],
                 ["Readers", Boolean(editor.targetScopeType) && validAudienceSelection(editor.audienceIds, options?.audiences ?? [], editor.targetScopeType)]] as const).map(([label, done]) =>
                 <li key={label} className={done ? "is-done" : ""}><Icon name={done ? "check" : "close"} size={12} />{label}<small>{done ? "Done" : "Missing"}</small></li>)}
             </ul>
@@ -692,6 +707,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <button type="button" className="island-icon-button" onClick={() => setSelectedContributionId(null)} aria-label="Close contribution details"><Icon name="close" size={14} /></button></div>
             {selectedContributionLatest?.decisionComment && <blockquote className="island-box contribution-reason"><strong>Reviewer note</strong><p>{selectedContributionLatest.decisionComment}</p></blockquote>}
             <dl className="island-kv">
+              {options?.categories && <><dt>Category</dt><dd>{categoryName(selectedContribution.categoryId) ?? "Not chosen"}</dd></>}
               <dt>Classification</dt><dd>{selectedContribution.classification.toLowerCase().replace(/^./, (letter) => letter.toUpperCase())}</dd>
               <dt>Department</dt><dd>{departmentName(selectedContribution.responsibleDepartmentId)}</dd>
               <dt>Readers</dt><dd>{audienceNames(selectedContribution.audienceIds)}</dd>

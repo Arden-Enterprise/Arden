@@ -32,6 +32,16 @@ describe("planReviewDecision", () => {
     });
   });
 
+  it("lets a reviewer reject but not yet approve a reader-change or withdrawal request (T6.1)", () => {
+    for (const requestType of ["READER_CHANGE", "WITHDRAWAL"] as const) {
+      expect(planReviewDecision({ ...facts, requestType }, request)).toEqual({ kind: "DENIED", reason: "REQUEST_NOT_SUPPORTED" });
+      expect(planReviewDecision({ ...facts, requestType }, { ...request, action: "REJECT", comment: "Keep it" }))
+        .toMatchObject({ kind: "RECORD_ONLY", decision: "REJECTED" });
+      // Authorization still comes first: an outsider learns nothing about the request type.
+      expect(planReviewDecision({ ...facts, requestType, reviewerGrants: [] }, request)).toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
+    }
+  });
+
   it("never publishes the wrong or corrupted snapshot", () => {
     expect(planReviewDecision(facts, { ...request, expectedSnapshotVersionId: "version-1" })).toEqual({ kind: "DENIED", reason: "STALE_SNAPSHOT" });
     expect(planReviewDecision(facts, { ...request, expectedContentHash: "b".repeat(64) })).toEqual({ kind: "DENIED", reason: "STALE_SNAPSHOT" });

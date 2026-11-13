@@ -37,6 +37,17 @@ let indexPool: Pool | null = null;
 const indexLogin = `arden_test_indexer_${ids.owner.replaceAll("-", "")}`;
 const indexPassword = randomUUID();
 
+/** T3.2: the required contribution form fields (the organization's default category). */
+async function submittableForm(organizationId: string) {
+  if (!pool) throw new Error("Test database is unavailable");
+  const category = await pool.query<{ category_id: string }>(`SELECT category_id FROM arden.document_category
+    WHERE organization_id = $1 AND is_default`, [organizationId]);
+  const categoryId = category.rows[0]?.category_id;
+  if (!categoryId) throw new Error("The organization has no default category");
+  // Effective and Expiration Dates are optional, so a submittable draft needs only a category (and readers).
+  return { categoryId };
+}
+
 describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => {
   beforeAll(async () => {
     if (!pool) throw new Error("ARDEN_TEST_DATABASE_URL was not provided");
@@ -57,8 +68,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0021_monotonic_publication_activation', '0022_organization_reviewer_grants',
           '0024_target_reader_selection', '0025_review_approved_readers', '0026_review_list_authors',
           '0027_document_category_relationships', '0028_audience_to_target_readers',
-          '0029_withdraw_pending_submission')`);
-    if (migration.rows[0]?.count !== "16") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0029_withdraw_pending_submission', '0030_contribution_form_dates',
+          '0031_publication_change_requests')`);
+    if (migration.rows[0]?.count !== "18") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -405,6 +417,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           responsibleDepartmentId: ids.department,
           targetScopeType: "ORGANIZATION",
           audienceRoleIds: [audienceId],
+          ...(await submittableForm(ids.organization)), targetReaders: { mode: "ORGANIZATION" },
         }, null, `integration-${title}-configure`);
       expect(configured.kind).toBe("updated");
       if (configured.kind !== "updated") throw new Error("Knowledge draft was not configured");
@@ -507,6 +520,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       responsibleDepartmentId: ids.department,
       targetScopeType: "ORGANIZATION",
       audienceRoleIds: [ids.readerAudience],
+      ...(await submittableForm(ids.organization)), targetReaders: { mode: "ORGANIZATION" },
     }, null, "integration-flow2-configure");
     expect(configured).toMatchObject({ kind: "updated", draft: { currentVersion: 2 } });
     if (configured.kind !== "updated") return;
@@ -600,7 +614,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     ]);
 
     const revised = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
-      created.draft.id, configured.draft.currentVersion, { title: "Replacement candidate" }, null,
+      created.draft.id, configured.draft.currentVersion, { title: "Replacement candidate",
+        changeDescription: "Replacement candidate" }, null,
       "integration-flow3-revise");
     expect(revised).toMatchObject({ kind: "updated", draft: { currentVersion: 3 } });
     if (revised.kind !== "updated") return;
@@ -636,7 +651,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     let draftVersion = revised.draft.currentVersion;
     const candidate = async (title: string) => {
       const update = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
-        created.draft.id, draftVersion, { title }, null, "ordering-update");
+        created.draft.id, draftVersion, { title, changeDescription: title }, null, "ordering-update");
       if (update.kind !== "updated") throw new Error("Expected candidate edit");
       draftVersion = update.draft.currentVersion;
       const submission = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
@@ -673,12 +688,13 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(sources).toEqual([expect.objectContaining({ generationId: newer.generationId, chunks: manifest.chunks })]);
     await expect(repository.listAuthorizedAiSources(ids.owner, ids.organization, [older.generationId])).resolves.toEqual([]);
 
-    // Legacy audience publications carry no Target Readers and stay on the audience path.
+    // T3.2 requires readers at submit, so this publication carries the approved ORGANIZATION readers.
     const ownerActor = await repository.getTargetReaderActor(ids.owner, ids.organization);
     expect(ownerActor).toEqual({ membershipId: ids.ownerMembership, organizationId: ids.organization,
       status: "ACTIVE", departmentIds: [ids.department] });
     const legacy = await repository.listPublishedKnowledge(ids.owner, ids.organization);
-    expect(legacy).toEqual([expect.objectContaining({ title: "Newest active publication", targetReaders: null })]);
+    expect(legacy).toEqual([expect.objectContaining({ title: "Newest active publication",
+      targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] } })]);
     expect(canRead(ownerActor, { organizationId: ids.organization, readers: legacy![0]!.targetReaders })).toBe(true);
   }, 15_000);
 
@@ -733,13 +749,24 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       if (created.kind !== "created") throw new Error("Draft was not created");
       const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
         responsibleDepartmentId: ids.department, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.organizationAudience],
-        ...(targetReaders ? { targetReaders } : {}),
+        ...(await submittableForm(ids.organization)), targetReaders: targetReaders ?? { mode: "ORGANIZATION" },
       }, null, `t21-${title}-configure`);
       if (configured.kind !== "updated") throw new Error(`Draft was not configured: ${configured.kind}`);
       const submitted = await repository.submitKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 2,
         randomUUID(), `t21-${title}-submit`);
       if (submitted.kind !== "submitted") throw new Error("Draft was not submitted");
       const submission = submitted.submission;
+      if (targetReaders === null) {
+        // T3.2 requires readers at submit; recreate a pre-Target Readers submission as legacy data.
+        const client = await pool!.connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL session_replication_role = replica");
+          await client.query("UPDATE arden.shared_submission SET proposed_selection_id = NULL WHERE submission_id = $1",
+            [submission.id]);
+          await client.query("COMMIT");
+        } finally { client.release(); }
+      }
       const decide = (approvedReaders?: TargetReadersInput, key = randomUUID(), action: "APPROVE" | "REJECT" = "APPROVE") =>
         repository.decideReview(ids.organizationReviewer, ids.organization, submission.id, action,
           submission.snapshotVersionId, submission.contentHash, action === "REJECT" ? "Clarify" : null, key,

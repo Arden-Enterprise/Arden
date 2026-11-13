@@ -8,6 +8,8 @@ import { planReviewDecision, type ReviewAction, type ReviewDecisionPlan } from "
 import { maxSelectedReaders, validateSelection, type ReaderActor, type ReaderMode, type ReaderSelection,
   type SelectionFacts, type TargetReadersField, type TargetReadersInput } from "../target-readers/policy.js";
 import { sameReaders, type ApprovedReadersField } from "../target-readers/narrowing.js";
+import { normalizeChangeDescription, normalizeKeywords, submitFieldError, validateDates, validateRelatedDocumentIds,
+  type ContributionField } from "../knowledge/contribution-form.js";
 
 export type MembershipStatus = "INVITED" | "ACTIVE" | "SUSPENDED" | "LEFT";
 export type MembershipSummary = {
@@ -59,6 +61,14 @@ export type SharedKnowledgeDraft = {
   audienceRoleIds: string[];
   /** Target Readers saved on the draft (T1.4); null until the author chooses them. */
   targetReaders: ReaderSelection | null;
+  /** T3.2 contribution form fields; nullable/empty while the draft is incomplete. */
+  categoryId: string | null;
+  keywords: string[];
+  changeDescription: string | null;
+  /** YYYY-MM-DD. */
+  effectiveDate: string | null;
+  expirationDate: string | null;
+  relatedDocumentIds: string[];
   versionId: string;
   sourceUri: string;
   mimeType: string;
@@ -84,12 +94,21 @@ export type SharedDraftPatch = {
   audienceRoleIds?: string[];
   /** Absent keeps the saved readers; present must pass TargetReaderPolicy.validateSelection. */
   targetReaders?: TargetReadersInput;
+  /** T3.2: absent keeps the saved value; null clears it. */
+  categoryId?: string | null;
+  keywords?: string[];
+  changeDescription?: string | null;
+  effectiveDate?: string | null;
+  expirationDate?: string | null;
+  /** Replaces the document's RELATED links. */
+  relatedDocumentIds?: string[];
 };
 export type UpdateSharedDraftResult =
   | { kind: "not-found" }
   | { kind: "conflict"; currentVersion: number }
   | { kind: "invalid-metadata" }
   | { kind: "invalid-target-readers"; field: TargetReadersField; reason: string }
+  | { kind: "invalid-field"; field: ContributionField; reason: string }
   | { kind: "updated"; draft: SharedKnowledgeDraft };
 export type SharedKnowledgeSubmission = {
   id: string;
@@ -111,13 +130,34 @@ export type SharedKnowledgeSubmission = {
   submittedAt: Date;
   publishedVersionId: string | null;
   decisionComment: string | null;
+  /** T6.1: CONTENT for a new version; READER_CHANGE or WITHDRAWAL for a request about the current publication. */
+  requestType: PublicationRequestType;
+  requestReason: string | null;
 };
+export type PublicationRequestType = "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+export type PublicationChangeInput = {
+  type: "READER_CHANGE" | "WITHDRAWAL";
+  reason: string;
+  /** Required for READER_CHANGE, refused for WITHDRAWAL. */
+  targetReaders?: TargetReadersInput;
+  idempotencyKey: string;
+};
+export type RequestPublicationChangeResult =
+  | { kind: "requested"; submission: SharedKnowledgeSubmission }
+  | { kind: "replayed"; submission: SharedKnowledgeSubmission }
+  | { kind: "not-found" }
+  | { kind: "not-published" }
+  | { kind: "conflict" }
+  | { kind: "invalid-request"; reason: string }
+  | { kind: "invalid-target-readers"; field: TargetReadersField; reason: string };
 export type SubmitKnowledgeDraftResult =
   | { kind: "submitted"; submission: SharedKnowledgeSubmission }
   | { kind: "replayed"; submission: SharedKnowledgeSubmission }
   | { kind: "not-found" }
   | { kind: "conflict" }
-  | { kind: "not-ready" };
+  | { kind: "not-ready" }
+  /** T3.2: a required form field is missing (missing) or invalid at submit. */
+  | { kind: "invalid-field"; field: ContributionField; missing: boolean; reason: string };
 export type WithdrawKnowledgeSubmissionResult =
   | { kind: "withdrawn"; submission: SharedKnowledgeSubmission }
   | { kind: "replayed"; submission: SharedKnowledgeSubmission }
@@ -262,6 +302,12 @@ type SharedDraftRow = ReaderSelectionColumns & {
   updated_at: Date;
   audience_role_ids: string[];
   draft_selection_revision: number | null;
+  category_id: string | null;
+  keywords: string[];
+  change_description: string | null;
+  effective_date: string | null;
+  expiration_date: string | null;
+  related_document_ids: string[];
 };
 const sharedDraftSelect = `
   SELECT d.shared_draft_id, d.title, d.classification, d.source_private_version_id,
@@ -276,6 +322,12 @@ const sharedDraftSelect = `
                WHERE a.shared_draft_id = d.shared_draft_id ORDER BY a.role_id) AS audience_role_ids,
          (SELECT rs.revision FROM reader_selection rs
            WHERE rs.selection_id = d.draft_selection_id) AS draft_selection_revision,
+         d.category_id, d.keywords, d.change_description,
+         to_char(d.effective_date, 'YYYY-MM-DD') AS effective_date,
+         to_char(d.expiration_date, 'YYYY-MM-DD') AS expiration_date,
+         ARRAY(SELECT r.target_document_id::text FROM document_relationship r
+               WHERE r.source_document_id = d.shared_draft_id AND r.relationship_type = 'RELATED'
+               ORDER BY r.created_at, r.target_document_id) AS related_document_ids,
          ${readerSelectionColumns("d.draft_selection_id")}
     FROM shared_draft d
     JOIN shared_draft_version v ON v.shared_draft_id = d.shared_draft_id
@@ -294,6 +346,12 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
     projectTag: row.project_tag,
     audienceRoleIds: row.audience_role_ids,
     targetReaders: mapReaderSelection(row),
+    categoryId: row.category_id,
+    keywords: row.keywords ?? [],
+    changeDescription: row.change_description,
+    effectiveDate: row.effective_date,
+    expirationDate: row.expiration_date,
+    relatedDocumentIds: row.related_document_ids ?? [],
     versionId: row.shared_draft_version_id,
     sourceUri: row.content_uri,
     mimeType: row.mime_type,
@@ -329,6 +387,8 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
   organization_wide: boolean;
   published_version_id: string | null;
   decision_comment: string | null;
+  request_type: PublicationRequestType;
+  request_reason: string | null;
 };
 // organization_wide: the frozen audience includes the organization audience. That kind is valid only at
 // Organization scope (audience_snapshot_enforceable) and audience_member_read shows it to every active member,
@@ -346,7 +406,7 @@ const submissionSelect = `
            SELECT 1 FROM audience a WHERE a.organization_id = s.organization_id
               AND a.audience_id = ANY(s.audience_role_ids) AND a.kind = 'ORGANIZATION_ALL')) AS organization_wide,
          cp.published_version_id,
-         rd.comment AS decision_comment
+         rd.comment AS decision_comment, s.request_type, s.request_reason
     FROM shared_submission s
     LEFT JOIN published_knowledge_version pv ON pv.submission_id = s.submission_id
     LEFT JOIN knowledge_current_publication cp ON cp.published_version_id = pv.published_version_id
@@ -371,6 +431,8 @@ function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmissio
     submittedAt: row.submitted_at,
     publishedVersionId: row.published_version_id,
     decisionComment: row.decision_comment,
+    requestType: row.request_type,
+    requestReason: row.request_reason,
   };
 }
 type ReviewerGrantRow = {
@@ -481,6 +543,8 @@ export type KnowledgeOptions = {
   organizationReviewerAvailable: boolean;
   audiences: Array<{ id: string; name: string; departmentId: string | null;
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
+  /** T3.2/T3.3: the organization's active document categories, in display order. */
+  categories: Array<{ id: string; code: string; name: string; isDefault: boolean }>;
 };
 
 export type DeleteDepartmentResult =
@@ -536,6 +600,8 @@ export interface ArdenDataRepository {
   listKnowledgeSubmissions(userId: string, organizationId: string): Promise<SharedKnowledgeSubmission[] | null>;
   withdrawKnowledgeSubmission(userId: string, organizationId: string, submissionId: string,
     requestId: string): Promise<WithdrawKnowledgeSubmissionResult>;
+  requestPublicationChange(userId: string, organizationId: string, documentId: string,
+    input: PublicationChangeInput, requestId: string): Promise<RequestPublicationChangeResult>;
   listReviewerGrants(userId: string, organizationId: string): Promise<ReviewerGrantRecord[] | null>;
   createReviewerGrant(userId: string, organizationId: string, input: ReviewerGrantInput, requestId: string): Promise<ReviewerGrantRecord | null>;
   deactivateReviewerGrant(userId: string, organizationId: string, grantId: string, requestId: string): Promise<boolean>;
@@ -944,6 +1010,9 @@ export class ArdenRepository implements ArdenDataRepository {
         ORDER BY kind, name, audience_id`, [organizationId, membershipId]);
       const organizationReviewer = await client.query<{ available: boolean }>(`
         SELECT organization_has_active_reviewer_grant($1) AS available`, [organizationId]);
+      const categories = await client.query<{ id: string; code: string; name: string; is_default: boolean }>(`
+        SELECT category_id AS id, code, name, is_default FROM document_category
+         WHERE organization_id = $1 AND status = 'ACTIVE' ORDER BY sort_order, name`, [organizationId]);
       return {
         departments: departments.rows,
         primaryDepartmentId: await this.actorPrimaryDepartment(client, userId, organizationId),
@@ -952,6 +1021,8 @@ export class ArdenRepository implements ArdenDataRepository {
           id: audience.id, name: audience.name, departmentId: audience.department_id,
           kind: audience.kind,
         })),
+        categories: categories.rows.map((category) => ({ id: category.id, code: category.code, name: category.name,
+          isDefault: category.is_default })),
       };
     });
   }
@@ -1511,6 +1582,9 @@ export class ArdenRepository implements ArdenDataRepository {
         [organizationId, next.audienceRoleIds, next.targetScopeType, next.responsibleDepartmentId]);
         if (audiences.rowCount !== next.audienceRoleIds.length) return { kind: "invalid-metadata" };
       }
+      const form = await this.resolveContributionForm(client, organizationId, draftId, row.author_membership_id,
+        current, patch);
+      if (!form.ok) return { kind: "invalid-field", field: form.field, reason: form.reason };
       let draftSelectionId: string | null = null;
       if (patch.targetReaders !== undefined) {
         const validation = validateSelection(patch.targetReaders,
@@ -1521,10 +1595,23 @@ export class ArdenRepository implements ArdenDataRepository {
       }
       await client.query(`UPDATE shared_draft SET title = $3, classification = $4,
         responsible_department_id = $5, target_scope_type = $6, team_tag = $7, project_tag = $8,
-        draft_selection_id = COALESCE($9::uuid, draft_selection_id)
+        draft_selection_id = COALESCE($9::uuid, draft_selection_id),
+        category_id = $10, keywords = $11, change_description = $12, effective_date = $13::date,
+        expiration_date = $14::date
         WHERE shared_draft_id = $1 AND organization_id = $2`, [draftId, organizationId, next.title,
         next.classification, next.responsibleDepartmentId, next.targetScopeType, next.teamTag, next.projectTag,
-        draftSelectionId]);
+        draftSelectionId, form.value.categoryId, form.value.keywords, form.value.changeDescription,
+        form.value.effectiveDate, form.value.expirationDate]);
+      if (patch.relatedDocumentIds !== undefined) {
+        await client.query(`DELETE FROM document_relationship
+          WHERE source_document_id = $1 AND relationship_type = 'RELATED'`, [draftId]);
+        if (form.value.relatedDocumentIds.length > 0) {
+          await client.query(`INSERT INTO document_relationship (organization_id, source_document_id,
+              target_document_id, created_by_membership_id)
+            SELECT $1, $2, target, $3 FROM unnest($4::uuid[]) AS target`,
+          [organizationId, draftId, row.author_membership_id, form.value.relatedDocumentIds]);
+        }
+      }
       if (patch.audienceRoleIds !== undefined) {
         await client.query(`DELETE FROM shared_draft_audience WHERE shared_draft_id = $1`, [draftId]);
         if (next.audienceRoleIds.length > 0) {
@@ -1550,6 +1637,47 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
+  /** T3.2: merges and validates the contribution form fields of a draft save. Nothing is written. */
+  private async resolveContributionForm(client: PoolClient, organizationId: string, draftId: string,
+    authorMembershipId: string, current: SharedKnowledgeDraft, patch: SharedDraftPatch): Promise<
+      | { ok: true; value: { categoryId: string | null; keywords: string[]; changeDescription: string | null;
+          effectiveDate: string | null; expirationDate: string | null; relatedDocumentIds: string[] } }
+      | { ok: false; field: ContributionField; reason: string }> {
+    const categoryId = patch.categoryId === undefined ? current.categoryId : patch.categoryId;
+    if (patch.categoryId !== undefined && categoryId !== null) {
+      const category = await client.query(`SELECT 1 FROM document_category
+        WHERE category_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [categoryId, organizationId]);
+      if (category.rowCount === 0) return { ok: false, field: "categoryId", reason: "Choose an active category of this organization." };
+    }
+    const keywords = patch.keywords === undefined ? { ok: true as const, value: current.keywords } : normalizeKeywords(patch.keywords);
+    if (!keywords.ok) return keywords;
+    const changeDescription = patch.changeDescription === undefined
+      ? { ok: true as const, value: current.changeDescription } : normalizeChangeDescription(patch.changeDescription);
+    if (!changeDescription.ok) return changeDescription;
+    const effectiveDate = patch.effectiveDate === undefined ? current.effectiveDate : patch.effectiveDate;
+    const expirationDate = patch.expirationDate === undefined ? current.expirationDate : patch.expirationDate;
+    const dates = validateDates(effectiveDate, expirationDate);
+    if (!dates.ok) return dates;
+    const related = patch.relatedDocumentIds === undefined
+      ? { ok: true as const, value: current.relatedDocumentIds } : validateRelatedDocumentIds(draftId, patch.relatedDocumentIds);
+    if (!related.ok) return related;
+    if (patch.relatedDocumentIds !== undefined && related.value.length > 0) {
+      // A link target is a published document the author may read (RLS applies Target Readers) or their own draft.
+      const visible = await client.query<{ id: string }>(`
+        SELECT cp.shared_draft_id::text AS id FROM knowledge_current_publication cp
+         WHERE cp.organization_id = $1 AND cp.shared_draft_id = ANY($2::uuid[])
+        UNION
+        SELECT d.shared_draft_id::text FROM shared_draft d
+         WHERE d.organization_id = $1 AND d.shared_draft_id = ANY($2::uuid[]) AND d.author_membership_id = $3
+           AND d.status = 'ACTIVE'`, [organizationId, related.value, authorMembershipId]);
+      if (visible.rowCount !== related.value.length) {
+        return { ok: false, field: "relatedDocumentIds", reason: "Link only documents you can read in this organization." };
+      }
+    }
+    return { ok: true, value: { categoryId, keywords: keywords.value, changeDescription: changeDescription.value,
+      effectiveDate, expirationDate, relatedDocumentIds: related.value } };
+  }
+
   async submitKnowledgeDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number,
     idempotencyKey: string, requestId: string): Promise<SubmitKnowledgeDraftResult> {
     return this.withActorContext(userId, organizationId, async (client) => {
@@ -1567,6 +1695,17 @@ export class ArdenRepository implements ArdenDataRepository {
         return { kind: "not-found" };
       }
       if (row.current_version_no !== expectedVersion) return { kind: "conflict" };
+      // T3.2: the contribution form's required fields come first, each named in the error.
+      const formState = await client.query<{ category_active: boolean; new_version: boolean }>(`
+        SELECT EXISTS (SELECT 1 FROM document_category c WHERE c.category_id = $3
+                         AND c.organization_id = $1 AND c.status = 'ACTIVE') AS category_active,
+               EXISTS (SELECT 1 FROM shared_submission s WHERE s.organization_id = $1 AND s.shared_draft_id = $2
+                         AND s.status = 'APPROVED') AS new_version`, [organizationId, draftId, row.category_id]);
+      const fieldError = submitFieldError({ title: row.title, categoryId: row.category_id,
+        categoryActive: formState.rows[0]?.category_active ?? false, hasTargetReaders: row.readers_selection_id !== null,
+        effectiveDate: row.effective_date, expirationDate: row.expiration_date,
+        changeDescription: row.change_description, isNewVersion: formState.rows[0]?.new_version ?? false });
+      if (fieldError) return { kind: "invalid-field", ...fieldError };
       if (!row.responsible_department_id || !row.target_scope_type) return { kind: "not-ready" };
       const audiences = await client.query<{ audience_id: string; organization_id: string;
         status: "ACTIVE" | "INACTIVE"; kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP";
@@ -1605,16 +1744,18 @@ export class ArdenRepository implements ArdenDataRepository {
           submitted_by_membership_id, target_scope_type, target_department_id,
           responsible_department_id, title, classification, team_tag, project_tag,
           audience_role_ids, policy_version, content_uri, mime_type, content_hash, submit_request_id,
-          proposed_selection_id)
+          proposed_selection_id, category_id, keywords, change_description, effective_date, expiration_date)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-          $13::uuid[], 1, $14, $15, $16, $17, $18::uuid)
+          $13::uuid[], 1, $14, $15, $16, $17, $18::uuid, $19::uuid, $20::text[], $21, $22::date, $23::date)
         RETURNING submission_id`, [organizationId, draftId, row.shared_draft_version_id,
         row.current_version_no, row.author_membership_id, row.target_scope_type,
         row.target_scope_type === "DEPARTMENT" ? row.responsible_department_id : null,
         row.responsible_department_id, row.title, row.classification, row.team_tag, row.project_tag,
         row.audience_role_ids, row.content_uri, row.mime_type, row.content_hash, idempotencyKey,
         // T1.4: the draft selection is frozen as the proposed readers; selections are immutable rows.
-        row.readers_selection_id]);
+        row.readers_selection_id,
+        // T3.2: the form fields are frozen with the snapshot.
+        row.category_id, row.keywords, row.change_description, row.effective_date, row.expiration_date]);
       const submissionId = submitted.rows[0]?.submission_id;
       if (!submissionId) throw new Error("Submission insert returned no identifier");
       await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type,
@@ -1665,6 +1806,77 @@ export class ArdenRepository implements ArdenDataRepository {
         WHERE s.submission_id = $1`, [submissionId]);
       if (!result.rows[0]) throw new Error("Withdrawn submission is not readable");
       return { kind: "withdrawn", submission: mapSharedSubmission(result.rows[0]) };
+    });
+  }
+
+  /**
+   * T6.1 (SDD S-16): the author asks to change the readers of their published document or to withdraw it.
+   * The request reuses the current publication's frozen snapshot and is reviewed like a submission; until
+   * it is approved (T6.2) the current version and readers do not change.
+   */
+  async requestPublicationChange(userId: string, organizationId: string, documentId: string,
+    input: PublicationChangeInput, requestId: string): Promise<RequestPublicationChangeResult> {
+    const reason = input.reason.trim();
+    if (!reason || [...reason].length > 1000) return { kind: "invalid-request", reason: "Give a reason of 1 to 1000 characters." };
+    if (input.type === "WITHDRAWAL" && input.targetReaders !== undefined) {
+      return { kind: "invalid-request", reason: "A withdrawal request does not take readers." };
+    }
+    if (input.type === "READER_CHANGE" && input.targetReaders === undefined) {
+      return { kind: "invalid-request", reason: "Choose the new readers." };
+    }
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const membership = await this.activeActorMembership(client, userId, organizationId);
+      if (!membership) return { kind: "not-found" };
+      const replay = await client.query<SharedSubmissionRow>(`${submissionSelect}
+        WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2 AND s.submit_request_id = $3`,
+      [organizationId, membership, input.idempotencyKey]);
+      if (replay.rows[0]) {
+        return replay.rows[0].shared_draft_id === documentId && replay.rows[0].request_type === input.type
+          ? { kind: "replayed", submission: mapSharedSubmission(replay.rows[0]) } : { kind: "conflict" };
+      }
+      const document = await client.query<{ author_membership_id: string }>(`SELECT author_membership_id FROM shared_draft
+        WHERE organization_id = $1 AND shared_draft_id = $2 AND status = 'ACTIVE' FOR UPDATE`, [organizationId, documentId]);
+      if (document.rows[0]?.author_membership_id !== membership) return { kind: "not-found" };
+      const current = await client.query<{ published_version_id: string; submission_id: string }>(`
+        SELECT cp.published_version_id, pv.submission_id FROM knowledge_current_publication cp
+          JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
+         WHERE cp.organization_id = $1 AND cp.shared_draft_id = $2`, [organizationId, documentId]);
+      const publication = current.rows[0];
+      if (!publication) return { kind: "not-published" };
+      const pending = await client.query(`SELECT 1 FROM shared_submission
+        WHERE shared_draft_id = $1 AND status = 'PENDING_REVIEW'`, [documentId]);
+      if (pending.rowCount !== 0) return { kind: "conflict" };
+      let selectionId: string | null = null;
+      if (input.type === "READER_CHANGE") {
+        const validation = validateSelection(input.targetReaders!,
+          await this.loadSelectionFacts(client, organizationId, input.targetReaders!));
+        if (!validation.ok) return { kind: "invalid-target-readers", field: validation.field, reason: validation.reason };
+        selectionId = await this.insertReaderSelection(client, organizationId, validation.selection, 1);
+      }
+      // The request repeats the published submission's frozen snapshot, so it routes to the same reviewers.
+      const inserted = await client.query<{ submission_id: string }>(`
+        INSERT INTO shared_submission (organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
+          submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id, title,
+          classification, team_tag, project_tag, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
+          content_hash, submit_request_id, proposed_selection_id, category_id, keywords, change_description,
+          effective_date, expiration_date, request_type, request_reason, target_published_version_id)
+        SELECT s.organization_id, s.shared_draft_id, s.shared_draft_version_id, s.snapshot_version_no,
+               $2, s.target_scope_type, s.target_department_id, s.responsible_department_id, s.title,
+               s.classification, s.team_tag, s.project_tag, s.audience_role_ids, s.policy_version, s.review_rule,
+               s.content_uri, s.mime_type, s.content_hash, $3, $4::uuid, s.category_id, s.keywords,
+               s.change_description, s.effective_date, s.expiration_date, $5, $6, $7
+          FROM shared_submission s WHERE s.submission_id = $1
+        RETURNING submission_id`, [publication.submission_id, membership, input.idempotencyKey, selectionId,
+        input.type, reason, publication.published_version_id]);
+      const submissionId = inserted.rows[0]?.submission_id;
+      if (!submissionId) throw new Error("Change request insert returned no identifier");
+      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type,
+        outcome, details_json) VALUES ($1, $2, 'KNOWLEDGE_CHANGE_REQUESTED', 'SUCCESS', $3::jsonb)`,
+      [organizationId, membership, JSON.stringify({ submissionId, draftId: documentId, requestType: input.type,
+        publishedVersionId: publication.published_version_id, requestId })]);
+      const result = await client.query<SharedSubmissionRow>(`${submissionSelect} WHERE s.submission_id = $1`, [submissionId]);
+      if (!result.rows[0]) throw new Error("Change request is not readable");
+      return { kind: "requested", submission: mapSharedSubmission(result.rows[0]) };
     });
   }
 
@@ -1751,6 +1963,7 @@ export class ArdenRepository implements ArdenDataRepository {
         effectivePolicyVersion: 1,
         audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids,
           row.target_scope_type, row.responsible_department_id),
+        requestType: row.request_type,
       })));
       const assigned = listAssignedReviews({ actor, now, candidates });
       // Names are resolved only for submissions the policy above already authorized.
@@ -1876,6 +2089,7 @@ export class ArdenRepository implements ArdenDataRepository {
         policy: { kind: "SINGLE_REVIEWER" },
         now: new Date(),
         readers: { proposed: proposedReaders, facts: readerFacts },
+        requestType: row.request_type,
       }, { action, expectedSnapshotVersionId, expectedContentHash, comment, approvedReaders });
       if (plan.kind === "DENIED") {
         return plan.reason === "INVALID_READERS"

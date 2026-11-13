@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, DecidedReview, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult, WithdrawKnowledgeSubmissionResult } from "./db/repository.js";
+import type { ActiveMembership, ArdenDataRepository, DecidedReview, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult, WithdrawKnowledgeSubmissionResult,
+  PublicationChangeInput, RequestPublicationChangeResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -1220,6 +1221,7 @@ describe("API auth and private draft routes", () => {
       responsibleDepartmentId: salesDepartmentId, targetScopeType: "ORGANIZATION", targetDepartmentId: null,
       audienceRoleIds: [], proposedTargetReaders: null, approvedTargetReaders: null, contentHash: "a".repeat(64),
       status: "PENDING_REVIEW", publicationState: "NONE", submittedAt: new Date("2026-11-10T09:00:00.000Z"),
+      requestType: "CONTENT", requestReason: null,
       publishedVersionId: null, decisionComment: null };
     repository.reviewerGrant = { id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", reviewerMembershipId: otherId, scope: "DEPARTMENT",
       departmentId: salesDepartmentId, classifications: ["INTERNAL"], level: "STANDARD", teamTag: null, projectTag: null,
@@ -1582,6 +1584,33 @@ describe("API auth and private draft routes", () => {
       headers: { cookie: owner, origin: "http://localhost:5180" } })).statusCode).toBe(400);
   });
 
+  it("accepts reader-change and withdrawal requests only for a published document (T6.1)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const url = `/api/v1/organizations/${organizationId}/knowledge/documents/${sharedDraftId}/change-requests`;
+    const headers = { cookie: owner, origin: "http://localhost:5180", "idempotency-key": "dededede-dede-4ede-8ede-dededededede" };
+    const send = (payload: object, extra: Record<string, string> = headers) => app.inject({ method: "POST", url, headers: extra, payload });
+
+    expect((await send({ type: "WITHDRAWAL", reason: "Outdated" }, { cookie: owner, origin: "http://localhost:5180" })).statusCode).toBe(400);
+    expect((await send({ type: "ARCHIVE", reason: "Outdated" })).statusCode).toBe(400);
+    expect((await send({ type: "WITHDRAWAL" })).statusCode).toBe(400);
+    const unpublished = await send({ type: "WITHDRAWAL", reason: "Outdated" });
+    expect(unpublished.statusCode).toBe(409);
+    expect(unpublished.json().error.code).toBe("DOCUMENT_NOT_PUBLISHED");
+
+    repository.sharedSubmission = { id: "abababab-abab-4aba-8aba-abababababab", draftId: sharedDraftId,
+      snapshotVersionId: sharedVersionId, title: "Runbook", classification: "INTERNAL",
+      responsibleDepartmentId: salesDepartmentId, targetScopeType: "ORGANIZATION", targetDepartmentId: null,
+      audienceRoleIds: [], proposedTargetReaders: null, approvedTargetReaders: null, contentHash: "a".repeat(64),
+      status: "APPROVED", publicationState: "ACTIVE", submittedAt: new Date("2026-11-10T09:00:00.000Z"),
+      publishedVersionId: "efefefef-efef-4efe-8efe-efefefefefef", decisionComment: null,
+      requestType: "CONTENT", requestReason: null };
+    expect((await send({ type: "READER_CHANGE", reason: "Narrow it" })).statusCode).toBe(400);
+    const requested = await send({ type: "WITHDRAWAL", reason: "The policy was replaced" });
+    expect(requested.statusCode).toBe(201);
+    expect(requested.json()).toMatchObject({ status: "PENDING_REVIEW", requestType: "WITHDRAWAL",
+      requestReason: "The policy was replaced" });
+  });
+
   it("routes desktop-compatible sign-in through the same HttpOnly Supabase session", async () => {
     const response = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
@@ -1898,6 +1927,7 @@ class MemoryRepository implements ArdenDataRepository {
       organizationReviewerAvailable: false,
       audiences: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product members",
         departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", kind: "DEPARTMENT_ALL" }],
+      categories: [{ id: "12121212-1212-4121-8121-121212121212", code: "GENERAL", name: "General", isDefault: true }],
     };
   }
 
@@ -1978,7 +2008,8 @@ class MemoryRepository implements ArdenDataRepository {
       id: sharedDraftId, organizationId, title: input.expectedSource.title,
       classification: input.classification, sourcePrivateVersionId: input.sourceVersionId,
       responsibleDepartmentId: null, targetScopeType: null, teamTag: null, projectTag: null, audienceRoleIds: [],
-      targetReaders: null, versionId: sharedVersionId, sourceUri: input.copiedContent.sourceUri,
+      targetReaders: null, categoryId: null, keywords: [], changeDescription: null,
+      effectiveDate: null, expirationDate: null, relatedDocumentIds: [], versionId: sharedVersionId, sourceUri: input.copiedContent.sourceUri,
       mimeType: input.copiedContent.mimeType, contentHash: input.copiedContent.contentHash,
       currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
     };
@@ -2001,7 +2032,8 @@ class MemoryRepository implements ArdenDataRepository {
     this.sharedDraft = {
       id: sharedDraftId, organizationId, title: input.title, classification: input.classification,
       sourcePrivateVersionId: null, responsibleDepartmentId: null, targetScopeType: null,
-      teamTag: null, projectTag: null, audienceRoleIds: [], targetReaders: null, versionId: sharedVersionId,
+      teamTag: null, projectTag: null, audienceRoleIds: [], targetReaders: null, categoryId: null, keywords: [], changeDescription: null,
+      effectiveDate: null, expirationDate: null, relatedDocumentIds: [], versionId: sharedVersionId,
       sourceUri: input.content.sourceUri, mimeType: input.content.mimeType, contentHash: input.content.contentHash,
       currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
     };
@@ -2062,7 +2094,7 @@ class MemoryRepository implements ArdenDataRepository {
       contentHash: draft.contentHash,
       status: "PENDING_REVIEW", submittedAt: new Date("2026-10-10T10:00:00.000Z"), publishedVersionId: null,
       publicationState: "NONE",
-      decisionComment: null,
+      decisionComment: null, requestType: "CONTENT", requestReason: null,
     };
     this.sharedDraft = { ...draft, hasPendingSubmission: true };
     return { kind: "submitted", submission: this.sharedSubmission! };
@@ -2084,6 +2116,19 @@ class MemoryRepository implements ArdenDataRepository {
     this.sharedSubmission = { ...submission, status: "WITHDRAWN" };
     if (this.sharedDraft) this.sharedDraft = { ...this.sharedDraft, hasPendingSubmission: false };
     return { kind: "withdrawn", submission: this.sharedSubmission };
+  }
+
+  async requestPublicationChange(userId: string, requestedOrganization: string, documentId: string,
+    input: PublicationChangeInput): Promise<RequestPublicationChangeResult> {
+    if (userId !== ownerId || requestedOrganization !== organizationId || documentId !== sharedDraftId) return { kind: "not-found" };
+    const submission = this.sharedSubmission;
+    if (!submission || submission.publicationState !== "ACTIVE") return { kind: "not-published" };
+    if (input.type === "READER_CHANGE" && !input.targetReaders) return { kind: "invalid-request", reason: "Choose the new readers." };
+    this.sharedSubmission = { ...submission, id: "cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd", status: "PENDING_REVIEW",
+      publicationState: "NONE", requestType: input.type, requestReason: input.reason.trim(),
+      proposedTargetReaders: input.targetReaders ? { mode: input.targetReaders.mode,
+        departmentId: input.targetReaders.departmentId ?? null, memberIds: input.targetReaders.memberIds ?? [] } : null };
+    return { kind: "requested", submission: this.sharedSubmission };
   }
 
   async listReviewerGrants(userId: string, requestedOrganization: string): Promise<ReviewerGrantRecord[] | null> {
@@ -2113,7 +2158,7 @@ class MemoryRepository implements ArdenDataRepository {
     return [{ submissionId: submission.id, snapshotId: submission.snapshotVersionId,
       title: submission.title, departmentId: submission.responsibleDepartmentId,
       classification: submission.classification, submittedAt: submission.submittedAt, approvalBlocked: false,
-      versionNo: 2, authorName: "Owner" }];
+      versionNo: 2, requestType: submission.requestType, authorName: "Owner" }];
   }
 
   decidedReviews: DecidedReview[] = [];

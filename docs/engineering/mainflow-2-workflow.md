@@ -109,7 +109,9 @@ Target Readers are the per-document reader model planned to replace audience gro
 - `document_category`: every organization has the five defaults, seeded by a trigger on organization creation and backfilled for existing organizations. A category is a browse/filter label and grants no access. Members read only their organization's categories.
 - `shared_draft` gains `category_id`, `keywords` (at most 20 distinct entries of 1–50 characters) and `change_description` (≤ 2000 characters). They are nullable working fields so Save draft accepts an incomplete form; T3.2 validates them on Submit. Existing documents got their organization's default category.
 - `shared_submission` gains frozen copies of the same three fields, part of the immutable snapshot tuple.
-- `document_relationship` links two documents (`RELATED`, `REFERENCES`, `SUPERSEDES`) of the same organization; composite foreign keys make a cross-organization link impossible, and only the source document's author can add or remove a link. The API and screens for these fields are T3.2/T3.3.
+- `document_relationship` links two documents (`RELATED`, `REFERENCES`, `SUPERSEDES`) of the same organization; composite foreign keys make a cross-organization link impossible, and only the source document's author can add or remove a link.
+- **Save draft (T3.2, migration 0030):** `PATCH /drafts/:id` also accepts `categoryId`, `keywords`, `changeDescription`, `effectiveDate`, `expirationDate` (YYYY-MM-DD) and `relatedDocumentIds`. Absent keeps the saved value; null clears it. Missing values are allowed. Malformed ones return 400 `INVALID_FIELD` with `error.field` and no new version: a category that is not an active category of the organization, invalid keywords, an impossible date, an Expiration Date not later than the Effective Date, more than 20 related documents, a duplicate or self link, or a link to a document the author cannot read (a related document must be a current publication the author may read, or the author's own draft). `relatedDocumentIds` replaces the document's `RELATED` links. Drafts return all six fields.
+- **Category in the editor (part of T3.3, 2026-11-12 request):** `GET /knowledge/options` returns the organization's active `categories` (id, code, name, isDefault). The draft editor's "Before you submit" panel has a required Category select, a "Category" readiness line, and Submit stays disabled until a category is chosen; a saved category that became inactive shows as "Unavailable category". My Contributions shows the category. Against a server without categories the field is hidden and no `categoryId` is sent. The other fields (dates, keywords, related documents, change description) are still T3.3 and the Target Readers picker is T1.5. **Until the picker ships, the current form cannot submit**, because Submit also requires Target Readers; merge T3.2 to staging together with it.
 
 ## 4. Submitting
 
@@ -122,9 +124,17 @@ Target Readers are the per-document reader model planned to replace audience gro
   - the author has an active primary department, and it equals the stored responsible department;
   - a target scope is set;
   - at least one valid, enforceable audience is chosen.
+- **Required form fields (T3.2), checked first, in form order:** Document Name, an active category and Target Readers; when both dates are set, an Expiration Date later than the Effective Date; and, when the document already has an approved version, a Change Description. A missing field returns 400 `REQUIRED_FIELD_MISSING`, an invalid one 400 `INVALID_FIELD`, both with `error.field`. The submission freezes the category, keywords, Change Description and both dates with the snapshot; later draft edits do not change it. Keywords, related documents and **both dates are optional**. Provenance: the maintainer decided on 2026-11-12 that the Effective Date is not required, replacing "Effective Date \*" in the SRS (Report 3, FR for the contribution form and NSF on validity) and the T3.2/S-10 wording; Report 3/4 need the same update. Activation and expiry by date are T4.1–T4.3; without an Effective Date a version applies from its activation. Still open against the SRS: equal Effective and Expiration Dates (the SRS allows "not earlier than"; the code requires a later date) and the 500-character Change Description limit (the code allows 2000).
 - A draft that is not ready returns 409 `DRAFT_NOT_READY`. Another open submission, or an already-submitted version, returns 409 `SUBMISSION_CONFLICT`.
 - `GET /submissions` lists the actor's own submissions. My Contributions uses it for status and history.
 - **Withdraw (T5.1, FR-DOC-06, migration 0029):** `POST /submissions/:id/withdraw` lets the author withdraw their own `PENDING_REVIEW` submission. It becomes `WITHDRAWN`, leaves every review queue and frees the document for a new submission; the draft is kept. Another member's or an unknown submission → 404 `RESOURCE_NOT_AVAILABLE`; a decided one → 409 `SUBMISSION_NOT_PENDING`; repeating a completed withdrawal returns it again (200). A trigger makes `WITHDRAWN` reachable only from `PENDING_REVIEW` and final; an RLS policy lets only the submitting author make that change.
+
+### Reader-change and withdrawal requests (T6.1, migration 0031)
+
+- `POST /documents/:documentId/change-requests` with an `Idempotency-Key` and `{ type: "READER_CHANGE" | "WITHDRAWAL", reason, targetReaders? }` lets the author of a published document ask to change its readers or to withdraw it. The reason is required (1–1000 characters). `READER_CHANGE` requires `targetReaders` (validated like a draft save; 400 `INVALID_TARGET_READERS` with `error.field`); `WITHDRAWAL` refuses them (400 `INVALID_REQUEST`). A document without a current publication → 409 `DOCUMENT_NOT_PUBLISHED`; another pending request or submission for the document → 409 `SUBMISSION_CONFLICT`; another member or an unknown document → 404. The same key replays the request (200).
+- The request is a `shared_submission` with `request_type`, `request_reason` and `target_published_version_id`. It repeats the current publication's frozen snapshot, so it routes to the same reviewers; new readers are its proposed readers. A trigger verifies the requester is the author and the snapshot is the current publication's.
+- **While pending, the current version and readers do not change.** The request appears in the review queue with `requestType`; submissions and reviews return `requestType` and `requestReason`. The author can withdraw it (T5.1). A reviewer can reject it. Approving it is T6.2: until then the API returns 409 `REQUEST_NOT_SUPPORTED` and a database trigger refuses the approval.
+- Provenance: Flow 2 task list T6.1 and SDD S-16, requested by the maintainer on 2026-11-12. Only the author can request in this slice; the SDD also names the responsible reviewer, and the Org Admin emergency path is T6.3. Decision owner for that extension: unknown; confirmation needed.
 
 ## 5. Reviewer grants (Organization Admin)
 
@@ -202,6 +212,9 @@ Approval hands the exact snapshot to the Mainflow 3 indexing pipeline (migration
 | Invalid approved readers / readers on a reject / readers on a legacy submission | 400 `INVALID_READERS` (with `error.field`) / `INVALID_REQUEST` / `READERS_NOT_SUPPORTED` |
 | Approved readers wider than proposed | 409 `READERS_WIDENED` |
 | Withdrawing a submission that is no longer pending | 409 `SUBMISSION_NOT_PENDING` |
+| Invalid contribution form field on save or submit / required field missing at submit | 400 `INVALID_FIELD` / `REQUIRED_FIELD_MISSING`, with `error.field` |
+| Change request for a document that is not published | 409 `DOCUMENT_NOT_PUBLISHED` |
+| Approving a reader-change or withdrawal request (until T6.2) | 409 `REQUEST_NOT_SUPPORTED` |
 | Request body fails schema validation | 400 `INVALID_REQUEST` ("The request is invalid.") |
 
 The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) is the target. Some current codes still differ: `SUBMISSION_CONFLICT` rather than `OPEN_RELEASE_CANDIDATE_EXISTS`, and 412 rather than 409 for a stale save.
@@ -209,7 +222,7 @@ The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) i
 ## 10. Audit events
 
 - **Drafts:** `SHARED_DRAFT_CREATED`, `SHARED_DRAFT_UPDATED`.
-- **Submissions and decisions:** `KNOWLEDGE_SUBMITTED`, `KNOWLEDGE_SUBMISSION_WITHDRAWN`, `KNOWLEDGE_REVIEW_DECIDED` (with `selfApproved` when an Organization Admin decides their own submission).
+- **Submissions and decisions:** `KNOWLEDGE_SUBMITTED`, `KNOWLEDGE_SUBMISSION_WITHDRAWN`, `KNOWLEDGE_CHANGE_REQUESTED` (with `requestType`), `KNOWLEDGE_REVIEW_DECIDED` (with `selfApproved` when an Organization Admin decides their own submission).
 - **Grants:** `REVIEWER_GRANT_CREATED` (including scope), `REVIEWER_GRANT_DEACTIVATED`.
 - **Activation:** `KNOWLEDGE_INDEX_ACTIVATED`, written by the indexing pipeline.
 
@@ -227,7 +240,7 @@ The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) i
 |---|---|
 | **Library → New shared draft** | Choose the content source (PDF or Arden editor) and the title. |
 | **Private Notes → Contribute a copy** | Copy one saved note version into a shared draft. It opens in the status island. |
-| **Draft editor → Before you submit** | Owner line, "Who can read it" picker, derived scope and reviewer, Advanced tags, readiness, Save version, Submit. |
+| **Draft editor → Before you submit** | Category, owner line, "Who can read it" picker, derived scope and reviewer, Advanced tags, readiness, Save version, Submit. |
 | **Library → My Contributions** | The author's drafts with status, reviewer note and history; "Withdraw request" with an in-place confirmation while a submission awaits review. |
 | **Reviews** | Queue, frozen document and decision island with a pinned Approve/Reject footer. Confirmation happens in place. |
 | **Library** | Current publications the member may read, and the document reader. |
@@ -253,6 +266,8 @@ The migration ledger is `apps/api/migrations`. Flow 2 relies on:
 | `0027_document_category_relationships.sql` | Categories (five defaults per organization), document keywords/change description, frozen submission copies, `document_relationship`; adds the `seed_document_categories` trigger, 20 postgres-owned SECURITY DEFINER routines in total (operator-class, trusted superuser/BYPASSRLS only). |
 | `0028_audience_to_target_readers.sql` | Forward-only backfill of current publications from legacy audiences to Target Readers, with the operator report function (operator-class, trusted superuser/BYPASSRLS only). |
 | `0029_withdraw_pending_submission.sql` | Author withdrawal policy and the `PENDING_REVIEW → WITHDRAWN` (final) trigger (operator-class). |
+| `0030_contribution_form_dates.sql` | Effective/Expiration Dates on drafts and frozen on submissions (operator-class). |
+| `0031_publication_change_requests.sql` | `request_type`, `request_reason`, `target_published_version_id`; replaces two reviewed SECURITY DEFINER validators (still 20); refuses approvals of change requests until T6.2 (operator-class, trusted superuser). |
 
 Run migrations before starting an API build that depends on them. The 0022 code reads `reviewer_grant.scope` and `shared_submission.review_rule`. The 0024 code reads `shared_draft.draft_selection_id`, the submission selection columns and `publication_reader_selection_id()`.
 
@@ -261,6 +276,8 @@ Run migrations before starting an API build that depends on them. The 0022 code 
 **Approved readers evidence (0025):** `src/target-readers/narrowing.test.ts`, the T2.1 cases in `src/knowledge/review-decision.test.ts` and the T2.1 request tests in `src/app.test.ts` run without a database. The T2.1 scenario in `src/db/repository.integration.test.ts` (widening refused with no decision/audit rows, narrowing, as-proposed copy, replay, legacy path, immutability, reviewer directory, activation and RLS/API reading) needs `ARDEN_TEST_DATABASE_URL`; it passed in the 2026-11-11 local PostgreSQL run above, and an end-to-end smoke through the running API (draft readers → submit → narrowed approval) passed. Not rehearsed on a staging copy. 0024/0025 add postgres-owned `SECURITY DEFINER` functions (18 in total); the operator repair script `deploy/release/security-definer-owner-repair.sql` still lists the reviewed 12 and will refuse until an operator reviews the new inventory.
 
 **Categories, backfill and withdrawal evidence (0027–0029):** `src/target-readers/target-readers.integration.test.ts` covers T3.1 (five defaults for an organization created by the runtime role, no pre-0027 document without a category, member-only category reads, keyword rules, cross-organization category/link refusal, author-only links), T1.2 (dry run, apply and re-report of organization, department, partial-department, one-member group and empty audiences with zero wider readers; operator-only function) and T5.1 (author-only withdrawal, replay, audit, 409 for an approved submission, final state, no reviewer withdrawal). `src/app.test.ts` and `packages/ui/tests/withdrawSubmission.test.ts` cover the route and the My Contributions button. On 2026-11-11 the full API suite passed on the disposable local PostgreSQL 17 after applying 0027–0029 (244 passed, Supabase auth skipped; an earlier run hit the existing 5-second timeout once in the activation scenario under parallel load). 0027–0029 were also applied to the local anonymized staging sample (3 organizations → 15 categories, all 12 drafts categorized; it has no current publications, so 0028 mapped nothing there). Not rehearsed on a real staging copy; the repair script still lists 12 functions.
+
+**Form and change-request evidence (0030–0031):** `src/knowledge/contribution-form.test.ts`, the T6.1 case in `src/knowledge/review-decision.test.ts` and the change-request route test in `src/app.test.ts` run without a database. `src/target-readers/target-readers.integration.test.ts` covers T3.2 (incomplete save and read-back, seven invalid-field cases with no new version, submit refused field by field, frozen fields, Change Description for a new version) and T6.1 (not published, another member, reason/readers rules, replay, conflict, unchanged current pointer, queue type, API and database refusal of approval, rejection, reader-change readers, integrity trigger). The existing scenarios in `src/db/repository.integration.test.ts` now save the required fields before submitting. On 2026-11-12 the full API suite passed twice on the disposable local PostgreSQL 17 after applying 0030–0031 (258 passed, Supabase auth skipped); the Target Readers suite's cleanup now retries a deadlock with the parallel repository suite. Not rehearsed on a staging copy.
 
 **Evidence obtained:**
 - API unit and request tests cover:

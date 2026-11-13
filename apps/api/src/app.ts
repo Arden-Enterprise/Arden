@@ -1120,6 +1120,13 @@ export function buildApp(dependencies: AppDependencies) {
           audienceIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
           // Shape only; counts, duplicates and membership/department state are TargetReaderPolicy field errors.
           targetReaders: targetReadersSchema,
+          // T3.2 contribution form. Shape only; rules are field errors from contribution-form.ts.
+          categoryId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
+          keywords: { type: "array", maxItems: 50, items: { type: "string", maxLength: 200 } },
+          changeDescription: { type: ["string", "null"], maxLength: 4000 },
+          effectiveDate: { type: ["string", "null"], maxLength: 10 },
+          expirationDate: { type: ["string", "null"], maxLength: 10 },
+          relatedDocumentIds: { type: "array", maxItems: 50, items: { type: "string", pattern: uuidPattern } },
         } },
       },
     }, async (request, reply) => {
@@ -1164,6 +1171,10 @@ export function buildApp(dependencies: AppDependencies) {
           if (result.kind === "invalid-metadata") return reply.code(400).send(safeError("INVALID_METADATA", "The draft metadata is invalid.", request.id));
           if (result.kind === "invalid-target-readers") {
             return reply.code(400).send({ error: { code: "INVALID_TARGET_READERS", message: result.reason,
+              requestId: request.id, field: result.field } });
+          }
+          if (result.kind === "invalid-field") {
+            return reply.code(400).send({ error: { code: "INVALID_FIELD", message: result.reason,
               requestId: request.id, field: result.field } });
           }
           return reply.code(404).send(resourceNotAvailable(request.id));
@@ -1214,6 +1225,11 @@ export function buildApp(dependencies: AppDependencies) {
         if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
         if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT", "Reload this draft and its review status.", request.id));
         if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Choose who can read this draft and save it before submitting. You need an active primary department; ask an Org Admin if you have none.", request.id));
+        // T3.2: Submit names the missing or invalid form field.
+        if (result.kind === "invalid-field") {
+          return reply.code(400).send({ error: { code: result.missing ? "REQUIRED_FIELD_MISSING" : "INVALID_FIELD",
+            message: result.reason, requestId: request.id, field: result.field } });
+        }
         reply.header("Cache-Control", "no-store");
         return reply.code(result.kind === "submitted" ? 201 : 200).send(representSubmission(result.submission));
       } catch (error) {
@@ -1241,6 +1257,50 @@ export function buildApp(dependencies: AppDependencies) {
         return representSubmission(result.submission);
       } catch (error) {
         request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge submission withdrawal failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // T6.1 (SDD S-16): the author asks to change the readers of a published document or to withdraw it.
+  app.post<{ Params: { organizationId: string; documentId: string };
+    Body: { type: "READER_CHANGE" | "WITHDRAWAL"; reason: string; targetReaders?: TargetReadersInput } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/change-requests", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern },
+        } },
+        headers: { type: "object", required: ["idempotency-key"], properties: {
+          "idempotency-key": { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", additionalProperties: false, required: ["type", "reason"], properties: {
+          type: { type: "string", enum: ["READER_CHANGE", "WITHDRAWAL"] },
+          reason: { type: "string", minLength: 1, maxLength: 4000 },
+          targetReaders: targetReadersSchema,
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.requestPublicationChange(context.userId,
+          request.params.organizationId, request.params.documentId, {
+            type: request.body.type, reason: request.body.reason, targetReaders: request.body.targetReaders,
+            idempotencyKey: request.headers["idempotency-key"] as string,
+          }, request.id);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "not-published") return reply.code(409).send(safeError("DOCUMENT_NOT_PUBLISHED",
+          "Only a published document can have its readers changed or be withdrawn.", request.id));
+        if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT",
+          "This document already has a request waiting for review.", request.id));
+        if (result.kind === "invalid-request") return reply.code(400).send(safeError("INVALID_REQUEST", result.reason, request.id));
+        if (result.kind === "invalid-target-readers") {
+          return reply.code(400).send({ error: { code: "INVALID_TARGET_READERS", message: result.reason,
+            requestId: request.id, field: result.field } });
+        }
+        reply.header("Cache-Control", "no-store");
+        return reply.code(result.kind === "requested" ? 201 : 200).send(representSubmission(result.submission));
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge change request failed");
         return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
       }
     });
@@ -1457,6 +1517,10 @@ export function buildApp(dependencies: AppDependencies) {
         if (result.reason === "READERS_NOT_SUPPORTED") {
           return reply.code(400).send(safeError("READERS_NOT_SUPPORTED",
             "This submission uses audiences; approve it without approved readers.", request.id));
+        }
+        if (result.reason === "REQUEST_NOT_SUPPORTED") {
+          return reply.code(409).send(safeError("REQUEST_NOT_SUPPORTED",
+            "Reader-change and withdrawal requests can be rejected; approving them is not available yet.", request.id));
         }
         if (result.reason === "READERS_WIDENED") {
           return reply.code(409).send(safeError("READERS_WIDENED",
@@ -1973,6 +2037,12 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
     projectTag: draft.projectTag,
     audienceIds: draft.audienceRoleIds,
     targetReaders: representTargetReaders(draft.targetReaders),
+    categoryId: draft.categoryId,
+    keywords: [...draft.keywords],
+    changeDescription: draft.changeDescription,
+    effectiveDate: draft.effectiveDate,
+    expirationDate: draft.expirationDate,
+    relatedDocumentIds: [...draft.relatedDocumentIds],
     currentVersion: {
       id: draft.versionId,
       version: draft.currentVersion,
@@ -2002,6 +2072,12 @@ function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
     currentVersion: draft.currentVersion,
     audienceIds: draft.audienceRoleIds ?? [],
     targetReaders: representTargetReaders(draft.targetReaders),
+    categoryId: draft.categoryId,
+    keywords: [...draft.keywords],
+    changeDescription: draft.changeDescription,
+    effectiveDate: draft.effectiveDate,
+    expirationDate: draft.expirationDate,
+    relatedDocumentIds: [...draft.relatedDocumentIds],
     createdAt: draft.createdAt.toISOString(),
     updatedAt: draft.updatedAt.toISOString(),
   };
@@ -2026,6 +2102,8 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     decisionComment: submission.decisionComment,
     submittedAt: submission.submittedAt.toISOString(),
     publishedVersionId: submission.publishedVersionId,
+    requestType: submission.requestType,
+    requestReason: submission.requestReason,
   };
 }
 
