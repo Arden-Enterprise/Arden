@@ -246,13 +246,13 @@ export function buildApp(dependencies: AppDependencies) {
         clearAuthCookies(reply, dependencies.secureCookies);
         return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
       }
+      if (resolution.rotatedSession) setAuthCookies(reply, resolution.rotatedSession, dependencies.secureCookies,
+        sessionKey, session.expiresAt);
       if (!resolution.passwordSetupRequired) return reply.code(409).send(safeError("PASSWORD_ALREADY_INITIALIZED", "This account already has a password.", request.id));
       if (!meetsAccountPasswordRequirements(request.body.password)) {
         return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordRequirementsMessage, request.id));
       }
       await dependencies.auth.setInitialPassword(resolution.rotatedSession ?? session.tokens, request.body.password);
-      if (resolution.rotatedSession) setAuthCookies(reply, resolution.rotatedSession, dependencies.secureCookies,
-        sessionKey, session.expiresAt);
       return reply.code(204).send();
     } catch (error) {
       if (error instanceof Error && error.message === "PASSWORD_REJECTED") {

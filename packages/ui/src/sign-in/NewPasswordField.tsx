@@ -39,6 +39,7 @@ export function NewPasswordField({
         autoComplete="new-password"
         placeholder={placeholder}
         minLength={8}
+        aria-invalid={hasValue && metCount < requirements.length}
         aria-describedby={`${id}-requirements`}
         required
       />

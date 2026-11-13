@@ -103,6 +103,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [historyError, setHistoryError] = useState("");
   const [historyRetry, setHistoryRetry] = useState(0);
   const [viewedVersion, setViewedVersion] = useState<KnowledgeDraftVersionRecord | null>(null);
+  const viewedVersionRequest = useRef(0);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -155,12 +156,16 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     return () => window.removeEventListener("focus", onFocus);
   }, [active, reload]);
 
-  useEffect(() => { setViewedVersion(null); }, [active, organizationId]);
-
   const historyDraftId = screen === "editor" ? draft?.id ?? null
     : screen === "library" && libraryTab === "drafts" ? selectedContributionId : null;
   const historyRevision = screen === "editor" ? draft?.currentVersion.version
     : drafts.find((item) => item.id === selectedContributionId)?.currentVersion;
+  const historyContext = useRef({ active, organizationId, historyDraftId });
+  historyContext.current = { active, organizationId, historyDraftId };
+  useEffect(() => {
+    viewedVersionRequest.current += 1;
+    setViewedVersion(null);
+  }, [active, historyDraftId, organizationId]);
   useEffect(() => {
     if (!active || !historyDraftId) { setHistoryVersions(null); return; }
     let present = true;
@@ -204,10 +209,25 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     submitRequestKey.current = null;
     setDraft(loaded); setEditor(valuesFromDraft(loaded)); setScreen("editor");
   });
-  const openHistoryVersion = (draftId: string, versionId: string) => void run(async () => {
-    const loaded = await loadKnowledgeDraftVersion(platform, organizationId, draftId, versionId);
-    setViewedVersion(loaded);
-  });
+  const openHistoryVersion = (draftId: string, versionId: string) => {
+    const request = ++viewedVersionRequest.current;
+    const requestedOrganizationId = organizationId;
+    void loadKnowledgeDraftVersion(platform, requestedOrganizationId, draftId, versionId)
+      .then((loaded) => {
+        const current = historyContext.current;
+        if (request === viewedVersionRequest.current && current.active
+          && current.organizationId === requestedOrganizationId && current.historyDraftId === draftId) {
+          setViewedVersion(loaded);
+        }
+      })
+      .catch((cause) => {
+        const current = historyContext.current;
+        if (request === viewedVersionRequest.current && current.active
+          && current.organizationId === requestedOrganizationId && current.historyDraftId === draftId) {
+          setError(errorMessage(cause));
+        }
+      });
+  };
 
   const createDraft = () => void run(async () => {
     if (!newTitle.trim()) { setNewTitleError("Enter a title for this draft."); window.document.getElementById("knowledge-new-title")?.focus(); return; }
