@@ -33,10 +33,23 @@ SELECT changed.organization_id, 'REVIEWER_GRANT_DUPLICATE_DEACTIVATED', 'SUCCESS
                           'reason', 'exact duplicate grant migration')
   FROM changed JOIN ranked ON ranked.reviewer_grant_id = changed.reviewer_grant_id;
 
--- An exact duplicate cannot be inserted directly, even outside the API. The API
--- separately blocks an effective grant with the same scope, tags, level, and
--- classification set, including requests with a different expiry.
+-- Normalize classification arrays to set semantics for the database constraint.
+-- The API separately blocks an effective grant with the same scope, tags, level,
+-- and classification set, including requests with a different expiry.
+CREATE FUNCTION reviewer_grant_classification_set(p_classifications text[])
+RETURNS text[] LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE
+SET search_path = pg_catalog, pg_temp AS $$
+    SELECT ARRAY(
+        SELECT DISTINCT classification
+          FROM pg_catalog.unnest(p_classifications) AS input(classification)
+         ORDER BY classification
+    );
+$$;
+REVOKE ALL ON FUNCTION reviewer_grant_classification_set(text[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION reviewer_grant_classification_set(text[]) TO arden_runtime;
+
 CREATE UNIQUE INDEX uq_active_reviewer_grant_exact
     ON reviewer_grant (organization_id, reviewer_membership_id, scope, department_id,
-                       classifications, level, team_tag, project_tag, valid_until)
+                       reviewer_grant_classification_set(classifications), level,
+                       team_tag, project_tag, valid_until)
     NULLS NOT DISTINCT WHERE status = 'ACTIVE';

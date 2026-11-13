@@ -184,7 +184,7 @@
     {
       "id": "0031",
       "filename": "0031_deduplicate_reviewer_grants.sql",
-      "sha256": "e146840869449c9d0a120eda2ee3522440ec454700e6d9d89e948bf876b54275",
+      "sha256": "a113f2824f5382b475d9c625d3ca25fb07d7ad58b6fefc8ef668f0d61539bd1c",
       "rollout": "operator"
     }
   ]

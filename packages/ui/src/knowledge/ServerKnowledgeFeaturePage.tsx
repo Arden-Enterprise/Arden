@@ -29,7 +29,6 @@ import { ActionToast } from "../shared/ActionToast";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
 import { KnowledgeDocumentDetail } from "./KnowledgeDocumentDetail";
-import { readerDocumentStatusAt } from "./KnowledgeDocumentDetail";
 import { KnowledgeDialog } from "./KnowledgeDialog";
 import type { KnowledgeNavigationTarget } from "./knowledgeCitation";
 

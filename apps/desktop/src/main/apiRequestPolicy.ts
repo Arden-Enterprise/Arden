@@ -4,6 +4,7 @@ export type DesktopApiRequest = {
   body?: string;
   ifMatch?: string;
   idempotencyKey?: string;
+  timeoutMs?: number;
 };
 
 const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -44,7 +45,7 @@ const invitationPreview = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}$/;
 export function validateDesktopApiRequest(value: unknown): value is DesktopApiRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const request = value as Record<string, unknown>;
-  if (Object.keys(request).some((key) => !["path", "method", "body", "ifMatch", "idempotencyKey"].includes(key))) return false;
+  if (Object.keys(request).some((key) => !["path", "method", "body", "ifMatch", "idempotencyKey", "timeoutMs"].includes(key))) return false;
   if (typeof request.path !== "string" || request.path.length > 2048 || !request.path.startsWith("/") || request.path.startsWith("//")) return false;
   if (request.method !== "GET" && request.method !== "POST" && request.method !== "PATCH") return false;
   const pdfUpload = typeof request.path === "string" && (pdfKnowledgeDraft.test(request.path)
@@ -53,6 +54,8 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
     (pdfUpload ? 7_100_000 : 128 * 1024))) return false;
   if (request.ifMatch !== undefined && (typeof request.ifMatch !== "string" || request.ifMatch.length > 80)) return false;
   if (request.idempotencyKey !== undefined && (typeof request.idempotencyKey !== "string" || !uuidPattern.test(request.idempotencyKey))) return false;
+  if (request.timeoutMs !== undefined && (typeof request.timeoutMs !== "number"
+    || !Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1_000 || request.timeoutMs > 60_000)) return false;
   return isAllowedRequest(request as DesktopApiRequest);
 }
 

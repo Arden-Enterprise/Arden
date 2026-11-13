@@ -563,7 +563,7 @@ export async function inviteOrganizationMember(platform: Platform, organizationI
   return request(platform, `/api/v1/organizations/${organizationId}/invitations`, {
     method: "POST",
     body: JSON.stringify({ email, ...(departmentId ? { departmentId } : {}) }),
-  });
+  }, 30_000);
 }
 
 export async function resendOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
@@ -616,7 +616,7 @@ export async function apiRequest<T>(platform: Platform, path: string, init: Requ
 
 type ApiResponse = { status: number; body: string; etag?: string; location?: string };
 
-async function request<T>(platform: Platform, path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(platform: Platform, path: string, init: RequestInit = {}, timeoutMs?: number): Promise<T> {
   const rawMethod = init.method ?? "GET";
   if (rawMethod !== "GET" && rawMethod !== "POST" && rawMethod !== "PATCH") {
     throw new ApiError(0, "This request method is not available in the Arden client.");
@@ -639,23 +639,37 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
         body: typeof init.body === "string" ? init.body : undefined,
         ifMatch: headers.get("if-match") ?? undefined,
         ...(headers.has("idempotency-key") ? { idempotencyKey: headers.get("idempotency-key")! } : {}),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
     } else {
       const requestHeaders: Record<string, string> = { ...Object.fromEntries(headers.entries()) };
       if (init.body !== undefined) {
         requestHeaders["Content-Type"] = "application/json";
       }
-      const webResponse = await fetch(`${window.location.origin}${path}`, {
-        ...init,
-        credentials: "include",
-        headers: requestHeaders,
-      });
-      response = {
-        status: webResponse.status,
-        body: await webResponse.text(),
-        etag: webResponse.headers.get("etag") ?? undefined,
-        location: webResponse.headers.get("location") ?? undefined,
-      };
+      const controller = timeoutMs === undefined ? undefined : new AbortController();
+      const abortFromCaller = () => controller?.abort(init.signal?.reason);
+      if (controller && init.signal) {
+        if (init.signal.aborted) abortFromCaller();
+        else init.signal.addEventListener("abort", abortFromCaller, { once: true });
+      }
+      const timeout = timeoutMs === undefined ? undefined : setTimeout(() => controller?.abort(), timeoutMs);
+      try {
+        const webResponse = await fetch(`${window.location.origin}${path}`, {
+          ...init,
+          ...(controller ? { signal: controller.signal } : {}),
+          credentials: "include",
+          headers: requestHeaders,
+        });
+        response = {
+          status: webResponse.status,
+          body: await webResponse.text(),
+          etag: webResponse.headers.get("etag") ?? undefined,
+          location: webResponse.headers.get("location") ?? undefined,
+        };
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        if (controller && init.signal) init.signal.removeEventListener("abort", abortFromCaller);
+      }
     }
   } catch (cause) {
     if (cause instanceof ApiError) throw cause;

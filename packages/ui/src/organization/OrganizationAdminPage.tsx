@@ -186,10 +186,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     setInviteError(""); setInviteReport(null); setError(""); setMessage(""); setBusy(true); onSendingInvitationsChange?.(true);
     void sendInvitationBatch(readyEmails, (email) => inviteOrganizationMember(platform, organizationId, null, email),
       (current, total) => setInviteProgress({ current, total }))
-      .then(async (results) => {
+      .then((results) => {
         setInviteReport({ plan, results });
         setInviteEmail("");
-        try { await reload(); } catch { setError("Invitations processed, but the list could not refresh. Refresh before retrying any uncertain addresses."); }
+        void reload().catch(() => setError("Invitations processed, but the list could not refresh. Refresh before retrying any uncertain addresses."));
       })
       .catch(() => setInviteError("The batch could not be completed. Check the invitation list before retrying."))
       .finally(() => { setInviteProgress(null); setBusy(false); onSendingInvitationsChange?.(false); });
