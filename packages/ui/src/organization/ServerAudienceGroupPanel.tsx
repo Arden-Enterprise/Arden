@@ -154,6 +154,8 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
     && !activeMembers.some(groupMember => groupMember.membershipId === member.id));
 
   const activeOrganizationMembers = members.filter(member => member.status === "ACTIVE");
+  const activeGroups = groups.filter(group => group.status === "ACTIVE");
+  const inactiveGroups = groups.filter(group => group.status === "INACTIVE");
   const managedAudiences = [
     { id: "organization", section: "ORGANIZATION", name: `Everyone in ${organizationName}`, description: "All active members",
       count: activeOrganizationMembers.length, syncWith: "active organization membership" },
@@ -167,6 +169,14 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
     <span className="island-tile" aria-hidden="true"><Icon name={audience.id === "organization" ? "building" : "people"} size={16} /></span>
     <span className="audience-row-copy"><strong>{audience.name}</strong><small>{audience.description}</small></span>
     <span className="island-badge" aria-label={`${audience.count} readers`}>{audience.count}</span><span className="island-chip">Automatic</span>
+  </button>;
+  const groupRow = (group: AudienceGroupRecord) => <button type="button" key={group.id} className="audience-row" disabled={busy}
+    ref={(element) => { if (element) groupRows.current.set(group.id, element); else groupRows.current.delete(group.id); }}
+    aria-pressed={!managedId && selectedId === group.id} onClick={() => guard(() => select(group))}>
+    <span className="island-tile" aria-hidden="true"><Icon name="people" size={16} /></span>
+    <span className="audience-row-copy"><strong>{group.name}</strong><small>{group.description || "Reader group"}</small></span>
+    <span className="island-badge" aria-label={`${group.members.filter(member => member.status === "ACTIVE").length} readers`}>{group.members.filter(member => member.status === "ACTIVE").length}</span>
+    <span className={`island-chip${group.status === "INACTIVE" ? "" : " tone-strong"}`}>{group.status === "INACTIVE" ? "Inactive" : "Group"}</span>
   </button>;
 
   return <div className="island-split audience-layout" aria-label="Readers">
@@ -182,20 +192,17 @@ export function ServerAudienceGroupPanel({ platform, organizationId, organizatio
           {managedAudiences.filter(audience => audience.section === "DEPARTMENTS").map(managedRow)}
         </section>}
         <section className="island audience-list" aria-label="Reader groups">
-          <div className="island-section-label"><span>GROUPS · {groups.length}</span><span>Managed by Org Admins</span></div>
-          {groups.map(group => <button type="button" key={group.id} className="audience-row" disabled={busy}
-            ref={(element) => { if (element) groupRows.current.set(group.id, element); else groupRows.current.delete(group.id); }}
-            aria-pressed={!managedId && selectedId === group.id} onClick={() => guard(() => select(group))}>
-            <span className="island-tile" aria-hidden="true"><Icon name="people" size={16} /></span>
-            <span className="audience-row-copy"><strong>{group.name}</strong><small>{group.description || "Reader group"}</small></span>
-            <span className="island-badge" aria-label={`${group.members.filter(member => member.status === "ACTIVE").length} readers`}>{group.members.filter(member => member.status === "ACTIVE").length}</span>
-            <span className={`island-chip${group.status === "INACTIVE" ? "" : " tone-strong"}`}>{group.status === "INACTIVE" ? "Inactive" : "Group"}</span>
-          </button>)}
-          {!groups.length && !creating && <div className="island-empty"><p>No reader groups yet.</p>
+          <div className="island-section-label"><span>GROUPS · {activeGroups.length}</span><span>Managed by Org Admins</span></div>
+          {activeGroups.map(groupRow)}
+          {!activeGroups.length && !creating && <div className="island-empty"><p>No active reader groups.</p>
             <button ref={createButton} className="secondary-button" type="button" onClick={() => guard(startNew)}>Create reader group</button></div>}
           {creating && <div className="audience-row is-pending" aria-current="true"><span className="island-tile" aria-hidden="true"><Icon name="plus" size={16} /></span>
             <span className="audience-row-copy"><strong>{draft.name || "New reader group"}</strong><small>Not saved yet</small></span></div>}
         </section>
+        {inactiveGroups.length > 0 && <section className="island audience-list" aria-label="Inactive reader groups">
+          <div className="island-section-label"><span>INACTIVE · {inactiveGroups.length}</span><span>Managed by Org Admins</span></div>
+          {inactiveGroups.map(groupRow)}
+        </section>}
       </>}
     </div>
     {!loading && managed && <aside className="island island-panel island-side" aria-label="Audience details">

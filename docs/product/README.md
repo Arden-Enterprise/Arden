@@ -12,8 +12,8 @@ Each group document distinguishes current main, branch-only alternatives, observ
 
 | ID | Feature group and paths | Specification / coverage map | Known boundary at this inspection |
 | --- | --- | --- | --- |
-| F01 | Account registration, sign-in, recovery and sessions | [Identity and access](identity-and-access.md#f01-accounts-and-sessions) | API/UI slices exist; complete live identity acceptance not established here |
-| F02 | Organization setup, invitations and membership | [Identity and access](identity-and-access.md#f02-organizations-and-membership) | Implemented slices; lifecycle and integration evidence remain |
+| F01 | Account registration, sign-in, recovery and sessions | [Identity and access](identity-and-access.md#f01-accounts-and-sessions) | Local integration branch includes password guidance and link-based recovery; live provider/native acceptance remains open |
+| F02 | Organization setup, invitations and membership | [Identity and access](identity-and-access.md#f02-organizations-and-membership) | Local integration branch includes batch invitations and email branding; invitation lifecycle and live mail evidence remain |
 | F03 | Owner-private notes | [Identity and access](identity-and-access.md#f03-private-notes) | API/UI slices exist; privacy/conflict/platform acceptance required |
 | F04 | Published audiences and reader access | [Identity and access](identity-and-access.md#f04-published-audiences) | Decision 0010/code/migration foundation; database rehearsal boundary |
 | F05 | Reviewer authority and organization administration | [Identity and access](identity-and-access.md#f05-reviewer-and-organization-authority) | Main/branch review-authority conflict; see G1/G3 below |

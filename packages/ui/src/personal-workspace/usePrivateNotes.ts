@@ -96,6 +96,7 @@ export function usePrivateNotes(initialNotes: PrivateNote[]) {
       setError("Choose a signed-in organization before saving this note.");
       return;
     }
+    const generation = loadGeneration.current;
     setSaving(true);
     setError("");
     setSaveMessage("");
@@ -109,18 +110,20 @@ export function usePrivateNotes(initialNotes: PrivateNote[]) {
           method: "PATCH", headers: { "If-Match": `"${versions.current.get(selectedNote.id) ?? 0}"` },
           body: JSON.stringify(draft),
         });
+      if (generation !== loadGeneration.current) return;
       versions.current.set(result.id, result.currentVersion.version);
       const updatedNotes = [toPrivateNote(result), ...state.notes.filter((note) => note.id !== selectedNote.id && note.id !== result.id)];
       dispatch({ type: "reset", notes: updatedNotes });
       setSaveMessage("Saved");
     } catch (cause) {
+      if (generation !== loadGeneration.current) return;
       if (cause instanceof ApiError && cause.code === "VERSION_CONFLICT") {
         setError("This note has changed. Copy your edits, then refresh the page.");
       } else {
         setError(cause instanceof Error ? cause.message : "The note was not saved.");
       }
     } finally {
-      setSaving(false);
+      if (generation === loadGeneration.current) setSaving(false);
     }
   };
 

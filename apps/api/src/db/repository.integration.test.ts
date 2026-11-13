@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ArdenRepository } from "./repository.js";
+import { ArdenRepository, ReviewerGrantConflictError } from "./repository.js";
 import { prepareKnowledgeFixture, submitLegacyKnowledgeFixture } from "./knowledge-fixture.test-support.js";
 import { registerKnowledgeCatalogVerification } from "../knowledge/catalog.integration.verification.js";
 import { PgIndexGenerationStore } from "../indexing/store.js";
@@ -59,8 +59,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0021_monotonic_publication_activation', '0022_organization_reviewer_grants',
           '0024_target_reader_selection', '0025_review_approved_readers', '0026_review_list_authors',
           '0027_document_category_relationships', '0028_audience_to_target_readers',
-          '0029_withdraw_pending_submission')`);
-    if (migration.rows[0]?.count !== "16") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0029_withdraw_pending_submission', '0031_deduplicate_reviewer_grants')`);
+    if (migration.rows[0]?.count !== "17") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -141,6 +141,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     }
   });
 
+  // Trigger cleanup locks the same tables as target-readers.integration.test.ts.
+  // The API Vitest config keeps these files from running together on one database.
   afterAll(async () => {
     if (!pool) return;
     try {
@@ -300,6 +302,18 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(created).toMatchObject({ kind: "created", draft: { currentVersion: 1, sourcePrivateVersionId: source.versionId } });
     if (created.kind !== "created") return;
     expect(created.draft.sourceUri).not.toBe(source.sourceUri);
+    const firstVersion = await repository.listKnowledgeDraftVersions(ids.owner, ids.organization, created.draft.id);
+    expect(firstVersion).toMatchObject([{ id: created.draft.versionId, version: 1 }]);
+    await expect(repository.listKnowledgeDraftVersions(ids.manager, ids.organization, created.draft.id)).resolves.toBeNull();
+    await expect(repository.getKnowledgeDraftVersion(ids.manager, ids.organization,
+      created.draft.id, created.draft.versionId)).resolves.toBeNull();
+    const revisedDraft = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
+      created.draft.id, 1, { title: "Revised review notes" }, null, "integration-version-history-update");
+    expect(revisedDraft.kind).toBe("updated");
+    const versions = await repository.listKnowledgeDraftVersions(ids.owner, ids.organization, created.draft.id);
+    expect(versions?.map((version) => version.version)).toEqual([2, 1]);
+    expect(await repository.getKnowledgeDraftVersion(ids.owner, ids.organization,
+      created.draft.id, created.draft.versionId)).toMatchObject({ version: 1, contentHash: created.draft.contentHash });
     expect(await repository.createKnowledgeDraft(ids.owner, ids.organization, {
       ...input, copiedContent: { ...input.copiedContent, sourceUri: `arden-private-object://${randomUUID()}` },
     })).toMatchObject({ kind: "replayed", draft: { id: created.draft.id } });
@@ -350,6 +364,20 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       validUntil: null,
     }, "integration-reviewer-grant");
     expect(grant).toMatchObject({ reviewerMembershipId: ids.managerMembership, status: "ACTIVE" });
+    const grantInput = {
+      reviewerMembershipId: ids.managerMembership, scope: "DEPARTMENT" as const,
+      departmentId: ids.department, classifications: ["INTERNAL" as const],
+      level: "STANDARD" as const, teamTag: null, projectTag: null, validUntil: null,
+    };
+    await expect(repository.createReviewerGrant(ids.owner, ids.organization, grantInput,
+      "integration-duplicate-grant")).rejects.toBeInstanceOf(ReviewerGrantConflictError);
+    const tagged = { ...grantInput, teamTag: "operations" };
+    const concurrent = await Promise.allSettled([
+      repository.createReviewerGrant(ids.owner, ids.organization, tagged, "integration-tagged-grant-a"),
+      repository.createReviewerGrant(ids.owner, ids.organization, tagged, "integration-tagged-grant-b"),
+    ]);
+    expect(concurrent.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(concurrent.filter((result) => result.status === "rejected" && result.reason instanceof ReviewerGrantConflictError)).toHaveLength(1);
 
     const client = await pool.connect();
     try {
@@ -529,16 +557,23 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(submitted.kind).toBe("submitted");
     if (submitted.kind !== "submitted") return;
 
-    const grant = await repository.createReviewerGrant(ids.owner, ids.organization, {
+    const grantInput = {
       reviewerMembershipId: ids.managerMembership,
-      scope: "DEPARTMENT",
+      scope: "DEPARTMENT" as const,
       departmentId: ids.department,
-      classifications: ["INTERNAL"],
-      level: "STANDARD",
+      classifications: ["INTERNAL" as const],
+      level: "STANDARD" as const,
       teamTag: null,
       projectTag: null,
       validUntil: null,
-    }, "integration-flow2-reviewer-grant");
+    };
+    const existingGrant = (await repository.listReviewerGrants(ids.owner, ids.organization))?.find((item) =>
+      item.reviewerMembershipId === ids.managerMembership && item.scope === "DEPARTMENT"
+      && item.departmentId === ids.department && item.level === "STANDARD" && item.status === "ACTIVE"
+      && item.teamTag === null && item.projectTag === null && item.validUntil === null
+      && item.classifications.length === 1 && item.classifications[0] === "INTERNAL");
+    const grant = existingGrant ?? await repository.createReviewerGrant(ids.owner, ids.organization,
+      grantInput, "integration-flow2-reviewer-grant");
     expect(grant).not.toBeNull();
 
     const assigned = await repository.listAssignedReviews(ids.manager, ids.organization);

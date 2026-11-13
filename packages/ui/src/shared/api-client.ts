@@ -24,6 +24,7 @@ export type OrganizationMembership = {
 export type CurrentSession = {
   actor: { id: string; email?: string; fullName?: string | null };
   account: { passwordSetupRequired: boolean };
+  sessionExpiresAt?: string;
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
   testMode?: boolean;
@@ -78,6 +79,13 @@ export type KnowledgeDraftRecord = {
   createdAt: string;
   updatedAt: string;
 };
+export type KnowledgeDraftVersionSummary = {
+  id: string;
+  version: number;
+  mimeType: "text/plain" | "application/pdf";
+  createdAt: string;
+};
+export type KnowledgeDraftVersionRecord = KnowledgeDraftVersionSummary & { body: string; pdfBase64?: string };
 export type KnowledgeDraftSummary = {
   documentCode?: string;
   management?: KnowledgeMetadata | null;
@@ -223,6 +231,18 @@ export async function listKnowledgeDrafts(platform: Platform, organizationId: st
 
 export function loadKnowledgeDraft(platform: Platform, organizationId: string, draftId: string): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`);
+}
+
+export async function listKnowledgeDraftVersions(platform: Platform, organizationId: string,
+  draftId: string): Promise<KnowledgeDraftVersionSummary[]> {
+  const response = await request<{ items: KnowledgeDraftVersionSummary[] }>(platform,
+    `${knowledgePath(organizationId)}/drafts/${draftId}/versions`);
+  return response.items;
+}
+
+export function loadKnowledgeDraftVersion(platform: Platform, organizationId: string,
+  draftId: string, versionId: string): Promise<KnowledgeDraftVersionRecord> {
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}/versions/${versionId}`);
 }
 
 export function createNewKnowledgeDraft(platform: Platform, organizationId: string,
@@ -403,9 +423,9 @@ export async function requestPasswordReset(platform: Platform, email: string): P
   });
 }
 
-export async function resetPasswordWithToken(
+export async function resetPasswordFromLink(
   platform: Platform,
-  params: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string }
+  params: { accessToken: string; refreshToken: string; newPassword: string }
 ): Promise<void> {
   await request(platform, "/api/v1/auth/reset-password", {
     method: "POST", body: JSON.stringify(params),
@@ -543,7 +563,7 @@ export async function inviteOrganizationMember(platform: Platform, organizationI
   return request(platform, `/api/v1/organizations/${organizationId}/invitations`, {
     method: "POST",
     body: JSON.stringify({ email, ...(departmentId ? { departmentId } : {}) }),
-  });
+  }, 30_000);
 }
 
 export async function resendOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
@@ -596,7 +616,7 @@ export async function apiRequest<T>(platform: Platform, path: string, init: Requ
 
 type ApiResponse = { status: number; body: string; etag?: string; location?: string };
 
-async function request<T>(platform: Platform, path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(platform: Platform, path: string, init: RequestInit = {}, timeoutMs?: number): Promise<T> {
   const rawMethod = init.method ?? "GET";
   if (rawMethod !== "GET" && rawMethod !== "POST" && rawMethod !== "PATCH") {
     throw new ApiError(0, "This request method is not available in the Arden client.");
@@ -619,23 +639,37 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
         body: typeof init.body === "string" ? init.body : undefined,
         ifMatch: headers.get("if-match") ?? undefined,
         ...(headers.has("idempotency-key") ? { idempotencyKey: headers.get("idempotency-key")! } : {}),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
     } else {
       const requestHeaders: Record<string, string> = { ...Object.fromEntries(headers.entries()) };
       if (init.body !== undefined) {
         requestHeaders["Content-Type"] = "application/json";
       }
-      const webResponse = await fetch(`${window.location.origin}${path}`, {
-        ...init,
-        credentials: "include",
-        headers: requestHeaders,
-      });
-      response = {
-        status: webResponse.status,
-        body: await webResponse.text(),
-        etag: webResponse.headers.get("etag") ?? undefined,
-        location: webResponse.headers.get("location") ?? undefined,
-      };
+      const controller = timeoutMs === undefined ? undefined : new AbortController();
+      const abortFromCaller = () => controller?.abort(init.signal?.reason);
+      if (controller && init.signal) {
+        if (init.signal.aborted) abortFromCaller();
+        else init.signal.addEventListener("abort", abortFromCaller, { once: true });
+      }
+      const timeout = timeoutMs === undefined ? undefined : setTimeout(() => controller?.abort(), timeoutMs);
+      try {
+        const webResponse = await fetch(`${window.location.origin}${path}`, {
+          ...init,
+          ...(controller ? { signal: controller.signal } : {}),
+          credentials: "include",
+          headers: requestHeaders,
+        });
+        response = {
+          status: webResponse.status,
+          body: await webResponse.text(),
+          etag: webResponse.headers.get("etag") ?? undefined,
+          location: webResponse.headers.get("location") ?? undefined,
+        };
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        if (controller && init.signal) init.signal.removeEventListener("abort", abortFromCaller);
+      }
     }
   } catch (cause) {
     if (cause instanceof ApiError) throw cause;

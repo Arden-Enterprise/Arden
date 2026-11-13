@@ -180,6 +180,12 @@
       "filename": "0030_knowledge_management_catalog.sql",
       "sha256": "dd3b336abff3752ec6a183ba040ccd10c94bb4b2f30fb23459b3a7423c908036",
       "rollout": "operator"
+    },
+    {
+      "id": "0031",
+      "filename": "0031_deduplicate_reviewer_grants.sql",
+      "sha256": "a113f2824f5382b475d9c625d3ca25fb07d7ad58b6fefc8ef668f0d61539bd1c",
+      "rollout": "operator"
     }
   ]
 }

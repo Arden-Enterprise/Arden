@@ -12,7 +12,7 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
   return {
     ...actual,
     requestPasswordReset: vi.fn(),
-    resetPasswordWithToken: vi.fn(),
+    resetPasswordFromLink: vi.fn(),
     signIn: vi.fn(),
     signUp: vi.fn(),
   };
@@ -48,7 +48,7 @@ describe("SignInPage password reset flow", () => {
     }
   });
 
-  it("does not render 'Have a reset code?' and transitions directly to reset-password on sending instructions", async () => {
+  it("shows a check-email screen after requesting a reset link and allows another request", async () => {
     vi.mocked(apiClient.requestPasswordReset).mockResolvedValue(undefined);
 
     render(
@@ -61,62 +61,70 @@ describe("SignInPage password reset flow", () => {
       })
     );
 
-    // Verify "Have a reset code?" is NOT present
-    expect(screen.queryByText(/have a reset code/i)).toBeNull();
-
-    // Type email and submit forgot password form
     const emailInput = screen.getByPlaceholderText("name@company.com") as HTMLInputElement;
     fireEvent.change(emailInput, { target: { value: "test@example.com" } });
-
-    const submitButton = screen.getByRole("button", { name: /send reset instructions/i });
+    const submitButton = screen.getByRole("button", { name: /send reset link/i });
     fireEvent.click(submitButton);
 
-    // Should call requestPasswordReset
     await waitFor(() => {
       expect(apiClient.requestPasswordReset).toHaveBeenCalledWith("web", "test@example.com");
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: /check your email/i }));
     });
+    expect(screen.getByRole("status").textContent).toContain("If an account with this email exists");
+    expect(screen.getByRole("status").textContent).toContain("password reset link");
+    expect(screen.queryByRole("textbox", { name: /email address/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /update password/i })).toBeNull();
+    expect(screen.queryByText(/verification code/i)).toBeNull();
 
-    // Should transition directly to reset-password mode
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: /set a new password/i })).toBeTruthy();
-    });
-
-    // Verification code input should now be visible
-    expect(screen.getByPlaceholderText(/enter code from email/i)).toBeTruthy();
-
-    // The email should remain prefilled
-    const resetEmailInput = screen.getByPlaceholderText("name@company.com") as HTMLInputElement;
-    expect(resetEmailInput.value).toBe("test@example.com");
-
-    // "Request new code" should be available to switch back if needed
-    const requestNewCodeBtn = screen.getByRole("button", { name: /request new code/i });
-    expect(requestNewCodeBtn).toBeTruthy();
-
-    // Clicking "Request new code" returns to forgot-password mode
-    fireEvent.click(requestNewCodeBtn);
+    fireEvent.click(screen.getByRole("button", { name: /send another link/i }));
     expect(screen.getByRole("heading", { name: /reset your password/i })).toBeTruthy();
+    expect((screen.getByPlaceholderText("name@company.com") as HTMLInputElement).value).toBe("test@example.com");
   });
 
-  it("clears reset token and switches to sign-in on successful password update", async () => {
-    vi.mocked(apiClient.resetPasswordWithToken).mockResolvedValue(undefined);
+  it("does not claim a link was sent for an invalid email or failed request", async () => {
+    render(createElement(SignInPage, {
+      platform: "web",
+      initialMode: "forgot-password",
+      onEnterPreview: vi.fn(),
+      onOpenSetup: vi.fn(),
+      onAuthenticated: vi.fn(),
+    }));
+
+    const emailInput = screen.getByPlaceholderText("name@company.com");
+    const submitButton = screen.getByRole("button", { name: /send reset link/i });
+    fireEvent.change(emailInput, { target: { value: "invalid-email" } });
+    fireEvent.click(submitButton);
+    expect(apiClient.requestPasswordReset).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Enter a valid email address.");
+
+    vi.mocked(apiClient.requestPasswordReset).mockRejectedValueOnce(new Error("provider unavailable"));
+    fireEvent.change(emailInput, { target: { value: "user@example.test" } });
+    fireEvent.click(submitButton);
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("Password reset could not be requested.");
+    });
+    expect(screen.queryByRole("button", { name: /update password/i })).toBeNull();
+  });
+
+  it("uses only a verified recovery-link session to update the password", async () => {
+    vi.mocked(apiClient.resetPasswordFromLink).mockResolvedValue(undefined);
 
     render(
       createElement(SignInPage, {
         platform: "web",
         initialMode: "reset-password",
+        recoveryTokens: { accessToken: "access-recovery", refreshToken: "refresh-recovery" },
         onEnterPreview: vi.fn(),
         onOpenSetup: vi.fn(),
         onAuthenticated: vi.fn(),
       })
     );
 
-    const emailInput = screen.getByPlaceholderText("name@company.com");
-    const codeInput = screen.getByPlaceholderText(/enter code from email/i);
     const passwordInput = screen.getByPlaceholderText(/enter new password/i);
     const confirmPasswordInput = screen.getByPlaceholderText(/confirm new password/i);
 
-    fireEvent.change(emailInput, { target: { value: "user@example.test" } });
-    fireEvent.change(codeInput, { target: { value: "123456" } });
+    expect(screen.queryByText(/verification code/i)).toBeNull();
+    expect(screen.queryByText(/email address/i)).toBeNull();
     fireEvent.change(passwordInput, { target: { value: "new-valid-password" } });
     fireEvent.change(confirmPasswordInput, { target: { value: "new-valid-password" } });
 
@@ -124,18 +132,39 @@ describe("SignInPage password reset flow", () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(apiClient.resetPasswordWithToken).toHaveBeenCalledWith("web", {
-        email: "user@example.test",
-        token: "123456",
+      expect(apiClient.resetPasswordFromLink).toHaveBeenCalledWith("web", {
+        accessToken: "access-recovery",
+        refreshToken: "refresh-recovery",
         newPassword: "new-valid-password",
       });
     });
 
-    // Transitions to sign-in mode with success notice
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: /sign in to your account/i })).toBeTruthy();
       expect(screen.getByText(/password updated successfully/i)).toBeTruthy();
     });
+  });
+
+  it("keeps the reset form available when the link update fails", async () => {
+    vi.mocked(apiClient.resetPasswordFromLink).mockRejectedValueOnce(new Error("session expired"));
+    render(createElement(SignInPage, {
+      platform: "web",
+      initialMode: "reset-password",
+      recoveryTokens: { accessToken: "access-recovery", refreshToken: "refresh-recovery" },
+      onEnterPreview: vi.fn(),
+      onOpenSetup: vi.fn(),
+      onAuthenticated: vi.fn(),
+    }));
+
+    fireEvent.change(screen.getByPlaceholderText(/enter new password/i), { target: { value: "new-valid-password" } });
+    fireEvent.change(screen.getByPlaceholderText(/confirm new password/i), { target: { value: "new-valid-password" } });
+    fireEvent.click(screen.getByRole("button", { name: /update password/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toContain("Couldn’t reset password.");
+    });
+    expect(screen.getByRole("heading", { name: /set a new password/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /request a new link/i })).toBeTruthy();
   });
 
   it("shows an error notice and prevents sign-up when email format is invalid", async () => {
@@ -206,7 +235,7 @@ describe("SignInPage password reset flow", () => {
     expect(screen.getByRole("alert").textContent).toBe("Enter your password.");
   });
 
-  it("asks for a name and a 6 character password before registration", () => {
+  it("asks for a name and rejects each missing account password requirement", () => {
     render(
       createElement(SignInPage, {
         platform: "web",
@@ -229,7 +258,85 @@ describe("SignInPage password reset flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /create account/i }));
 
     expect(apiClient.signUp).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toBe("Password must be at least 8 characters long.");
+    expect(screen.getByRole("alert").textContent).toContain("at least 8 characters");
+
+    for (const invalidPassword of ["abcdefgh!", "Abcdefgh"]) {
+      fireEvent.change(screen.getByLabelText("Password"), { target: { value: invalidPassword } });
+      fireEvent.click(screen.getByRole("button", { name: /create account/i }));
+      expect(apiClient.signUp).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toContain("one uppercase letter, and one special character");
+    }
+  });
+
+  it("updates all three password checks while typing and lets the user show or hide the entry", () => {
+    render(createElement(SignInPage, {
+      platform: "web", initialMode: "register", onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+
+    const password = screen.getByLabelText("Password") as HTMLInputElement;
+    expect(password.maxLength).toBe(100);
+    const minimum = screen.getByText("At least 8 characters").closest("li");
+    const uppercase = screen.getByText("At least 1 uppercase letter").closest("li");
+    const special = screen.getByText("At least 1 special character").closest("li");
+    expect(minimum?.textContent).toContain("Pending:");
+    expect(screen.getByRole("status").textContent).toBe("No password entered.");
+    fireEvent.change(password, { target: { value: "short" } });
+    expect(minimum?.textContent).toContain("Not met:");
+    expect(uppercase?.textContent).toContain("Not met:");
+    expect(special?.textContent).toContain("Not met:");
+    fireEvent.change(password, { target: { value: "eight123" } });
+    expect(minimum?.textContent).toContain("Met:");
+    expect(uppercase?.textContent).toContain("Not met:");
+    expect(special?.textContent).toContain("Not met:");
+    fireEvent.change(password, { target: { value: "Eight123!" } });
+    expect(uppercase?.textContent).toContain("Met:");
+    expect(special?.textContent).toContain("Met:");
+    expect(screen.getByRole("status").textContent).toBe("3 of 3 password requirements met.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+    expect(password.type).toBe("text");
+    expect(password.value).toBe("Eight123!");
+    fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(password.type).toBe("password");
+    expect(apiClient.signUp).not.toHaveBeenCalled();
+  });
+
+  it("keeps a rejected registration password available to revise without claiming a specific provider rule", async () => {
+    vi.mocked(apiClient.signUp)
+      .mockRejectedValueOnce(new apiClient.ApiError(400, "Account setup could not be completed.", "ACCOUNT_SETUP_UNAVAILABLE"))
+      .mockResolvedValueOnce(undefined);
+    render(createElement(SignInPage, {
+      platform: "web", initialMode: "register", onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "new@example.test" } });
+    const password = screen.getByLabelText("Password") as HTMLInputElement;
+    fireEvent.change(password, { target: { value: "ValidPass1!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    await waitFor(() => expect(apiClient.signUp).toHaveBeenCalledTimes(1));
+    expect((await screen.findByRole("alert")).textContent).toContain("password meets the listed requirements");
+    expect(password.value).toBe("ValidPass1!");
+
+    fireEvent.change(password, { target: { value: "Better-password-123!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await waitFor(() => expect(apiClient.signUp).toHaveBeenCalledTimes(2));
+    expect((await screen.findByRole("alert")).textContent).toContain("Check your email to continue.");
+  });
+
+  it("clears the registration password when an existing account returns to sign-in", async () => {
+    vi.mocked(apiClient.signUp).mockRejectedValueOnce(new apiClient.ApiError(409, "Account already exists.", "ACCOUNT_ALREADY_EXISTS"));
+    render(createElement(SignInPage, {
+      platform: "web", initialMode: "register", onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "new@example.test" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Valid-password-123!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Sign in to your account" })).toBeTruthy());
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
   });
 
   it("displays success notice when URL contains type=signup from email confirmation", () => {
@@ -277,33 +384,30 @@ describe("SignInPage password reset flow", () => {
       createElement(SignInPage, {
         platform: "web",
         initialMode: "reset-password",
+        recoveryTokens: { accessToken: "access-recovery", refreshToken: "refresh-recovery" },
         onEnterPreview: vi.fn(),
         onOpenSetup: vi.fn(),
         onAuthenticated: vi.fn(),
       })
     );
 
-    const emailInput = screen.getByPlaceholderText("name@company.com");
-    const codeInput = screen.getByPlaceholderText(/enter code from email/i);
     const passwordInput = screen.getByPlaceholderText(/enter new password/i);
     const confirmPasswordInput = screen.getByPlaceholderText(/confirm new password/i);
 
-    fireEvent.change(emailInput, { target: { value: "user@example.test" } });
-    fireEvent.change(codeInput, { target: { value: "123456" } });
     fireEvent.change(passwordInput, { target: { value: "short" } });
     fireEvent.change(confirmPasswordInput, { target: { value: "short" } });
 
     const submitBtn = screen.getByRole("button", { name: /update password/i });
     fireEvent.click(submitBtn);
 
-    expect(apiClient.resetPasswordWithToken).not.toHaveBeenCalled();
+    expect(apiClient.resetPasswordFromLink).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("Password must be at least 8 characters long.");
     } finally {
       restoreUrl();
     }
   });
 
-  it("shows specific error and blocks submission when verification code is missing", async () => {
+  it("does not show a password form without a recovery link and offers a new link", () => {
     const restoreUrl = replacePageUrl("/");
     try {
     render(
@@ -316,19 +420,12 @@ describe("SignInPage password reset flow", () => {
       })
     );
 
-    const emailInput = screen.getByPlaceholderText("name@company.com");
-    const passwordInput = screen.getByPlaceholderText(/enter new password/i);
-    const confirmPasswordInput = screen.getByPlaceholderText(/confirm new password/i);
-
-    fireEvent.change(emailInput, { target: { value: "user@example.test" } });
-    fireEvent.change(passwordInput, { target: { value: "valid-password-123" } });
-    fireEvent.change(confirmPasswordInput, { target: { value: "valid-password-123" } });
-
-    const form = screen.getByRole("button", { name: /update password/i }).closest("form")!;
-    fireEvent.submit(form);
-
-    expect(apiClient.resetPasswordWithToken).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toContain("Enter the verification code sent to your email.");
+    expect(screen.getByRole("heading", { name: /reset link unavailable/i })).toBeTruthy();
+    expect(screen.getByText(/invalid or has expired/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /update password/i })).toBeNull();
+    expect(apiClient.resetPasswordFromLink).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /request a new link/i }));
+    expect(screen.getByRole("heading", { name: /reset your password/i })).toBeTruthy();
     } finally {
       restoreUrl();
     }

@@ -4,6 +4,7 @@ export type DesktopApiRequest = {
   body?: string;
   ifMatch?: string;
   idempotencyKey?: string;
+  timeoutMs?: number;
 };
 
 const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
@@ -15,6 +16,8 @@ const reviewerGrantCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowl
 const newKnowledgeDraft = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/new$`);
 const pdfKnowledgeDraft = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/pdf$`);
 const knowledgeDraftItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}$`);
+const knowledgeDraftVersions = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/versions(?:/${uuid})?$`);
+const knowledgeDraftVersionItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/versions/${uuid}$`);
 const knowledgeDraftSubmit = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/submit$`);
 const knowledgeSubmissionWithdraw = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/submissions/${uuid}/withdraw$`);
 const knowledgeReviewItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}$`);
@@ -42,7 +45,7 @@ const invitationPreview = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}$/;
 export function validateDesktopApiRequest(value: unknown): value is DesktopApiRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   const request = value as Record<string, unknown>;
-  if (Object.keys(request).some((key) => !["path", "method", "body", "ifMatch", "idempotencyKey"].includes(key))) return false;
+  if (Object.keys(request).some((key) => !["path", "method", "body", "ifMatch", "idempotencyKey", "timeoutMs"].includes(key))) return false;
   if (typeof request.path !== "string" || request.path.length > 2048 || !request.path.startsWith("/") || request.path.startsWith("//")) return false;
   if (request.method !== "GET" && request.method !== "POST" && request.method !== "PATCH") return false;
   const pdfUpload = typeof request.path === "string" && (pdfKnowledgeDraft.test(request.path)
@@ -51,13 +54,15 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
     (pdfUpload ? 7_100_000 : 128 * 1024))) return false;
   if (request.ifMatch !== undefined && (typeof request.ifMatch !== "string" || request.ifMatch.length > 80)) return false;
   if (request.idempotencyKey !== undefined && (typeof request.idempotencyKey !== "string" || !uuidPattern.test(request.idempotencyKey))) return false;
+  if (request.timeoutMs !== undefined && (typeof request.timeoutMs !== "number"
+    || !Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1_000 || request.timeoutMs > 60_000)) return false;
   return isAllowedRequest(request as DesktopApiRequest);
 }
 
 export function desktopApiResponseLimit(request: DesktopApiRequest): number {
   const pdfCreate = request.method === "POST" && pdfKnowledgeDraft.test(request.path);
   const knowledgeDetail = ((request.method === "GET" || request.method === "PATCH")
-    && knowledgeDraftItem.test(request.path))
+    && (knowledgeDraftItem.test(request.path) || knowledgeDraftVersionItem.test(request.path)))
     || (request.method === "GET" && (knowledgeReviewItem.test(request.path)
       || publishedKnowledgeItem.test(request.path)));
   return pdfCreate || knowledgeDetail ? 7_100_000 : 1024 * 1024;
@@ -79,6 +84,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const sharedDraftCreate = sharedDraftPath.test(url.pathname) && request.method === "POST" &&
     Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   const knowledgeGet = (knowledgeCollection.test(url.pathname) || knowledgeDraftItem.test(url.pathname)
+    || knowledgeDraftVersions.test(url.pathname)
     || knowledgeReviewItem.test(url.pathname) || publishedKnowledgeItem.test(url.pathname))
     && request.method === "GET" && !request.body && !request.ifMatch && !request.idempotencyKey;
   const knowledgeCreate = newKnowledgeDraft.test(url.pathname) && request.method === "POST"
