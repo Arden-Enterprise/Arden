@@ -14,8 +14,8 @@ Scope: the implemented Supabase-authenticated web/desktop boundary, account setu
 | F01-AC2 | Recovery, refresh, expiry and sign-out clear/revalidate sessions without exposing tokens; callbacks and redirects obey the current trust boundary. | Check actual provider, HTTP cookies and error paths. |
 | F01-AC3 | Web HttpOnly sessions and desktop OS-protected sessions produce equivalent access; renderer/browser storage does not receive secret tokens. | Native behavior needs native evidence, not just a build. |
 | F01-AC4 | New-account password fields show live checks for at least 8 characters, an uppercase letter and a special character; form and API reject a missing check, while users can show or hide the entry and revise it after a non-enumerating provider rejection. | UI/API implementation, focused tests and Chrome layout checks on `feat/signup-password-guidance`; live provider/native checks remain separate. |
-
 | F01-AC5 | A recovery request shows a non-enumerating check-email screen for a reset link, with a way to request another link. Link session tokens open the new-password form; the API requires provider-verified proof in the browser that opened the link. Missing, expired and reused links cannot update a password and offer a new request. No manual recovery-code path is presented or accepted. | UI/API regression coverage is required; live email delivery and browser verification remain separate evidence. |
+| F01-AC6 | Email/password and Google sign-ins receive one absolute 24-hour Arden session deadline. Refresh and password changes preserve it; protected requests fail after it, and an open web/desktop shell returns to sign-in. | Requested by the maintainer on 13 November 2026. API and UI regression checks cover the local boundary; live Supabase and native window behavior remain separate. |
 
 ### F01 new-account password guidance
 
@@ -29,6 +29,10 @@ Scope: the implemented Supabase-authenticated web/desktop boundary, account setu
 ### F01 password recovery link refinement
 
 Accepted recovery refinement, 7 November 2026: the requesting maintainer chose a link-only reset path after comparing it with manual code entry, then requested implementation. The requesting maintainer is the brainstorm originator and decision owner; their personal identity is not recorded in this public specification. This record was prepared by the implementing coding agent from that task instruction. The inspected main and staging revision was `9fa3d34a19a559318eff87b4487f2113e6ee5a49`. This refines F01-AC2/F01-AC5 and follows the existing [recovery email link operation](../engineering/operations.md#password-recovery-email-links); it does not establish live Supabase email or deployment evidence.
+
+### F01 24-hour session refinement
+
+The requester chose a 24-hour limit for both ordinary and Google sign-in on 13 November 2026. This specification records that direct instruction; the requester is the decision owner for this refinement and the coding agent prepared the record. The limit is absolute from sign-in, including after provider token refresh. Arden signs a token-bound deadline in a server-only HttpOnly cookie, rejects missing/edited/expired deadlines and clears the session cookies. The same cookie set is stored in the desktop's encrypted main-process jar; the renderer receives only the deadline timestamp needed to clear an idle workspace. A fresh sign-in begins a new period. Existing sessions without the new marker require sign-in after rollout. F01-AC4 and F01-AC5 describe the password-guidance and link-only recovery refinements included in this bundle. This change does not provide a device/session list or change Supabase-owned Auth configuration.
 
 ## F02 Organizations and membership
 

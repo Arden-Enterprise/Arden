@@ -385,6 +385,45 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setPendingMemberEntry(null);
   };
 
+  /** Clears protected workspace state when the user signs out or the session expires. */
+  const finishSignOut = () => {
+    setSettingsOpen(false);
+    setNavOpen(false);
+    if (serverSession) void apiSignOut(platform).catch(() => undefined);
+    setServerSession(null);
+    setServerOrganizationId(null);
+    setCreatedKnowledgeDraft(null);
+    setAssignedReviewCount(undefined);
+    setContributionAttempt(null);
+    setKnowledgeCitationTarget(null);
+    setPreviewRole(null);
+    setEntryView("sign-in");
+    setOrganization(null);
+    setOrganizationDirty(false);
+    setActiveView("my-work");
+    privateNotes.reset();
+    setInvitationId("");
+    setAccessMemberId("");
+    setPendingMemberEntry(null);
+  };
+
+  useEffect(() => {
+    if (!serverSession?.sessionExpiresAt) return;
+    const expiresAt = Date.parse(serverSession.sessionExpiresAt);
+    const expire = () => {
+      if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) finishSignOut();
+    };
+    const delay = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - Date.now()) : 0;
+    const timer = window.setTimeout(expire, delay);
+    window.addEventListener("focus", expire);
+    document.addEventListener("visibilitychange", expire);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", expire);
+      document.removeEventListener("visibilitychange", expire);
+    };
+  }, [serverSession?.sessionExpiresAt]);
+
   if (entryView === "setup") {
     return (
       <OrganizationSetupPage
@@ -531,30 +570,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const openKnowledgeCitation = (citation: KnowledgeCitationReference) => {
     setKnowledgeCitationTarget({ ...citation, navigationId: crypto.randomUUID() });
     navigate("knowledge");
-  };
-
-  /**
-   * Completes local session teardown and resets all workspace state to sign-in.
-   */
-  const finishSignOut = () => {
-    setSettingsOpen(false);
-    setNavOpen(false);
-    if (serverSession) void apiSignOut(platform).catch(() => undefined);
-    setServerSession(null);
-    setServerOrganizationId(null);
-    setCreatedKnowledgeDraft(null);
-    setAssignedReviewCount(undefined);
-    setContributionAttempt(null);
-    setKnowledgeCitationTarget(null);
-    setPreviewRole(null);
-    setEntryView("sign-in");
-    setOrganization(null);
-    setOrganizationDirty(false);
-    setActiveView("my-work");
-    privateNotes.reset();
-    setInvitationId("");
-    setAccessMemberId("");
-    setPendingMemberEntry(null);
   };
 
   /**

@@ -79,6 +79,7 @@ describe("API auth and private draft routes", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await app.close();
     await rm(root, { recursive: true, force: true });
   });
@@ -187,11 +188,105 @@ describe("API auth and private draft routes", () => {
     expect(response.json()).toEqual({
       actor: { id: ownerId, email: "owner@example.test", fullName: "Owner" },
       account: { passwordSetupRequired: false },
+      sessionExpiresAt: expect.any(String),
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
         status: "active", departmentId: null, departmentName: null, roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
       }],
     });
+  });
+
+  it.each(["password", "google"])("expires a %s session exactly 24 hours after sign-in", async (method) => {
+    const startedAt = Date.UTC(2026, 10, 13, 8);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    let cookie: string;
+    let setCookies: string | string[] | undefined;
+    if (method === "password") {
+      const signedIn = await app.inject({ method: "POST", url: "/api/v1/auth/sign-in",
+        headers: { origin: "http://localhost:5180" },
+        payload: { email: "owner@example.test", password: "synthetic-password" } });
+      expect(signedIn.statusCode).toBe(200);
+      setCookies = signedIn.headers["set-cookie"];
+      cookie = cookieHeader(setCookies);
+    } else {
+      const started = await app.inject("/api/v1/auth/google/start");
+      const callback = await app.inject({ method: "GET",
+        url: "/api/v1/auth/google/callback?code=synthetic-code&sb_flow_id=0123456789abcdef0123456789abcdef",
+        headers: { cookie: cookieHeader(started.headers["set-cookie"]) } });
+      expect(callback.statusCode).toBe(302);
+      setCookies = callback.headers["set-cookie"];
+      cookie = cookieHeader(setCookies);
+    }
+    expect(cookie).toContain("arden_session=v1.");
+    expect(JSON.stringify(setCookies)).toContain("Max-Age=86400");
+    const expectedExpiry = new Date(startedAt + 24 * 60 * 60 * 1000).toISOString();
+    expect((await app.inject({ url: "/api/v1/me", headers: { cookie } })).json().sessionExpiresAt).toBe(expectedExpiry);
+
+    const withoutSeal = cookie.split("; ").filter((part) => !part.startsWith("arden_session=")).join("; ");
+    const unbound = await app.inject({ url: "/api/v1/me", headers: { cookie: withoutSeal } });
+    expect(unbound.statusCode).toBe(401);
+    expect(JSON.stringify(unbound.headers["set-cookie"])).toContain("arden_session=; ");
+
+    clock.mockReturnValue(startedAt + 24 * 60 * 60 * 1000 - 1000);
+    expect((await app.inject({ url: "/api/v1/me", headers: { cookie } })).statusCode).toBe(200);
+    clock.mockReturnValue(startedAt + 24 * 60 * 60 * 1000);
+    const expired = await app.inject({ url: "/api/v1/me", headers: { cookie } });
+    expect(expired.statusCode).toBe(401);
+    expect(JSON.stringify(expired.headers["set-cookie"])).toContain("Max-Age=0");
+  });
+
+  it("keeps the original deadline when refresh tokens rotate", async () => {
+    const startedAt = Date.UTC(2026, 10, 13, 8);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    const signedIn = await app.inject({ method: "POST", url: "/api/v1/auth/sign-in",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", password: "synthetic-password" } });
+    const originalCookie = cookieHeader(signedIn.headers["set-cookie"]);
+    authProvider.rotatedSession = { accessToken: "access-rotated", refreshToken: "refresh-rotated", expiresIn: 3600 };
+    clock.mockReturnValue(startedAt + 60 * 60 * 1000);
+    const refreshed = await app.inject({ url: "/api/v1/me", headers: { cookie: originalCookie } });
+    expect(refreshed.statusCode).toBe(200);
+    expect(refreshed.json().sessionExpiresAt).toBe(new Date(startedAt + 24 * 60 * 60 * 1000).toISOString());
+    expect(JSON.stringify(refreshed.headers["set-cookie"])).toContain("Max-Age=82800");
+    const rotatedCookie = cookieHeader(refreshed.headers["set-cookie"]);
+    expect(rotatedCookie).toContain("arden_access=access-rotated");
+    expect((await app.inject({ url: "/api/v1/me", headers: { cookie: rotatedCookie } })).statusCode).toBe(200);
+    const mixedCookie = rotatedCookie.replace("arden_session=", "arden_session=wrong");
+    expect((await app.inject({ url: "/api/v1/me", headers: { cookie: mixedCookie } })).statusCode).toBe(401);
+  });
+
+  it("shares secure password and desktop Google sessions across API replicas with one key", async () => {
+    const key = Buffer.alloc(32, 9);
+    const makeReplica = (sessionSigningKey: Buffer) => buildApp({
+      checkDatabase: async () => undefined, auth: authProvider,
+      authTrustedOrigins: ["https://arden.example.test"], secureCookies: true,
+      sessionSigningKey, repository, storage, invitationMailer,
+      publicWebOrigin: "https://arden.example.test", publicApiOrigin: "https://api.example.test",
+    });
+    const first = makeReplica(key);
+    const second = makeReplica(key);
+    const otherKey = makeReplica(Buffer.alloc(32, 8));
+    try {
+      const signedIn = await first.inject({ method: "POST", url: "/api/v1/auth/sign-in",
+        headers: { origin: "https://arden.example.test" },
+        payload: { email: "owner@example.test", password: "synthetic-password" } });
+      const passwordCookie = cookieHeader(signedIn.headers["set-cookie"]);
+      expect(passwordCookie).toContain("__Host-arden_session=v1.");
+      expect(JSON.stringify(signedIn.headers["set-cookie"])).toContain("Secure");
+      expect((await second.inject({ url: "/api/v1/me", headers: { cookie: passwordCookie } })).statusCode).toBe(200);
+      expect((await otherKey.inject({ url: "/api/v1/me", headers: { cookie: passwordCookie } })).statusCode).toBe(401);
+
+      const started = await first.inject("/api/v1/auth/google/start?client=desktop");
+      const callback = await first.inject({ method: "GET",
+        url: "/api/v1/auth/google/callback?code=synthetic-code&sb_flow_id=0123456789abcdef0123456789abcdef",
+        headers: { cookie: cookieHeader(started.headers["set-cookie"]) } });
+      expect(callback.headers.location).toContain("/api/v1/auth/google/desktop-complete?status=success");
+      const googleCookie = cookieHeader(callback.headers["set-cookie"]);
+      expect(googleCookie).toContain("__Host-arden_session=v1.");
+      expect((await second.inject({ url: "/api/v1/me", headers: { cookie: googleCookie } })).statusCode).toBe(200);
+    } finally {
+      await Promise.all([first.close(), second.close(), otherKey.close()]);
+    }
   });
 
   it("completes Google PKCE sign-in and requires a one-time Arden password", async () => {
@@ -394,6 +489,8 @@ describe("API auth and private draft routes", () => {
   });
 
   it("requires a verified current password for account changes and rejects session-only recovery", async () => {
+    const startedAt = Date.UTC(2026, 10, 13, 8);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
     const signIn = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
       payload: { email: "owner@example.test", password: "synthetic-password" },
@@ -410,9 +507,13 @@ describe("API auth and private draft routes", () => {
     expect(wrong.statusCode).toBe(401);
     expect(wrong.json().error.code).toBe("INVALID_CURRENT_PASSWORD");
     expect(authProvider.lastUpdatedPassword).toBeNull();
+    clock.mockReturnValue(startedAt + 60 * 60 * 1000);
     const updated = await submit(change, { currentPassword: "synthetic-password", newPassword });
     expect(updated.statusCode).toBe(200);
     expect(authProvider.lastUpdatedPassword).toEqual({ token: "access-owner", password: newPassword });
+    expect((await app.inject({ url: "/api/v1/me",
+      headers: { cookie: cookieHeader(updated.headers["set-cookie"]) } })).json().sessionExpiresAt)
+      .toBe(new Date(startedAt + 24 * 60 * 60 * 1000).toISOString());
   });
 
   it("binds a recovery-link update to the verified browser flow", async () => {
@@ -1736,6 +1837,7 @@ class FakeAuthProvider implements AuthProvider {
   lastResetRedirectTo: string | null = null;
   lastUpdatedPassword: { token: string; password: string } | null = null;
   lastSignUpCredentials: SupabaseSignUp | null = null;
+  rotatedSession: { accessToken: string; refreshToken: string; expiresIn: number } | null = null;
   private readonly usersByAccessToken = new Map<string, { userId: string; email: string; passwordSetupRequired: boolean }>();
 
   async signIn(credentials: { email: string; password: string }) {
@@ -1760,7 +1862,10 @@ class FakeAuthProvider implements AuthProvider {
 
   async resolveSession(tokens: { accessToken: string }) {
     const user = this.usersByAccessToken.get(tokens.accessToken);
-    return user ? { kind: "authenticated" as const, ...user, fullName: user.userId === ownerId ? "Owner" : null, emailVerified: true } : { kind: "unauthenticated" as const };
+    if (user && this.rotatedSession) this.usersByAccessToken.set(this.rotatedSession.accessToken, user);
+    return user ? { kind: "authenticated" as const, ...user, fullName: user.userId === ownerId ? "Owner" : null,
+      emailVerified: true, ...(this.rotatedSession ? { rotatedSession: this.rotatedSession } : {}) }
+      : { kind: "unauthenticated" as const };
   }
 
   async signOut(tokens: { accessToken: string }) {
