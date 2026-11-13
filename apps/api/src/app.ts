@@ -1,6 +1,6 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
   type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
@@ -103,13 +103,14 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
       }
       const route = request.routeOptions.url;
-      const passwordField = route === "/api/v1/auth/sign-up" || route === "/api/v1/auth/password"
-        ? "/password"
-        : route === "/api/v1/auth/reset-password" || route === "/api/v1/auth/change-password" ? "/newPassword" : undefined;
-      const isPasswordError = passwordField && error.validation.some((v) =>
-        v.instancePath === passwordField && v.keyword === "minLength"
+      const passwordIssue = error.validation.find((issue) =>
+        (issue.instancePath === "/password" || issue.instancePath === "/newPassword" || issue.instancePath === "/currentPassword")
+        && (issue.keyword === "minLength" || issue.keyword === "maxLength")
       );
-      if (isPasswordError) {
+      if (passwordIssue?.keyword === "maxLength") {
+        return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordMaximumLengthMessage, request.id));
+      }
+      if (passwordIssue?.keyword === "minLength" && route !== "/api/v1/auth/sign-in" && passwordIssue.instancePath !== "/currentPassword") {
         const message = route === "/api/v1/auth/sign-up" || route === "/api/v1/auth/password"
           ? accountPasswordRequirementsMessage : "Password must be at least 8 characters long.";
         return reply.code(400).send(safeError("INVALID_PASSWORD", message, request.id));
@@ -151,7 +152,7 @@ export function buildApp(dependencies: AppDependencies) {
         type: "object", additionalProperties: false, required: ["email", "password"],
         properties: {
           email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
-          password: { type: "string", minLength: 1, maxLength: 1024 },
+          password: { type: "string", minLength: 1, maxLength: accountPasswordMaximumLength },
         },
       },
     },
@@ -229,7 +230,7 @@ export function buildApp(dependencies: AppDependencies) {
   app.post<{ Body: { password: string } }>("/api/v1/auth/password", {
     schema: {
       body: { type: "object", additionalProperties: false, required: ["password"], properties: {
-        password: { type: "string", minLength: 8 },
+        password: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
       } },
     },
   }, async (request, reply) => {
@@ -269,7 +270,7 @@ export function buildApp(dependencies: AppDependencies) {
         type: "object", additionalProperties: false, required: ["email", "password", "fullName"],
         properties: {
           email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
-          password: { type: "string", minLength: 8 },
+          password: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
           fullName: { type: "string", minLength: 1, maxLength: 200 },
           redirectTo: { type: "string", minLength: 1, maxLength: 2048 },
         },
@@ -424,6 +425,8 @@ export function buildApp(dependencies: AppDependencies) {
   app.get("/api/v1/auth/verify", handleVerify);
   app.get("/verify", handleVerify);
 
+  // Same-process replay guard. Another replica fails after the provider rotates the
+  // refresh token inside the password update. A simultaneous cross-replica race remains.
   const consumedResetTokens = new Map<string, number>();
   const RESET_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -456,7 +459,7 @@ export function buildApp(dependencies: AppDependencies) {
         properties: {
           accessToken: { type: "string", minLength: 10 },
           refreshToken: { type: "string", minLength: 10 },
-          newPassword: { type: "string", minLength: 8, maxLength: 1024 },
+          newPassword: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
         },
       },
     },
@@ -500,8 +503,8 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["currentPassword", "newPassword"],
         properties: {
-          currentPassword: { type: "string", minLength: 1, maxLength: 1024 },
-          newPassword: { type: "string", minLength: 8, maxLength: 1024 },
+          currentPassword: { type: "string", minLength: 1, maxLength: accountPasswordMaximumLength },
+          newPassword: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
         },
       },
     },

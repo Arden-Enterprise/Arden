@@ -5,6 +5,7 @@ import { KnowledgePane } from "./KnowledgePane";
 import { MyWorkPage } from "../my-work/MyWorkPage";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
 import { SignInPage } from "../sign-in/SignInPage";
+import { clearRecoveryTokens, readRecoveryTokens, storeRecoveryTokens } from "../sign-in/recovery-session";
 import { SetPasswordPage } from "../sign-in/SetPasswordPage";
 import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
 import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
@@ -200,11 +201,17 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   });
   const [recoveryTokens, setRecoveryTokens] = useState<{ accessToken: string; refreshToken: string } | null>(() => {
     if (typeof window === "undefined") return null;
-    const parsed = parseRecoveryHash(window.location);
-    if (parsed) {
+    const fromUrl = parseRecoveryHash(window.location);
+    if (fromUrl) {
+      storeRecoveryTokens(fromUrl);
+      try { window.history.replaceState(null, "", "/reset-password"); } catch {}
+      return fromUrl;
+    }
+    const stored = readRecoveryTokens();
+    if (stored && window.location.pathname !== "/reset-password") {
       try { window.history.replaceState(null, "", "/reset-password"); } catch {}
     }
-    return parsed;
+    return stored;
   });
   const [entryView, setEntryView] = useState<EntryView>(() => {
     if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return "sign-in";
@@ -282,6 +289,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       }
       setInvitationToken(null);
     }
+    clearRecoveryTokens();
     if (recoveryTokens) {
       setRecoveryTokens(null);
     }
@@ -295,10 +303,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     restoreStarted.current = true;
     void restoreSession(platform).then((current) => {
       if (current) {
+        if (recoveryTokens) return undefined;
+        if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return undefined;
         if (current.account?.passwordSetupRequired === true) return acceptServerSession(current);
-        if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) {
-          return acceptServerSession(current);
-        }
         const pathToken = typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
         const activeMemberships = current.memberships.filter((membership) => membership.status === "active");
         if (!pathToken && activeMemberships.length > 0) {
@@ -452,6 +459,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         platform={platform}
         initialMode={recoveryTokens || (typeof window !== "undefined" && window.location.pathname === "/reset-password") ? "reset-password" : "sign-in"}
         recoveryTokens={recoveryTokens}
+        onRecoveryComplete={() => {
+          clearRecoveryTokens();
+          setRecoveryTokens(null);
+        }}
         onAuthenticated={acceptServerSession}
         onEnterPreview={() => {
           setServerSession(null);

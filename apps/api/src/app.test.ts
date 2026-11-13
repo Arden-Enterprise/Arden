@@ -320,10 +320,18 @@ describe("API auth and private draft routes", () => {
     }
     const stillPending = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
     expect(stillPending.json().account).toEqual({ passwordSetupRequired: true });
+    const tooLong = await app.inject({
+      method: "POST", url: "/api/v1/auth/password",
+      headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
+      payload: { password: "A!" + "a".repeat(99) },
+    });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().error.code).toBe("INVALID_PASSWORD");
+    expect(tooLong.json().error.message).toBe("Password must be 100 characters or fewer.");
     const updated = await app.inject({
       method: "POST", url: "/api/v1/auth/password",
       headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
-      payload: { password: "A!" + "a".repeat(1023) },
+      payload: { password: "A!" + "a".repeat(98) },
     });
     expect(updated.statusCode).toBe(204);
     const after = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
@@ -507,6 +515,10 @@ describe("API auth and private draft routes", () => {
     expect(wrong.statusCode).toBe(401);
     expect(wrong.json().error.code).toBe("INVALID_CURRENT_PASSWORD");
     expect(authProvider.lastUpdatedPassword).toBeNull();
+    const tooLong = await submit(change, { currentPassword: "synthetic-password", newPassword: "b".repeat(101) });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().error.code).toBe("INVALID_PASSWORD");
+    expect(tooLong.json().error.message).toBe("Password must be 100 characters or fewer.");
     clock.mockReturnValue(startedAt + 60 * 60 * 1000);
     const updated = await submit(change, { currentPassword: "synthetic-password", newPassword });
     expect(updated.statusCode).toBe(200);
@@ -525,11 +537,18 @@ describe("API auth and private draft routes", () => {
       payload: { accessToken: "access-recovery", refreshToken, newPassword: "new-secure-password" },
     });
     expect((await reset("different-refresh")).statusCode).toBe(401);
+    const tooLong = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180", cookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "b".repeat(101) },
+    });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().error.code).toBe("INVALID_PASSWORD");
     expect((await reset("refresh-recovery")).statusCode).toBe(200);
     expect((await reset("refresh-recovery")).statusCode).toBe(401);
   });
 
-  it("enforces the three account-creation requirements without changing sign-in validation", async () => {
+  it("enforces the account-creation requirements and the 100-character password cap", async () => {
     const headers = { origin: "http://localhost:5180" };
     for (const password of ["Abcdef!", "abcdefgh!", "Abcdefgh"]) {
       const signup = await app.inject({
@@ -548,13 +567,26 @@ describe("API auth and private draft routes", () => {
     expect(signup.statusCode).toBe(202);
     const longSignup = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up", headers,
-      payload: { email: "long@example.test", password: "A!" + "a".repeat(1023), fullName: "Long Password" },
+      payload: { email: "long@example.test", password: "A!" + "a".repeat(98), fullName: "Long Password" },
     });
     expect(longSignup.statusCode).toBe(202);
+    const overLimit = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up", headers,
+      payload: { email: "longer@example.test", password: "A!" + "a".repeat(99), fullName: "Long Password" },
+    });
+    expect(overLimit.statusCode).toBe(400);
+    expect(overLimit.json().error.code).toBe("INVALID_PASSWORD");
+    expect(overLimit.json().error.message).toBe("Password must be 100 characters or fewer.");
     const signin = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers, payload: { email: "owner@example.test", password: "" },
     });
     expect(signin.json().error.code).toBe("INVALID_REQUEST");
+    const longSignIn = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in", headers, payload: { email: "owner@example.test", password: "a".repeat(101) },
+    });
+    expect(longSignIn.statusCode).toBe(400);
+    expect(longSignIn.json().error.code).toBe("INVALID_PASSWORD");
+    expect(longSignIn.json().error.message).toBe("Password must be 100 characters or fewer.");
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {

@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { meetsAccountPasswordRequirements } from "@arden/domain";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements } from "@arden/domain";
 import { setAccountPassword, type CurrentSession } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { AuthLayout } from "./AuthLayout";
@@ -14,6 +14,7 @@ export function SetPasswordPage({ platform, email, onComplete }: { platform: Pla
   const [busy, setBusy] = useState(false);
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (password.length > accountPasswordMaximumLength) return setNotice(accountPasswordMaximumLengthMessage);
     if (!meetsAccountPasswordRequirements(password)) return setNotice(accountPasswordRequirementMessage);
     if (password !== confirmation) return setNotice(text.mismatch);
     setBusy(true); setNotice(null);
@@ -30,7 +31,7 @@ export function SetPasswordPage({ platform, email, onComplete }: { platform: Pla
           {notice && <div className="auth-message" role="alert">{notice}</div>}
           <form noValidate onSubmit={submit}>
             <NewPasswordField label={text.password} placeholder={text.placeholder} value={password} onChange={setPassword} />
-            <label><span>{text.confirm}</span><input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" placeholder={text.placeholder} minLength={8} required /></label>
+            <label><span>{text.confirm}</span><input type="password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="new-password" placeholder={text.placeholder} minLength={8} maxLength={accountPasswordMaximumLength} required /></label>
             <button type="submit" className="auth-primary" disabled={busy}>{busy ? text.busy : text.action}</button>
           </form>
         </div>

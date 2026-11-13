@@ -1,3 +1,8 @@
+/** Typed password length before the provider hashes it. Counts the same units as the field and API schema. */
+export const accountPasswordMaximumLength = 100;
+
+export const accountPasswordMaximumLengthMessage = "Password must be 100 characters or fewer.";
+
 export type AccountPasswordChecks = {
   minimumLength: boolean;
   uppercaseLetter: boolean;
@@ -14,5 +19,6 @@ export function checkAccountPassword(password: string): AccountPasswordChecks {
 
 export function meetsAccountPasswordRequirements(password: string): boolean {
   const checks = checkAccountPassword(password);
-  return checks.minimumLength && checks.uppercaseLetter && checks.specialCharacter;
+  return password.length <= accountPasswordMaximumLength
+    && checks.minimumLength && checks.uppercaseLetter && checks.specialCharacter;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { meetsAccountPasswordRequirements } from "@arden/domain";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements } from "@arden/domain";
 import { AuthLayout } from "../sign-in/AuthLayout";
 import { NewPasswordField, accountPasswordRequirementMessage } from "../sign-in/NewPasswordField";
 import {
@@ -175,6 +175,11 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     }
     if (!fullName.trim()) {
       setError("Enter your name.");
+      setBusy(false);
+      return;
+    }
+    if (password.length > accountPasswordMaximumLength) {
+      setError(accountPasswordMaximumLengthMessage);
       setBusy(false);
       return;
     }
@@ -416,7 +421,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       autoComplete="current-password"
                       type="password"
                       required
-                      maxLength={1024}
+                      maxLength={accountPasswordMaximumLength}
                       placeholder="Enter your password"
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}

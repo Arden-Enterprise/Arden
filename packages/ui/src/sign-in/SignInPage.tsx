@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { meetsAccountPasswordRequirements } from "@arden/domain";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements } from "@arden/domain";
 import type { Platform } from "../shared/types";
 import {
   beginGoogleSignIn,
@@ -60,6 +60,7 @@ export function SignInPage({
   onOpenSetup,
   onEnterAdminPreview,
   onAuthenticated,
+  onRecoveryComplete,
   initialMode = "sign-in",
   recoveryTokens = null,
 }: {
@@ -68,6 +69,7 @@ export function SignInPage({
   onOpenSetup: () => void;
   onEnterAdminPreview?: () => void;
   onAuthenticated: (session: CurrentSession) => Promise<void>;
+  onRecoveryComplete?: () => void;
   initialMode?: SignInMode;
   recoveryTokens?: { accessToken: string; refreshToken: string } | null;
 }) {
@@ -152,6 +154,10 @@ export function SignInPage({
       setNotice({ text: "Enter your password." });
       return;
     }
+    if (password.length > accountPasswordMaximumLength) {
+      setNotice({ text: accountPasswordMaximumLengthMessage });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
@@ -177,6 +183,10 @@ export function SignInPage({
     }
     if (!fullName.trim()) {
       setNotice({ text: "Enter your name." });
+      return;
+    }
+    if (password.length > accountPasswordMaximumLength) {
+      setNotice({ text: accountPasswordMaximumLengthMessage });
       return;
     }
     if (!meetsAccountPasswordRequirements(password)) {
@@ -238,6 +248,10 @@ export function SignInPage({
       setNotice({ text: "This reset link is invalid or has expired. Request a new link." });
       return;
     }
+    if (password.length > accountPasswordMaximumLength) {
+      setNotice({ text: accountPasswordMaximumLengthMessage });
+      return;
+    }
     if (password.length < 8) {
       setNotice({ text: "Password must be at least 8 characters long." });
       return;
@@ -257,6 +271,7 @@ export function SignInPage({
       if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
         try { window.history.replaceState(null, "", "/"); } catch {}
       }
+      onRecoveryComplete?.();
       setNotice({
         text: "Password updated successfully. You can now sign in with your new password.",
         isSuccess: true,
@@ -321,7 +336,7 @@ export function SignInPage({
                     onChange={(event) => setPassword(event.target.value)}
                     autoComplete="current-password"
                     placeholder="Enter your password"
-                    maxLength={1024}
+                    maxLength={accountPasswordMaximumLength}
                     required
                   />
                 </label>
@@ -467,7 +482,7 @@ export function SignInPage({
                       autoComplete="new-password"
                       placeholder="Enter new password (min. 8 characters)"
                       minLength={8}
-                      maxLength={1024}
+                      maxLength={accountPasswordMaximumLength}
                       required
                     />
                   </label>
@@ -480,7 +495,7 @@ export function SignInPage({
                       autoComplete="new-password"
                       placeholder="Confirm new password"
                       minLength={8}
-                      maxLength={1024}
+                      maxLength={accountPasswordMaximumLength}
                       required
                     />
                   </label>

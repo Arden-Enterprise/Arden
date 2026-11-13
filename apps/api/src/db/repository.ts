@@ -1,4 +1,4 @@
-import type { Pool, PoolClient } from "pg";
+import type { Pool, PoolClient, QueryResult } from "pg";
 import { metadataSubmissionErrors, validKnowledgeMetadata, type KnowledgeMetadata } from "@arden/domain";
 import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledge/catalog-store.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
@@ -1832,7 +1832,9 @@ export class ArdenRepository implements ArdenDataRepository {
         LIMIT 1`, [organizationId, input.reviewerMembershipId, input.scope, input.departmentId,
         input.teamTag, input.projectTag, level, input.classifications]);
       if (duplicate.rowCount) throw new ReviewerGrantConflictError();
-      const result = await client.query<ReviewerGrantRow>(`
+      let result: QueryResult<ReviewerGrantRow>;
+      try {
+        result = await client.query<ReviewerGrantRow>(`
         INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope, department_id,
           granted_by_membership_id, classifications, level, team_tag, project_tag, valid_until)
         VALUES ($1, $2, $3, $4, $5, $6::text[], $7, $8, $9, $10)
@@ -1840,6 +1842,10 @@ export class ArdenRepository implements ArdenDataRepository {
                   level, team_tag, project_tag, status, valid_from, valid_until`, [organizationId,
         input.reviewerMembershipId, input.scope, input.departmentId, adminMembershipId,
         input.classifications, level, input.teamTag, input.projectTag, input.validUntil]);
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new ReviewerGrantConflictError();
+        throw error;
+      }
       const row = result.rows[0];
       if (!row) throw new Error("Reviewer grant insert returned no row");
       await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id,

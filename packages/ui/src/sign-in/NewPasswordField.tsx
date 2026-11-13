@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { checkAccountPassword } from "@arden/domain";
+import { accountPasswordMaximumLength, checkAccountPassword } from "@arden/domain";
 
 type NewPasswordFieldProps = {
   label?: string;
@@ -39,6 +39,7 @@ export function NewPasswordField({
         autoComplete="new-password"
         placeholder={placeholder}
         minLength={8}
+        maxLength={accountPasswordMaximumLength}
         aria-invalid={hasValue && metCount < requirements.length}
         aria-describedby={`${id}-requirements`}
         required
