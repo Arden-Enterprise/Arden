@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "./app.js";
 import { resolveSupabaseAuthPublicUrl, SupabaseAuthProvider } from "./auth/provider.js";
+import { sessionSigningKey } from "./auth/session-timebox.js";
 import { assertLocalFlow1TestTarget, LocalFlow1TestAuthProvider, parseLocalTestAccounts } from "./auth/local-flow1-test.js";
 import { ArdenRepository } from "./db/repository.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -120,6 +121,8 @@ const app = buildApp({
   testActor: remoteFlow1TestMode ? kietLocalFlow1TestActor : undefined,
   authTrustedOrigins: flow1TestMode ? ["http://127.0.0.1:5180"] : trustedOrigins,
   secureCookies: process.env.NODE_ENV === "production",
+  sessionSigningKey: sessionSigningKey(process.env.ARDEN_SESSION_SIGNING_KEY,
+    process.env.NODE_ENV === "production"),
   repository: new ArdenRepository(pool),
   storage: contentStorage,
   invitationMailer,

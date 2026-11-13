@@ -24,6 +24,7 @@ export type OrganizationMembership = {
 export type CurrentSession = {
   actor: { id: string; email?: string; fullName?: string | null };
   account: { passwordSetupRequired: boolean };
+  sessionExpiresAt?: string;
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
   testMode?: boolean;

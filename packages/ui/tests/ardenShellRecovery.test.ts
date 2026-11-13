@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
@@ -13,6 +13,7 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
     ...actual,
     restoreSession: vi.fn().mockResolvedValue(null),
     currentSession: vi.fn().mockResolvedValue(null),
+    signOut: vi.fn().mockResolvedValue(undefined),
     getInvitationPreview: vi.fn(),
   };
 });
@@ -24,6 +25,7 @@ describe("ArdenShell password recovery priority", () => {
 
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
     window.history.replaceState(null, "", "/");
   });
 
@@ -67,5 +69,23 @@ describe("ArdenShell password recovery priority", () => {
 
     expect(await screen.findByRole("heading", { name: /set a new password/i })).toBeTruthy();
     expect(screen.queryByText(/join/i)).toBeNull();
+  });
+
+  it("removes an expired authenticated session when the window regains focus", async () => {
+    const expiresAt = Date.now() + 60_000;
+    vi.mocked(apiClient.restoreSession).mockResolvedValueOnce({
+      actor: { id: "user-1", email: "user@example.test" },
+      account: { passwordSetupRequired: false },
+      memberships: [],
+      sessionExpiresAt: new Date(expiresAt).toISOString(),
+    });
+
+    render(createElement(ArdenShell, { platform: "web" }));
+    expect(await screen.findByRole("heading", { name: "Create your organization" })).toBeTruthy();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(expiresAt);
+    fireEvent.focus(window);
+    expect(await screen.findByRole("heading", { name: "Sign in to your account" })).toBeTruthy();
+    expect(apiClient.signOut).toHaveBeenCalledWith("web");
+    clock.mockRestore();
   });
 });

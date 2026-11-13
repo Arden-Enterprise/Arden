@@ -2,6 +2,7 @@ import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } fr
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
+import { newSessionExpiry, readSessionExpiry, sealSession } from "./auth/session-timebox.js";
 import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
@@ -32,6 +33,7 @@ type AppDependencies = {
   auth: AuthProvider | null;
   authTrustedOrigins: string[];
   secureCookies: boolean;
+  sessionSigningKey?: Buffer;
   repository: ArdenDataRepository;
   storage: PrivateContentStorage;
   invitationMailer?: InvitationMailer | null;
@@ -42,11 +44,13 @@ type AppDependencies = {
   testActor?: SessionContext;
 };
 
-type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean; passwordSetupRequired?: boolean };
+type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean;
+  passwordSetupRequired?: boolean; sessionExpiresAt?: number };
 // Decision 0013: classification is optional and defaults to INTERNAL; review strictness comes from audience breadth.
 type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification?: KnowledgeClassification };
 
 export function buildApp(dependencies: AppDependencies) {
+  const sessionKey = dependencies.sessionSigningKey ?? randomBytes(32);
   const app = Fastify({
     logger: {
       redact: {
@@ -70,7 +74,7 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
   const requestActor = (request: FastifyRequest, reply: FastifyReply) =>
-    requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, dependencies.testActor);
+    requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, sessionKey, dependencies.testActor);
   registerAudienceGroupRoutes(app, dependencies.repository.audienceGroups, requestActor, uuidPattern);
   registerKnowledgeCatalogRoutes(app, dependencies.repository.knowledgeCatalog, requestActor, uuidPattern);
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
@@ -143,7 +147,7 @@ export function buildApp(dependencies: AppDependencies) {
     }
     try {
       const result = await dependencies.auth.signIn({ email: normalizedEmail, password: request.body.password });
-      setAuthCookies(reply, result.tokens, dependencies.secureCookies);
+      setAuthCookies(reply, result.tokens, dependencies.secureCookies, sessionKey);
       return { authenticated: true };
     } catch (error) {
       if (error instanceof Error && error.message === "EMAIL_NOT_CONFIRMED") {
@@ -190,7 +194,8 @@ export function buildApp(dependencies: AppDependencies) {
       }
       try {
         const result = await dependencies.auth.completeGoogleSignIn(request.query.code, state.flowId, state.verifier);
-        setAuthCookies(reply, result.tokens, dependencies.secureCookies, [clearOAuthStateCookie(dependencies.secureCookies)]);
+        setAuthCookies(reply, result.tokens, dependencies.secureCookies, sessionKey,
+          newSessionExpiry(), [clearOAuthStateCookie(dependencies.secureCookies)]);
         const suffix = `status=success${result.passwordSetupRequired ? "&setup=password" : ""}`;
         return reply.redirect(`${completeUrl}${completeUrl.includes("?") ? "&" : "?"}${suffix}`);
       } catch (error) {
@@ -213,13 +218,22 @@ export function buildApp(dependencies: AppDependencies) {
     },
   }, async (request, reply) => {
     if (!dependencies.auth?.setInitialPassword) return authUnavailable(reply, request);
-    const tokens = readAuthCookies(request.headers.cookie, dependencies.secureCookies);
-    if (!tokens) return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+    const session = readBoundSession(request.headers.cookie, dependencies.secureCookies, sessionKey);
+    if (!session) {
+      clearAuthCookies(reply, dependencies.secureCookies);
+      return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+    }
     try {
-      const resolution = await dependencies.auth.resolveSession(tokens);
+      const resolution = await dependencies.auth.resolveSession(session.tokens);
       if (resolution.kind !== "authenticated") return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+      if (Date.now() >= session.expiresAt * 1000) {
+        clearAuthCookies(reply, dependencies.secureCookies);
+        return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+      }
       if (!resolution.passwordSetupRequired) return reply.code(409).send(safeError("PASSWORD_ALREADY_INITIALIZED", "This account already has a password.", request.id));
-      await dependencies.auth.setInitialPassword(tokens, request.body.password);
+      await dependencies.auth.setInitialPassword(resolution.rotatedSession ?? session.tokens, request.body.password);
+      if (resolution.rotatedSession) setAuthCookies(reply, resolution.rotatedSession, dependencies.secureCookies,
+        sessionKey, session.expiresAt);
       return reply.code(204).send();
     } catch (error) {
       if (error instanceof Error && error.message === "PASSWORD_REJECTED") {
@@ -469,7 +483,8 @@ export function buildApp(dependencies: AppDependencies) {
         markResetTokenConsumed(`access:${tokens.accessToken}`);
       }
 
-      setAuthCookies(reply, tokens, dependencies.secureCookies, [recoveryCookie("", 0)]);
+      setAuthCookies(reply, tokens, dependencies.secureCookies, sessionKey,
+        newSessionExpiry(), [recoveryCookie("", 0)]);
       return reply.code(200).send({ status: "password_updated" });
     } catch (error) {
       if (error instanceof Error && (error.message === "INVALID_OTP" || error.message === "INVALID_SESSION")) {
@@ -496,15 +511,16 @@ export function buildApp(dependencies: AppDependencies) {
   }, async (request, reply) => {
     const auth = dependencies.auth;
     if (!auth?.updateUserPassword) return authUnavailable(reply, request);
-    const context = await requireAuthenticatedActor(request, reply, auth, dependencies.secureCookies);
+    const context = await requireAuthenticatedActor(request, reply, auth, dependencies.secureCookies, sessionKey);
     if (!context) return;
+    if (!context.sessionExpiresAt) return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
     try {
       const confirmed = await auth.signIn({ email: context.email, password: request.body.currentPassword });
       if (confirmed.userId !== context.userId) {
         return reply.code(401).send(safeError("INVALID_CURRENT_PASSWORD", "Enter your correct current password.", request.id));
       }
       await auth.updateUserPassword(confirmed.tokens, request.body.newPassword);
-      setAuthCookies(reply, confirmed.tokens, dependencies.secureCookies);
+      setAuthCookies(reply, confirmed.tokens, dependencies.secureCookies, sessionKey, context.sessionExpiresAt);
       return reply.code(200).send({ status: "password_updated" });
     } catch (error) {
       if (error instanceof Error && ["INVALID_CREDENTIALS", "EMAIL_NOT_CONFIRMED"].includes(error.message)) {
@@ -540,6 +556,7 @@ export function buildApp(dependencies: AppDependencies) {
       return {
         actor: { id: context.userId, email: context.email, fullName: context.fullName },
         account: { passwordSetupRequired: Boolean(context.passwordSetupRequired) },
+        ...(context.sessionExpiresAt ? { sessionExpiresAt: new Date(context.sessionExpiresAt * 1000).toISOString() } : {}),
         ...(dependencies.testActor ? { testMode: true } : {}),
         ...(pendingInvitationToken ? { pendingInvitationToken } : {}),
         memberships: memberships.map((membership) => ({
@@ -1786,27 +1803,36 @@ export function buildApp(dependencies: AppDependencies) {
   return app;
 }
 
-async function requireAuthenticatedActor(request: FastifyRequest, reply: FastifyReply, auth: AuthProvider | null, secureCookies: boolean, testActor?: SessionContext): Promise<SessionContext | null> {
+async function requireAuthenticatedActor(request: FastifyRequest, reply: FastifyReply, auth: AuthProvider | null,
+  secureCookies: boolean, sessionKey: Buffer, testActor?: SessionContext): Promise<SessionContext | null> {
   if (testActor) return testActor;
   if (!auth) {
     authUnavailable(reply, request);
     return null;
   }
-  const tokens = readAuthCookies(request.headers.cookie, secureCookies);
-  if (!tokens) {
+  const session = readBoundSession(request.headers.cookie, secureCookies, sessionKey);
+  if (!session) {
+    clearAuthCookies(reply, secureCookies);
     reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
     return null;
   }
   try {
-    const resolution = await auth.resolveSession(tokens);
+    const resolution = await auth.resolveSession(session.tokens);
     if (resolution.kind === "authenticated") {
-      if (resolution.rotatedSession) setAuthCookies(reply, resolution.rotatedSession, secureCookies);
+      if (Date.now() >= session.expiresAt * 1000) {
+        clearAuthCookies(reply, secureCookies);
+        reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+        return null;
+      }
+      if (resolution.rotatedSession) setAuthCookies(reply, resolution.rotatedSession, secureCookies,
+        sessionKey, session.expiresAt);
       return {
         userId: resolution.userId,
         email: resolution.email,
         fullName: resolution.fullName,
         emailVerified: resolution.emailVerified,
         passwordSetupRequired: resolution.passwordSetupRequired,
+        sessionExpiresAt: session.expiresAt,
       };
     }
     if (resolution.kind === "unavailable") {
@@ -1828,10 +1854,21 @@ function passwordRejected(reply: FastifyReply, request: FastifyRequest) {
     "Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.", request.id));
 }
 
-function cookieNames(secure: boolean): { access: string; refresh: string } {
+function cookieNames(secure: boolean): { access: string; refresh: string; session: string } {
   return secure
-    ? { access: "__Host-arden_access", refresh: "__Host-arden_refresh" }
-    : { access: "arden_access", refresh: "arden_refresh" };
+    ? { access: "__Host-arden_access", refresh: "__Host-arden_refresh", session: "__Host-arden_session" }
+    : { access: "arden_access", refresh: "arden_refresh", session: "arden_session" };
+}
+
+function readBoundSession(header: string | undefined, secure: boolean, key: Buffer):
+  { tokens: AuthSessionTokens; expiresAt: number } | null {
+  const tokens = readAuthCookies(header, secure);
+  if (!tokens || !header) return null;
+  const name = cookieNames(secure).session;
+  const value = header.split(";").map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1);
+  const expiresAt = readSessionExpiry(value, tokens, key);
+  return expiresAt === null ? null : { tokens, expiresAt };
 }
 
 function readAuthCookies(header: string | undefined, secure: boolean): AuthSessionTokens | null {
@@ -1850,12 +1887,15 @@ function readAuthCookies(header: string | undefined, secure: boolean): AuthSessi
   return { accessToken, refreshToken, expiresIn: 3600 };
 }
 
-function setAuthCookies(reply: FastifyReply, tokens: AuthSessionTokens, secure: boolean, additional: string[] = []): void {
+function setAuthCookies(reply: FastifyReply, tokens: AuthSessionTokens, secure: boolean, key: Buffer,
+  expiresAt = newSessionExpiry(), additional: string[] = []): void {
   const names = cookieNames(secure);
-  const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
+  const maxAge = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
+  const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}; Max-Age=${maxAge}`;
   reply.header("set-cookie", [
     `${names.access}=${tokens.accessToken}; ${attributes}`,
     `${names.refresh}=${tokens.refreshToken}; ${attributes}`,
+    `${names.session}=${sealSession(tokens, expiresAt, key)}; ${attributes}`,
     ...additional,
   ]);
 }
@@ -1921,7 +1961,8 @@ function readPendingInvitationCookie(header: string | undefined, secure: boolean
 function clearAuthCookies(reply: FastifyReply, secure: boolean, additional: string[] = []): void {
   const names = cookieNames(secure);
   const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}; Max-Age=0`;
-  reply.header("set-cookie", [`${names.access}=; ${attributes}`, `${names.refresh}=; ${attributes}`, ...additional]);
+  reply.header("set-cookie", [`${names.access}=; ${attributes}`, `${names.refresh}=; ${attributes}`,
+    `${names.session}=; ${attributes}`, ...additional]);
 }
 
 function hasTrustedOrigin(request: FastifyRequest, trustedOrigins: string[]): boolean {

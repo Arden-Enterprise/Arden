@@ -13,6 +13,11 @@ Scope: the implemented Supabase-authenticated web/desktop boundary, account setu
 | F01-AC1 | Supported account/sign-in paths reach only the authenticated actor's available organizations; invalid credentials and unverified/expired provider state have clear outcomes. | Source slices reported; full provider/browser acceptance not established by this map. |
 | F01-AC2 | Recovery, refresh, expiry and sign-out clear/revalidate sessions without exposing tokens; callbacks and redirects obey the current trust boundary. | Check actual provider, HTTP cookies and error paths. |
 | F01-AC3 | Web HttpOnly sessions and desktop OS-protected sessions produce equivalent access; renderer/browser storage does not receive secret tokens. | Native behavior needs native evidence, not just a build. |
+| F01-AC6 | Email/password and Google sign-ins receive one absolute 24-hour Arden session deadline. Refresh and password changes preserve it; protected requests fail after it, and an open web/desktop shell returns to sign-in. | Requested by the maintainer on 13 November 2026. API and UI regression checks cover the local boundary; live Supabase and native window behavior remain separate. |
+
+### F01 24-hour session refinement
+
+The requester chose a 24-hour limit for both ordinary and Google sign-in on 13 November 2026. This specification records that direct instruction; the requester is the decision owner for this refinement and the coding agent prepared the record. The limit is absolute from sign-in, including after provider token refresh. Arden signs a token-bound deadline in a server-only HttpOnly cookie, rejects missing/edited/expired deadlines and clears the session cookies. The same cookie set is stored in the desktop's encrypted main-process jar; the renderer receives only the deadline timestamp needed to clear an idle workspace. A fresh sign-in begins a new period. Existing sessions without the new marker require sign-in after rollout. F01-AC4 and F01-AC5 are reserved by the separate in-flight password-guidance and reset-link refinements. This change does not provide a device/session list or change Supabase-owned Auth configuration.
 
 ## F02 Organizations and membership
 

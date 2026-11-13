@@ -124,6 +124,7 @@ contributor and agent, not to one named tool.
 
 - Keep renderer/browser unprivileged and use a narrow typed IPC/native boundary. Validate sender and inputs; native adapters are not a substitute for server policy.
 - Do not store long-lived auth secrets in renderer localStorage or unencrypted files. Choose protected OS storage for desktop and secure session/cookie behavior for web; document the threat model and recovery behavior.
+- Arden's API checks a signed, token-bound absolute 24-hour deadline on every protected request for both password and Google sign-in. A refresh keeps the original deadline; missing or invalid timebox markers fail closed. The key stays in API runtime secrets and is identical across replicas. Browser/desktop UI expiry clears in-memory private context, while the API remains authoritative even if a client clock or timer is altered.
 - Validate configurable Core URLs and sign-in callbacks. Do not accept arbitrary redirects, open external schemes blindly, disable certificate validation, or grant wildcard origins for convenience.
 - Offline support is future limited personal-draft/cache behavior, not complete shared sync. Distinguish saved-to-server, saved-locally, pending, failed, and conflict states without silent loss/overwrites.
 - Cache protection, expiration, shared-content reauthorization, revocation when offline, device compromise, logout cleanup, and key lifecycle require accepted decisions before shipping caching. Do not claim immediate remote wipe on an offline device.
