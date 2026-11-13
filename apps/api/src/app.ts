@@ -367,7 +367,7 @@ export function buildApp(dependencies: AppDependencies) {
 
   // Only a provider-verified recovery link can authorize an access/refresh-token reset.
   // The short-lived proof stays in the browser that opened the verification link.
-  const recoveryProofKey = randomBytes(32);
+  const recoveryProofKey = createHmac("sha256", sessionKey).update("arden:recovery-proof:v1").digest();
   const recoveryProofSeconds = 600;
   const recoveryCookieName = dependencies.secureCookies ? "__Host-arden_recovery" : "arden_recovery";
   const recoveryCookie = (value: string, maxAge: number) =>
