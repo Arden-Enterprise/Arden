@@ -14,7 +14,7 @@ export function filterLibrary(items: PublishedKnowledge[], catalog: KnowledgeCat
     && (!filters.topicId || item.management?.topicId === filters.topicId)
     && (!filters.ownerId || item.responsibleDepartmentId === filters.ownerId)
     && (!filters.collectionId || collection?.documentIds.includes(item.id))
-    && (!terms || [item.title, item.documentCode, item.management?.type, item.management?.topicName,
+    && (!terms || [item.title, item.management?.type, item.management?.topicName,
       item.responsibleDepartmentName].some(value => value?.toLocaleLowerCase().includes(terms))))
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id));
 }
@@ -29,7 +29,6 @@ function DocumentRegister({ items, onOpen, recent = false }: { items: PublishedK
       return <IslandRow key={item.id} className="library-row">
         <IslandCell className="island-row-cell is-name"><button className="island-row-name library-row-name" type="button" aria-label={`Read ${item.title}`} onClick={() => onOpen(item.id)}>
           <span className="library-row-icon"><Icon name="document" size={17} /></span><span className="library-row-copy">
-            {item.documentCode && <span className="library-row-code">{item.documentCode}</span>}
             <strong className="library-row-title">{item.title}</strong>
             <span className="library-row-meta">{item.management?.topicName}{recent && release && <span className="km-release">{release === "UPDATED" ? "Updated" : "New"}</span>}</span>
           </span></button></IslandCell>

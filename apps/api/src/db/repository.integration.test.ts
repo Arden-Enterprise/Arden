@@ -61,8 +61,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0024_target_reader_selection', '0025_review_approved_readers', '0026_review_list_authors',
           '0027_document_category_relationships', '0028_audience_to_target_readers',
           '0029_withdraw_pending_submission', '0031_deduplicate_reviewer_grants',
-          '0032_governed_ai_sources_and_conversations')`);
-    if (migration.rows[0]?.count !== "18") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0032_governed_ai_sources_and_conversations', '0033_reader_directory_email',
+          '0034_publication_change_requests', '0035_apply_publication_change_requests')`);
+    if (migration.rows[0]?.count !== "21") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {

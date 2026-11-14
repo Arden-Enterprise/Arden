@@ -52,7 +52,6 @@ export type PrivateContributionSource = {
   contentHash: string;
 };
 export type SharedKnowledgeDraft = {
-  documentCode?: string;
   management?: (KnowledgeMetadata & { schemaVersion?: number }) | null;
   hasPublishedVersion?: boolean;
   id: string;
@@ -101,7 +100,6 @@ export type UpdateSharedDraftResult =
   | { kind: "invalid-target-readers"; field: TargetReadersField; reason: string }
   | { kind: "updated"; draft: SharedKnowledgeDraft };
 export type SharedKnowledgeSubmission = {
-  documentCode?: string | null;
   management?: (KnowledgeMetadata & { topicName?: string }) | null;
   id: string;
   draftId: string;
@@ -122,7 +120,26 @@ export type SharedKnowledgeSubmission = {
   submittedAt: Date;
   publishedVersionId: string | null;
   decisionComment: string | null;
+  /** T6.1: CONTENT for a new version; READER_CHANGE or WITHDRAWAL for a request about the current publication. */
+  requestType: PublicationRequestType;
+  requestReason: string | null;
 };
+export type PublicationRequestType = "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+export type PublicationChangeInput = {
+  type: "READER_CHANGE" | "WITHDRAWAL";
+  reason: string;
+  /** Required for READER_CHANGE, refused for WITHDRAWAL. */
+  targetReaders?: TargetReadersInput;
+  idempotencyKey: string;
+};
+export type RequestPublicationChangeResult =
+  | { kind: "requested"; submission: SharedKnowledgeSubmission }
+  | { kind: "replayed"; submission: SharedKnowledgeSubmission }
+  | { kind: "not-found" }
+  | { kind: "not-published" }
+  | { kind: "conflict" }
+  | { kind: "invalid-request"; reason: string }
+  | { kind: "invalid-target-readers"; field: TargetReadersField; reason: string };
 export type SubmitKnowledgeDraftResult =
   | { kind: "submitted"; submission: SharedKnowledgeSubmission }
   | { kind: "replayed"; submission: SharedKnowledgeSubmission }
@@ -197,7 +214,6 @@ export type DecideReviewResult =
   | { kind: "not-found" }
   | { kind: "conflict" };
 export type PublishedKnowledge = {
-  documentCode?: string | null;
   management?: (KnowledgeMetadata & { topicName?: string }) | null;
   id: string;
   draftId: string;
@@ -268,7 +284,6 @@ function readersAuditSummary(readers: ReaderSelection) {
   return { mode: readers.mode, departmentId: readers.departmentId, memberCount: readers.memberIds.length };
 }
 type SharedDraftRow = ReaderSelectionColumns & {
-  document_code: string;
   management: KnowledgeMetadata | null;
   has_published_version: boolean;
   shared_draft_id: string;
@@ -295,7 +310,7 @@ type SharedDraftRow = ReaderSelectionColumns & {
 };
 const sharedDraftSelect = `
   SELECT d.shared_draft_id, d.title, d.classification, d.source_private_version_id,
-         d.document_code, d.management,
+         d.management,
          EXISTS (SELECT 1 FROM shared_submission prior WHERE prior.shared_draft_id = d.shared_draft_id
            AND prior.publication_state IN ('ACTIVE', 'SUPERSEDED')) AS has_published_version,
          d.author_membership_id, d.status,
@@ -316,7 +331,7 @@ const sharedDraftSelect = `
 
 function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnowledgeDraft {
   return {
-    documentCode: row.document_code, management: row.management, hasPublishedVersion: row.has_published_version,
+    management: row.management, hasPublishedVersion: row.has_published_version,
     id: row.shared_draft_id,
     organizationId,
     title: row.title,
@@ -339,7 +354,6 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
   };
 }
 type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
-  document_code: string | null;
   management: (KnowledgeMetadata & { topicName?: string }) | null;
   submission_id: string;
   shared_draft_id: string;
@@ -365,13 +379,16 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
   organization_wide: boolean;
   published_version_id: string | null;
   decision_comment: string | null;
+  request_type: PublicationRequestType;
+  request_reason: string | null;
+  target_published_version_id: string | null;
 };
 // organization_wide: the frozen audience includes the organization audience. That kind is valid only at
 // Organization scope (audience_snapshot_enforceable) and audience_member_read shows it to every active member,
 // so it is detected even when the reviewer cannot see the snapshot's group or department audiences.
 const submissionSelect = `
   SELECT s.submission_id, s.shared_draft_id, s.shared_draft_version_id,
-         s.document_code, s.management,
+         s.management,
          s.snapshot_version_no,
          s.title, s.classification, s.responsible_department_id, s.target_scope_type,
          s.target_department_id, s.audience_role_ids, s.content_hash, s.content_uri,
@@ -383,14 +400,14 @@ const submissionSelect = `
            SELECT 1 FROM audience a WHERE a.organization_id = s.organization_id
               AND a.audience_id = ANY(s.audience_role_ids) AND a.kind = 'ORGANIZATION_ALL')) AS organization_wide,
          cp.published_version_id,
-         rd.comment AS decision_comment
+         rd.comment AS decision_comment, s.request_type, s.request_reason, s.target_published_version_id
     FROM shared_submission s
     LEFT JOIN published_knowledge_version pv ON pv.submission_id = s.submission_id
     LEFT JOIN knowledge_current_publication cp ON cp.published_version_id = pv.published_version_id
     LEFT JOIN review_decision rd ON rd.submission_id = s.submission_id AND rd.flow2`;
 function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmission {
   return {
-    documentCode: row.document_code, management: row.management,
+    management: row.management,
     id: row.submission_id,
     draftId: row.shared_draft_id,
     snapshotVersionId: row.shared_draft_version_id,
@@ -409,6 +426,8 @@ function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmissio
     submittedAt: row.submitted_at,
     publishedVersionId: row.published_version_id,
     decisionComment: row.decision_comment,
+    requestType: row.request_type,
+    requestReason: row.request_reason,
   };
 }
 type ReviewerGrantRow = {
@@ -455,7 +474,6 @@ function reviewAuthorizationFromRow(row: SharedSubmissionRow, organizationId: st
   };
 }
 type PublishedKnowledgeRow = ReaderSelectionColumns & {
-  document_code: string | null;
   management: (KnowledgeMetadata & { topicName?: string }) | null;
   published_version_id: string;
   shared_draft_id: string;
@@ -486,7 +504,7 @@ type AuthorizedAiSourceRow = ReaderSelectionColumns & {
 };
 const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
-         pv.document_code, pv.management,
+         pv.management,
          pv.responsible_department_id, pv.content_hash, pv.content_uri,
          owner_department.name AS responsible_department_name,
          pv.audience_role_ids, pv.published_at,
@@ -498,7 +516,7 @@ const publishedKnowledgeSelect = `
       AND owner_department.organization_id = cp.organization_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
   return {
-    documentCode: row.document_code, management: row.management,
+    management: row.management,
     id: row.published_version_id,
     draftId: row.shared_draft_id,
     title: row.title,
@@ -589,6 +607,8 @@ export interface ArdenDataRepository {
   listKnowledgeSubmissions(userId: string, organizationId: string): Promise<SharedKnowledgeSubmission[] | null>;
   withdrawKnowledgeSubmission(userId: string, organizationId: string, submissionId: string,
     requestId: string): Promise<WithdrawKnowledgeSubmissionResult>;
+  requestPublicationChange(userId: string, organizationId: string, documentId: string,
+    input: PublicationChangeInput, requestId: string): Promise<RequestPublicationChangeResult>;
   listReviewerGrants(userId: string, organizationId: string): Promise<ReviewerGrantRecord[] | null>;
   createReviewerGrant(userId: string, organizationId: string, input: ReviewerGrantInput, requestId: string): Promise<ReviewerGrantRecord | null>;
   deactivateReviewerGrant(userId: string, organizationId: string, grantId: string, requestId: string): Promise<boolean>;
@@ -1806,6 +1826,76 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
+  /**
+   * T6.1 (SDD S-16): the author asks to change the readers of their published document or to withdraw it.
+   * The request reuses the current publication's frozen snapshot and is reviewed like a submission; until
+   * it is approved (T6.2) the current version and readers do not change.
+   */
+  async requestPublicationChange(userId: string, organizationId: string, documentId: string,
+    input: PublicationChangeInput, requestId: string): Promise<RequestPublicationChangeResult> {
+    const reason = input.reason.trim();
+    if (!reason || [...reason].length > 1000) return { kind: "invalid-request", reason: "Give a reason of 1 to 1000 characters." };
+    if (input.type === "WITHDRAWAL" && input.targetReaders !== undefined) {
+      return { kind: "invalid-request", reason: "A withdrawal request does not take readers." };
+    }
+    if (input.type === "READER_CHANGE" && input.targetReaders === undefined) {
+      return { kind: "invalid-request", reason: "Choose the new readers." };
+    }
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const membership = await this.activeActorMembership(client, userId, organizationId);
+      if (!membership) return { kind: "not-found" };
+      const replay = await client.query<SharedSubmissionRow>(`${submissionSelect}
+        WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2 AND s.submit_request_id = $3`,
+      [organizationId, membership, input.idempotencyKey]);
+      if (replay.rows[0]) {
+        return replay.rows[0].shared_draft_id === documentId && replay.rows[0].request_type === input.type
+          ? { kind: "replayed", submission: mapSharedSubmission(replay.rows[0]) } : { kind: "conflict" };
+      }
+      const document = await client.query<{ author_membership_id: string }>(`SELECT author_membership_id FROM shared_draft
+        WHERE organization_id = $1 AND shared_draft_id = $2 AND status = 'ACTIVE' FOR UPDATE`, [organizationId, documentId]);
+      if (document.rows[0]?.author_membership_id !== membership) return { kind: "not-found" };
+      const current = await client.query<{ published_version_id: string; submission_id: string }>(`
+        SELECT cp.published_version_id, pv.submission_id FROM knowledge_current_publication cp
+          JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
+         WHERE cp.organization_id = $1 AND cp.shared_draft_id = $2`, [organizationId, documentId]);
+      const publication = current.rows[0];
+      if (!publication) return { kind: "not-published" };
+      const pending = await client.query(`SELECT 1 FROM shared_submission
+        WHERE shared_draft_id = $1 AND status = 'PENDING_REVIEW'`, [documentId]);
+      if (pending.rowCount !== 0) return { kind: "conflict" };
+      let selectionId: string | null = null;
+      if (input.type === "READER_CHANGE") {
+        const validation = validateSelection(input.targetReaders!,
+          await this.loadSelectionFacts(client, organizationId, input.targetReaders!));
+        if (!validation.ok) return { kind: "invalid-target-readers", field: validation.field, reason: validation.reason };
+        selectionId = await this.insertReaderSelection(client, organizationId, validation.selection, 1);
+      }
+      // The request repeats the published submission's frozen snapshot, so it routes to the same reviewers.
+      const inserted = await client.query<{ submission_id: string }>(`
+        INSERT INTO shared_submission (organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
+          submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id, title,
+          classification, team_tag, project_tag, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
+          content_hash, submit_request_id, proposed_selection_id, request_type, request_reason,
+          target_published_version_id)
+        SELECT s.organization_id, s.shared_draft_id, s.shared_draft_version_id, s.snapshot_version_no,
+               $2, s.target_scope_type, s.target_department_id, s.responsible_department_id, s.title,
+               s.classification, s.team_tag, s.project_tag, s.audience_role_ids, s.policy_version, s.review_rule,
+               s.content_uri, s.mime_type, s.content_hash, $3, $4::uuid, $5, $6, $7
+          FROM shared_submission s WHERE s.submission_id = $1
+        RETURNING submission_id`, [publication.submission_id, membership, input.idempotencyKey, selectionId,
+        input.type, reason, publication.published_version_id]);
+      const submissionId = inserted.rows[0]?.submission_id;
+      if (!submissionId) throw new Error("Change request insert returned no identifier");
+      await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type,
+        outcome, details_json) VALUES ($1, $2, 'KNOWLEDGE_CHANGE_REQUESTED', 'SUCCESS', $3::jsonb)`,
+      [organizationId, membership, JSON.stringify({ submissionId, draftId: documentId, requestType: input.type,
+        publishedVersionId: publication.published_version_id, requestId })]);
+      const result = await client.query<SharedSubmissionRow>(`${submissionSelect} WHERE s.submission_id = $1`, [submissionId]);
+      if (!result.rows[0]) throw new Error("Change request is not readable");
+      return { kind: "requested", submission: mapSharedSubmission(result.rows[0]) };
+    });
+  }
+
   async listReviewerGrants(userId: string, organizationId: string): Promise<ReviewerGrantRecord[] | null> {
     return this.withOrganizationAdmin(userId, organizationId, async (client) => {
       const result = await client.query<ReviewerGrantRow>(`SELECT reviewer_grant_id, reviewer_membership_id,
@@ -1909,6 +1999,7 @@ export class ArdenRepository implements ArdenDataRepository {
         effectivePolicyVersion: 1,
         audienceEnforceable: await this.audienceEnforceable(client, organizationId, row.audience_role_ids,
           row.target_scope_type, row.responsible_department_id),
+        requestType: row.request_type,
       })));
       const assigned = listAssignedReviews({ actor, now, candidates });
       // Names are resolved only for submissions the policy above already authorized.
@@ -2023,6 +2114,15 @@ export class ArdenRepository implements ArdenDataRepository {
       const readerFacts: SelectionFacts = proposedReaders && approvedReaders !== undefined
         ? await this.loadSelectionFacts(client, organizationId, approvedReaders)
         : { organizationId, departments: [], members: [] };
+      // T6.2: a change request applies to the publication it names, which must still be current.
+      const publicationChange = row.request_type === "CONTENT" ? undefined : (await client.query<{
+        target_is_current: boolean; newer_version_preparing: boolean }>(`
+        SELECT EXISTS (SELECT 1 FROM knowledge_current_publication cp WHERE cp.shared_draft_id = s.shared_draft_id
+                         AND cp.published_version_id = s.target_published_version_id) AS target_is_current,
+               EXISTS (SELECT 1 FROM shared_submission c WHERE c.shared_draft_id = s.shared_draft_id
+                         AND c.status = 'APPROVED' AND c.publication_state = 'PREPARING') AS newer_version_preparing
+          FROM shared_submission s WHERE s.submission_id = $1`, [submissionId])).rows
+        .map((fact) => ({ targetIsCurrent: fact.target_is_current, newerVersionPreparing: fact.newer_version_preparing }))[0];
       const plan = planReviewDecision({
         actor,
         submission: { ...reviewAuthorizationFromRow(row, organizationId),
@@ -2034,6 +2134,8 @@ export class ArdenRepository implements ArdenDataRepository {
         policy: { kind: "SINGLE_REVIEWER" },
         now: new Date(),
         readers: { proposed: proposedReaders, facts: readerFacts },
+        requestType: row.request_type,
+        publicationChange,
       }, { action, expectedSnapshotVersionId, expectedContentHash, comment, approvedReaders });
       if (plan.kind === "DENIED") {
         return plan.reason === "INVALID_READERS"
@@ -2057,6 +2159,8 @@ export class ArdenRepository implements ArdenDataRepository {
         membershipId, decisionId, JSON.stringify({ submissionId, snapshotVersionId: row.shared_draft_version_id,
           decision: plan.decision,
           selfApproved: actor.isOrganizationAdmin === true && membershipId === row.submitted_by_membership_id,
+          ...(row.request_type !== "CONTENT" ? { requestType: row.request_type,
+            publishedVersionId: row.target_published_version_id } : {}),
           ...(readers ? { proposedReaders: readersAuditSummary(readers.proposed),
             approvedReaders: readersAuditSummary(readers.approved), narrowed: readers.narrowed } : {}),
           requestId })]);

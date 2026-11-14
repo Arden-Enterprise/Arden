@@ -16,6 +16,8 @@ export type ReviewQueueCandidate = {
   reviewerGrants: readonly ReviewerGrant[];
   effectivePolicyVersion: number;
   audienceEnforceable: boolean;
+  /** T6.1: CONTENT, READER_CHANGE or WITHDRAWAL; omitted means CONTENT. */
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
 };
 
 export type AssignedReview = {
@@ -27,6 +29,7 @@ export type AssignedReview = {
   submittedAt: Date;
   approvalBlocked: boolean;
   versionNo: number;
+  requestType: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
   /** Filled by the repository after authorization; null when the name is unavailable. */
   authorName: string | null;
 };
@@ -66,6 +69,7 @@ export function listAssignedReviews(input: {
       submittedAt: candidate.submittedAt,
       approvalBlocked: !candidate.audienceEnforceable,
       versionNo: candidate.versionNo,
+      requestType: candidate.requestType ?? "CONTENT",
       authorName: null,
     });
   }

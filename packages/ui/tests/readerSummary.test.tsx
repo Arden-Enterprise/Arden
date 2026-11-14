@@ -8,7 +8,7 @@ import * as api from "../src/shared/reader-summary-api";
 import { ApiError } from "../src/shared/api-client";
 import { deferred, readerContext, readerId, readerSummaryFixture } from "./readerSummary.test-support";
 
-const metadata: ReaderDocumentMetadata = { title: "Working together", documentCode: "ARD-001", ownerDepartment: "HR", summary: "",
+const metadata: ReaderDocumentMetadata = { title: "Working together", ownerDepartment: "HR", summary: "",
   activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE", effectiveDate: "2026-11-01" }] };
 function fixture() {
   const options: ReaderSummaryOptions = { platform: "web", context: { ...readerContext }, active: true, onCitation: vi.fn(), onAccessLost: vi.fn() };

@@ -16,7 +16,7 @@ away from the names.
    - Owner + Version cells: 13px / 400 / `--arden-text-secondary`.
    - Effective date: 13px / `--arden-text-muted`, `font-variant-numeric: tabular-nums`,
      format with `toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })`.
-2. **Code above the title**
+2. **Code above the title** — superseded by [ADR 0021](../../decisions/0021-reader-email-search-and-no-document-code.md): no code line; show the full title.
    - Show the code on its own line *above* the title: 12px monospace, `--arden-text-muted`.
    - Source: `item.documentCode`; if null, derive it for display only from a leading title prefix
      matching `/^([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)\s*[—–-]\s+/` and strip that prefix from the shown title.

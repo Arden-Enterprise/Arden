@@ -1344,6 +1344,50 @@ export function buildApp(dependencies: AppDependencies) {
       }
     });
 
+  // T6.1 (SDD S-16): the author asks to change the readers of a published document or to withdraw it.
+  app.post<{ Params: { organizationId: string; documentId: string };
+    Body: { type: "READER_CHANGE" | "WITHDRAWAL"; reason: string; targetReaders?: TargetReadersInput } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/change-requests", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern },
+        } },
+        headers: { type: "object", required: ["idempotency-key"], properties: {
+          "idempotency-key": { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", additionalProperties: false, required: ["type", "reason"], properties: {
+          type: { type: "string", enum: ["READER_CHANGE", "WITHDRAWAL"] },
+          reason: { type: "string", minLength: 1, maxLength: 4000 },
+          targetReaders: targetReadersSchema,
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.requestPublicationChange(context.userId,
+          request.params.organizationId, request.params.documentId, {
+            type: request.body.type, reason: request.body.reason, targetReaders: request.body.targetReaders,
+            idempotencyKey: request.headers["idempotency-key"] as string,
+          }, request.id);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "not-published") return reply.code(409).send(safeError("DOCUMENT_NOT_PUBLISHED",
+          "Only a published document can have its readers changed or be withdrawn.", request.id));
+        if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT",
+          "This document already has a request waiting for review.", request.id));
+        if (result.kind === "invalid-request") return reply.code(400).send(safeError("INVALID_REQUEST", result.reason, request.id));
+        if (result.kind === "invalid-target-readers") {
+          return reply.code(400).send({ error: { code: "INVALID_TARGET_READERS", message: result.reason,
+            requestId: request.id, field: result.field } });
+        }
+        reply.header("Cache-Control", "no-store");
+        return reply.code(result.kind === "requested" ? 201 : 200).send(representSubmission(result.submission));
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge change request failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
   app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/submissions", {
     schema: { params: { type: "object", required: ["organizationId"], properties: {
       organizationId: { type: "string", pattern: uuidPattern },
@@ -1561,6 +1605,10 @@ export function buildApp(dependencies: AppDependencies) {
           return reply.code(400).send(safeError("READERS_NOT_SUPPORTED",
             "This submission uses audiences; approve it without approved readers.", request.id));
         }
+        if (result.reason === "PUBLICATION_CHANGED") {
+          return reply.code(409).send(safeError("PUBLICATION_CHANGED",
+            "This document changed since the request was made, or a newer version is still being prepared.", request.id));
+        }
         if (result.reason === "READERS_WIDENED") {
           return reply.code(409).send(safeError("READERS_WIDENED",
             "Approved readers can keep or narrow the proposed readers, never widen them.", request.id));
@@ -1629,7 +1677,7 @@ export function buildApp(dependencies: AppDependencies) {
         }
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
-          documentCode: publication.documentCode, management: publication.management,
+          management: publication.management,
           classification: publication.classification,
           responsibleDepartmentId: publication.responsibleDepartmentId,
           responsibleDepartmentName: publication.responsibleDepartmentName,
@@ -2001,7 +2049,7 @@ async function readKnowledgeContent(storage: PrivateContentStorage, sourceUri: s
 
 function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
   return {
-    documentCode: draft.documentCode, management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
+    management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
     id: draft.id,
     organizationId: draft.organizationId,
     title: draft.title,
@@ -2028,7 +2076,7 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
 
 function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
   return {
-    documentCode: draft.documentCode, management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
+    management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
     id: draft.id,
     organizationId: draft.organizationId,
     title: draft.title,
@@ -2052,7 +2100,7 @@ function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
 
 function representSubmission(submission: SharedKnowledgeSubmission) {
   return {
-    documentCode: submission.documentCode, management: submission.management,
+    management: submission.management,
     id: submission.id,
     draftId: submission.draftId,
     snapshotVersionId: submission.snapshotVersionId,
@@ -2070,6 +2118,8 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     decisionComment: submission.decisionComment,
     submittedAt: submission.submittedAt.toISOString(),
     publishedVersionId: submission.publishedVersionId,
+    requestType: submission.requestType,
+    requestReason: submission.requestReason,
   };
 }
 

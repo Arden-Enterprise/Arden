@@ -20,7 +20,6 @@ export type ReaderDocumentMetadata = {
   publishedDate?: string;
   expirationDate?: string;
   title: string;
-  documentCode: string;
   ownerDepartment: string;
   summary: string;
   activeVersionId: string;
@@ -141,7 +140,6 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
             aria-label="Hide document information" title="Hide document information" onClick={() => toggleInformation(true)}><Icon name="sidebar" size={14} /></button>
         </div>
         <dl>
-          <div><dt>Document code</dt><dd>{metadata.documentCode}</dd></div>
           {metadata.type && <div><dt>Type</dt><dd>{metadata.type}</dd></div>}
           {metadata.topic && <div><dt>Topic</dt><dd>{metadata.topic}</dd></div>}
           <div><dt>Version</dt><dd><label><span className="sr-only">Document version</span><select

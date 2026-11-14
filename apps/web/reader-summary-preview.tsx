@@ -68,7 +68,7 @@ function Preview() {
       {!open && <button className="secondary-button" onClick={() => { setOpen(true); setUnavailable(false); }}>Open test document</button>}
     </div>
     {unavailable && <p role="alert">This document is unavailable.</p>}
-    {open && <KnowledgeDocumentDetail key={format} metadata={{ title: "Working together", documentCode: "ARD-001", ownerDepartment: "HR", summary: "",
+    {open && <KnowledgeDocumentDetail key={format} metadata={{ title: "Working together", ownerDepartment: "HR", summary: "",
       activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE", effectiveDate: "2026-11-01" }] }}
       summaryOptions={{ platform: transport, active: true, context: readerContext, onCitation: setFocus,
         onAccessLost: () => { setOpen(false); setUnavailable(true); } }} focusTarget={focus} onBack={() => setOpen(false)}

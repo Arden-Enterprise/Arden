@@ -5,6 +5,8 @@ or data migration is established by this record. Decision owner: requesting
 project maintainer. Recorded by Codex from the approved Library reference,
 standardized field discussion and explicit catalog-ownership confirmation.
 Owning requirements: [F11 KM-v1](../product/graph-ai-and-work.md#knowledge-management-refinement-km-v1-accepted-12-november-2026), ARD-77.
+Partly superseded by [0021](0021-reader-email-search-and-no-document-code.md) (14 November 2026): Document Code
+is retired and the reader lookup searches by name or email; the rest of this decision stands.
 
 ## Decision
 
