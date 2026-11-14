@@ -745,11 +745,6 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       const queue = await repository.listAssignedReviews(ids.author, ids.orgA);
       expect(queue?.find((item) => item.submissionId === requested.submission.id)).toMatchObject({ requestType: "WITHDRAWAL" });
       const submission = requested.submission;
-      await expect(repository.decideReview(ids.author, ids.orgA, submission.id, "APPROVE", submission.snapshotVersionId,
-        submission.contentHash, null, randomUUID(), "change-approve")).resolves.toEqual({ kind: "denied", reason: "REQUEST_NOT_SUPPORTED" });
-      await expect(sqlState((client) => client.query(`INSERT INTO review_decision (submission_id, reviewer_membership_id,
-          decision, flow2, snapshot_version_id, content_hash) VALUES ($1, $2, 'APPROVED', true, $3, $4)`,
-      [submission.id, ids.authorM, submission.snapshotVersionId, submission.contentHash]))).resolves.toBe("0A000");
       await expect(repository.decideReview(ids.author, ids.orgA, submission.id, "REJECT", submission.snapshotVersionId,
         submission.contentHash, "Keep it published", randomUUID(), "change-reject"))
         .resolves.toMatchObject({ kind: "decided", submission: { status: "REJECTED", requestType: "WITHDRAWAL" } });
@@ -773,6 +768,83 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (requested.kind !== "requested") return;
       await expect(repository.withdrawKnowledgeSubmission(ids.author, ids.orgA, requested.submission.id, "change-withdraw"))
         .resolves.toMatchObject({ kind: "withdrawn" });
+    });
+
+    it("T6.2: an approved withdrawal removes the document at once and republishing needs a new submission", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { draftId, submissionId, versionId } = await publish("Published then withdrawn");
+      const requested = await ask(draftId, { type: "WITHDRAWAL", reason: "Superseded by the new handbook" });
+      if (requested.kind !== "requested") throw new Error("Request failed");
+      const visible = async (userId: string) => (await asRuntime(userId, ids.orgA, (client) => client.query(
+        "SELECT 1 FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId]))).rowCount;
+      expect(await visible(ids.engineer)).toBe(1);
+
+      const approved = await repository.decideReview(ids.author, ids.orgA, requested.submission.id, "APPROVE",
+        requested.submission.snapshotVersionId, requested.submission.contentHash, null, randomUUID(), "withdraw-approve");
+      expect(approved).toMatchObject({ kind: "decided", submission: { status: "APPROVED", requestType: "WITHDRAWAL",
+        publicationState: "NONE" } });
+      // On the next request: no current pointer, so no library entry, detail, Ask Arden source or citation.
+      await expect(currentPointer(draftId)).resolves.toBeUndefined();
+      expect(await visible(ids.engineer)).toBe(0);
+      const library = await repository.listPublishedKnowledge(ids.engineer, ids.orgA);
+      expect(library?.some((item) => item.id === versionId)).toBe(false);
+      await expect(repository.getPublishedKnowledge(ids.engineer, ids.orgA, versionId)).resolves.toBeNull();
+      const released = await asSuperuser((client) => client.query(
+        "SELECT publication_state FROM shared_submission WHERE submission_id = $1", [submissionId]));
+      expect(released.rows[0]).toEqual({ publication_state: "WITHDRAWN" });
+      const audit = await asSuperuser((client) => client.query(`SELECT details_json->>'requestType' AS type FROM audit_event
+        WHERE event_type = 'KNOWLEDGE_REVIEW_DECIDED' AND details_json->>'submissionId' = $1`, [requested.submission.id]));
+      expect(audit.rows).toEqual([{ type: "WITHDRAWAL" }]);
+
+      // No restore: the approved request cannot be applied again, and a new request needs a publication.
+      await expect(sqlState((client) => client.query("SELECT apply_publication_change($1)", [requested.submission.id])))
+        .resolves.toBe("40001");
+      await expect(ask(draftId, { type: "WITHDRAWAL", reason: "Again" })).resolves.toEqual({ kind: "not-published" });
+      // Publishing again is a new content submission of a new version.
+      const edited = await repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, 2,
+        { title: "Published again", changeDescription: "Republished after review" }, null, "republish-edit");
+      if (edited.kind !== "updated") throw new Error("Edit failed");
+      await expect(repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 3, randomUUID(), "republish"))
+        .resolves.toMatchObject({ kind: "submitted", submission: { requestType: "CONTENT", status: "PENDING_REVIEW" } });
+    });
+
+    it("T6.2: an approved reader change applies the approved readers to the current publication", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { draftId, versionId } = await publish("Published then narrowed");
+      const before = await currentPointer(draftId);
+      const readers = { mode: "SELECTED_MEMBERS" as const, departmentId: null, memberIds: [ids.engineerM, ids.outsiderM] };
+      const requested = await ask(draftId, { type: "READER_CHANGE", reason: "Only the rollout team", targetReaders: readers });
+      if (requested.kind !== "requested") throw new Error("Request failed");
+      const decided = await repository.decideReview(ids.author, ids.orgA, requested.submission.id, "APPROVE",
+        requested.submission.snapshotVersionId, requested.submission.contentHash, null, randomUUID(), "readers-approve");
+      expect(decided).toMatchObject({ kind: "decided", submission: { approvedTargetReaders: readers } });
+      const after = await currentPointer(draftId);
+      expect(after?.published_version_id).toBe(before?.published_version_id);
+      expect(after?.reader_selection_id).not.toBe(before?.reader_selection_id);
+      // The version and content stay; only the readers changed, effective on the next request.
+      const see = async (userId: string) => (await repository.getPublishedKnowledge(userId, ids.orgA, versionId))?.id ?? null;
+      await expect(see(ids.engineer)).resolves.toBe(versionId);
+      await expect(see(ids.reviewer)).resolves.toBeNull();
+      const library = await repository.listPublishedKnowledge(ids.engineer, ids.orgA);
+      expect(library?.find((item) => item.id === versionId)?.targetReaders).toMatchObject({ mode: "SELECTED_MEMBERS" });
+    });
+
+    it("T6.2: refuses to approve a request whose publication is no longer current", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { draftId } = await publish("Published then replaced");
+      const requested = await ask(draftId, { type: "WITHDRAWAL", reason: "Outdated" });
+      if (requested.kind !== "requested") throw new Error("Request failed");
+      // Simulate the pointer leaving the requested version (for example an Org Admin emergency withdrawal).
+      await asSuperuser(async (client) => {
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query("DELETE FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId]);
+      });
+      await expect(repository.decideReview(ids.author, ids.orgA, requested.submission.id, "APPROVE",
+        requested.submission.snapshotVersionId, requested.submission.contentHash, null, randomUUID(), "stale-approve"))
+        .resolves.toEqual({ kind: "denied", reason: "PUBLICATION_CHANGED" });
+      await expect(repository.decideReview(ids.author, ids.orgA, requested.submission.id, "REJECT",
+        requested.submission.snapshotVersionId, requested.submission.contentHash, "Already gone", randomUUID(), "stale-reject"))
+        .resolves.toMatchObject({ kind: "decided", submission: { status: "REJECTED" } });
     });
 
     it("refuses a change request that does not repeat the current publication", async () => {

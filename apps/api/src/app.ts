@@ -1518,9 +1518,9 @@ export function buildApp(dependencies: AppDependencies) {
           return reply.code(400).send(safeError("READERS_NOT_SUPPORTED",
             "This submission uses audiences; approve it without approved readers.", request.id));
         }
-        if (result.reason === "REQUEST_NOT_SUPPORTED") {
-          return reply.code(409).send(safeError("REQUEST_NOT_SUPPORTED",
-            "Reader-change and withdrawal requests can be rejected; approving them is not available yet.", request.id));
+        if (result.reason === "PUBLICATION_CHANGED") {
+          return reply.code(409).send(safeError("PUBLICATION_CHANGED",
+            "This document changed since the request was made, or a newer version is still being prepared.", request.id));
         }
         if (result.reason === "READERS_WIDENED") {
           return reply.code(409).send(safeError("READERS_WIDENED",

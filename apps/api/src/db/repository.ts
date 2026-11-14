@@ -389,6 +389,7 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
   decision_comment: string | null;
   request_type: PublicationRequestType;
   request_reason: string | null;
+  target_published_version_id: string | null;
 };
 // organization_wide: the frozen audience includes the organization audience. That kind is valid only at
 // Organization scope (audience_snapshot_enforceable) and audience_member_read shows it to every active member,
@@ -406,7 +407,7 @@ const submissionSelect = `
            SELECT 1 FROM audience a WHERE a.organization_id = s.organization_id
               AND a.audience_id = ANY(s.audience_role_ids) AND a.kind = 'ORGANIZATION_ALL')) AS organization_wide,
          cp.published_version_id,
-         rd.comment AS decision_comment, s.request_type, s.request_reason
+         rd.comment AS decision_comment, s.request_type, s.request_reason, s.target_published_version_id
     FROM shared_submission s
     LEFT JOIN published_knowledge_version pv ON pv.submission_id = s.submission_id
     LEFT JOIN knowledge_current_publication cp ON cp.published_version_id = pv.published_version_id
@@ -2078,6 +2079,15 @@ export class ArdenRepository implements ArdenDataRepository {
       const readerFacts: SelectionFacts = proposedReaders && approvedReaders !== undefined
         ? await this.loadSelectionFacts(client, organizationId, approvedReaders)
         : { organizationId, departments: [], members: [] };
+      // T6.2: a change request applies to the publication it names, which must still be current.
+      const publicationChange = row.request_type === "CONTENT" ? undefined : (await client.query<{
+        target_is_current: boolean; newer_version_preparing: boolean }>(`
+        SELECT EXISTS (SELECT 1 FROM knowledge_current_publication cp WHERE cp.shared_draft_id = s.shared_draft_id
+                         AND cp.published_version_id = s.target_published_version_id) AS target_is_current,
+               EXISTS (SELECT 1 FROM shared_submission c WHERE c.shared_draft_id = s.shared_draft_id
+                         AND c.status = 'APPROVED' AND c.publication_state = 'PREPARING') AS newer_version_preparing
+          FROM shared_submission s WHERE s.submission_id = $1`, [submissionId])).rows
+        .map((fact) => ({ targetIsCurrent: fact.target_is_current, newerVersionPreparing: fact.newer_version_preparing }))[0];
       const plan = planReviewDecision({
         actor,
         submission: { ...reviewAuthorizationFromRow(row, organizationId),
@@ -2090,6 +2100,7 @@ export class ArdenRepository implements ArdenDataRepository {
         now: new Date(),
         readers: { proposed: proposedReaders, facts: readerFacts },
         requestType: row.request_type,
+        publicationChange,
       }, { action, expectedSnapshotVersionId, expectedContentHash, comment, approvedReaders });
       if (plan.kind === "DENIED") {
         return plan.reason === "INVALID_READERS"
@@ -2113,6 +2124,8 @@ export class ArdenRepository implements ArdenDataRepository {
         membershipId, decisionId, JSON.stringify({ submissionId, snapshotVersionId: row.shared_draft_version_id,
           decision: plan.decision,
           selfApproved: actor.isOrganizationAdmin === true && membershipId === row.submitted_by_membership_id,
+          ...(row.request_type !== "CONTENT" ? { requestType: row.request_type,
+            publishedVersionId: row.target_published_version_id } : {}),
           ...(readers ? { proposedReaders: readersAuditSummary(readers.proposed),
             approvedReaders: readersAuditSummary(readers.approved), narrowed: readers.narrowed } : {}),
           requestId })]);

@@ -32,14 +32,25 @@ describe("planReviewDecision", () => {
     });
   });
 
-  it("lets a reviewer reject but not yet approve a reader-change or withdrawal request (T6.1)", () => {
+  it("approves a change request only while it names the current publication (T6.2)", () => {
+    const current = { targetIsCurrent: true, newerVersionPreparing: false };
+    expect(planReviewDecision({ ...facts, requestType: "WITHDRAWAL", publicationChange: current }, request))
+      .toMatchObject({ kind: "APPROVE_FOR_PREPARATION", decision: "APPROVED" });
     for (const requestType of ["READER_CHANGE", "WITHDRAWAL"] as const) {
-      expect(planReviewDecision({ ...facts, requestType }, request)).toEqual({ kind: "DENIED", reason: "REQUEST_NOT_SUPPORTED" });
+      expect(planReviewDecision({ ...facts, requestType, publicationChange: { ...current, targetIsCurrent: false } }, request))
+        .toEqual({ kind: "DENIED", reason: "PUBLICATION_CHANGED" });
+      expect(planReviewDecision({ ...facts, requestType }, request)).toEqual({ kind: "DENIED", reason: "PUBLICATION_CHANGED" });
+      // Rejection never depends on the publication, and authorization still comes first.
       expect(planReviewDecision({ ...facts, requestType }, { ...request, action: "REJECT", comment: "Keep it" }))
         .toMatchObject({ kind: "RECORD_ONLY", decision: "REJECTED" });
-      // Authorization still comes first: an outsider learns nothing about the request type.
       expect(planReviewDecision({ ...facts, requestType, reviewerGrants: [] }, request)).toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
     }
+    // A withdrawal would race the activation of a newer prepared version; a reader change would not.
+    const preparing = { targetIsCurrent: true, newerVersionPreparing: true };
+    expect(planReviewDecision({ ...facts, requestType: "WITHDRAWAL", publicationChange: preparing }, request))
+      .toEqual({ kind: "DENIED", reason: "PUBLICATION_CHANGED" });
+    expect(planReviewDecision({ ...facts, requestType: "READER_CHANGE", publicationChange: preparing }, request))
+      .toMatchObject({ kind: "APPROVE_FOR_PREPARATION" });
   });
 
   it("never publishes the wrong or corrupted snapshot", () => {

@@ -186,6 +186,12 @@
       "filename": "0031_publication_change_requests.sql",
       "sha256": "8a74be3fd9a680ee0b03e436dc9fef602dd90d394b2f9cf98d80b378f9ad77b7",
       "rollout": "operator"
+    },
+    {
+      "id": "0032",
+      "filename": "0032_apply_publication_change_requests.sql",
+      "sha256": "ce6aa5d663745d5e2655b68102bd88360ce46c13ecda29f93a6c59da569eee9c",
+      "rollout": "operator"
     }
   ]
 }
