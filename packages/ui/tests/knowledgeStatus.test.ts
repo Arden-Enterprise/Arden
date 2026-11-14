@@ -37,5 +37,8 @@ describe("redesigned knowledge states", () => {
     expect(draftStatus(draft, { ...submission, publicationState: "SUPERSEDED" }).label).toBe("Newer version published");
     expect(draftStatus(draft, { ...submission, publicationState: "FAILED", publishedVersionId: null })).toEqual({ label: "Publication failed", tone: "is-danger" });
     expect(draftStatus(draft, { ...submission, status: "REJECTED" }).tone).toBe("is-danger");
+    expect(draftStatus(draft, { ...submission, publicationState: "WITHDRAWN" }).label).toBe("Withdrawn");
+    expect(draftStatus(draft, { ...submission, requestType: "WITHDRAWAL", publicationState: "NONE" }).label).toBe("Document withdrawn");
+    expect(draftStatus(draft, { ...submission, requestType: "READER_CHANGE", publicationState: "NONE" }).label).toBe("Readers updated");
   });
 });

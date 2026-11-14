@@ -1,13 +1,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../shared/Icon";
 import type { AssignedKnowledgeReview, DecidedKnowledgeReview } from "../shared/api-client";
+import { reviewRequestPresentation } from "./reviewRequest";
 
 /**
  * REV-02 "Reviews · Linear list": the Reviews landing page. Needs review rows open the decision workspace
  * (REV-01); Approved and Rejected rows are the reviewer's own decided history and are read-only.
  */
 type GroupKey = "pending" | "approved" | "rejected";
-type Row = { id: string; title: string; versionNo: number | null; departmentId: string;
+type Row = { id: string; title: string; requestLabel?: string; versionNo: number | null; departmentId: string;
   authorName: string | null; date: string; detail: string; status: GroupKey; openable: boolean };
 
 const groupLabels: Record<GroupKey, string> = { pending: "Needs review", approved: "Approved", rejected: "Rejected" };
@@ -29,7 +30,7 @@ export function initialsOf(name: string): string {
 
 const publicationLabels: Record<DecidedKnowledgeReview["publicationState"], string> = {
   NONE: "", PREPARING: "Preparing publication", ACTIVE: "Published", FAILED: "Publication failed",
-  SUPERSEDED: "Newer version published",
+  SUPERSEDED: "Newer version published", WITHDRAWN: "Withdrawn",
 };
 
 export function ReviewList({ pending, decided, departmentName, busy, onOpen, onRefresh }: {
@@ -63,6 +64,7 @@ export function ReviewList({ pending, decided, departmentName, busy, onOpen, onR
   const rows: Row[] = [
     ...pending.map((item): Row => {
       return { id: item.submissionId, title: item.title, versionNo: item.versionNo ?? null,
+        requestLabel: item.requestType && item.requestType !== "CONTENT" ? reviewRequestPresentation(item.requestType).label : undefined,
         departmentId: item.departmentId, authorName: item.authorName ?? null, date: item.submittedAt,
         detail: item.approvalBlocked ? "Approval blocked: the readers can no longer be enforced. You can still reject."
           : `Submitted ${shortDate(item.submittedAt)}`, status: "pending", openable: true };
@@ -135,6 +137,7 @@ export function ReviewList({ pending, decided, departmentName, busy, onOpen, onR
                 <span className={`review-status-icon is-${row.status}`} aria-hidden="true"><Icon name={statusIcons[row.status]} size={14} /></span>
                 <span className="review-row-title">
                   <strong>{row.title}</strong>
+                  {row.requestLabel && <span className="island-chip">{row.requestLabel}</span>}
                   {row.versionNo !== null && <span className="review-row-version">v{row.versionNo}</span>}
                   {row.status === "pending" && pending.find((item) => item.submissionId === row.id)?.approvalBlocked
                     && <span className="review-blocked-dot" title="Approval blocked: the readers can no longer be enforced" />}

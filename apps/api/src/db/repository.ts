@@ -116,7 +116,7 @@ export type SharedKnowledgeSubmission = {
   approvedTargetReaders: ReaderSelection | null;
   contentHash: string;
   status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
-  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED";
+  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED" | "WITHDRAWN";
   submittedAt: Date;
   publishedVersionId: string | null;
   decisionComment: string | null;

@@ -68,4 +68,11 @@ describe("REV-02 review list", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Rejected" }));
     expect(screen.queryByRole("button", { name: /Rejected\s*1/ })).toBeNull();
   });
+
+  it("labels a previously published version that has been withdrawn", () => {
+    render(createElement(ReviewList, { pending: [], decided: [{ ...decided[0], publicationState: "WITHDRAWN" }],
+      busy: false, onOpen: vi.fn(), onRefresh: vi.fn(), departmentName: () => "Security" }));
+    expect(screen.getByText("Information security policy").closest(".review-row")?.getAttribute("title"))
+      .toMatch(/ · Withdrawn$/);
+  });
 });
