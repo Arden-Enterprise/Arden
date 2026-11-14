@@ -136,6 +136,13 @@ Target Readers are the per-document reader model planned to replace audience gro
 - **Approval (T6.2):** the same `POST /reviews/:id/decisions` route. A reader change is approved with its proposed readers kept or narrowed as in T2.1 (`approvedReaders`); the approved readers then become the readers of the current publication (same version and content) on the next request. An approved withdrawal deletes the current pointer, so the document leaves the library, document detail, search, Ask Arden sources and citation rechecks on the next request; the released submission's `publicationState` becomes `WITHDRAWN`; versions stay for history. There is no restore: publishing again is a new content submission, which the 0021 high-water mark still orders. The request itself ends `APPROVED` with `publicationState` `NONE`. Approval returns 409 `PUBLICATION_CHANGED` when the request no longer names the current publication or, for a withdrawal, while a newer approved version is still being prepared; the reviewer can still reject. The database applies the change in the decision transaction through the reviewed SECURITY DEFINER `apply_publication_change` (activation lock; a stale or repeated application is refused with 40001). The decision audit event adds `requestType` and `publishedVersionId`.
 - Provenance: Flow 2 task list T6.1/T6.2 and SDD S-16, requested by the maintainer on 2026-11-12 and 2026-11-14. Only the author can request in this slice; the SDD also names the responsible reviewer, and the Org Admin emergency path is T6.3. Screens are T2.2/T6.4.
 
+Review UI safety: the pending queue labels reader-change/withdrawal requests. The decision pane
+shows their request type and reason, and confirmation/success copy describes the actual effect
+(replace readers or remove from Library/AI), never preparation of a new version. Cancel sends
+no decision. This corrects presentation of existing approved T6.2 behavior; it adds no new
+request-management capability or permission. `reviewRequest.test.tsx` exercises the real page
+with synthetic API boundaries for all three request types.
+
 ## 5. Reviewer grants (Organization Admin)
 
 - `GET /reviewer-grants` lists the organization's grants (Organization Admin only).

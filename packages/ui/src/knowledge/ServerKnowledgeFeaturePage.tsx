@@ -20,6 +20,7 @@ import {
 import type { Platform } from "../shared/types";
 import { PdfDocument, PdfViewer, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
 import { ReviewList, initialsOf } from "./ReviewList";
+import { reviewRequestPresentation } from "./reviewRequest";
 import { libraryDateLabel } from "./libraryDisplay";
 import { ownerDepartment } from "./readerSelection";
 import { KnowledgeCatalogEditor } from "./KnowledgeCatalogEditor";
@@ -302,7 +303,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     decisionRequest.current = null; setReview(null); setDecisionToConfirm(null);
     await refresh();
     setMessage(result.status === "APPROVED"
-      ? "Preparing publication"
+      ? reviewRequestPresentation(result.requestType ?? review.requestType).success
       : "Submission rejected");
   });
 
@@ -500,8 +501,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <section aria-labelledby="review-frozen-title">
                 <h3 id="review-frozen-title" className="review-section-label">SUBMITTED DETAILS</h3>
                 <dl className="review-frozen">
+                  {review.requestType && review.requestType !== "CONTENT" && <>
+                    <div><dt>Request</dt><dd>{reviewRequestPresentation(review.requestType).label}</dd></div>
+                    <div><dt>Reason</dt><dd>{review.requestReason || "—"}</dd></div>
+                  </>}
                   <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
-                  <div><dt>Readers</dt><dd>{review.proposedTargetReaders ? targetReadersLabel(review.proposedTargetReaders, departmentName) : audienceNames(review.audienceIds)}</dd></div>
+                  {review.requestType !== "WITHDRAWAL" && <div><dt>Readers</dt><dd>{review.proposedTargetReaders ? targetReadersLabel(review.proposedTargetReaders, departmentName) : audienceNames(review.audienceIds)}</dd></div>}
                   {review.management ? <>
                     <div><dt>Type</dt><dd>{review.management.type ?? "—"}</dd></div>
                     <div><dt>Topic</dt><dd>{review.management.topicName ?? "—"}</dd></div>
@@ -526,9 +531,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <footer className="review-decision-footer" role="group" aria-label="Review decision"
               onKeyDown={(event) => { if (event.key === "Escape" && decisionToConfirm && !busy) { event.stopPropagation(); setDecisionToConfirm(null); } }}>
               {decisionToConfirm ? <div className="review-confirm" role="alertdialog" aria-labelledby="review-confirm-title" aria-describedby="review-confirm-body">
-                <strong id="review-confirm-title">{decisionToConfirm === "APPROVE" ? "Approve this submission?" : "Reject this submission?"}</strong>
+                <strong id="review-confirm-title">{decisionToConfirm === "APPROVE" ? reviewRequestPresentation(review.requestType).title : "Reject this submission?"}</strong>
                 <p id="review-confirm-body">{decisionToConfirm === "APPROVE"
-                  ? "This version will be prepared for publication."
+                  ? reviewRequestPresentation(review.requestType).effect
                   : "Your note will be sent to the author."}</p>
                 {error && <p role="alert" className="knowledge-live-error">{error}</p>}
                 <div className="review-decision-actions">
