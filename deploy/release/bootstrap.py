@@ -282,7 +282,7 @@ def build_app_template(environment, source_uuid, api, web):
                           "environment": {key: "${" + key + "}" for key in values},
                           "volumes": volumes, "networks": api_networks,
                           "tmpfs": ["/tmp:rw,nosuid,nodev,size=64m"], "mem_limit": "512m", "pids_limit": 128,
-                          "logging": {"driver": "none"}},
+                          "logging": {"driver": "json-file", "options": {"max-size": "1m", "max-file": "2"}}},
             "arden-web": {**copy.deepcopy(hardening), "image": web["Image"], "user": "101:101",
                           "depends_on": {"arden-api": {"condition": "service_healthy"}},
                           "networks": web_networks, "expose": ["8080"],

@@ -414,7 +414,8 @@ const userErrorMessages: Record<string, string> = {
 };
 
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string, readonly code: string | null = null) {
+  constructor(readonly status: number, message: string, readonly code: string | null = null,
+    readonly retryAfterSeconds?: number, readonly retryable?: boolean) {
     super(code && Object.hasOwn(userErrorMessages, code) ? userErrorMessages[code] : message);
     this.name = "ApiError";
   }
@@ -704,6 +705,7 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
 
   if (response.status < 200 || response.status >= 300) {
     let code: string | null = null;
+    let retryAfterSeconds: number | undefined, retryable: boolean | undefined;
     let message = response.status === 401 ? "Sign in to continue." : "The request could not be completed.";
     try {
       const data: unknown = JSON.parse(response.body);
@@ -713,13 +715,17 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
           if (typeof error === "object" && error !== null) {
             if ("code" in error && typeof error.code === "string") code = error.code;
             if ("message" in error && typeof error.message === "string") message = error.message;
+            if ("retryAfterSeconds" in error && Number.isSafeInteger(error.retryAfterSeconds)
+              && typeof error.retryAfterSeconds === "number" && error.retryAfterSeconds > 0 && error.retryAfterSeconds <= 300)
+              retryAfterSeconds = error.retryAfterSeconds;
+            if ("retryable" in error && typeof error.retryable === "boolean") retryable = error.retryable;
           }
         } else if ("message" in data && typeof data.message === "string") {
           message = data.message;
         }
       }
     } catch { /* Keep the stable generic message when the server body is not JSON. */ }
-    throw new ApiError(response.status, message, code);
+    throw new ApiError(response.status, message, code, retryAfterSeconds, retryable);
   }
   if (response.status === 204 || response.body.length === 0) return undefined as T;
   try { return JSON.parse(response.body) as T; }

@@ -75,8 +75,15 @@ export class HttpAskArdenClient implements AskArdenClient {
       response = await fetch(new URL(path, this.endpoint), { method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${this.serviceToken}` },
         body: JSON.stringify(payload), signal: AbortSignal.timeout(timeoutMs) });
-    } catch { throw new ArdenAiAnswerError("AI_SERVICE_UNAVAILABLE"); }
+    } catch (error) {
+      throw new ArdenAiAnswerError(path === "/v1/reader-summaries" && error instanceof Error && error.name === "TimeoutError"
+        ? "AI_SUMMARY_TIMEOUT" : "AI_SERVICE_UNAVAILABLE");
+    }
     if (!response.ok) {
+      if (path === "/v1/reader-summaries" && response.status === 502) {
+        const code = await summaryFailureCode(response);
+        if (code) throw new ArdenAiAnswerError(`AI_SUMMARY_${code}`);
+      }
       await response.body?.cancel().catch(() => undefined);
       throw new ArdenAiAnswerError(`AI_SERVICE_HTTP_${response.status}`);
     }
@@ -96,4 +103,24 @@ export class HttpAskArdenClient implements AskArdenClient {
     try { return JSON.parse(Buffer.concat(parts).toString("utf8")) as unknown; }
     catch { throw new ArdenAiAnswerError("AI_ANSWER_INVALID_JSON"); }
   }
+}
+
+/** Read only a tiny, closed error-code envelope. Never surface provider messages. */
+async function summaryFailureCode(response: Response): Promise<string | null> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const parts: Uint8Array[] = []; let size = 0;
+  try {
+    while (true) {
+      const part = await reader.read(); if (part.done) break;
+      size += part.value.byteLength; if (size > 4_096) return null;
+      parts.push(part.value);
+    }
+    const value: unknown = JSON.parse(Buffer.concat(parts).toString("utf8"));
+    if (typeof value !== "object" || value === null || !("detail" in value)
+      || typeof value.detail !== "object" || value.detail === null || !("code" in value.detail)) return null;
+    const code = value.detail.code;
+    return typeof code === "string" && ["TIMEOUT", "PROVIDER_BUSY", "PROVIDER_AUTH", "INVALID_OUTPUT", "UNAVAILABLE"].includes(code) ? code : null;
+  } catch { return null; }
+  finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }

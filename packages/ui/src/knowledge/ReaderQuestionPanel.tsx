@@ -5,7 +5,8 @@ import { useReaderOperation, type ReaderOperationOptions } from "./useReaderOper
 export function ReaderQuestionPanel({ options, onClose }: { options: ReaderOperationOptions; onClose: () => void }) {
   const id = useId(), [query, setQuery] = useState(""), [submitted, setSubmitted] = useState("");
   const operation = useReaderOperation<ReaderAnswer, string>(options, {
-    label: "Document Q&A", run: (config, input, signal) => askReaderQuestion(config.platform, config.context, input, signal),
+    label: "Document Q&A", busyRetrySeconds: 10,
+    run: (config, input, signal) => askReaderQuestion(config.platform, config.context, input, signal),
   });
   const { state } = operation, waiting = state.status === "loading" || state.status === "checking";
   if (options.visible === false) return null;
@@ -26,7 +27,8 @@ export function ReaderQuestionPanel({ options, onClose }: { options: ReaderOpera
     </form>
     {waiting && <p role="status" className="reader-ai-summary-wait">{state.status === "loading" ? "Finding an answer…" : "Checking access…"}</p>}
     {state.status === "error" && <div role="alert" className="reader-ai-summary-error"><p>{state.message}</p>
-      {state.retry && <button className="secondary-button" type="button" onClick={() => void operation.retry()}>Retry</button>}</div>}
+      {state.retry && <button className="secondary-button" type="button" disabled={operation.retryAfterSeconds > 0}
+        onClick={() => void operation.retry()}>{operation.retryAfterSeconds > 0 ? `Retry in ${operation.retryAfterSeconds}s` : "Retry"}</button>}</div>}
     {state.status === "ready" && state.result && <div className="reader-ai-question-answer">
       {query !== submitted && <p className="island-meta">Answer to: {submitted}</p>}
       <p className="reader-ai-answer-text">{state.result.answer}</p>

@@ -18,8 +18,44 @@ function fixture() {
   return { options, generation, check, props };
 }
 beforeEach(() => { localStorage.clear(); vi.stubGlobal("matchMedia", () => ({ matches: true })); });
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("exact-version on-request Summary reader", () => {
+  it("counts down before manual Retry, never auto-generates and cleans its timer on Close", async () => {
+    vi.useFakeTimers();
+    const interval = vi.spyOn(globalThis, "setInterval"), clear = vi.spyOn(globalThis, "clearInterval");
+    const h = fixture(); h.generation.mockRejectedValueOnce(new ApiError(429, "private", "SUMMARY_COOLDOWN", 2, true));
+    render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await act(async () => {});
+    const retry = screen.getByRole("button", { name: "Retry in 2s" });
+    expect(retry.hasAttribute("disabled")).toBe(true); fireEvent.click(retry); expect(h.generation).toHaveBeenCalledOnce();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(screen.getByRole("button", { name: "Retry in 1s" }).hasAttribute("disabled")).toBe(true);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(h.generation).toHaveBeenCalledOnce(); expect(screen.getByRole("button", { name: "Retry" }).hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" })); await act(async () => {});
+    expect(h.generation).toHaveBeenCalledTimes(2); expect(screen.getByText("Only approved readers can use this guidance.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(clear).toHaveBeenCalledWith(interval.mock.results[0].value);
+  });
+  it("cleans an unexpired countdown when the panel is closed", async () => {
+    vi.useFakeTimers();
+    const interval = vi.spyOn(globalThis, "setInterval"), clear = vi.spyOn(globalThis, "clearInterval");
+    const h = fixture(); h.generation.mockRejectedValueOnce(new ApiError(429, "Wait", "SUMMARY_COOLDOWN", 60));
+    render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await act(async () => {}); expect(screen.getByRole("button", { name: "Retry in 60s" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(clear).toHaveBeenCalledWith(interval.mock.results[0].value);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(h.generation).toHaveBeenCalledOnce();
+  });
+  it("keeps temporary source failures retryable but does not retry a configuration failure", async () => {
+    const h = fixture(); h.generation.mockRejectedValueOnce(new ApiError(503, "private", "SUMMARY_SOURCE_UNAVAILABLE", undefined, true));
+    render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Summary is unavailable. Please retry shortly.");
+    h.generation.mockRejectedValueOnce(new ApiError(503, "private-key", "SUMMARY_PROVIDER_AUTH", undefined, false));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" })); await screen.findByText("Summary is unavailable.");
+    expect(screen.queryByRole("button", { name: /^Retry/ })).toBeNull(); expect(screen.queryByText("private-key")).toBeNull();
+  });
   it("starts only on request, keeps the source and Back, and rechecks before navigating", async () => {
     const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props));
     expect(h.generation).not.toHaveBeenCalled(); expect(screen.queryByText("AI-generated")).toBeNull();
@@ -60,7 +96,8 @@ describe("exact-version on-request Summary reader", () => {
     const h = fixture(); h.generation.mockRejectedValue(new ApiError(status, "private diagnostic payload"));
     render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
     await screen.findByRole("alert"); expect(screen.queryByText("private diagnostic payload")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Retry" }) !== null).toBe(status === 429 || status === 503);
+    expect(screen.queryByRole("button", { name: /^Retry/ }) !== null).toBe(status === 429 || status === 503);
+    if (status === 429) expect(screen.getByRole("button", { name: "Retry in 60s" }).hasAttribute("disabled")).toBe(true);
     expect(h.options.onAccessLost).toHaveBeenCalledTimes(status === 401 || status === 403 || status === 404 ? 1 : 0);
     if (status === 503) { h.generation.mockImplementation(async (_p, context, id) => readerSummaryFixture(id, context)); fireEvent.click(screen.getByRole("button", { name: "Retry" })); await screen.findByText("Only approved readers can use this guidance."); }
     expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();

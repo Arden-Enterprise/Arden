@@ -60,7 +60,8 @@ describe("Ask this document reader", () => {
   it.each([404, 422, 429, 503])("shows safe %s failure and only permitted manual retry", async status => {
     const h = fixture(); h.ask.mockRejectedValue(new ApiError(status, "private diagnostic")); h.submit();
     await screen.findByRole("alert"); expect(screen.queryByText("private diagnostic")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Retry" }) !== null).toBe(status === 429 || status === 503);
+    expect(screen.queryByRole("button", { name: /^Retry/ }) !== null).toBe(status === 429 || status === 503);
+    if (status === 429) expect(screen.getByRole("button", { name: "Retry in 10s" }).hasAttribute("disabled")).toBe(true);
     expect(h.options.onAccessLost).toHaveBeenCalledTimes(status === 404 ? 1 : 0);
     if (status === 503) { h.ask.mockResolvedValue(answer()); fireEvent.click(screen.getByRole("button", { name: "Retry" })); await screen.findByText("Approved readers only."); }
   });

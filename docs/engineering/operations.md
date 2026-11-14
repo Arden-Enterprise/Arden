@@ -2,6 +2,21 @@
 
 Read [AGENTS.md](../../AGENTS.md), [the technology guide](technology-guide.md), and [security/data rules](security-and-data.md). This is the operational policy for the intended product. The repository includes reviewed SQL migration/local database tooling and the [branch-based app release implementation](release-pipeline.md). Its [approved design and delivery status](release-pipeline-design.md) distinguish implementation from live activation. Worker, installer and backup automation remain separate work.
 
+### Reader AI diagnostic retention
+
+The Summary reliability follow-up emits operation/HTTP request IDs, stage, safe
+failure code and elapsed time, never evidence, prompts, tokens or raw exceptions.
+Core disables automatic request URL/IP logs via Fastify's `LogController`; the AI
+image disables Uvicorn access logs. Keep container logging bounded (the app bootstrap
+template uses json-file, max-size `1m`, max-file `2`). Do not restore raw request or
+provider-body logging to diagnose failures. See [the owning Reader AI contract](reader-ai.md#summary-reliability-refinement--accepted-14-november-2026).
+
+Changing that template does not reconcile an existing Coolify stack. An authorized
+staging rollout must separately preserve its compose/environment, apply the bounded
+logging setting to Core and the isolated AI service, and verify safe events/rotation.
+Do not re-bootstrap an existing environment or change production/shared services
+merely to enable logs. Logging retention remains unverified until actual rollout.
+
 ## 1. Supported baseline and current commands
 
 - Development/CI baseline: Node.js 24, root-pinned pnpm (currently 11.19.0), and Docker with Compose. Windows is the first desktop target; Ubuntu 24.04 is the customer server target.

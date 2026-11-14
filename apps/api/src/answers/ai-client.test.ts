@@ -2,12 +2,25 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpAskArdenClient } from "./ai-client.js";
 import type { GenerationRequest, RetrievalRequest } from "./governed-contracts.js";
-import type { ReaderSourceRequest } from "../reader-ai/contracts.js";
+import type { ReaderSourceRequest, ReaderSourceResponse } from "../reader-ai/contracts.js";
 
 const golden = JSON.parse(readFileSync(new URL("./fixtures/governed-v2.json", import.meta.url), "utf8")) as {
   retrievalRequest: RetrievalRequest; retrievalResponse: unknown; generationRequest: GenerationRequest; generationResponse: unknown };
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe("paired v2 HTTP adapter", () => {
+  it.each(["TIMEOUT", "PROVIDER_BUSY", "PROVIDER_AUTH", "INVALID_OUTPUT"])("accepts only the safe Summary failure %s", async code => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ detail: { code, message: "private provider data" } }, { status: 502 })));
+    const source = JSON.parse(readFileSync(new URL("../reader-ai/fixtures/reader-source-v1.json", import.meta.url), "utf8")).response as ReaderSourceResponse;
+    await expect(new HttpAskArdenClient("http://ai.example.test", "test").summarizeReaderSource(source))
+      .rejects.toMatchObject({ code: `AI_SUMMARY_${code}` });
+  });
+  it.each(["unknown", "oversize", "old-service"])("bounds and sanitizes %s Summary errors", async mode => {
+    const body = mode === "oversize" ? "x".repeat(4_097) : JSON.stringify({ detail: mode === "old-service" ? "private error" : { code: "private token" } });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 502 })));
+    const source = JSON.parse(readFileSync(new URL("../reader-ai/fixtures/reader-source-v1.json", import.meta.url), "utf8")).response as ReaderSourceResponse;
+    await expect(new HttpAskArdenClient("http://ai.example.test", "test").summarizeReaderSource(source))
+      .rejects.toMatchObject({ code: "AI_SERVICE_HTTP_502" });
+  });
   it("applies reader-only deadlines without changing general chat timeouts", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(Response.json(golden.retrievalResponse)).mockResolvedValueOnce(Response.json(golden.generationResponse))
       .mockResolvedValueOnce(Response.json(golden.retrievalResponse));

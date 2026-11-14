@@ -8,7 +8,8 @@ export type ReaderSummaryResponse = Pick<ReaderSourceResponse, "contractVersion"
     coverage: Array<{ startOffset: number; endOffset: number }>; usedChunkIds: string[] };
 
 export class ReaderSummaryError extends Error {
-  constructor(readonly code: "INVALID_SUMMARY" | "UNSUPPORTED" | "BUSY" | "UNAVAILABLE") { super(code); }
+  constructor(readonly code: "INVALID_SUMMARY" | "UNSUPPORTED" | "BUSY" | "UNAVAILABLE" | "TIMEOUT" | "PROVIDER_BUSY" | "PROVIDER_AUTH",
+    readonly reason?: "IN_PROGRESS" | "COOLDOWN" | "CAPACITY", readonly retryAfterSeconds?: number) { super(code); }
 }
 const invalid = (): never => { throw new ReaderSummaryError("INVALID_SUMMARY"); };
 function record(value: unknown, keys: readonly string[]): Record<string, unknown> {

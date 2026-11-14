@@ -1,5 +1,14 @@
 # Implementation status and rollout boundaries
 
+## Summary reliability — local follow-up, 14 November 2026
+
+The accepted [SR-1–SR-5 refinement](reader-ai.md#summary-reliability-refinement--accepted-14-november-2026)
+adds per-publication cooldown, bounded same-actor in-flight joining with independent
+final authorization, classified safe failures, manual Retry countdown and metadata
+diagnostics. No completed/shared cache, DB/index, model or dependency changes.
+This follow-up is local and not deployed; existing provider/native acceptance is
+not upgraded by offline checks or the synthetic browser preview.
+
 ## Reader panel session follow-up — 14 November 2026
 
 The [Reader AI refinement](reader-ai.md#ra-0405-refinement-switching-panels-is-not-close-accepted-14-november-2026)

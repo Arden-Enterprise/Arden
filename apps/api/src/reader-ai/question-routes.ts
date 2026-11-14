@@ -36,11 +36,13 @@ export function registerReaderQuestionRoutes(app: FastifyInstance,
         const unsupported = error instanceof ArdenAiAnswerError && error.code === "AI_SERVICE_HTTP_422";
         const busy = error instanceof ReaderSummaryError && error.code === "BUSY";
         const status = missing ? 404 : unsupported ? 422 : busy ? 429 : 503;
-        if (busy) reply.header("Retry-After", "10");
+        const retryAfterSeconds = busy ? error.retryAfterSeconds ?? 10 : undefined;
+        if (retryAfterSeconds) reply.header("Retry-After", String(retryAfterSeconds));
         if (status === 503) request.log.warn({ requestId: request.id,
           errorType: error instanceof Error ? error.name : "Unknown" }, "Document question failed");
         return reply.code(status).send({ error: {
           code: missing ? "RESOURCE_NOT_AVAILABLE" : unsupported ? "DOCUMENT_QUESTION_UNSUPPORTED" : busy ? "DOCUMENT_QUESTION_BUSY" : "DOCUMENT_QUESTION_UNAVAILABLE",
+          ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
           message: missing ? "This document is unavailable." : unsupported ? "This question cannot be answered here."
             : busy ? "Please wait before trying again." : "Document Q&A is unavailable.", requestId: request.id,
         } });

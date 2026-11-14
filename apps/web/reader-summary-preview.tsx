@@ -18,6 +18,12 @@ window.fetch = async (input, init) => {
   if (path.endsWith("/access")) return Response.json({ documentId: readerContext.documentId, versionId: readerContext.versionId, contentHash: readerContext.contentHash });
   if (scenario === "unsupported") return Response.json({ error: { code: "SUMMARY_UNSUPPORTED" } }, { status: 422 });
   if (scenario === "failure") return Response.json({ error: { code: "SUMMARY_UNAVAILABLE" } }, { status: 503 });
+  if (scenario === "cooldown" || scenario === "capacity") return Response.json({ error: {
+    code: scenario === "cooldown" ? "SUMMARY_COOLDOWN" : "SUMMARY_CAPACITY", retryAfterSeconds: 10, retryable: true,
+  } }, { status: 429 });
+  if (scenario === "source-unavailable") return Response.json({ error: {
+    code: "SUMMARY_SOURCE_UNAVAILABLE", retryAfterSeconds: 5, retryable: true,
+  } }, { status: 503 });
   const request: { requestId: string } = JSON.parse(String(init?.body));
   const result = readerSummaryFixture(request.requestId);
   result.points.push({ kind: "CONDITION", text: "Check that you are reading the version currently open. Publication and effective dates are different.", citations: result.points[0].citations },
@@ -55,7 +61,8 @@ function Preview() {
   return <div className="arden-app-shell reader-qa"><div className="reader-qa-inner">
     <div className="reader-qa-controls"><strong>Local verification · synthetic data · no model calls</strong>
       <label>Scenario <select value={mode} onChange={event => { scenario = event.target.value; setMode(scenario); }}>
-        <option value="ready">Ready</option><option value="insufficient">Insufficient evidence</option><option value="unsupported">Unsupported</option><option value="failure">Failure</option><option value="denied">Access denied</option></select></label>
+        <option value="ready">Ready</option><option value="insufficient">Insufficient evidence</option><option value="unsupported">Unsupported</option><option value="failure">Failure</option><option value="denied">Access denied</option>
+        <option value="cooldown">Cooldown</option><option value="capacity">Capacity</option><option value="source-unavailable">Source unavailable</option></select></label>
       <label>Transport <select value={transport} onChange={event => {
         const value = event.target.value === "desktop" ? "desktop" : "web";
         window.ardenDesktop = value === "desktop" ? { requestApi: async request => {
