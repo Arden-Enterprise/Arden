@@ -1,0 +1,120 @@
+{
+  "request": {
+    "contractVersion": 1,
+    "purpose": "READER_SUMMARY",
+    "requestId": "10000000-0000-4000-8000-000000000007",
+    "publishedVersionId": "10000000-0000-4000-8000-000000000006",
+    "snapshot": {
+      "contractVersion": 1,
+      "jobId": "10000000-0000-4000-8000-000000000001",
+      "organizationId": "10000000-0000-4000-8000-000000000002",
+      "submissionId": "10000000-0000-4000-8000-000000000003",
+      "generationId": "10000000-0000-4000-8000-000000000004",
+      "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
+      "snapshotContentHash": "769d46b73da4ff9fde3db5d83a84caba8ec9701b531bc889221c0a4ba098fc75",
+      "snapshotMimeType": "text/plain",
+      "snapshotContent": "arden-document:application/vnd.arden.semantic-blocks+json;version=1\n{\"schemaVersion\":1,\"blocks\":[{\"id\":\"s0h\",\"type\":\"heading\",\"props\":{\"level\":1},\"content\":[{\"type\":\"text\",\"text\":\"🔐 Quyền đọc\",\"styles\":{}}],\"children\":[]},{\"id\":\"s0b\",\"type\":\"paragraph\",\"props\":{},\"content\":[{\"type\":\"text\",\"text\":\"Only approved readers may read this version.\",\"styles\":{}}],\"children\":[]},{\"id\":\"s1h\",\"type\":\"heading\",\"props\":{\"level\":1},\"content\":[{\"type\":\"text\",\"text\":\"Exceptions\",\"styles\":{}}],\"children\":[]},{\"id\":\"s1b\",\"type\":\"paragraph\",\"props\":{},\"content\":[{\"type\":\"text\",\"text\":\"An exception requires recorded approval.\",\"styles\":{}}],\"children\":[]},{\"id\":\"s2h\",\"type\":\"heading\",\"props\":{\"level\":1},\"content\":[{\"type\":\"text\",\"text\":\"After revocation\",\"styles\":{}}],\"children\":[]},{\"id\":\"s2b\",\"type\":\"paragraph\",\"props\":{},\"content\":[{\"type\":\"text\",\"text\":\"Do not reuse a cached summary after access is revoked.\",\"styles\":{}}],\"children\":[]}]}"
+    }
+  },
+  "response": {
+    "contractVersion": 1,
+    "purpose": "READER_SUMMARY",
+    "requestId": "10000000-0000-4000-8000-000000000007",
+    "organizationId": "10000000-0000-4000-8000-000000000002",
+    "publishedVersionId": "10000000-0000-4000-8000-000000000006",
+    "generationId": "10000000-0000-4000-8000-000000000004",
+    "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
+    "snapshotContentHash": "769d46b73da4ff9fde3db5d83a84caba8ec9701b531bc889221c0a4ba098fc75",
+    "compilerVersion": "semantic-markdown-v1",
+    "chunkingVersion": "langchain-section-token-v1",
+    "markdownContentHash": "649e501034a870fef2a733298f861fbb1e2ac5a159c2c3680bb52037818cabf7",
+    "chunksDigest": "a5bc49092729d8a6fec8392e3ef8fc81cced5a979e85b38be668ed8b2b42b6f4",
+    "markdown": "# 🔐 Quyền đọc\n\nOnly approved readers may read this version\\.\n\n# Exceptions\n\nAn exception requires recorded approval\\.\n\n# After revocation\n\nDo not reuse a cached summary after access is revoked\\.\n",
+    "chunks": [
+      {
+        "chunkId": "73d850e8706ded36405cf03f08f3b862445bf6bb3026c43e3b12ac2025ed67bc",
+        "ordinal": 0,
+        "contentHash": "0fe81f89e35df4138190b42e8f3e9507b0f256d7d0ac12a48c0cadcde82ff5d3",
+        "startOffset": 15,
+        "endOffset": 62,
+        "sourceBlockIds": [
+          "s0b"
+        ],
+        "parentSectionBlockId": "s0h",
+        "content": "Only approved readers may read this version\\.\n\n"
+      },
+      {
+        "chunkId": "40897f2e6a63c58b9ba0ac9fea2f75ea41e8982eb59d6bbfe6461ca4f7d3bdb7",
+        "ordinal": 1,
+        "contentHash": "7eec18f80251e9e275be53bf991d84f707fe1230edc5ee827a355f7e85585ac6",
+        "startOffset": 76,
+        "endOffset": 119,
+        "sourceBlockIds": [
+          "s1b"
+        ],
+        "parentSectionBlockId": "s1h",
+        "content": "An exception requires recorded approval\\.\n\n"
+      },
+      {
+        "chunkId": "c7272e1a8164c4c19134bac282139f8db5c449dc616728792db9b5143326aa08",
+        "ordinal": 2,
+        "contentHash": "93c47acdcaf5cafb2117d19778ef22f49077cae49e3c8617602286918b3a14ca",
+        "startOffset": 139,
+        "endOffset": 195,
+        "sourceBlockIds": [
+          "s2b"
+        ],
+        "parentSectionBlockId": "s2h",
+        "content": "Do not reuse a cached summary after access is revoked\\.\n"
+      }
+    ]
+  },
+  "manifest": {
+    "contractVersion": 1,
+    "generationId": "10000000-0000-4000-8000-000000000004",
+    "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
+    "snapshotContentHash": "769d46b73da4ff9fde3db5d83a84caba8ec9701b531bc889221c0a4ba098fc75",
+    "compilerVersion": "semantic-markdown-v1",
+    "chunkingVersion": "langchain-section-token-v1",
+    "markdownContentHash": "649e501034a870fef2a733298f861fbb1e2ac5a159c2c3680bb52037818cabf7",
+    "chunksDigest": "a5bc49092729d8a6fec8392e3ef8fc81cced5a979e85b38be668ed8b2b42b6f4",
+    "jobId": "10000000-0000-4000-8000-000000000001",
+    "embeddingModel": "text-embedding-3-small",
+    "embeddingDimensions": 1536,
+    "chunks": [
+      {
+        "chunkId": "73d850e8706ded36405cf03f08f3b862445bf6bb3026c43e3b12ac2025ed67bc",
+        "ordinal": 0,
+        "contentHash": "0fe81f89e35df4138190b42e8f3e9507b0f256d7d0ac12a48c0cadcde82ff5d3",
+        "startOffset": 15,
+        "endOffset": 62,
+        "sourceBlockIds": [
+          "s0b"
+        ],
+        "parentSectionBlockId": "s0h"
+      },
+      {
+        "chunkId": "40897f2e6a63c58b9ba0ac9fea2f75ea41e8982eb59d6bbfe6461ca4f7d3bdb7",
+        "ordinal": 1,
+        "contentHash": "7eec18f80251e9e275be53bf991d84f707fe1230edc5ee827a355f7e85585ac6",
+        "startOffset": 76,
+        "endOffset": 119,
+        "sourceBlockIds": [
+          "s1b"
+        ],
+        "parentSectionBlockId": "s1h"
+      },
+      {
+        "chunkId": "c7272e1a8164c4c19134bac282139f8db5c449dc616728792db9b5143326aa08",
+        "ordinal": 2,
+        "contentHash": "93c47acdcaf5cafb2117d19778ef22f49077cae49e3c8617602286918b3a14ca",
+        "startOffset": 139,
+        "endOffset": 195,
+        "sourceBlockIds": [
+          "s2b"
+        ],
+        "parentSectionBlockId": "s2h"
+      }
+    ]
+  }
+}

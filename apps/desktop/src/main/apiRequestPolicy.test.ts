@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { desktopApiResponseLimit, validateDesktopApiRequest } from "./apiRequestPolicy.ts";
+import { desktopApiResponseLimit, desktopApiTimeout, validateDesktopApiRequest } from "./apiRequestPolicy.ts";
 
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const sourcePrivateVersionId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
@@ -8,6 +8,61 @@ const idempotencyKey = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const sharedDraftPath = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
 
 describe("desktop API request allowlist", () => {
+  it("preserves bounded non-reader deadlines while keeping reader deadlines main-owned", () => {
+    const session = { path: "/api/v1/me", method: "GET" as const, timeoutMs: 15_000 };
+    assert.equal(validateDesktopApiRequest(session), true);
+    assert.equal(desktopApiTimeout(session), 15_000);
+    assert.equal(validateDesktopApiRequest({ ...session, timeoutMs: 60_001 }), false);
+    const reader = `/api/v1/organizations/${organizationId}/knowledge/published/${sourcePrivateVersionId}`;
+    assert.equal(validateDesktopApiRequest({ path: `${reader}/questions`, method: "POST",
+      body: JSON.stringify({ requestId: idempotencyKey, query: "What is required?" }), timeoutMs: 15_000 }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${reader}/summary/access`, method: "GET", timeoutMs: 15_000 }), false);
+  });
+  it("permits only the stateless exact-document question request", () => {
+    const path = `/api/v1/organizations/${organizationId}/knowledge/published/${sourcePrivateVersionId}/questions`;
+    const request = { path, method: "POST" as const, body: JSON.stringify({ requestId: idempotencyKey, query: "Who may read?" }) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 240_000);
+    for (const extra of [{ history: [] }, { generationId: sourcePrivateVersionId }, { text: "injected" }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, body: JSON.stringify({ requestId: idempotencyKey, query: "q", ...extra }) }), false);
+    }
+    for (const query of ["", " ", "x".repeat(4_001)]) assert.equal(validateDesktopApiRequest({ ...request,
+      body: JSON.stringify({ requestId: idempotencyKey, query }) }), false);
+    for (const change of [{ method: "GET" }, { path: `${path}?all=1` }, { body: "{}" }, { timeoutMs: 999_999 },
+      { ifMatch: '"1"' }, { idempotencyKey }]) assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+  });
+  it("permits only exact Summary generation/access shapes with main-owned deadlines", () => {
+    const path = `/api/v1/organizations/${organizationId}/knowledge/published/${sourcePrivateVersionId}/summary`;
+    const request = { path, method: "POST" as const, body: JSON.stringify({ requestId: idempotencyKey }) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 300_000);
+    assert.equal(desktopApiResponseLimit(request), 1024 * 1024);
+    assert.equal(validateDesktopApiRequest({ path: `${path}/access`, method: "GET" }), true);
+    assert.equal(desktopApiTimeout({ path: `${path}/access`, method: "GET" }), 30_000);
+    for (const body of [undefined, "{}", "null", "[]", "bad", JSON.stringify({ requestId: "bad" }),
+      JSON.stringify({ requestId: idempotencyKey, prompt: "bypass" })]) assert.equal(validateDesktopApiRequest({ ...request, body }), false);
+    for (const suffix of ["?prompt=x", "/other", "#fragment"]) assert.equal(validateDesktopApiRequest({ ...request, path: `${path}${suffix}` }), false);
+    assert.equal(validateDesktopApiRequest({ ...request, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ ...request, method: "PATCH" }), false);
+    assert.equal(validateDesktopApiRequest({ ...request, ifMatch: '"1"' }), false);
+    assert.equal(validateDesktopApiRequest({ ...request, idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ ...request, timeoutMs: 3_600_000 }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${path}/access`, method: "GET", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${path}/access?all=1`, method: "GET" }), false);
+    assert.equal(desktopApiTimeout({ path: "/api/v1/me", method: "GET" }), undefined);
+  });
+  it("allows only exact bodyless private conversation reads", () => {
+    const list = `/api/v1/organizations/${organizationId}/ai/conversations`;
+    for (const path of [list, `${list}/${sourcePrivateVersionId}`]) {
+      assert.equal(validateDesktopApiRequest({ path, method: "GET" }), true);
+      assert.equal(validateDesktopApiRequest({ path, method: "POST" }), false);
+      assert.equal(validateDesktopApiRequest({ path, method: "GET", body: "{}" }), false);
+      assert.equal(validateDesktopApiRequest({ path: `${path}?owner=all`, method: "GET" }), false);
+      assert.equal(validateDesktopApiRequest({ path, method: "GET", ifMatch: '"1"' }), false);
+    }
+    assert.equal(validateDesktopApiRequest({ path: `${list}/not-a-uuid`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${list}/${sourcePrivateVersionId}/turns`, method: "GET" }), false);
+  });
   it("permits only the scoped bodyless submission withdrawal action", () => {
     const path = `/api/v1/organizations/${organizationId}/knowledge/submissions/${sourcePrivateVersionId}/withdraw`;
     assert.equal(validateDesktopApiRequest({ path, method: "POST" }), true);

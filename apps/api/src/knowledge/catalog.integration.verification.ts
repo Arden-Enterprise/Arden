@@ -41,7 +41,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         await client.query("DELETE FROM published_knowledge_version WHERE shared_draft_id = $1", [draftId || randomUUID()]);
         await client.query("DELETE FROM knowledge_index_job WHERE generation_id IN (SELECT generation_id FROM knowledge_index_generation WHERE organization_id = $1)", [org]);
         await client.query("DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)", [org]);
-        for (const table of ["knowledge_collection_document", "knowledge_collection", "knowledge_current_publication", "knowledge_index_generation",
+        for (const table of ["knowledge_ai_release", "knowledge_collection_document", "knowledge_collection", "knowledge_current_publication", "knowledge_index_generation",
           "shared_submission", "shared_draft_audience", "shared_draft", "selected_reader", "reader_selection", "knowledge_topic", "knowledge_base",
           "audit_event", "audience_group_membership", "audience", "reviewer_grant"]) {
           await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);

@@ -3,7 +3,7 @@ import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { desktopApiResponseLimit, validateDesktopApiRequest, type DesktopApiRequest } from "./apiRequestPolicy";
+import { desktopApiResponseLimit, desktopApiTimeout, validateDesktopApiRequest, type DesktopApiRequest } from "./apiRequestPolicy";
 
 type DesktopApiResponse = { status: number; body: string; etag?: string; location?: string };
 type CookieJar = Map<string, string>;
@@ -91,8 +91,9 @@ async function doApiRequest(request: DesktopApiRequest): Promise<DesktopApiRespo
   if (request.ifMatch) headers.set("if-match", request.ifMatch);
   if (request.idempotencyKey) headers.set("idempotency-key", request.idempotencyKey);
   if (jar.size > 0) headers.set("cookie", [...jar].map(([name, value]) => `${name}=${value}`).join("; "));
-  const controller = request.timeoutMs === undefined ? undefined : new AbortController();
-  const timeout = request.timeoutMs === undefined ? undefined : setTimeout(() => controller?.abort(), request.timeoutMs);
+  const deadline = desktopApiTimeout(request);
+  const controller = deadline === undefined ? undefined : new AbortController();
+  const timeout = deadline === undefined ? undefined : setTimeout(() => controller?.abort(), deadline);
   try {
     const response = await fetch(`${origin}${request.path}`, {
       method: request.method,

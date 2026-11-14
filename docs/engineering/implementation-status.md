@@ -1,5 +1,34 @@
 # Implementation status and rollout boundaries
 
+## Governed answering v2 — feature checkout, 13 November 2026
+
+The paired [governed hybrid answering contract](governed-hybrid-answering.md)
+implements staged retrieve/authorize/generate, filtered semantic + BM25/RRF,
+current-applicable version selection and owner-private persisted conversations.
+Operator migration 0031 and actual RLS/indexing/history workflows have only been
+rehearsed on disposable local PostgreSQL, including post-ownership transfer.
+Not yet committed, integrated into staging or deployed. Live provider relevance
+and signed-in browser acceptance remain unverified. This checkpoint supersedes
+historical claims below that chat persistence is wholly unimplemented, without
+certifying the rest of the historical inventory.
+
+## Reader AI — local checkpoint, 14 November 2026
+
+[RA-02/RA-03](reader-ai.md) now implement exact-version source preparation and a
+bounded whole-text Summary backend, with original-source citations and final reader
+authorization. RA-04 adds the on-request shared reader panel, strict web/native
+adapters and no-model access revalidation. RA-05 adds stateless Ask this document:
+one exact-generation hybrid retrieval, source-bound cited answers, fixed insufficient
+copy, shared reader interaction and native request validation. Local regression and
+12 real disposable PostgreSQL cases pass. Genuine Electron and signed-in paired
+acceptance remain unverified; the maintainer explicitly retained them before release
+while approving local RA-05 development. No cache/history write or selection
+explanation is delivered. Provider-quality acceptance remains separate.
+Model/effort and shared data are unchanged; no paid calls or publication/deployment.
+Fetched staging is now `5bd752c`, while this dependent checkout remains `a07f575`.
+Its unpublished GA-v2 migration 0031 conflicts with staging's reviewer-grant 0031;
+reconcile the integration/migration plan before any release, not by editing applied SQL.
+
 This inventory was moved from the main agent entry point during the October 2026 rules reconciliation. Keep it synchronized with the [technology guide](technology-guide.md), source and operational evidence; a documented capability is not proof it is deployed.
 
 Decision 0010 supersedes the role-based product wording in the historical inventory below. The current application contract uses Member and Organization Admin for organization capability, Reviewer Grants for review authority, canonical Audiences for published readership, and installation-level Arden System Admins that have no organization/content bypass. Custom Role endpoints and UI have been removed; migration 0017 retains legacy role-backed columns and shadow writes only as a bounded compatibility bridge until the Phase 5 schema contraction.

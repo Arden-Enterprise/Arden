@@ -4,6 +4,8 @@ export type KnowledgeCitationReference = {
   blockId?: string;
   page?: number;
   excerpt: string;
+  startOffset?: number;
+  endOffset?: number;
 };
 
 export type KnowledgeNavigationTarget = KnowledgeCitationReference & {

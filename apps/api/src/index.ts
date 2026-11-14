@@ -127,6 +127,7 @@ const app = buildApp({
   storage: contentStorage,
   invitationMailer,
   askArden,
+  readerAi: askArden,
   invitationDeliveryMode: smtpConfiguration ? "email" : "local-test-no-email",
   publicWebOrigin: (() => {
     if (flow1TestMode) return "http://127.0.0.1:5180";

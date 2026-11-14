@@ -23,10 +23,14 @@ const knowledgeSubmissionWithdraw = new RegExp(`^/api/v1/organizations/${uuid}/k
 const knowledgeReviewItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}$`);
 const knowledgeReviewDecision = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}/decisions$`);
 const publishedKnowledgeItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}$`);
+const readerSummaryPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}/summary$`);
+const readerSummaryAccess = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}/summary/access$`);
+const readerQuestionPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}/questions$`);
 const knowledgeCatalogRead = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog(?:/readers)?$`);
 const knowledgeCatalogCreate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/(topics|collections)$`);
 const knowledgeCatalogItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/(topics|collections)/${uuid}$`);
 const aiAnswerPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/answers$`);
+const aiConversationPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations(?:/${uuid})?$`);
 const reviewerGrantDeactivate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants/${uuid}/deactivate$`);
 const administrationPath = new RegExp(`^/api/v1/organizations/${uuid}/administration$`);
 const adminCreatePath = new RegExp(`^/api/v1/organizations/${uuid}/(departments|invitations)$`);
@@ -68,6 +72,35 @@ export function desktopApiResponseLimit(request: DesktopApiRequest): number {
   return pdfCreate || knowledgeDetail ? 7_100_000 : 1024 * 1024;
 }
 
+/** Reader deadlines are main-owned; other routes retain the validated renderer bound. */
+export function desktopApiTimeout(request: DesktopApiRequest): number | undefined {
+  if (request.method === "POST" && readerQuestionPath.test(request.path)) return 240_000;
+  if (request.method === "POST" && readerSummaryPath.test(request.path)) return 300_000;
+  if (request.method === "GET" && readerSummaryAccess.test(request.path)) return 30_000;
+  return request.timeoutMs;
+}
+
+function summaryBody(body: string | undefined): boolean {
+  if (!body || body.length > 100) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      && Object.keys(value).join() === "requestId" && "requestId" in value
+      && typeof value.requestId === "string" && uuidPattern.test(value.requestId);
+  } catch { return false; }
+}
+
+function questionBody(body: string | undefined): boolean {
+  if (!body || body.length > 25_000) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      && Object.keys(value).sort().join() === "query,requestId" && "requestId" in value && "query" in value
+      && typeof value.requestId === "string" && uuidPattern.test(value.requestId)
+      && typeof value.query === "string" && Boolean(value.query.trim()) && Array.from(value.query).length <= 4_000;
+  } catch { return false; }
+}
+
 function isAllowedRequest(request: DesktopApiRequest): boolean {
   let url: URL;
   try { url = new URL(request.path, "https://arden.invalid"); }
@@ -105,6 +138,12 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && !request.body && !request.ifMatch && !request.idempotencyKey;
   const aiAnswer = aiAnswerPath.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
+  const aiConversationGet = aiConversationPath.test(url.pathname) && request.method === "GET"
+    && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const readerSummary = ((readerSummaryPath.test(url.pathname) && request.method === "POST" && summaryBody(request.body))
+    || (readerQuestionPath.test(url.pathname) && request.method === "POST" && questionBody(request.body))
+    || (readerSummaryAccess.test(url.pathname) && request.method === "GET" && request.body === undefined))
+    && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
   const adminGet = administrationPath.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
   const audienceGroupGet = audienceGroupReadPath.test(url.pathname) && request.method === "GET"
@@ -150,7 +189,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const catalogQuery = catalogGet && url.pathname.endsWith("/readers")
     && [...url.searchParams.keys()].every(key => key === "q" || key === "ids");
   return (catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
-    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || grantCreate || grantDeactivate || aiAnswer || adminGet
+    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke) && (!url.search || queryAllowed || catalogQuery);

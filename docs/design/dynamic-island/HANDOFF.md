@@ -73,3 +73,41 @@ Tabs: Members · Departments · **Audiences** · Invitations · Reviewer access.
   `representSharedDraft` so list and detail share one shape.)
 - Handover removed from navigation (route/component still exist; remove later if unused).
 - Collapsed sidebar footer no longer stretches/overflows.
+
+## 6. Reader Summary addition — 14 November 2026, local only
+
+F13 / RA-04 is a minimal addition to the existing published document reader, not a
+replacement for Khôi's Library design. The viewer bar gains a Summary toggle beside
+Download; an inline panel above the unchanged source shows AI-generated short points
+with original-source buttons. Retain Island tokens/fonts and document information.
+See the governing [Reader AI contract](../../engineering/reader-ai.md#ra-04-reader-integration-specification--14-november).
+
+Loading/checking states withhold points. Failure offers manual Retry where supported;
+unsupported/denied never show fake output. Close and Escape dismiss while preserving
+the document and return focus to Summary. Context switch/unmount clears transient
+state; focus/visibility return and source clicks recheck readership. React renders
+model strings as text, not markup. No upload summary or metadata/cache write.
+
+Local browser evidence uses synthetic fixtures at 1440/1024 widths, including Close,
+Escape, Retry, unsupported and revoked-access paths, text-anchor highlighting and
+PDF `#page=2` navigation with a visible quoted passage. The in-app PDF surface remains
+blank here; this does not certify native PDF rendering or precise in-page highlighting.
+Desktop-bridge simulation is not a genuine Electron interaction test. Native-runtime
+and signed-in paired-service acceptance remain open; do not equate a build with them.
+
+## 7. Ask this document — 14 November 2026, local only
+
+RA-05 adds a second viewer-bar toggle; Summary and Q&A panels are mutually exclusive.
+The inline question panel keeps the original document visible and reuses Island
+fields/buttons, existing AI/source accents and type hierarchy. No new art/fonts or
+Library layout. Each question is standalone (no imported Ask Arden history). Display
+short document-specific insufficient copy, safe plain-text answers, original-source
+buttons, waiting/checking/error/unsupported/Retry and an always-available Close.
+Escape dismisses and returns focus to the Q&A toggle. Switching source context or
+closing clears the form/results; editing the question labels an older visible
+answer rather than pretending it answers the new text. Source/focus rechecks use
+the same read-only probe as Summary.
+
+Local browser/fixture checks do not constitute signed-in paired/provider or native
+acceptance. The maintainer explicitly moved genuine Electron and signed-in paired
+checks to mandatory pre-release gates; they are not dropped or recorded as passed.

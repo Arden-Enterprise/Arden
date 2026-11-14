@@ -147,3 +147,10 @@
 }
 
 @keyframes ask-pulse { 50% { opacity: .3; transform: scale(.82); } }
+.ask-scope select {
+  max-width: 170px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}

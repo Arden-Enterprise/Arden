@@ -645,6 +645,11 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         </div>
       </> : screen === "document" && document ? <KnowledgeDocumentDetail
         focusTarget={openedCitation}
+        summaryOptions={{ platform, active: active && view === "knowledge", context: { organizationId,
+          documentId: document.draftId, versionId: document.id, contentHash: document.contentHash },
+          onCitation: citation => setOpenedCitation(previous => citation ? { ...citation, navigationId: `reader-summary:${crypto.randomUUID()}` }
+            : previous?.navigationId.startsWith("reader-summary:") ? null : previous),
+          onAccessLost: () => { setOpenedCitation(null); setDocument(null); setScreen("library"); setError("This document is unavailable."); } }}
         metadata={{
           title: document.title,
           documentCode: document.documentCode ?? "Not assigned",

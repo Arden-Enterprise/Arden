@@ -6,6 +6,7 @@ export type AskArdenMessage = {
   body: string;
   citations?: AskArdenAnswer["citations"];
   insufficientEvidence?: boolean;
+  unavailable?: boolean;
 };
 
 export const starterPrompts = [

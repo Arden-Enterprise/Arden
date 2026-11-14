@@ -7,6 +7,9 @@
     "tests/departmentConfirmation.test.ts",
     "tests/invitationFeedback.test.ts",
     "tests/memberAdministration.test.ts",
-    "tests/membershipAssignment.test.ts"
+    "tests/membershipAssignment.test.ts",
+    "tests/readerSummary.test.tsx",
+    "tests/readerSummaryApi.test.ts",
+    "tests/readerQuestion.test.tsx"
   ]
 }
