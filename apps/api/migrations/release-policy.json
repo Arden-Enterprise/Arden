@@ -192,6 +192,24 @@
       "filename": "0032_governed_ai_sources_and_conversations.sql",
       "sha256": "e9476799f88218c7a6f811781bffc9ef54512cdb39992702a288fd9f6622f4b2",
       "rollout": "operator"
+    },
+    {
+      "id": "0033",
+      "filename": "0033_reader_directory_email.sql",
+      "sha256": "afb6abd14bef622a2ea27785480a5805b896b79fb5250ac9bd1d228865511f5b",
+      "rollout": "operator"
+    },
+    {
+      "id": "0034",
+      "filename": "0034_publication_change_requests.sql",
+      "sha256": "cd3957812dbbcb1553e0fed23ed0f45a517d833d5eb56b77ec601f8317dec30d",
+      "rollout": "operator"
+    },
+    {
+      "id": "0035",
+      "filename": "0035_apply_publication_change_requests.sql",
+      "sha256": "85833b6576871a5316f29c9ccd604aa9474d2a7646e7132a614443d8e2291e37",
+      "rollout": "operator"
     }
   ]
 }

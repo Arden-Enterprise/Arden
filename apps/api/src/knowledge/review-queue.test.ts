@@ -37,7 +37,7 @@ describe("listAssignedReviews", () => {
     expect(result[0]).toEqual({
       submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide",
       departmentId: "engineering", classification: "INTERNAL", submittedAt: candidate.submittedAt,
-      approvalBlocked: false, versionNo: 3, authorName: null,
+      approvalBlocked: false, versionNo: 3, requestType: "CONTENT", authorName: null,
     });
   });
 
@@ -45,7 +45,7 @@ describe("listAssignedReviews", () => {
     expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...candidate, audienceEnforceable: false }] }))
       .toEqual([{ submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide",
         departmentId: "engineering", classification: "INTERNAL", submittedAt: candidate.submittedAt,
-        approvalBlocked: true, versionNo: 3, authorName: null }]);
+        approvalBlocked: true, versionNo: 3, requestType: "CONTENT", authorName: null }]);
   });
 
   it("shows Organization Admin their own pending submission without a reviewer grant", () => {

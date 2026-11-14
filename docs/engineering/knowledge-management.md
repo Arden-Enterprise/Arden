@@ -15,9 +15,13 @@ Under `/api/v1/organizations/:organizationId/knowledge`:
 - `PATCH /catalog/:kind/:id`: complete name/description/status write, requiring
   `If-Match: "catalog-N"`. Collections accept a fixed cover key and ordered exact
   `documentIds`; input source IDs must be currently readable by the curator.
-- `GET /catalog/readers?q=...&ids=...`: active-member display names only, bounded
-  to the caller's organization. Search requires two characters; selected-ID
-  resolution accepts at most 100 identities. It is not an email directory.
+- `GET /catalog/readers?q=...&ids=...`: active members of the caller's organization
+  found by name or email, like sharing in Google Drive ([ADR 0021](../decisions/0021-reader-email-search-and-no-document-code.md),
+  migration 0033). Each item has `id`, `name`, the full `email` and the primary
+  `department`. Search needs two characters and returns at most 20 suggestions
+  (an exact email first); selected-ID resolution accepts at most 100 identities.
+  An address outside the organization finds nobody. There is no Document Code:
+  responses no longer include `documentCode` (the column stays, unused).
 - Existing draft PATCH accepts `management` and explicit `targetReaders` with the
   usual save revision. A PDF can be replaced by a canonical `pdfBase64` payload,
   under the same draft/code, with a new immutable content revision; no text/PDF

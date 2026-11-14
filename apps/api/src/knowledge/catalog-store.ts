@@ -13,8 +13,11 @@ export class CatalogError extends Error {
 type MemberTransaction = <T>(userId: string, organizationId: string, work: (client: PoolClient) => Promise<T>) => Promise<T>;
 type AdminTransaction = <T>(userId: string, organizationId: string,
   work: (client: PoolClient, membershipId: string) => Promise<T>) => Promise<T | null>;
+export type KnowledgeReaderMatch = { id: string; name: string; email: string; department: string | null };
+
 export interface KnowledgeCatalogStore {
-  readers(userId: string, organizationId: string, query: string, ids: string[]): Promise<Array<{ id: string; name: string }>>;
+  /** Decision 0021: active members of the caller's organization by name or email, with email and department. */
+  readers(userId: string, organizationId: string, query: string, ids: string[]): Promise<KnowledgeReaderMatch[]>;
   list(userId: string, organizationId: string): Promise<KnowledgeCatalog>;
   write(userId: string, organizationId: string, kind: CatalogKind, id: string | null, version: number | null,
     input: CatalogWrite, requestId: string): Promise<CatalogEntry>;
@@ -51,8 +54,9 @@ export class PgKnowledgeCatalogStore implements KnowledgeCatalogStore {
   constructor(private readonly withMember: MemberTransaction, private readonly withAdmin: AdminTransaction) {}
 
   async readers(userId: string, organizationId: string, query: string, ids: string[]) {
-    return this.withMember(userId, organizationId, async client => (await client.query<{ id: string; name: string }>(`
-      SELECT membership_id AS id, display_name AS name FROM knowledge_reader_directory($1, $2::uuid[])`, [query, ids])).rows);
+    return this.withMember(userId, organizationId, async client => (await client.query<KnowledgeReaderMatch>(`
+      SELECT membership_id AS id, display_name AS name, email, department_name AS department
+        FROM knowledge_reader_directory($1, $2::uuid[])`, [query, ids])).rows);
   }
 
   async list(userId: string, organizationId: string): Promise<KnowledgeCatalog> {

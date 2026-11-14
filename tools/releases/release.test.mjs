@@ -24,7 +24,7 @@ test("release metadata binds the complete migration policy inventory", () => {
   const source = release.metadata();
   assert.equal(source.migrations, migrationInventory.fingerprintMigrationInventory(source.migration_inventory));
   assert.ok(source.migration_inventory.length >= 23);
-  const operatorOnlyIds = new Set(["0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031"]);
+  const operatorOnlyIds = new Set(["0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035"]);
   for (const id of operatorOnlyIds) {
     assert.equal(source.migration_inventory.find(row => row.id === id)?.rollout, "operator",
       `Migration ${id} must remain operator-class`);

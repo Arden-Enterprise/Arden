@@ -63,7 +63,10 @@
 .km-selected-readers { display: flex; flex-wrap: wrap; gap: 6px; }
 .km-selected-readers button { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 7px; border: 1px solid var(--arden-border-strong); border-radius: 5px; color: var(--arden-text-primary); background: var(--arden-surface-hover); font-size: 11px; }
 .km-member-results { display: grid; gap: 2px; max-height: 180px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
-.km-member-results button { display: flex; justify-content: space-between; width: 100%; padding: 8px; border: 0; color: var(--arden-text-primary); background: var(--arden-surface-raised); text-align: left; font-size: 12px; }
+.km-member-results button { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; padding: 8px; border: 0; color: var(--arden-text-primary); background: var(--arden-surface-raised); text-align: left; font-size: 12px; }
+.km-member-identity { display: grid; gap: 2px; min-width: 0; }
+.km-member-identity strong { font-weight: 600; }
+.km-member-identity small { overflow: hidden; color: var(--arden-text-secondary); text-overflow: ellipsis; white-space: nowrap; }
 .km-readers > small { color: var(--arden-text-secondary); font-size: 11px; }
 .km-library button, .km-catalog button { cursor: pointer; transition: background .15s ease, border-color .15s ease; }
 .km-library button:focus-visible, .km-catalog button:focus-visible, .km-metadata-fields :focus-visible { outline: 2px solid var(--arden-violet); outline-offset: 3px; }

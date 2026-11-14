@@ -14,13 +14,14 @@ const collection = { id: "collection", name: "Employee handbook", description: "
   cover: "handbook" as const, documentIds: ["readable"] };
 const catalog: api.KnowledgeCatalog = { canManage: false, topics: [topic], collections: [collection] };
 const publication: api.PublishedKnowledge = { id: "readable", draftId: "draft", title: "Working together", classification: "INTERNAL",
-  responsibleDepartmentId: "hr", responsibleDepartmentName: "HR", documentCode: "ARD-123", audienceIds: [], contentHash: "hash",
+  responsibleDepartmentId: "hr", responsibleDepartmentName: "HR", audienceIds: [], contentHash: "hash",
   publishedAt: "2026-11-12T10:00:00Z", validFrom: "2026-11-12T10:00:00Z", validUntil: null,
   management: { type: "Guide", topicId: topic.id, topicName: topic.name, version: "1.0", effectiveDate: "2027-01-01",
     expirationDate: null, changeNote: "", releaseKind: "NEW" } };
 describe("live Library management components", () => {
   it("uses exact canonical fields, not title prefixes, and keeps sort/filter behavior deterministic", () => {
-    expect(filterLibrary([publication], catalog, "ARD-123", emptyLibraryFilters())).toHaveLength(1);
+    // Decision 0021: there is no Document Code to search.
+    expect(filterLibrary([publication], catalog, "ARD-123", emptyLibraryFilters())).toHaveLength(0);
     expect(filterLibrary([publication], catalog, "HR", emptyLibraryFilters())).toHaveLength(1);
     expect(filterLibrary([publication], catalog, "", { ...emptyLibraryFilters(), type: "Procedure" })).toEqual([]);
     expect(filterLibrary([publication], catalog, "", { ...emptyLibraryFilters(), collectionId: "forged" })).toEqual([]);
@@ -68,7 +69,8 @@ describe("live Library management components", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" })); expect(close).toHaveBeenCalledOnce(); restore();
   });
   it("does not default readership, shows optional expiration, and looks up explicit members", async () => {
-    vi.spyOn(api, "findKnowledgeReaders").mockResolvedValue([{ id: "reader", name: "Selected colleague" }]);
+    vi.spyOn(api, "findKnowledgeReaders").mockResolvedValue([{ id: "reader", name: "Selected colleague",
+      email: "colleague@example.test", department: "HR" }]);
     const onReaders = vi.fn();
     const view = render(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: null, topics: [topic], departments: [],
       busy: false, isUpdate: false, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders }));
@@ -78,8 +80,18 @@ describe("live Library management components", () => {
     expect(onReaders).toHaveBeenCalledWith({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] });
     view.rerender(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] },
       topics: [topic], departments: [], busy: false, isUpdate: true, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders }));
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find members" }), { target: { value: "Selected" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Selected colleague" })).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: "Selected colleague" })); expect(onReaders).toHaveBeenLastCalledWith({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: ["reader"] });
+    fireEvent.change(screen.getByRole("searchbox", { name: "Add people by name or email" }), { target: { value: "colleague@example" } });
+    // Decision 0021: suggestions show the name, full email and department, like sharing in Google Drive.
+    const suggestion = await screen.findByRole("button", { name: "Add Selected colleague, colleague@example.test" });
+    expect(suggestion.textContent).toContain("colleague@example.test · HR");
+    expect(api.findKnowledgeReaders).toHaveBeenLastCalledWith("web", "org", "colleague@example", []);
+    fireEvent.click(suggestion); expect(onReaders).toHaveBeenLastCalledWith({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: ["reader"] });
+  });
+  it("says when a pasted email is not a member of the organization (decision 0021)", async () => {
+    vi.spyOn(api, "findKnowledgeReaders").mockResolvedValue([]);
+    render(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] },
+      topics: [topic], departments: [], busy: false, isUpdate: false, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders: vi.fn() }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Add people by name or email" }), { target: { value: "outsider@other.test" } });
+    expect(await screen.findByText("No member with this email in this organization.")).toBeTruthy();
   });
 });

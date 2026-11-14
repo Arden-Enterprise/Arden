@@ -14,6 +14,6 @@ export function readerCitation(metadata: PublishedKnowledge, publication: string
     title: metadata.title, version: metadata.management?.version ?? "Version unavailable",
     scope: metadata.targetReaders?.mode === "SELECTED_MEMBERS" ? "Selected readers"
       : metadata.targetReaders?.mode === "DEPARTMENT" ? "Department" : "Organization",
-    classification: metadata.classification, documentCode: metadata.documentCode ?? null,
+    classification: metadata.classification, documentCode: null,
     startOffset, endOffset: startOffset + Array.from(quote).length };
 }
