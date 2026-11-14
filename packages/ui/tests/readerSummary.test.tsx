@@ -117,6 +117,9 @@ describe("exact-version on-request Summary reader", () => {
     expect(h.check).toHaveBeenCalledOnce();
     await act(async () => pending.resolve());
     expect(screen.getByText("Only approved readers can use this guidance.")).toBeTruthy();
+    // Some browsers deliver focus after the visible event's request already completed.
+    fireEvent.focus(window); fireEvent(document, new Event("visibilitychange"));
+    await act(async () => {}); expect(h.check).toHaveBeenCalledOnce();
     expect(h.generation).toHaveBeenCalledOnce();
   });
   it("withholds generation completed while blurred until access is checked on return", async () => {

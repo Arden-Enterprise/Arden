@@ -74,10 +74,12 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
   onVersionChange?: (versionId: string) => void;
   summaryOptions?: ReaderSummaryOptions;
 }) {
-  const summary = useReaderSummary(summaryOptions), summaryId = useId(), summaryButton = useRef<HTMLButtonElement>(null);
-  const [questionOpen, setQuestionOpen] = useState(false), questionButton = useRef<HTMLButtonElement>(null);
-  const closeSummary = () => { summary.close(); summaryButton.current?.focus(); };
-  const closeQuestion = () => { setQuestionOpen(false); questionButton.current?.focus(); };
+  const [panel, setPanel] = useState<"summary" | "question" | null>(null);
+  const [questionMounted, setQuestionMounted] = useState(false), questionButton = useRef<HTMLButtonElement>(null);
+  const summary = useReaderSummary(summaryOptions ? { ...summaryOptions, visible: panel === "summary" } : undefined);
+  const summaryId = useId(), summaryButton = useRef<HTMLButtonElement>(null);
+  const closeSummary = () => { summary.close(); setPanel(null); summaryButton.current?.focus(); };
+  const closeQuestion = () => { setQuestionMounted(false); setPanel(null); questionButton.current?.focus(); };
   const readerRef = useRef<HTMLDivElement>(null);
   const [informationCollapsed, setInformationCollapsed] = useState(readInformationCollapsed);
   const toggleInformation = (collapsed: boolean) => {
@@ -114,8 +116,8 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
   if (!activeVersion) return null;
 
   return <div ref={readerRef} className="knowledge-reader-page" onKeyDown={event => {
-    if (event.key === "Escape" && questionOpen) { event.stopPropagation(); closeQuestion(); return; }
-    if (event.key === "Escape" && summary.state.status !== "closed") { event.stopPropagation(); closeSummary(); }
+    if (event.key === "Escape" && panel === "question") { event.stopPropagation(); closeQuestion(); return; }
+    if (event.key === "Escape" && panel === "summary") { event.stopPropagation(); closeSummary(); }
   }}>
     <button type="button" className="knowledge-reader-back" onClick={onBack}>
       <Icon name="arrow" size={12} />Library
@@ -172,14 +174,21 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
           <small>{activeVersion.label}</small>
           {(surfaceActions || summaryOptions) && <div className="knowledge-reader-surface-actions">
             {summaryOptions && <button ref={summaryButton} type="button" className="secondary-button reader-ai-summary-trigger"
-              aria-expanded={summary.state.status !== "closed"} aria-controls={summaryId}
-              onClick={() => { setQuestionOpen(false); if (summary.state.status === "closed") void summary.open(); else closeSummary(); }}>Summary</button>}
+              aria-expanded={panel === "summary" && summary.state.status !== "closed"} aria-controls={summaryId}
+              onClick={() => {
+                if (panel === "summary") { closeSummary(); return; }
+                setPanel("summary"); if (summary.state.status === "closed") void summary.open();
+              }}>Summary</button>}
             {summaryOptions && <button ref={questionButton} type="button" className="secondary-button"
-              aria-expanded={questionOpen} onClick={() => { summary.close(); setQuestionOpen(!questionOpen); }}>Ask this document</button>}
+              aria-expanded={panel === "question"} onClick={() => {
+                if (panel === "question") { closeQuestion(); return; }
+                setQuestionMounted(true); setPanel("question");
+              }}>Ask this document</button>}
             {surfaceActions}</div>}
         </header>
-        <ReaderSummaryPanel id={summaryId} summary={summary} onClose={closeSummary} />
-        {questionOpen && summaryOptions?.active && <ReaderQuestionPanel options={summaryOptions} onClose={closeQuestion}
+        {panel === "summary" && <ReaderSummaryPanel id={summaryId} summary={summary} onClose={closeSummary} />}
+        {questionMounted && summaryOptions?.active && <ReaderQuestionPanel
+          options={{ ...summaryOptions, visible: panel === "question" }} onClose={closeQuestion}
           key={JSON.stringify([summaryOptions.platform, summaryOptions.context])} />}
         <div className="knowledge-reader-content">{content}</div>
       </article>

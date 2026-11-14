@@ -250,6 +250,33 @@ known access loss also closes the human document in the parent. Revalidation fai
 never starts another generation automatically. Unseen remote revocation cannot recall
 content already delivered; no new notification/polling system is implied.
 
+#### RA-04/05 refinement: switching panels is not Close (accepted 14 November 2026)
+
+Originator and decision owner: requesting project maintainer; record author: implementation
+agent. The maintainer explicitly approved retaining Summary and document Q&A when switching
+between them during the same exact-version reader session, and authorized staging delivery.
+This supersedes the earlier RA-05 switch-discards-question behavior, not explicit Close or
+the reauthorization rules above. No teammate consultation is claimed.
+
+- Summary and Q&A are mutually exclusive **visible panels**, with separate ephemeral results.
+  Switching hides the other panel without discarding its question, result or in-flight request.
+  Returning never automatically generates again; a retained result is withheld until the
+  existing no-model access probe succeeds. An in-flight response completed while hidden is
+  similarly withheld. Only the visible panel checks access on window return.
+- Explicit Close/Escape (or toggling the already-open action off) cancels local waiting and
+  discards that panel, leaving the other panel's hidden state intact. Context change, leaving
+  the reader, inactive session and unmount still discard both. Retention is limited to this
+  mounted reader, not localStorage, a multi-document cache or persisted history.
+- Focus/visibility notifications for one suspension trigger one access check, even if focus
+  arrives after a visible-event check has completed. Blur/return remains fail-closed; this
+  refinement does not introduce a grace period for revoked readers or suppress checks at
+  citation navigation. Failed checks never regenerate; denial closes the parent reader.
+
+Acceptance: round trips call generation once per operation; delayed hidden responses do not
+leak; explicit Close and context changes clear the intended state; denied/offline revalidation
+withholds retained output; duplicate return events do not double-check. Regression cases live
+in `packages/ui/tests/readerSummary.test.tsx` and `readerQuestion.test.tsx`.
+
 Citation navigation stays in the open exact version, displays the original excerpt,
 uses the trusted source block/section anchor and PDF page when unambiguous. Do not
 claim precise PDF text highlighting with the browser-native PDF viewer; its supported

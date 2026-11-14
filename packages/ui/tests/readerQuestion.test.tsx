@@ -77,14 +77,63 @@ describe("Ask this document reader", () => {
     fireEvent.click(screen.getByRole("button", { name: "Answer" })); await act(async () => {});
     expect(h.ask.mock.calls[1][2]).toBe("And the previous secret?"); expect(h.ask.mock.calls[1]).toHaveLength(4);
   });
-  it("keeps Summary and Q&A mutually exclusive without retaining old questions", async () => {
+  it("switches panels without regenerating and revalidates retained results before revealing them", async () => {
     const h = fixture(); h.submit(); await screen.findByText("Approved readers only.");
-    vi.spyOn(summaryApi, "generateReaderSummary").mockImplementation(async (_p, context, requestId) => readerSummaryFixture(requestId, context));
+    const summary = vi.spyOn(summaryApi, "generateReaderSummary").mockImplementation(async (_p, context, requestId) => readerSummaryFixture(requestId, context));
     fireEvent.click(screen.getByRole("button", { name: "Summary" }));
     await screen.findByText("Only approved readers can use this guidance.");
     expect(screen.queryByRole("textbox", { name: "Your question" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
     expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
+    await screen.findByText("Approved readers only.");
+    expect((screen.getByRole("textbox", { name: "Your question" }) as HTMLTextAreaElement).value).toBe("Who may read?");
+    const pending = deferred<void>(); h.access.mockReturnValue(pending.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    expect(screen.getByText("Checking access…")).toBeTruthy();
+    expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
+    await act(async () => pending.resolve());
+    await screen.findByText("Only approved readers can use this guidance.");
+    expect(summary).toHaveBeenCalledOnce(); expect(h.ask).toHaveBeenCalledOnce();
+    expect(h.access).toHaveBeenCalledTimes(2);
+  });
+  it("keeps in-flight Summary across panel switches without starting another generation", async () => {
+    const h = fixture(), pending = deferred<ReturnType<typeof readerSummaryFixture>>();
+    const summary = vi.spyOn(summaryApi, "generateReaderSummary").mockReturnValue(pending.promise);
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    await act(async () => pending.resolve(readerSummaryFixture(readerId(7))));
+    expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Only approved readers can use this guidance.");
+    expect(summary).toHaveBeenCalledOnce(); expect(h.access).toHaveBeenCalledOnce();
+  });
+  it("does not revive retained Q&A after access is revoked while viewing Summary", async () => {
+    const h = fixture(); h.submit(); await screen.findByText("Approved readers only.");
+    vi.spyOn(summaryApi, "generateReaderSummary").mockImplementation(async (_p, context, requestId) => readerSummaryFixture(requestId, context));
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Only approved readers can use this guidance.");
+    h.access.mockRejectedValue(new ApiError(404, "revoked"));
+    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    await screen.findByText("This document is unavailable.");
+    expect(screen.queryByText("Approved readers only.")).toBeNull();
+    expect(h.options.onAccessLost).toHaveBeenCalledOnce(); expect(h.ask).toHaveBeenCalledOnce();
+  });
+  it("explicit Close discards only that panel, while reader context changes discard both", async () => {
+    const h = fixture(); h.submit(); await screen.findByText("Approved readers only.");
+    const summary = vi.spyOn(summaryApi, "generateReaderSummary").mockImplementation(async (_p, context, requestId) => readerSummaryFixture(requestId, context));
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Only approved readers can use this guidance.");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    await screen.findByText("Approved readers only.");
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Only approved readers can use this guidance.");
+    expect(summary).toHaveBeenCalledTimes(2); expect(h.ask).toHaveBeenCalledOnce();
+    h.view.rerender(createElement(KnowledgeDocumentDetail, { ...h.props,
+      summaryOptions: { ...h.options, context: { ...readerContext, versionId: readerId(90) } } }));
+    expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    expect(screen.queryByText("Approved readers only.")).toBeNull();
     expect((screen.getByRole("textbox", { name: "Your question" }) as HTMLTextAreaElement).value).toBe("");
   });
 });

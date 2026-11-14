@@ -5,7 +5,7 @@ import type { ReaderSummaryContext } from "../shared/reader-summary-contracts";
 import type { Platform } from "../shared/types";
 import type { KnowledgeCitationReference } from "./knowledgeCitation";
 
-export type ReaderOperationOptions = { platform: Platform; context: ReaderSummaryContext; active: boolean;
+export type ReaderOperationOptions = { platform: Platform; context: ReaderSummaryContext; active: boolean; visible?: boolean;
   onCitation: (citation: KnowledgeCitationReference | null) => void; onAccessLost: () => void };
 type State<Result> = { key: string | null; status: "closed" | "loading" | "checking" | "ready" | "error";
   result?: Result; message?: string; retry?: boolean };
@@ -16,6 +16,7 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
 }) {
   const key = options?.active ? JSON.stringify([options.platform, options.context.organizationId, options.context.documentId,
     options.context.versionId, options.context.contentHash]) : null;
+  const visible = options?.visible !== false;
   const current = useRef({ key, options, config }); current.current = { key, options, config };
   const sequence = useRef(0), controller = useRef<AbortController | null>(null);
   const operation = useRef<"generate" | "check" | null>(null);
@@ -70,7 +71,13 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
   };
   const latestCheck = useRef(check); latestCheck.current = check;
   useEffect(() => {
-    paused.current = document.visibilityState === "hidden";
+    return () => {
+      invalidate(); candidate.current = null; lastInput.current = null;
+      options?.onCitation(null);
+    };
+  }, [key]);
+  useEffect(() => {
+    paused.current = document.visibilityState === "hidden" || !visible;
     const suspend = () => {
       paused.current = true;
       if (candidate.current?.key !== key || !key) return;
@@ -78,18 +85,20 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
       current.current.options?.onCitation(null);
     };
     const resume = () => {
-      if (document.visibilityState !== "hidden") { paused.current = false; void latestCheck.current(); }
+      if (paused.current && visible && document.visibilityState !== "hidden") {
+        paused.current = false; void latestCheck.current();
+      }
     };
-    const visibility = () => document.visibilityState === "hidden" ? suspend() : resume();
+    const visibility = () => document.visibilityState === "hidden" || !visible ? suspend() : resume();
+    if (paused.current) suspend();
+    else if (candidate.current?.key === key) void latestCheck.current();
     window.addEventListener("blur", suspend); window.addEventListener("focus", resume);
     document.addEventListener("visibilitychange", visibility);
     return () => {
       window.removeEventListener("blur", suspend); window.removeEventListener("focus", resume);
       document.removeEventListener("visibilitychange", visibility);
-      invalidate(); candidate.current = null; lastInput.current = null;
-      options?.onCitation(null);
     };
-  }, [key]);
+  }, [key, visible]);
   return { state, open, close, navigate: check,
     retry: () => candidate.current?.key === key ? check() : lastInput.current ? open(lastInput.current.value) : undefined };
 }
