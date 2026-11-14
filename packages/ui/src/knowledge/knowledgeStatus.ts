@@ -1,4 +1,5 @@
 import type { KnowledgeDraftSummary, KnowledgeSubmission } from "../shared/api-client";
+import { reviewRequestPresentation } from "./reviewRequest";
 
 export function statusLabel(status: KnowledgeSubmission["status"]): string {
   return ({ PENDING_REVIEW: "Awaiting review", APPROVED: "Approved", REJECTED: "Rejected",
@@ -17,6 +18,10 @@ export function draftStatus(item: Pick<KnowledgeDraftSummary, "hasPendingSubmiss
   if (item.hasPendingSubmission) return { label: "Awaiting review", tone: "is-info" };
   const hasAudiences = Array.isArray(item.audienceIds) && item.audienceIds.length > 0;
   if (!latest) return { label: item.responsibleDepartmentId && item.targetScopeType && hasAudiences ? "Draft" : "Draft · Details needed", tone: "" };
+  if (latest.status === "APPROVED" && latest.publicationState === "WITHDRAWN") return { label: "Withdrawn", tone: "" };
+  if (latest.status === "APPROVED" && latest.requestType && latest.requestType !== "CONTENT") {
+    return { label: reviewRequestPresentation(latest.requestType).success, tone: "is-info" };
+  }
   if (latest.status === "APPROVED" && latest.publicationState === "SUPERSEDED") return { label: "Newer version published", tone: "is-info" };
   if (latest.status === "APPROVED" && latest.publicationState === "FAILED") return { label: "Publication failed", tone: "is-danger" };
   if (latest.status === "APPROVED") return latest.publicationState === "ACTIVE"

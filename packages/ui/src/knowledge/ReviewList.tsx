@@ -30,7 +30,7 @@ export function initialsOf(name: string): string {
 
 const publicationLabels: Record<DecidedKnowledgeReview["publicationState"], string> = {
   NONE: "", PREPARING: "Preparing publication", ACTIVE: "Published", FAILED: "Publication failed",
-  SUPERSEDED: "Newer version published",
+  SUPERSEDED: "Newer version published", WITHDRAWN: "Withdrawn",
 };
 
 export function ReviewList({ pending, decided, departmentName, busy, onOpen, onRefresh }: {
