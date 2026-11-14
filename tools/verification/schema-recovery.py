@@ -16,7 +16,7 @@ import uuid
 
 def validate_migration_inventory(migrations):
     """Keep this destructive disposable rehearsal bounded to reviewed history."""
-    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 32)]:
+    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 33)]:
         raise ValueError("Revisit this bounded rehearsal before changing migration inventory")
 
 
