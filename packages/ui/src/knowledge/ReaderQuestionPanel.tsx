@@ -8,6 +8,7 @@ export function ReaderQuestionPanel({ options, onClose }: { options: ReaderOpera
     label: "Document Q&A", run: (config, input, signal) => askReaderQuestion(config.platform, config.context, input, signal),
   });
   const { state } = operation, waiting = state.status === "loading" || state.status === "checking";
+  if (options.visible === false) return null;
   return <section className="reader-ai-summary" aria-labelledby={`${id}-title`} onKeyDown={event => {
     if (event.key === "Escape") { event.stopPropagation(); operation.close(); onClose(); }
   }}>

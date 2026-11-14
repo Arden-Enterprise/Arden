@@ -1,5 +1,14 @@
 # Implementation status and rollout boundaries
 
+## Reader panel session follow-up — 14 November 2026
+
+The [Reader AI refinement](reader-ai.md#ra-0405-refinement-switching-panels-is-not-close-accepted-14-november-2026)
+retains Summary/Q&A only within the same mounted exact-version reader and revalidates
+before revealing retained results. Explicit dismissal/context change still clears them.
+Local regression tests cover switching/in-flight/denied cases and duplicate return events;
+integration, CI and staging activation require their own final-revision evidence.
+No model, provider budget, persistent cache or AI-service change is introduced.
+
 ## Governed answering v2 — feature checkout, 13 November 2026
 
 The paired [governed hybrid answering contract](governed-hybrid-answering.md)
