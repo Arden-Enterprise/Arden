@@ -335,3 +335,46 @@ def test_installed_adapter_maps_output_limit_to_responses_without_request() -> N
     assert payload["max_output_tokens"] == 4_096
     assert payload["store"] is False
     assert payload["reasoning"] == {"effort": "high"}
+
+
+@pytest.mark.parametrize(("failure", "code"), [
+    (TimeoutError("private timeout"), "TIMEOUT"),
+    (InvalidSummary("private citation"), "INVALID_OUTPUT"),
+    (RuntimeError("private provider response"), "UNAVAILABLE"),
+])
+def test_failure_categories_survive_task_group_and_log_only_safe_metadata(
+    failure, code, caplog,
+) -> None:
+    class Broken:
+        async def generate(self, window):
+            raise failure
+
+    app = create_api(service_token=SecretStr("test-only"),
+                     summaries=ReaderSummarizer(Broken()))
+    payload = source().model_dump(mode="json", by_alias=True)
+    with TestClient(app) as client:
+        response = client.post("/v1/reader-summaries", json=payload,
+                               headers={"Authorization": "Bearer test-only"})
+    assert response.status_code == 502
+    assert response.json() == {"detail": {"code": code}}
+    events = [json.loads(record.message) for record in caplog.records
+              if record.message.startswith('{"event": "reader_summary_failed"')]
+    assert len(events) == 1 and events[0]["code"] == code
+    assert events[0]["operationId"] == payload["requestId"]
+    assert isinstance(events[0]["durationMs"], int)
+    assert "private" not in caplog.text + response.text
+    assert payload["markdown"] not in caplog.text + response.text
+
+
+@pytest.mark.parametrize(("status", "code"), [(401, "PROVIDER_AUTH"),
+                                             (403, "PROVIDER_AUTH"), (429, "PROVIDER_BUSY")])
+def test_provider_http_categories_without_retaining_exception_details(status, code) -> None:
+    from arden_ai.presentation.summary_failures import summary_failure
+
+    class ProviderError(Exception):
+        status_code = status
+
+    nested = ExceptionGroup("private group", [ExceptionGroup("private nested", [
+        ProviderError("private token, prompt and URL"),
+    ])])
+    assert summary_failure(nested) == code

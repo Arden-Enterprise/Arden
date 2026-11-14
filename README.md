@@ -80,6 +80,17 @@ on each side. Each serialized prompt has an 8,000-local-token ceiling including 
 no tail or evidence is silently truncated. The tokenizer encoding must be available;
 failure never falls back to an uncounted model call.
 
+Summary failures now return a closed `detail.code` envelope on HTTP 502: `TIMEOUT`,
+`PROVIDER_BUSY`, `PROVIDER_AUTH`, `INVALID_OUTPUT`, or `UNAVAILABLE`. Task-group
+failures are categorized without exposing provider messages. HTTP 422 remains the
+unsupported/preflight response, with no generation calls. Core understands both
+this additive envelope and the older generic failure; successful schemas are unchanged.
+Failure logs contain only operation ID, stage, safe code and elapsed milliseconds.
+The image disables automatic access logs. On an authorized staging rollout, enable
+bounded container retention (for example json-file, max-size 1m/max-file 2); a
+runtime with logging disabled still cannot retain these events. No paid call,
+new dependency, model, index or DB change is required by this correction.
+
 The existing configured model/effort is unchanged. Summary alone limits output to
 4,096 tokens including reasoning per call, 45 seconds per call, two concurrent windows
 and a 180-second operation deadline. Schema/quote errors have one identical-input

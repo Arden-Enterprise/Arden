@@ -1,6 +1,8 @@
 import asyncio
 import hmac
+import json
 import logging
+import time
 from collections.abc import Callable
 from typing import Annotated
 
@@ -27,6 +29,7 @@ from arden_ai.contracts.governed import (
 )
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
+from arden_ai.presentation.summary_failures import summary_failure
 
 logger = logging.getLogger(__name__)
 
@@ -104,15 +107,19 @@ def create_api(
         request: ReaderSourceResponse,
         service: Annotated[ReaderSummarizer, Depends(runtime_summaries)],
     ) -> ReaderSummaryResponse:
+        started = time.monotonic()
         try:
             return await service.summarize(request)
         except UnsupportedSummary as error:
             raise HTTPException(status_code=422, detail="Summary source is unsupported") from error
         except Exception as error:
-            logger.warning("Reader Summary failed", extra={
-                "request_id": str(request.request_id), "error_type": type(error).__name__,
-            })
-            raise HTTPException(status_code=502, detail="Summary could not be generated") from error
+            code = summary_failure(error)
+            logger.warning(json.dumps({
+                "event": "reader_summary_failed", "operationId": str(request.request_id),
+                "stage": "GENERATION", "code": code,
+                "durationMs": round((time.monotonic() - started) * 1_000),
+            }))
+            raise HTTPException(status_code=502, detail={"code": code}) from None
 
     @application.post(
         "/v1/reader-sources",
