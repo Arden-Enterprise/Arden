@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/shared/api-client";
 import { ServerKnowledgeFeaturePage } from "../src/knowledge/ServerKnowledgeFeaturePage";
@@ -41,6 +41,8 @@ describe("publication request review presentation", () => {
     }
     fireEvent.click(row);
     const approve = await screen.findByRole("button", { name: "Approve", exact: true });
+    // The loaded pane may render before run() clears busy. A user cannot click its disabled action.
+    await waitFor(() => expect(approve.hasAttribute("disabled")).toBe(false));
     if (type && type !== "CONTENT") {
       expect(screen.getByText(detail.requestReason!)).toBeTruthy();
       expect(screen.getByText(detail.requestReason!).querySelector("b")).toBeNull();
