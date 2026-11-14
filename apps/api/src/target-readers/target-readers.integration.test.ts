@@ -744,7 +744,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (!repository) throw new Error("Test database is unavailable");
       const { draftId, versionId } = await publish("Published then narrowed");
       const before = await currentPointer(draftId);
-      const readers = { mode: "SELECTED_MEMBERS" as const, departmentId: null, memberIds: [ids.engineerM, ids.outsiderM] };
+      const readers = { mode: "SELECTED_MEMBERS" as const, departmentId: null,
+        memberIds: [ids.engineerM, ids.outsiderM, ids.authorM].sort() };
       const requested = await ask(draftId, { type: "READER_CHANGE", reason: "Only the rollout team", targetReaders: readers });
       if (requested.kind !== "requested") throw new Error("Request failed");
       const decided = await repository.decideReview(ids.author, ids.orgA, requested.submission.id, "APPROVE",
@@ -763,7 +764,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       // A later approval removes the engineer. Replaying the older approved request must not restore them,
       // even when called directly by the original Organization Admin through the runtime role.
       const narrower = await ask(draftId, { type: "READER_CHANGE", reason: "Restrict the rollout",
-        targetReaders: { mode: "SELECTED_MEMBERS", memberIds: [ids.outsiderM] } });
+        targetReaders: { mode: "SELECTED_MEMBERS", memberIds: [ids.outsiderM, ids.authorM] } });
       if (narrower.kind !== "requested") throw new Error("Request failed");
       await expect(repository.decideReview(ids.author, ids.orgA, narrower.submission.id, "APPROVE",
         narrower.submission.snapshotVersionId, narrower.submission.contentHash, null, randomUUID(), "readers-narrow"))
