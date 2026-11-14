@@ -277,6 +277,12 @@ leak; explicit Close and context changes clear the intended state; denied/offlin
 withholds retained output; duplicate return events do not double-check. Regression cases live
 in `packages/ui/tests/readerSummary.test.tsx` and `readerQuestion.test.tsx`.
 
+Context reset must clear rendered state, not only the retained-result reference. Returning
+from another version or an inactive reader to the original identity must not resurrect
+the old result. The first explicit Summary click in the new session starts a fresh request;
+mere context reactivation never generates automatically. Round-trip identity regressions
+cover both active → inactive → active and version A → B → A.
+
 Citation navigation stays in the open exact version, displays the original excerpt,
 uses the trusted source block/section anchor and PDF page when unambiguous. Do not
 claim precise PDF text highlighting with the browser-native PDF viewer; its supported

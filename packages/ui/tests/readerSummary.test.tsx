@@ -132,6 +132,19 @@ describe("exact-version on-request Summary reader", () => {
     fireEvent.focus(window); await screen.findByText("Only approved readers can use this guidance.");
     expect(h.check).toHaveBeenCalledOnce(); expect(h.generation).toHaveBeenCalledOnce();
   });
+  it.each(["inactive", "version"])("does not resurrect a discarded result when returning from %s to the original context", async mode => {
+    const h = fixture(), view = render(createElement(KnowledgeDocumentDetail, h.props));
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Only approved readers can use this guidance.");
+    const options = { ...h.options, context: { ...h.options.context } };
+    if (mode === "inactive") options.active = false; else options.context.versionId = readerId(90);
+    view.rerender(createElement(KnowledgeDocumentDetail, { ...h.props, summaryOptions: options }));
+    view.rerender(createElement(KnowledgeDocumentDetail, h.props));
+    expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Only approved readers can use this guidance.");
+    expect(h.generation).toHaveBeenCalledTimes(2);
+  });
   it("renders generated strings as text, never model-supplied HTML", async () => {
     const h = fixture(); h.generation.mockImplementation(async (_p, context, id) => { const value = readerSummaryFixture(id, context); value.points[0].text = '<img src=x onerror="alert(1)">'; return value; });
     const view = render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
