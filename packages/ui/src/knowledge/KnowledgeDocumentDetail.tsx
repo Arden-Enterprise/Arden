@@ -176,7 +176,7 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
             {summaryOptions && <button ref={summaryButton} type="button" className="secondary-button reader-ai-summary-trigger"
               aria-expanded={panel === "summary" && summary.state.status !== "closed"} aria-controls={summaryId}
               onClick={() => {
-                if (panel === "summary") { closeSummary(); return; }
+                if (panel === "summary" && summary.state.status !== "closed") { closeSummary(); return; }
                 setPanel("summary"); if (summary.state.status === "closed") void summary.open();
               }}>Summary</button>}
             {summaryOptions && <button ref={questionButton} type="button" className="secondary-button"

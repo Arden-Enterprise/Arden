@@ -71,6 +71,8 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
   };
   const latestCheck = useRef(check); latestCheck.current = check;
   useEffect(() => {
+    // Clear the rendered state as well as refs: A → B → A must not revive A's old result.
+    setState({ key, status: "closed" });
     return () => {
       invalidate(); candidate.current = null; lastInput.current = null;
       options?.onCitation(null);
