@@ -4,7 +4,15 @@ from pathlib import Path
 from pydantic.json_schema import models_json_schema
 
 from arden_ai.contracts.answering import AnswerRequest, AnswerResponse
+from arden_ai.contracts.governed import (
+    GenerationRequest,
+    GenerationResponse,
+    RetrievalRequest,
+    RetrievalResponse,
+)
 from arden_ai.contracts.indexing import IndexGenerationManifest, IndexGenerationRequest
+from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
+from arden_ai.contracts.reader_summary import ReaderSummaryResponse
 from arden_ai.domain.semantic_document import SemanticDocument
 
 
@@ -24,6 +32,26 @@ def build_schemas() -> dict[str, dict[str, object]]:
         title="Arden answer contract v1",
     )
     return {
+        "reader-summary-v1.schema.json": models_json_schema(
+            [(ReaderSourceResponse, "validation"), (ReaderSummaryResponse, "validation")],
+            by_alias=True,
+            title="Arden reader Summary contract v1",
+        )[1],
+        "reader-source-v1.schema.json": models_json_schema(
+            [(ReaderSourceRequest, "validation"), (ReaderSourceResponse, "validation")],
+            by_alias=True,
+            title="Arden reader source contract v1",
+        )[1],
+        "answer-v2.schema.json": models_json_schema(
+            [
+                (RetrievalRequest, "validation"),
+                (RetrievalResponse, "validation"),
+                (GenerationRequest, "validation"),
+                (GenerationResponse, "validation"),
+            ],
+            by_alias=True,
+            title="Arden governed answer contract v2",
+        )[1],
         "answer-v1.schema.json": answering_root,
         "semantic-document-v1.schema.json": semantic,
         "index-generation-v1.schema.json": indexing_root,
@@ -40,4 +68,3 @@ def main() -> None:
             json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-

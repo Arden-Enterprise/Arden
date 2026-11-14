@@ -1,0 +1,392 @@
+{
+  "$defs": {
+    "DialogueTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Answer",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question",
+        "answer"
+      ],
+      "title": "DialogueTurn",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkId": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunkid",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 16000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "contentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contenthash",
+          "type": "string"
+        },
+        "endOffset": {
+          "exclusiveMinimum": 0,
+          "title": "Endoffset",
+          "type": "integer"
+        },
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "maxLength": 800,
+          "title": "Label",
+          "type": "string"
+        },
+        "parentSectionBlockId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parentsectionblockid"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        },
+        "sourceBlockIds": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Sourceblockids",
+          "type": "array"
+        },
+        "startOffset": {
+          "minimum": 0,
+          "title": "Startoffset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "generationId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "chunkId",
+        "contentHash",
+        "content",
+        "startOffset",
+        "endOffset",
+        "sourceBlockIds",
+        "parentSectionBlockId"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "EvidenceCitation": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkId": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunkid",
+          "type": "string"
+        },
+        "quote": {
+          "maxLength": 1200,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "chunkId",
+        "quote"
+      ],
+      "title": "EvidenceCitation",
+      "type": "object"
+    },
+    "GenerationRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": 2,
+          "default": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/DialogueTurn"
+          },
+          "maxItems": 4,
+          "title": "History",
+          "type": "array"
+        },
+        "organizationId": {
+          "format": "uuid",
+          "title": "Organizationid",
+          "type": "string"
+        },
+        "purpose": {
+          "default": "PUBLISHED_CHAT",
+          "enum": [
+            "PUBLISHED_CHAT",
+            "READER_QUESTION"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "query": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "organizationId",
+        "query",
+        "evidence"
+      ],
+      "title": "GenerationRequest",
+      "type": "object"
+    },
+    "GenerationResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Answer",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/EvidenceCitation"
+          },
+          "maxItems": 12,
+          "title": "Citations",
+          "type": "array"
+        },
+        "contractVersion": {
+          "const": 2,
+          "default": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ANSWERED",
+            "INSUFFICIENT_EVIDENCE"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "usedEvidence": {
+          "items": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Usedevidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requestId",
+        "status",
+        "answer",
+        "citations",
+        "usedEvidence"
+      ],
+      "title": "GenerationResponse",
+      "type": "object"
+    },
+    "RetrievalRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "allowedGenerationIds": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Allowedgenerationids",
+          "type": "array"
+        },
+        "contractVersion": {
+          "const": 2,
+          "default": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/DialogueTurn"
+          },
+          "maxItems": 4,
+          "title": "History",
+          "type": "array"
+        },
+        "organizationId": {
+          "format": "uuid",
+          "title": "Organizationid",
+          "type": "string"
+        },
+        "purpose": {
+          "default": "PUBLISHED_CHAT",
+          "enum": [
+            "PUBLISHED_CHAT",
+            "READER_QUESTION"
+          ],
+          "title": "Purpose",
+          "type": "string"
+        },
+        "query": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "sourceHints": {
+          "items": {
+            "$ref": "#/$defs/SourceHint"
+          },
+          "maxItems": 500,
+          "title": "Sourcehints",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requestId",
+        "organizationId",
+        "query",
+        "allowedGenerationIds"
+      ],
+      "title": "RetrievalRequest",
+      "type": "object"
+    },
+    "RetrievalResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": 2,
+          "default": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "maxItems": 8,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "retrievalMode": {
+          "enum": [
+            "HYBRID",
+            "SEMANTIC",
+            "LEXICAL"
+          ],
+          "title": "Retrievalmode",
+          "type": "string"
+        },
+        "standaloneQuery": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Standalonequery",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "standaloneQuery",
+        "retrievalMode",
+        "evidence"
+      ],
+      "title": "RetrievalResponse",
+      "type": "object"
+    },
+    "SourceHint": {
+      "additionalProperties": false,
+      "properties": {
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 800,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "generationId",
+        "label"
+      ],
+      "title": "SourceHint",
+      "type": "object"
+    }
+  },
+  "title": "Arden governed answer contract v2"
+}

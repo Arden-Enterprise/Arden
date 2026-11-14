@@ -1,0 +1,12 @@
+[
+  {"name":"exact-document-code","allowed":["code","general","other"],"relevant":["code"],"semantic":["general","other"],"lexical":["code"]},
+  {"name":"acronym","allowed":["mfa","password"],"relevant":["mfa"],"semantic":["password","mfa"],"lexical":["mfa"]},
+  {"name":"paraphrased-question","allowed":["onboarding","handbook"],"relevant":["onboarding"],"semantic":["onboarding","handbook"],"lexical":["handbook"]},
+  {"name":"vietnamese-terms","allowed":["readers","roles"],"relevant":["readers"],"semantic":["readers"],"lexical":["roles","readers"]},
+  {"name":"cross-document-comparison","allowed":["rule","exception","context"],"relevant":["rule","exception"],"semantic":["rule","context"],"lexical":["exception","rule"]},
+  {"name":"department-scope","allowed":["finance-policy"],"relevant":["finance-policy"],"semantic":["finance-policy"],"lexical":["finance-policy"]},
+  {"name":"current-effective-version","allowed":["effective"],"relevant":["effective"],"semantic":["effective"],"lexical":["effective"]},
+  {"name":"explicit-compare","allowed":["current","upcoming"],"relevant":["current","upcoming"],"semantic":["current"],"lexical":["upcoming"]},
+  {"name":"revoked-sources","allowed":[],"relevant":[],"semantic":[],"lexical":[]},
+  {"name":"unknown-question","allowed":["unrelated"],"relevant":[],"semantic":[],"lexical":[]}
+]

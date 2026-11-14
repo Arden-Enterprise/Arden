@@ -50,10 +50,115 @@ Arden core submits approved immutable snapshots to `POST /v1/index-generations` 
 manifest only after every chunk has been embedded and acknowledged by ChromaDB. Arden core remains
 responsible for validating that manifest and atomically activating the generation.
 
-Arden core calls `POST /v1/answers` with the authenticated actor's current generation allow-list.
-The service applies both organization and generation filters in Chroma, generates a grounded
-answer with OpenAI structured output, and returns evidence identities for a final Core-side access
-recheck before anything reaches the UI.
+The governed caller uses **two separate v2 operations**. Core calls
+`POST /v2/retrievals` with its organization/generation allow-list, bounded authorized
+dialogue and canonical labels. AI combines filtered Chroma semantic search and
+BM25 using deterministic RRF. Core validates raw text/hash/spans against its
+immutable manifest and rechecks access **before** calling `POST /v2/generations`
+with the fixed evidence. Generation uses strict structured output, temporary E
+identifiers and exact quotations. Core rechecks every input, including uncited and
+conversational evidence, persists the private turn atomically and then returns it.
+The old `/v1/answers` remains for deployment compatibility; new Core never falls back.
+
+Reader AI source preparation is additive at `POST /v1/reader-sources`, protected by
+the same service authentication. Purpose `READER_SUMMARY` carries Core's exact
+immutable snapshot and publication identity. It recompiles the canonical text and
+all ordered chunks without an embedding, LLM or index write, returning the full
+Markdown and manifest evidence for Core to compare against its stored ready manifest.
+It is not a Summary generation endpoint and never selects another publication.
+Limits: 200,000 canonical codepoints, 256 chunks, 16,000 codepoints per chunk and
+400,000 aggregate chunk codepoints including overlap; unsupported input fails rather
+than truncating to chat's top eight. See `reader-source-v1.schema.json` and the paired
+`reader-source-v1.json` fixture. Core reauthorizes before transfer and result return.
+
+Reader Summary generation is a separate additive `POST /v1/reader-summaries`, taking
+the validated exact-source envelope, not a browser prompt or a retrieval allow-list.
+It plans the entire canonical text before model calls: at most eight primary windows
+of 6,000 codepoints / 2,000 local `o200k_base` tokens, with 256 neighboring codepoints
+on each side. Each serialized prompt has an 8,000-local-token ceiling including a
+2,000-token schema/framing reserve. Unsupported whole text/overlap fails explicitly;
+no tail or evidence is silently truncated. The tokenizer encoding must be available;
+failure never falls back to an uncounted model call.
+
+The existing configured model/effort is unchanged. Summary alone limits output to
+4,096 tokens including reasoning per call, 45 seconds per call, two concurrent windows
+and a 180-second operation deadline. Schema/quote errors have one identical-input
+repair, transport errors no automatic retry; a failed window cancels/awaits siblings.
+At most 16 calls are possible, not an implied USD cost or spending approval.
+
+Each window proposes one to three short source-cited points. Unique whitespace-only
+quote recovery must match both the supplied slice and the original chunk, with a
+primary-passage citation required. Deterministic synthesis retains all validated
+points in document order and removes only identical duplicates. No second model
+rewrite, cross-document context, OCR, image understanding, tools, history, cache or
+index writes. Core independently checks echoed source identity, full coverage/all
+inputs and raw quotes, reauthorizes again, and derives public citation navigation.
+Strict schema/quotes do not prove semantic completeness or entailment. See
+`reader-summary-v1.schema.json` and the paired synthetic Summary fixture. Backend is
+verified locally with fake providers; reader UI and fresh paid quality checks remain
+separate steps. Deploy this additive AI endpoint before an authorized Core rollout.
+
+### Reader questions — RA-05 local implementation
+
+The existing v2 operations also accept `purpose: READER_QUESTION`. Core resolves
+the exact open publication/generation; retrieval requires exactly one generation,
+no dialogue and no hint outside that allow-list. Generation requires empty history
+and one generation/snapshot/hash across all evidence. Reuse filtered hybrid retrieval,
+never global search followed by an access filter or general conversation context.
+Core checks all evidence against its immutable manifest and reauthorizes before
+generation and after it; this service cannot grant business access or store turns.
+
+Reader generation uses the unchanged configured Luna/high model with a separate
+4,096-output-token cap (including reasoning), 45-second call timeout and no transport
+retry. One same-input output repair remains; the whole reader retrieval/generation
+operations are bounded at 60/110 seconds. Before generation, a 12,000-local-token
+prompt envelope (including 2,000 schema/framing reserve) fails unsupported if exceeded.
+Counts are local safety guards, not billing/context guarantees. Prompt labels/text
+are JSON data, no external tools or history. Core replaces insufficient model prose
+with fixed document-specific copy and independently validates source/citation identity.
+
+No new endpoint, provider/model/dependency, business DB access, cache/index write or
+upload summary. `answer-v2.schema.json` includes the additive purpose; deploy this
+compatible service before a separately authorized Core caller rollout. Existing chat
+behavior is unchanged. Offline scope/filter/timeout/schema tests do not certify
+grounding quality, injection-proof behavior or signed-in/native acceptance.
+
+For v2 generation, a unique literal quote is preferred. If only whitespace differs
+(for example PDF line wrapping), the service requires a unique contiguous match
+inside the cited input chunk and returns the **original source substring**. It does
+not rewrite canonical text/hashes, search another chunk, or accept changed wording,
+punctuation, case, ambiguous repetitions or disjoint passages. The recovered result
+is schema-validated again, including the existing quote-length bound. Failure keeps
+the existing single same-input repair attempt; Core's exact-span and authorization
+checks remain unchanged. Quote integrity does not establish factual entailment.
+
+No `langchain-community`/classic dependency is added: that Python package is archived
+([official notice](https://github.com/langchain-ai/langchain-community/issues/674)).
+Existing standalone integrations remain. Core alone selects current/upcoming/compare
+publications and enforces Target Readers. AI receives no general business DB
+credential. Responses API storage is disabled; conversations live in Core.
+
+### Retrieval bounds and evaluation
+
+Each request ranks only permitted chunks: semantic top 24, lexical corpus at most
+10,000 chunks / 8 million characters, lexical top 24, RRF constant 60. Final context
+has at most eight chunks / 64,000 characters. At most two slots expand to nearby
+text in the exact same generation/snapshot/parent section (512-character proximity).
+A single network-branch failure is labeled SEMANTIC or LEXICAL, not HYBRID. Both
+failing, malformed identities or an oversized corpus fail closed. There is no global
+lexical cache. Larger deployments need a reviewed indexed lexical adapter, not
+silent truncation or post-ranking ACL filters.
+
+```powershell
+uv run python tools/evaluate_retrieval.py tests/fixtures/retrieval-rankings.synthetic.json
+```
+
+The ten-case fixture supplies controlled complementary rankings. Metrics validate
+the harness/fusion, **not production relevance or model quality**. Use independently
+judged observations from the real corpus for a live benchmark. Ordinary tests call
+no OpenAI provider; disposable in-process Chroma uses deterministic fake embeddings
+to check filters/APIs only. Exact quotes/schema validation do not prove every claim
+is entailed. Retrieval logs contain request ID, mode, counts and timing, not bodies.
 
 Versioned cross-repository schemas are checked into `schemas/`. Regenerate them after an intentional
 contract change with:
@@ -78,6 +183,7 @@ raw Markdown offsets remain exact for citations.
    Arden AI applies that allow-list as a Chroma filter. Arden core rechecks returned evidence
    before it can enter model context or citations.
 
-The cross-repository indexing and retrieval APIs will be versioned under `/v1` and described by
-OpenAPI. No AI endpoint may broaden an allow-list supplied by Arden core.
+Indexing remains v1; staged answering uses v2. OpenAPI/JSON Schema describe both.
+Both repositories validate the same `governed-v2.json` golden fixture. No endpoint
+may broaden Core's allow-list.
 
