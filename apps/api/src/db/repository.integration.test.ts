@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository, ReviewerGrantConflictError } from "./repository.js";
 import { prepareKnowledgeFixture, submitLegacyKnowledgeFixture } from "./knowledge-fixture.test-support.js";
 import { registerKnowledgeCatalogVerification } from "../knowledge/catalog.integration.verification.js";
+import { registerGovernedAnsweringVerification } from "../answers/governed.integration.verification.js";
 import { PgIndexGenerationStore } from "../indexing/store.js";
 import type { IndexGenerationManifest } from "../indexing/contracts.js";
 import { canRead, type TargetReadersInput } from "../target-readers/policy.js";
@@ -59,8 +60,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0021_monotonic_publication_activation', '0022_organization_reviewer_grants',
           '0024_target_reader_selection', '0025_review_approved_readers', '0026_review_list_authors',
           '0027_document_category_relationships', '0028_audience_to_target_readers',
-          '0029_withdraw_pending_submission', '0031_deduplicate_reviewer_grants')`);
-    if (migration.rows[0]?.count !== "17") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0029_withdraw_pending_submission', '0031_deduplicate_reviewer_grants',
+          '0032_governed_ai_sources_and_conversations')`);
+    if (migration.rows[0]?.count !== "18") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -165,6 +167,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM knowledge_collection_document WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_collection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = $1", [ids.organization]);
+          // Derived release lineage deliberately retains publication references in production.
+          // Remove only this fixture's lineage before removing its immutable publications.
+          await client.query("DELETE FROM knowledge_ai_release WHERE organization_id = $1", [ids.organization]);
           await client.query(`DELETE FROM published_knowledge_version
             WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
           await client.query(`DELETE FROM knowledge_index_job WHERE generation_id IN
@@ -955,3 +960,4 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 });
 
 registerKnowledgeCatalogVerification();
+registerGovernedAnsweringVerification();

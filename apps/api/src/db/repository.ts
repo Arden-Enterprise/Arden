@@ -1,6 +1,9 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { metadataSubmissionErrors, validKnowledgeMetadata, type KnowledgeMetadata } from "@arden/domain";
 import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledge/catalog-store.js";
+import { PgConversationStore, type ConversationStore } from "../answers/conversation-store.js";
+import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
+import type { VersionScope } from "../answers/governed-contracts.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -212,6 +215,8 @@ export type PublishedKnowledge = {
   validUntil: Date | null;
 };
 export type AuthorizedAiSource = {
+  documentCode?: string | null;
+  management?: (KnowledgeMetadata & { topicName?: string }) | null;
   chunks: unknown;
   generationId: string;
   snapshotVersionId: string;
@@ -466,6 +471,8 @@ type PublishedKnowledgeRow = ReaderSelectionColumns & {
   valid_until: Date | null;
 };
 type AuthorizedAiSourceRow = ReaderSelectionColumns & {
+  document_code: string | null;
+  management: (KnowledgeMetadata & { topicName?: string }) | null;
   chunks: unknown;
   generation_id: string;
   snapshot_version_id: string;
@@ -530,6 +537,7 @@ export type DeleteDepartmentResult =
   | { success: false; errorReason: "NOT_FOUND" | "BASE_DEPARTMENT" };
 
 export interface ArdenDataRepository {
+  readonly readerSources?: ReaderSourceStore;
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
   readonly systemAdministration?: SystemAdministrationStore;
@@ -593,7 +601,8 @@ export interface ArdenDataRepository {
     idempotencyKey: string, requestId: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
-  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null>;
+  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[], versionScope?: VersionScope): Promise<AuthorizedAiSource[] | null>;
+  readonly conversations?: ConversationStore;
   /** The caller as a TargetReaderPolicy actor, or null when they are not an active member. */
   getTargetReaderActor(userId: string, organizationId: string): Promise<ReaderActor | null>;
 }
@@ -634,10 +643,14 @@ function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): strin
 }
 
 export class ArdenRepository implements ArdenDataRepository {
+  readonly readerSources: ReaderSourceStore;
+  readonly conversations: ConversationStore;
   readonly knowledgeCatalog: KnowledgeCatalogStore;
   readonly audienceGroups: AudienceGroupStore;
   readonly systemAdministration: SystemAdministrationStore;
   constructor(private readonly pool: Pool) {
+    this.readerSources = new PgReaderSourceStore((user, org, work) => this.withActorContext(user, org, work));
+    this.conversations = new PgConversationStore((user, org, work) => this.withActorContext(user, org, work));
     this.knowledgeCatalog = new PgKnowledgeCatalogStore((user, org, work) => this.withActorContext(user, org, work),
       (user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
@@ -2066,34 +2079,47 @@ export class ArdenRepository implements ArdenDataRepository {
   async getPublishedKnowledge(userId: string, organizationId: string,
     publishedVersionId: string): Promise<PublishedKnowledge | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
+      await client.query("SELECT set_config('arden.ai_version_scope', 'COMPARE', true)");
       const result = await client.query<PublishedKnowledgeRow>(`${publishedKnowledgeSelect}
         WHERE cp.organization_id = $1 AND pv.published_version_id = $2`, [organizationId, publishedVersionId]);
-      return result.rows[0] ? mapPublishedKnowledge(result.rows[0]) : null;
+      if (result.rows[0]) return mapPublishedKnowledge(result.rows[0]);
+      const applicable = await client.query<PublishedKnowledgeRow>(`
+        SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
+          pv.document_code, pv.management, pv.responsible_department_id, pv.content_hash, pv.content_uri,
+          d.name AS responsible_department_name, pv.audience_role_ids, pv.published_at,
+          pv.valid_from, pv.valid_until, ${readerSelectionColumns("pv.reader_selection_id")}
+        FROM published_knowledge_version pv JOIN knowledge_base kb USING (knowledge_base_id)
+        LEFT JOIN department d ON d.department_id = pv.responsible_department_id AND d.organization_id = kb.organization_id
+        WHERE kb.organization_id = $1 AND pv.published_version_id = $2
+          AND pv.published_version_id IN (SELECT eligible_ai_publications('COMPARE'))`, [organizationId, publishedVersionId]);
+      return applicable.rows[0] ? mapPublishedKnowledge(applicable.rows[0]) : null;
     });
   }
 
-  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null> {
-    if ((generationIds && generationIds.length > 12) || (chunkIds && chunkIds.length > 12)) throw new Error("Too many citation locations");
+  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[], versionScope: VersionScope = "CURRENT"): Promise<AuthorizedAiSource[] | null> {
+    if ((generationIds && generationIds.length > 64) || (chunkIds && chunkIds.length > 64)) throw new Error("Too many evidence locations");
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      await client.query("SELECT set_config('arden.ai_version_scope', $1, true)", [versionScope]);
       const result = await client.query<AuthorizedAiSourceRow>(`
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
-               pv.classification, cp.target_scope_type,
+               pv.classification, kb.scope_type AS target_scope_type, pv.document_code, pv.management,
                ${readerSelectionColumns("pv.reader_selection_id")},
                CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
                  (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
                    WHERE $3::text[] IS NULL OR chunk->>'chunkId' = ANY($3::text[])) END AS chunks
-          FROM knowledge_current_publication cp
-          JOIN published_knowledge_version pv
-            ON pv.published_version_id = cp.published_version_id
+          FROM published_knowledge_version pv
+          JOIN knowledge_base kb ON kb.knowledge_base_id = pv.knowledge_base_id
           JOIN knowledge_index_generation g
             ON g.submission_id = pv.submission_id AND g.status = 'READY'
-         WHERE cp.organization_id = $1
+         WHERE g.organization_id = $1 AND pv.published_version_id IN (SELECT eligible_ai_publications($4))
            AND ($2::uuid[] IS NULL OR g.generation_id = ANY($2::uuid[]))
          ORDER BY pv.published_at DESC, pv.published_version_id DESC
-         LIMIT 500`, [organizationId, generationIds ?? null, chunkIds ?? null]);
+         LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null, versionScope]);
+      if (result.rows.length > 500) throw new Error("Authorized source count exceeds the request budget");
       return result.rows.map((row) => ({
+        documentCode: row.document_code, management: row.management,
         generationId: row.generation_id,
         chunks: row.chunks,
         snapshotVersionId: row.snapshot_version_id,

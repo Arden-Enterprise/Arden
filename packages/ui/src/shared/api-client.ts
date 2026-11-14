@@ -198,6 +198,9 @@ export type ReviewerGrant = {
   status: "ACTIVE" | "INACTIVE";
 };
 export type AskArdenAnswer = {
+  conversationId?: string;
+  revision?: number;
+  turnId?: string;
   status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
   answer: string;
   citations: Array<{
@@ -210,8 +213,18 @@ export type AskArdenAnswer = {
     version: string;
     scope: string;
     classification: KnowledgeClassification;
+    documentCode?: string | null;
+    startOffset?: number;
+    endOffset?: number;
   }>;
 };
+export type AiVersionScope = "CURRENT" | "UPCOMING" | "COMPARE";
+export type AiConversationSummary = { id: string; title: string; revision: number; updatedAt: string };
+export type AiConversation = AiConversationSummary & { turns: Array<{
+  id: string; requestId: string; question: string; sequence: number; answer: string;
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE"; versionScope: AiVersionScope;
+  citations: AskArdenAnswer["citations"];
+}> };
 
 function knowledgePath(organizationId: string): string {
   return `/api/v1/organizations/${organizationId}/knowledge`;
@@ -357,10 +370,20 @@ export function loadPublishedKnowledge(platform: Platform, organizationId: strin
   return request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}`);
 }
 
-export function askArden(platform: Platform, organizationId: string, query: string): Promise<AskArdenAnswer> {
+export function askArden(platform: Platform, organizationId: string, query: string, conversation?: {
+  conversationId: string; requestId: string; expectedRevision: number; versionScope: AiVersionScope;
+}): Promise<AskArdenAnswer> {
   return request(platform, `/api/v1/organizations/${organizationId}/ai/answers`, {
-    method: "POST", body: JSON.stringify({ query }),
+    method: "POST", body: JSON.stringify({ query, ...conversation }),
   });
+}
+export async function listAiConversations(platform: Platform, organizationId: string): Promise<AiConversationSummary[]> {
+  const result = await request<{ items: AiConversationSummary[] }>(platform,
+    `/api/v1/organizations/${organizationId}/ai/conversations`);
+  return result.items;
+}
+export function loadAiConversation(platform: Platform, organizationId: string, id: string): Promise<AiConversation> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${id}`);
 }
 
 export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {

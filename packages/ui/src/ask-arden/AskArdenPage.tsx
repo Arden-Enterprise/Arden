@@ -1,9 +1,10 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Icon } from "../shared/Icon";
 import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { useWorkspaceNavigation } from "../shared/WorkspaceNavigationContext";
 import type { KnowledgeCitationReference } from "../knowledge/knowledgeCitation";
-import { ApiError, askArden } from "../shared/api-client";
+import { ApiError, askArden, listAiConversations, loadAiConversation, type AiConversation,
+  type AiConversationSummary, type AiVersionScope } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { answerMessage, starterPrompts, type AskArdenMessage } from "./askArdenModel";
 
@@ -23,6 +24,12 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState<AiConversationSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [versionScope, setVersionScope] = useState<AiVersionScope>("CURRENT");
+  const conversation = useRef<{ id: string; revision: number }>({ id: crypto.randomUUID(), revision: 0 });
+  const retryRequest = useRef<{ query: string; scope: AiVersionScope; id: string } | null>(null);
   const pendingQuestion = useRef<{ id: string; query: string } | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const requestGeneration = useRef(0);
@@ -30,20 +37,71 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
   const empty = messages.length === 0;
   const threadTitle = messages.find((message) => message.role === "member")?.body ?? "New conversation";
 
+  useEffect(() => {
+    requestGeneration.current++;
+    conversation.current = { id: crypto.randomUUID(), revision: 0 };
+    retryRequest.current = null;
+    setMessages([]); setDraft(""); setError(null); setPending(false);
+    setHistoryOpen(false); setHistoryLoading(false); setHistory([]); setVersionScope("CURRENT");
+    return () => { requestGeneration.current++; };
+  }, [organizationId]);
+
+  const showConversation = (saved: AiConversation) => {
+    conversation.current = { id: saved.id, revision: saved.revision };
+    setMessages(saved.turns.flatMap((turn) => [
+      { id: `${turn.id}-question`, role: "member" as const, body: turn.question },
+      { id: turn.id, role: "assistant" as const, body: turn.answer, citations: turn.citations,
+        insufficientEvidence: turn.status === "INSUFFICIENT_EVIDENCE", unavailable: turn.status === "UNAVAILABLE" },
+    ]));
+    setVersionScope(saved.turns.at(-1)?.versionScope ?? "CURRENT");
+  };
+  const openConversation = async (id: string) => {
+    if (!organizationId || pending) return;
+    const generation = ++requestGeneration.current;
+    setHistoryLoading(true); setError(null);
+    try {
+      const saved = await loadAiConversation(platform, organizationId, id);
+      if (generation !== requestGeneration.current) return;
+      showConversation(saved); setDraft(""); retryRequest.current = null; setHistoryOpen(false);
+    } catch (cause) {
+      if (generation === requestGeneration.current) setError(cause instanceof ApiError ? cause.message : "Chat could not be opened.");
+    } finally { if (generation === requestGeneration.current) setHistoryLoading(false); }
+  };
+  const openHistory = async () => {
+    if (!organizationId || pending) return;
+    const generation = ++requestGeneration.current;
+    setHistoryOpen(true); setHistoryLoading(true); setError(null);
+    try {
+      const saved = await listAiConversations(platform, organizationId);
+      if (generation === requestGeneration.current) setHistory(saved);
+    } catch (cause) {
+      if (generation === requestGeneration.current) setError(cause instanceof ApiError ? cause.message : "History is unavailable.");
+    } finally { if (generation === requestGeneration.current) setHistoryLoading(false); }
+  };
+
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     const query = draft.trim();
     if (!query || pending || !organizationId) return;
     const generation = ++requestGeneration.current;
-    const questionId = crypto.randomUUID();
+    const last = messages.at(-1);
+    const questionId = last?.role === "member" && last.body === query ? last.id : crypto.randomUUID();
     pendingQuestion.current = { id: questionId, query };
-    setMessages((current) => [...current, { id: questionId, role: "member", body: query }]);
+    setMessages((current) => current.some(message => message.id === questionId)
+      ? current : [...current, { id: questionId, role: "member", body: query }]);
     setDraft("");
     setError(null);
     setPending(true);
     try {
-      const answer = await askArden(platform, organizationId, query);
+      const previous = retryRequest.current;
+      const requestId = previous?.query === query && previous.scope === versionScope ? previous.id : crypto.randomUUID();
+      retryRequest.current = { query, scope: versionScope, id: requestId };
+      const answer = await askArden(platform, organizationId, query, { conversationId: conversation.current.id,
+        expectedRevision: conversation.current.revision, requestId, versionScope });
       if (generation !== requestGeneration.current) return;
+      if (!answer.conversationId || answer.revision === undefined) throw new Error("Conversation persistence is unavailable.");
+      conversation.current = { id: answer.conversationId, revision: answer.revision };
+      retryRequest.current = null;
       setMessages((current) => [...current, answerMessage(answer, crypto.randomUUID())]);
     } catch (cause) {
       if (generation === requestGeneration.current) {
@@ -66,6 +124,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
     setMessages([]);
     setError(null);
     pendingQuestion.current = null;
+    conversation.current = { id: crypto.randomUUID(), revision: 0 }; retryRequest.current = null;
     setResetting(false);
     requestAnimationFrame(() => composerRef.current?.focus());
   };
@@ -88,7 +147,13 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
       onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) submit(); }}
       placeholder="Ask Arden…" />
     <div className="ask-composer-tools">
-      <span className="ask-scope"><Icon name="knowledge" size={13} />Published documents<Icon name="chevron" size={10} /></span>
+      <label className="ask-scope"><Icon name="knowledge" size={13} />
+        <select aria-label="Knowledge version scope" value={versionScope} disabled={pending}
+          onChange={(event) => setVersionScope(event.target.value as AiVersionScope)}>
+          <option value="CURRENT">Current guidance</option><option value="UPCOMING">Upcoming changes</option>
+          <option value="COMPARE">Compare versions</option>
+        </select>
+      </label>
       <div className="ask-composer-actions">
       {pending ? <button type="button" className="island-link-button" onClick={stopWaiting}>Stop waiting</button>
         : draft && <button type="button" className="island-link-button" onClick={() => { setDraft(""); composerRef.current?.focus(); }}>Clear</button>}
@@ -109,6 +174,9 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
           <Icon name={navigation.open ? "close" : "menu"} size={17} />
         </button>}
         <div className="ask-thread-title"><strong>{empty ? "New chat" : threadTitle}</strong></div>
+        <button type="button" className="island-link-button" disabled={pending || historyLoading} onClick={openHistory}>History</button>
+        {!empty && <button type="button" className="island-link-button" disabled={pending || historyLoading}
+          onClick={() => openConversation(conversation.current.id)}>Reload chat</button>}
         {!empty && <button type="button" className="island-link-button" onClick={() => setResetting(true)}>New chat</button>}
       </header>
 
@@ -131,15 +199,15 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
         </section> : <section className="ask-conversation" aria-label="Conversation">
           {error && <div className="ask-thread-notice" role="alert"><Icon name="warning" size={14} /><span>{error}</span></div>}
           {messages.map((message) => <article key={message.id} className={`ask-message is-${message.role}`}>
-            <div className="ask-message-meta"><span>{message.role === "member" ? "You" : "Arden"}</span>{message.insufficientEvidence && <small>Not enough information</small>}</div>
+            <div className="ask-message-meta"><span>{message.role === "member" ? "You" : "Arden"}</span>{message.insufficientEvidence && <small>Not enough information</small>}{message.unavailable && <small>Unavailable</small>}</div>
             <div className="ask-message-body"><p>{message.body}</p></div>
-            {message.citations && <div className="ask-citations" aria-label="Sources">
+            {Boolean(message.citations?.length) && <div className="ask-citations" aria-label="Sources">
               <span className="ask-citation-label">Sources</span>
-              {message.citations.map((citation, index) => <button type="button" className="ask-citation"
-                key={`${citation.documentId}:${citation.versionId}:${citation.blockId ?? "source"}`}
+              {message.citations?.map((citation, index) => <button type="button" className="ask-citation"
+                key={`${citation.documentId}:${citation.versionId}:${citation.blockId ?? "source"}:${index}`}
                 onClick={() => onOpenCitation?.(citation)} disabled={!onOpenCitation}
                 aria-label={`Open source ${index + 1}: ${citation.title}, ${citation.version}`}>
-                <span>{index + 1}</span><div><strong>{citation.title}</strong><small>{citation.version}{citation.page ? ` · Page ${citation.page}` : ""} · {citation.scope}</small></div>
+                <span>{index + 1}</span><div><strong>{citation.documentCode ? `${citation.documentCode} · ` : ""}{citation.title}</strong><small>{citation.version}{citation.page ? ` · Page ${citation.page}` : ""} · {citation.scope}</small></div>
                 <Icon name="arrow" size={13} />
               </button>)}
             </div>}
@@ -151,9 +219,16 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
       {!empty && composer("dock")}
     </div>
     {resetting && <KnowledgeDialog confirmation title="Start a new chat?" onClose={() => setResetting(false)}>
-      <p>{draft.trim() ? "This clears this chat and your unsent prompt." : "This clears the current conversation."}</p>
+      <p>{draft.trim() ? "Your unsent message will be discarded. Saved chats stay in History." : "Saved chats stay in History."}</p>
       <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setResetting(false)}>Cancel</button>
         <button type="button" className="primary-button" onClick={reset}>New chat</button></div>
+    </KnowledgeDialog>}
+    {historyOpen && <KnowledgeDialog title="Chat history" onClose={() => { requestGeneration.current++; setHistoryOpen(false); setHistoryLoading(false); }}>
+      {historyLoading ? <p role="status">Loading…</p> : history.length ? <ul>{history.map((item) => <li key={item.id}>
+        <button type="button" className="island-link-button" onClick={() => openConversation(item.id)}>{item.title}</button>
+      </li>)}</ul> : <p>No saved chats.</p>}
+      {error && <p role="alert">{error}</p>}
+      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => { requestGeneration.current++; setHistoryOpen(false); setHistoryLoading(false); }}>Close</button></div>
     </KnowledgeDialog>}
   </main>;
 }

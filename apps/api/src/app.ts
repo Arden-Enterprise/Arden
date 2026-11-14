@@ -1,5 +1,5 @@
 import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
@@ -12,9 +12,11 @@ import { allKnowledgeClassifications, defaultKnowledgeClassification, type Knowl
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
 import type { AskArdenClient } from "./answers/ai-client.js";
-import { citationPage } from "./answers/citation-page.js";
-import { citationMatchesManifest } from "./answers/contracts.js";
-import { canRead, readerModes, type ReaderActor, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
+import { registerAnswerRoutes } from "./answers/routes.js";
+import { registerReaderSummaryRoutes } from "./reader-ai/routes.js";
+import { registerReaderQuestionRoutes } from "./reader-ai/question-routes.js";
+import type { ReaderAiClient } from "./reader-ai/summary.js";
+import { canRead, readerModes, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
 import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
 
 const maxBodyBytes = 100_000;
@@ -44,6 +46,7 @@ type AppDependencies = {
   publicApiOrigin?: string | null;
   invitationDeliveryMode?: "email" | "local-test-no-email";
   askArden?: AskArdenClient | null;
+  readerAi?: ReaderAiClient | null;
   testActor?: SessionContext;
 };
 
@@ -91,6 +94,9 @@ export function buildApp(dependencies: AppDependencies) {
     requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, sessionKey, dependencies.testActor);
   registerAudienceGroupRoutes(app, dependencies.repository.audienceGroups, requestActor, uuidPattern);
   registerKnowledgeCatalogRoutes(app, dependencies.repository.knowledgeCatalog, requestActor, uuidPattern);
+  registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern);
+  registerReaderSummaryRoutes(app, dependencies.repository, dependencies.storage, dependencies.readerAi ?? null, requestActor, uuidPattern);
+  registerReaderQuestionRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null, requestActor, uuidPattern);
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
@@ -1595,94 +1601,6 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: { query: string } }>(
-    "/api/v1/organizations/:organizationId/ai/answers", {
-      schema: {
-        params: { type: "object", required: ["organizationId"], additionalProperties: false, properties: {
-          organizationId: { type: "string", pattern: uuidPattern },
-        } },
-        body: { type: "object", required: ["query"], additionalProperties: false, properties: {
-          query: { type: "string", minLength: 1, maxLength: 4_000 },
-        } },
-      },
-    }, async (request, reply) => {
-      const context = await requestActor(request, reply);
-      if (!context) return;
-      const query = request.body.query.trim();
-      if (!query) return reply.code(400).send(safeError("INVALID_REQUEST", "The question is empty.", request.id));
-      if (!dependencies.askArden) {
-        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
-      }
-      try {
-        const { organizationId } = request.params;
-        const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
-        const candidates = actor ? await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId) : null;
-        if (!actor || !candidates) return reply.code(404).send(resourceNotAvailable(request.id));
-        // T1.3: only publications the actor can read enter the Arden-AI allow-list.
-        const readableSource = (readerActor: ReaderActor, source: { targetReaders: ReaderSelection | null }) =>
-          canRead(readerActor, { organizationId, readers: source.targetReaders });
-        const before = candidates.filter((source) => readableSource(actor, source));
-        if (before.length === 0) {
-          reply.header("Cache-Control", "no-store");
-          return { status: "INSUFFICIENT_EVIDENCE", answer: "I could not find any indexed published knowledge you are allowed to read.", citations: [] };
-        }
-        const requestId = randomUUID();
-        const aiResponse = await dependencies.askArden.answer({
-          contractVersion: 1,
-          requestId,
-          organizationId,
-          query,
-          allowedGenerationIds: before.map((source) => source.generationId),
-        });
-        const afterActor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
-        const afterCandidates = afterActor ? await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId,
-          [...new Set(aiResponse.citations.map((citation) => citation.generationId))],
-          [...new Set(aiResponse.citations.map((citation) => citation.chunkId))]) : null;
-        if (!afterActor || !afterCandidates) return reply.code(404).send(resourceNotAvailable(request.id));
-        // Re-checked after generation so a citation never outlives a reader change.
-        const after = afterCandidates.filter((source) => readableSource(afterActor, source));
-        const beforeByGeneration = new Map(before.map((source) => [source.generationId, source]));
-        const afterByGeneration = new Map(after.map((source) => [source.generationId, source]));
-        const citations = aiResponse.citations.map((citation) => {
-          const initial = beforeByGeneration.get(citation.generationId);
-          const current = afterByGeneration.get(citation.generationId);
-          if (!initial || !current || initial.publishedVersionId !== current.publishedVersionId
-            || current.snapshotVersionId !== citation.snapshotVersionId
-            || current.snapshotContentHash !== citation.snapshotContentHash
-            || !citationMatchesManifest(citation, current.chunks)) {
-            return null;
-          }
-          return {
-            documentId: current.draftId,
-            versionId: current.publishedVersionId,
-            blockId: citation.sourceBlockIds[0] ?? citation.parentSectionBlockId ?? undefined,
-            page: citationPage(citation.sourceBlockIds, citation.parentSectionBlockId),
-            excerpt: citation.excerpt,
-            title: current.title,
-            version: `v${current.versionNo}`,
-            scope: current.targetScopeType === "ORGANIZATION" ? "Company-wide" : "Department",
-            classification: current.classification,
-          };
-        });
-        if (citations.some((citation) => citation === null)) {
-          return reply.code(409).send(safeError("KNOWLEDGE_ACCESS_CHANGED",
-            "Knowledge access changed while the answer was being prepared. Please ask again.", request.id));
-        }
-        const authorizedCitations = citations.filter((citation): citation is NonNullable<typeof citation> => citation !== null);
-        const uniqueCitations = authorizedCitations.filter((citation, index, all) => {
-          const location = citation.page === undefined ? citation.blockId ?? "source" : `page-${citation.page}`;
-          return all.findIndex((candidate) => {
-            const candidateLocation = candidate.page === undefined ? candidate.blockId ?? "source" : `page-${candidate.page}`;
-            return candidate.versionId === citation.versionId && candidateLocation === location;
-          }) === index;
-        });
-        reply.header("Cache-Control", "no-store");
-        return { status: aiResponse.status, answer: aiResponse.answer, citations: uniqueCitations };
-      } catch (error) {
-        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Ask Arden answer failed");
-        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
-      }
-    });
 
   app.get<{ Params: { organizationId: string; publishedVersionId: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/published/:publishedVersionId", {

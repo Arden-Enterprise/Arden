@@ -186,6 +186,12 @@
       "filename": "0031_deduplicate_reviewer_grants.sql",
       "sha256": "a113f2824f5382b475d9c625d3ca25fb07d7ad58b6fefc8ef668f0d61539bd1c",
       "rollout": "operator"
+    },
+    {
+      "id": "0032",
+      "filename": "0032_governed_ai_sources_and_conversations.sql",
+      "sha256": "e9476799f88218c7a6f811781bffc9ef54512cdb39992702a288fd9f6622f4b2",
+      "rollout": "operator"
     }
   ]
 }

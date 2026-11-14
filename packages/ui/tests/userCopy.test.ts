@@ -68,7 +68,7 @@ describe("concise user-facing copy", () => {
 
   it("does not claim an index is ready in the empty chat", () => {
     render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
-    expect(screen.getByText("Published documents")).toBeTruthy();
+    expect((screen.getByRole("combobox", { name: "Knowledge version scope" }) as HTMLSelectElement).value).toBe("CURRENT");
     expect(screen.queryByText(/indexed|permission-aware/i)).toBeNull();
     expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "Attachments aren’t available yet" }) as HTMLButtonElement).disabled).toBe(true);

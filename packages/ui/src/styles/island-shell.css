@@ -350,6 +350,7 @@
 .arden-app-shell input[type="checkbox"], .arden-app-shell input[type="radio"] { accent-color: var(--arden-violet); }
 .arden-app-shell .organization-field input, .arden-app-shell .organization-field select, .arden-app-shell .organization-field textarea,
 .arden-app-shell .knowledge-live-form input, .arden-app-shell .knowledge-live-form select, .arden-app-shell .knowledge-live-form textarea,
+.arden-app-shell .reader-ai-question-form textarea,
 .arden-app-shell .knowledge-panel label > textarea, .arden-app-shell .island-field input, .arden-app-shell .island-field select, .arden-app-shell .island-field textarea {
   min-height: var(--arden-control-md); padding: 6px 10px; border: 1px solid var(--arden-border-strong); border-radius: 8px;
   color: var(--arden-text-primary); background: var(--arden-bg-sidebar); font-size: 13px;

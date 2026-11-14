@@ -63,6 +63,11 @@ Version-matched official docs, repository code/tests, and authorized decisions.
 
 ## Status and synchronization
 
+The governed-answering refinement is [0021: hybrid answering and applicable-version
+sources](0021-governed-hybrid-answering.md), accepted implementation scope with
+paired local verification. Publication/deployment and real-provider acceptance
+remain separate; consult its GA-v2 contract rather than inferring release status.
+
 The current release migration policy is [0016: run approved expand migrations through the release receiver](0016-github-hosted-server-side-migrations.md). It is accepted, but implementation evidence and rollout are tracked separately from the decision.
 
 - Follow [current main context](../engineering/rules/main-context.md) at task start. Check each relevant decision's status and superseding record on fetched main before relying on older chats or branch documents. A later accepted replacement governs the default intended architecture; verify its actual implementation separately.

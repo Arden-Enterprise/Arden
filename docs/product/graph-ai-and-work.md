@@ -98,7 +98,25 @@ Path: user asks with explicit permitted context → Core calculates allowed vers
 | F13-AC2 | Answers cite exact permitted versions/source blocks, validate structured references and clearly report missing/conflicting evidence; forged citations and injected document instructions grant no authority. | Source tests are not a complete integrated browser-to-provider acceptance result. |
 | F13-AC3 | Provider timeout, partial batch, revoked access and observability outage fail safely; external-provider consent/data-flow policy is explicitly reconciled with current Core before changing it. | ADR 0012 is branch-only; do not silently override main's private-inference boundary. |
 
+Reader-on-request Summary, Ask this document and Explain selection are the next
+ordered slice after the local citation correction. See the [Reader AI implementation
+plan](../engineering/reader-ai.md) for exact-version/coverage/source ownership and
+verification requirements. Exact-source preparation and Summary backend are locally
+implemented/verified through RA-03. RA-04 adds the Summary reader UI/adapters locally,
+with browser and boundary tests; genuine Electron and signed-in paired-service
+acceptance remain mandatory before release under the maintainer's sequencing
+refinement. RA-05 stateless exact-document Q&A is implemented locally through the
+purpose-restricted hybrid path and reader UI; source identity and current access
+are rechecked. Selection explanation is not delivered. No general-chat history is
+imported into reader Q&A; no live-provider/release acceptance is implied.
+
 ## F14 Conversation history
+
+The maintainer-approved combined F13/F14 implementation is specified by
+[GA-v2](../engineering/governed-hybrid-answering.md), including hybrid retrieval,
+staged evidence authorization, applicable-version selection and owner-private
+history. It is in progress, not a deployment receipt. ADR 0021 records the explicit
+currently-applicable default and forward-only lineage boundary.
 
 Path: start conversation → exchange grounded messages → reopen history → revalidate changed access/version availability → continue or show unavailable evidence. Related work: ARD-59.
 

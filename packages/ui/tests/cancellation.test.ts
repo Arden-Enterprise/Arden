@@ -51,11 +51,11 @@ describe("explicit cancellation", () => {
     await act(() => finishFirst({ status: "ANSWERED", answer: "Late old answer", citations: [] }));
     expect(screen.queryByText("Late old answer")).toBeNull();
     expect(screen.getByRole("button", { name: "Stop waiting" })).toBeTruthy();
-    await act(() => finishSecond({ status: "ANSWERED", answer: "Current answer", citations: [] }));
+    await act(() => finishSecond({ status: "ANSWERED", answer: "Current answer", citations: [], conversationId: "saved", revision: 1, turnId: "turn" }));
     expect(screen.getByText("Current answer")).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox", { name: "Ask Arden" }), { target: { value: "Unsent prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-    expect(within(screen.getByRole("alertdialog")).getByText("This clears this chat and your unsent prompt.")).toBeTruthy();
+    expect(within(screen.getByRole("alertdialog")).getByText("Your unsent message will be discarded. Saved chats stay in History.")).toBeTruthy();
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("Current answer")).toBeTruthy();
     expect((screen.getByRole("textbox", { name: "Ask Arden" }) as HTMLTextAreaElement).value).toBe("Unsent prompt");

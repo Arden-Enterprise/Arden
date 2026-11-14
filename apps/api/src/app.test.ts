@@ -14,6 +14,8 @@ import { AudienceGroupError, type AudienceGroup, type AudienceGroupStore } from 
 import { SystemAdministrationError, type SystemAdministrator, type SystemAdministrationStore } from "./system-administration/store.js";
 import { parseSemanticDocument } from "@arden/domain";
 import type { AskArdenClient } from "./answers/ai-client.js";
+import { evidenceManifest, evidenceText, MemoryConversationStore } from "./answers/conversation.test-support.js";
+import type { RetrievalRequest, RetrievalResponse, GenerationRequest, GenerationResponse } from "./answers/governed-contracts.js";
 import type { AiAnswerRequest, AiAnswerResponse } from "./answers/contracts.js";
 import { validateSelection, type ReaderActor, type SelectionFacts, type TargetReadersInput } from "./target-readers/policy.js";
 import { resolveApprovedReaders, sameReaders } from "./target-readers/narrowing.js";
@@ -107,7 +109,7 @@ describe("API auth and private draft routes", () => {
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
       classification: "INTERNAL", targetScopeType: "ORGANIZATION", targetReaders: null,
-      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
+      chunks: [{ ...evidenceManifest, chunkId: "b".repeat(64), sourceBlockIds: ["pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
     }];
     askArden.sourceBlockIds = ["pdf-page-2", "pdf-page-2-heading"];
     const session = await desktopSession(app, "owner@example.test");
@@ -119,7 +121,7 @@ describe("API auth and private draft routes", () => {
     expect(askArden.lastRequest?.allowedGenerationIds).toEqual([generationId]);
     expect(response.json()).toMatchObject({ status: "ANSWERED", citations: [{
       documentId: sharedDraftId, versionId, blockId: "pdf-page-2", page: 2, title: "Security policy",
-      version: "v3", scope: "Company-wide", classification: "INTERNAL",
+      version: "Version unavailable", scope: "Company-wide", classification: "INTERNAL",
     }] });
   });
 
@@ -128,7 +130,7 @@ describe("API auth and private draft routes", () => {
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
       classification: "INTERNAL", targetScopeType: "ORGANIZATION", targetReaders: null,
-      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa", "pdf-page-2", "pdf-page-2-heading"], parentSectionBlockId: null }],
+      chunks: [{ ...evidenceManifest, chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null }],
     }];
     askArden.onAnswer = () => { repository.authorizedAiSources = []; };
     const session = await desktopSession(app, "owner@example.test");
@@ -140,6 +142,32 @@ describe("API auth and private draft routes", () => {
     expect(response.json().error.code).toBe("KNOWLEDGE_ACCESS_CHANGED");
   });
 
+  it("exposes only owner-private persisted history with no-store responses and strict continuation", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const other = await desktopSession(app, "other@example.test");
+    const headers = { cookie: owner, origin: "http://localhost:5180" };
+    const base = `/api/v1/organizations/${organizationId}/ai`;
+    const payload = { query: "No matching knowledge?", conversationId: versionId,
+      requestId: createKey, expectedRevision: 0, versionScope: "CURRENT" };
+    const answer = await app.inject({ method: "POST", url: `${base}/answers`, headers, payload });
+    expect(answer.statusCode).toBe(200);
+    expect(answer.json()).toMatchObject({ status: "INSUFFICIENT_EVIDENCE", conversationId: versionId, revision: 1 });
+    const listed = await app.inject({ method: "GET", url: `${base}/conversations`, headers });
+    expect(listed.headers["cache-control"]).toBe("no-store");
+    expect(listed.json().items).toHaveLength(1);
+    const loaded = await app.inject({ method: "GET", url: `${base}/conversations/${versionId}`, headers });
+    expect(loaded.statusCode).toBe(200);
+    expect(loaded.json().turns).toHaveLength(1);
+    expect(loaded.json().turns[0]).not.toHaveProperty("evidence");
+    expect((await app.inject({ method: "GET", url: `${base}/conversations/${versionId}`,
+      headers: { cookie: other } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `${base}/conversations` })).statusCode).toBe(401);
+    expect((await app.inject({ method: "POST", url: `${base}/answers`, headers,
+      payload: { ...payload, query: "Changed request" } })).statusCode).toBe(409);
+    expect((await app.inject({ method: "POST", url: `${base}/answers`, headers,
+      payload: { query: "No revision", conversationId: versionId } })).statusCode).toBe(400);
+  });
+
   it.each([
     { name: "unlisted chunk", patch: { chunkId: "c".repeat(64) } },
     { name: "invented block", patch: { sourceBlockIds: ["other-block"] } },
@@ -149,7 +177,7 @@ describe("API auth and private draft routes", () => {
       generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
       publishedVersionId: versionId, draftId: sharedDraftId, title: "Security policy", versionNo: 3,
       classification: "INTERNAL", targetScopeType: "ORGANIZATION", targetReaders: null,
-      chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null, ...patch }],
+      chunks: [{ ...evidenceManifest, chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null, ...patch }],
     }];
     const session = await desktopSession(app, "owner@example.test");
     const response = await app.inject({ method: "POST",
@@ -1634,7 +1662,7 @@ describe("API auth and private draft routes", () => {
         generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
         publishedVersionId: versionId, draftId: sharedDraftId, title: "Restricted runbook", versionNo: 1,
         classification: "INTERNAL", targetScopeType: "DEPARTMENT", targetReaders,
-        chunks: [{ chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null }],
+        chunks: [{ ...evidenceManifest, chunkId: "b".repeat(64), sourceBlockIds: ["mfa"], parentSectionBlockId: null }],
       }];
     }
     async function ownerHeaders() {
@@ -2051,6 +2079,20 @@ class FakeAskArdenClient implements AskArdenClient {
   onAnswer: (() => void) | null = null;
   sourceBlockIds = ["mfa"];
 
+  async retrieve(request: RetrievalRequest): Promise<RetrievalResponse> {
+    this.lastRequest = { contractVersion: 1, requestId: request.requestId, organizationId: request.organizationId,
+      query: request.query, allowedGenerationIds: request.allowedGenerationIds };
+    return { contractVersion: 2, requestId: request.requestId, standaloneQuery: request.query, retrievalMode: "HYBRID",
+      evidence: [{ generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
+        chunkId: "b".repeat(64), content: evidenceText, ...evidenceManifest,
+        sourceBlockIds: this.sourceBlockIds, parentSectionBlockId: null, label: "" }] };
+  }
+  async generate(request: GenerationRequest): Promise<GenerationResponse> {
+    this.onAnswer?.();
+    return { contractVersion: 2, requestId: request.requestId, status: "ANSWERED", answer: "MFA is required by the security policy.",
+      citations: [{ chunkId: "b".repeat(64), quote: evidenceText }], usedEvidence: request.evidence.map((chunk) => chunk.chunkId) };
+  }
+
   async answer(request: AiAnswerRequest): Promise<AiAnswerResponse> {
     this.lastRequest = request;
     this.onAnswer?.();
@@ -2073,6 +2115,7 @@ class FakeAskArdenClient implements AskArdenClient {
 }
 
 class MemoryRepository implements ArdenDataRepository {
+  readonly conversations = new MemoryConversationStore();
   readonly audienceGroups: AudienceGroupStore = new MemoryAudienceGroupStore();
   readonly systemAdministration: SystemAdministrationStore = new MemorySystemAdministrationStore();
   createdOrganization: { userId: string; email: string; name: string } | null = null;

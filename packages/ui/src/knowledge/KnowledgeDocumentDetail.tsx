@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../shared/Icon";
 import type { KnowledgeCitationReference } from "./knowledgeCitation";
+import { useReaderSummary, type ReaderSummaryOptions } from "./useReaderSummary";
+import { ReaderSummaryPanel } from "./ReaderSummaryPanel";
+import { ReaderQuestionPanel } from "./ReaderQuestionPanel";
 
 export type ReaderDocumentStatus = "EFFECTIVE" | "UPCOMING" | "EXPIRED";
 
@@ -62,7 +65,7 @@ function dateLabel(value: string): string {
  * Reading layout: document information on the left, the viewer on the right. The title appears once,
  * in the viewer bar (the page h1); status and classification live in the information panel.
  */
-export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, focusTarget, onBack, onVersionChange }: {
+export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, focusTarget, onBack, onVersionChange, summaryOptions }: {
   metadata: ReaderDocumentMetadata;
   content: ReactNode;
   /** Actions for the viewer bar, such as Download PDF. */
@@ -70,7 +73,12 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
   focusTarget?: KnowledgeCitationReference | null;
   onBack: () => void;
   onVersionChange?: (versionId: string) => void;
+  summaryOptions?: ReaderSummaryOptions;
 }) {
+  const summary = useReaderSummary(summaryOptions), summaryId = useId(), summaryButton = useRef<HTMLButtonElement>(null);
+  const [questionOpen, setQuestionOpen] = useState(false), questionButton = useRef<HTMLButtonElement>(null);
+  const closeSummary = () => { summary.close(); summaryButton.current?.focus(); };
+  const closeQuestion = () => { setQuestionOpen(false); questionButton.current?.focus(); };
   const readerRef = useRef<HTMLDivElement>(null);
   const [informationCollapsed, setInformationCollapsed] = useState(readInformationCollapsed);
   const toggleInformation = (collapsed: boolean) => {
@@ -106,7 +114,10 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
 
   if (!activeVersion) return null;
 
-  return <div ref={readerRef} className="knowledge-reader-page">
+  return <div ref={readerRef} className="knowledge-reader-page" onKeyDown={event => {
+    if (event.key === "Escape" && questionOpen) { event.stopPropagation(); closeQuestion(); return; }
+    if (event.key === "Escape" && summary.state.status !== "closed") { event.stopPropagation(); closeSummary(); }
+  }}>
     <button type="button" className="knowledge-reader-back" onClick={onBack}>
       <Icon name="arrow" size={12} />Library
     </button>
@@ -161,8 +172,17 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
           <Icon name="pdf" size={14} />
           <h1 title={metadata.title}>{metadata.title}</h1>
           <small>{activeVersion.label}</small>
-          {surfaceActions && <div className="knowledge-reader-surface-actions">{surfaceActions}</div>}
+          {(surfaceActions || summaryOptions) && <div className="knowledge-reader-surface-actions">
+            {summaryOptions && <button ref={summaryButton} type="button" className="secondary-button reader-ai-summary-trigger"
+              aria-expanded={summary.state.status !== "closed"} aria-controls={summaryId}
+              onClick={() => { setQuestionOpen(false); if (summary.state.status === "closed") void summary.open(); else closeSummary(); }}>Summary</button>}
+            {summaryOptions && <button ref={questionButton} type="button" className="secondary-button"
+              aria-expanded={questionOpen} onClick={() => { summary.close(); setQuestionOpen(!questionOpen); }}>Ask this document</button>}
+            {surfaceActions}</div>}
         </header>
+        <ReaderSummaryPanel id={summaryId} summary={summary} onClose={closeSummary} />
+        {questionOpen && summaryOptions?.active && <ReaderQuestionPanel options={summaryOptions} onClose={closeQuestion}
+          key={JSON.stringify([summaryOptions.platform, summaryOptions.context])} />}
         <div className="knowledge-reader-content">{content}</div>
       </article>
     </div>
