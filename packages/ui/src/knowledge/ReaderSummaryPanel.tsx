@@ -17,7 +17,9 @@ export function ReaderSummaryPanel({ id, summary, onClose }: { id: string;
       <div className="reader-ai-summary-skeleton" aria-hidden="true"><i /><i /><i /></div>
     </div>}
     {state.status === "error" && <div className="reader-ai-summary-error" role="alert">
-      <p>{state.message}</p>{state.retry && <button type="button" className="secondary-button" onClick={() => void summary.retry()}>Retry</button>}
+      <p>{state.message}</p>{state.retry && <button type="button" className="secondary-button"
+        disabled={summary.retryAfterSeconds > 0} onClick={() => void summary.retry()}>
+        {summary.retryAfterSeconds > 0 ? `Retry in ${summary.retryAfterSeconds}s` : "Retry"}</button>}
     </div>}
     {state.status === "ready" && state.result && <ol className="reader-ai-summary-points">
       {state.result.points.map((point, index) => <li key={index}>

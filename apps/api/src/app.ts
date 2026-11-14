@@ -1,4 +1,4 @@
-import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
+import Fastify, { LogController, type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
@@ -58,6 +58,8 @@ type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification?: 
 export function buildApp(dependencies: AppDependencies) {
   const sessionKey = dependencies.sessionSigningKey ?? randomBytes(32);
   const app = Fastify({
+    // Explicit metadata-only operation events replace URL/IP-bearing automatic access logs.
+    logController: new LogController({ disableRequestLogging: true }),
     logger: {
       // Recovery verification URLs can contain one-time credentials in the query string.
       serializers: {

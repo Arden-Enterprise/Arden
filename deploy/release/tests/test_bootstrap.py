@@ -46,6 +46,8 @@ class BootstrapTests(unittest.TestCase):
         self.assertNotIn("synthetic-test-value", json.dumps(compose))
         self.assertNotIn("ports", compose["services"]["arden-api"])
         self.assertEqual(compose["services"]["arden-api"]["user"], "1000:1000")
+        self.assertEqual(compose["services"]["arden-api"]["logging"],
+                         {"driver": "json-file", "options": {"max-size": "1m", "max-file": "2"}})
         self.assertEqual(compose["services"]["arden-web"]["user"], "101:101")
 
     def test_provider_metadata_and_infrastructure_only_secrets_are_not_copied_into_the_app(self):

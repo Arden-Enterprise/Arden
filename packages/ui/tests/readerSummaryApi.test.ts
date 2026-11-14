@@ -6,6 +6,13 @@ import { deferred, readerContext, readerId, readerSummaryFixture } from "./reade
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); delete window.ardenDesktop; });
 describe("reader Summary client boundary", () => {
+  it.each(["web", "desktop"] as const)("preserves bounded safe retry metadata on %s without changing IPC", async platform => {
+    const body = { error: { code: "SUMMARY_COOLDOWN", message: "Wait", retryAfterSeconds: 7, retryable: true } };
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json(body, { status: 429 })));
+    window.ardenDesktop = { requestApi: vi.fn().mockResolvedValue({ status: 429, body: JSON.stringify(body) }), clearSession: vi.fn(), startGoogleSignIn: vi.fn() };
+    await expect(generateReaderSummary(platform, readerContext, readerId(4), new AbortController().signal))
+      .rejects.toMatchObject({ status: 429, code: "SUMMARY_COOLDOWN", retryAfterSeconds: 7, retryable: true });
+  });
   it.each(["web", "desktop"] as const)("uses the same strict scoped identity-only requests on %s", async platform => {
     const payload = readerSummaryFixture(readerId(4));
     const fetch = vi.fn().mockResolvedValueOnce(Response.json(payload)).mockResolvedValueOnce(Response.json({

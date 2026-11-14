@@ -8,11 +8,11 @@ import type { KnowledgeCitationReference } from "./knowledgeCitation";
 export type ReaderOperationOptions = { platform: Platform; context: ReaderSummaryContext; active: boolean; visible?: boolean;
   onCitation: (citation: KnowledgeCitationReference | null) => void; onAccessLost: () => void };
 type State<Result> = { key: string | null; status: "closed" | "loading" | "checking" | "ready" | "error";
-  result?: Result; message?: string; retry?: boolean };
+  result?: Result; message?: string; retry?: boolean; retryAt?: number };
 
 /** Ephemeral exact-reader state. A delivered derivative is never a reusable read grant. */
 export function useReaderOperation<Result, Input>(options: ReaderOperationOptions | undefined, config: {
-  label: string; run: (options: ReaderOperationOptions, input: Input, signal: AbortSignal) => Promise<Result>;
+  label: string; busyRetrySeconds?: number; run: (options: ReaderOperationOptions, input: Input, signal: AbortSignal) => Promise<Result>;
 }) {
   const key = options?.active ? JSON.stringify([options.platform, options.context.organizationId, options.context.documentId,
     options.context.versionId, options.context.contentHash]) : null;
@@ -24,6 +24,7 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
   const candidate = useRef<{ key: string; result: Result } | null>(null);
   const lastInput = useRef<{ value: Input } | null>(null);
   const [stored, setState] = useState<State<Result>>({ key: null, status: "closed" });
+  const [clock, setClock] = useState(Date.now);
   const state: State<Result> = key && stored.key === key ? stored : { key, status: "closed" };
   const valid = (scope: string, ticket: number) => current.current.key === scope && sequence.current === ticket;
   const invalidate = () => { sequence.current++; controller.current?.abort(); controller.current = null; operation.current = null; };
@@ -35,13 +36,31 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
     const status = cause instanceof ApiError ? cause.status : 0;
     const denied = status === 401 || status === 403 || status === 404;
     const unsupported = status === 422;
+    const retryable = !denied && !unsupported && (!(cause instanceof ApiError) || cause.retryable !== false);
+    const retryAfterSeconds = cause instanceof ApiError ? cause.retryAfterSeconds ?? (status === 429 ? config.busyRetrySeconds ?? 60 : 0) : 0;
+    const code = cause instanceof ApiError ? cause.code : null;
     if (denied || unsupported) candidate.current = null;
-    setState({ key: scope, status: "error", retry: !denied && !unsupported,
+    const now = Date.now(); setClock(now);
+    setState({ key: scope, status: "error", retry: retryable, retryAt: now + retryAfterSeconds * 1_000,
       message: denied ? "This document is unavailable." : unsupported ? `${config.label} is unavailable for this document.`
+        : code === "SUMMARY_IN_PROGRESS" ? "Another summary is still running."
+        : code === "SUMMARY_COOLDOWN" ? "Please wait before creating another summary."
+        : code === "SUMMARY_CAPACITY" || code === "SUMMARY_PROVIDER_BUSY" ? "Arden is busy. Please retry shortly."
+        : code === "SUMMARY_SOURCE_UNAVAILABLE" ? "Summary is unavailable. Please retry shortly."
+        : code === "SUMMARY_TIMEOUT" ? "Summary took too long. Please retry."
+        : !retryable ? `${config.label} is unavailable.`
         : status === 429 ? "Wait a moment, then retry." : `${config.label} is unavailable. Please retry.` });
     current.current.options?.onCitation(null);
     if (denied) current.current.options?.onAccessLost();
   };
+  useEffect(() => {
+    if (stored.status !== "error" || !stored.retry || !stored.retryAt || stored.retryAt <= Date.now()) return;
+    const timer = setInterval(() => {
+      const now = Date.now(); setClock(now);
+      if (now >= stored.retryAt!) clearInterval(timer);
+    }, 250);
+    return () => clearInterval(timer);
+  }, [stored.status, stored.retry, stored.retryAt]);
   const open = async (input: Input) => {
     const { key: scope, options: settings, config: operationConfig } = current.current;
     if (!scope || !settings || operation.current) return;
@@ -101,6 +120,9 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
       document.removeEventListener("visibilitychange", visibility);
     };
   }, [key, visible]);
-  return { state, open, close, navigate: check,
-    retry: () => candidate.current?.key === key ? check() : lastInput.current ? open(lastInput.current.value) : undefined };
+  return { state, open, close, navigate: check, retryAfterSeconds: Math.max(0, Math.ceil(((state.retryAt ?? 0) - clock) / 1_000)),
+    retry: () => {
+      if (state.status !== "error" || !state.retry || (state.retryAt ?? 0) > Date.now()) return;
+      return candidate.current?.key === key ? check() : lastInput.current ? open(lastInput.current.value) : undefined;
+    } };
 }

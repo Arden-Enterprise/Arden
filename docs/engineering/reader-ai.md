@@ -163,8 +163,9 @@ provider conversation. Cap each call at 4,096 output tokens including reasoning,
 Worst case: eight windows × two attempts = 16 calls and 65,536 output-token allowance;
 this is a ceiling, not a per-request USD charge. Core transport timeout is 200 seconds
 for Summary only; existing chat limits stay unchanged. Per Core process permit one
-active Summary per actor/organization, at most eight total, with a 60-second cooldown
-after dispatch and bounded expiry bookkeeping. This is not a distributed quota.
+active Summary per actor/organization, at most eight total, with bounded expiry
+bookkeeping. The 14 November reliability refinement below replaces the original
+cross-document 60-second cooldown. This is not a distributed quota.
 
 Core verifies echoed identities, contiguous full-source coverage, all supplied
 chunk IDs (including uncited inputs), point bounds and original-source quotations.
@@ -211,6 +212,35 @@ an old/missing AI route fails unavailable rather than falling back to chat. No n
 environment variable, model, dependency, storage or index format is needed. Removing
 this additive caller/route does not require data rollback; there is no Summary cache.
 The process-local quota resets on process restart and does not coordinate replicas.
+
+### Summary reliability refinement — accepted 14 November 2026
+
+The maintainer approved the diagnosed reliability fixes after comparing the old
+cross-document cooldown and immediate Retry behavior. This supersedes that admission
+detail only, not source authorization, citation validation, model budgets or Q&A.
+
+- Keep one active Summary per actor/organization and eight per Core process. Apply
+  the 60-second dispatch cooldown to the exact actor/organization/publication, not
+  other documents. Unsupported preflight does not consume generation cooldown.
+- Join an in-flight request only for the same actor, organization and exact
+  publication; independently revalidate its frozen source before each disclosure.
+  Echo each caller's request ID. Discard the entry at settlement: no completed,
+  shared or durable Summary cache, new DB job or provider-cancellation guarantee.
+- Report cooldown, another active operation and capacity separately. Cooldown uses
+  its remaining seconds; active/capacity provide a short retry suggestion, not a
+  promise of completion. UI waits before enabling manual Retry; never auto-generate.
+- Temporary missing/stale source, provider busy, timeout and invalid output have
+  safe distinct codes. Unsupported text/size stays non-retryable; permission denial
+  stays opaque. Older service failures retain a safe unavailable fallback.
+- Emit bounded metadata only: operation/HTTP request ID, stage, safe code, duration
+  and admission reason. No source text, prompt, token, raw exception or actor data.
+  Bounded container retention must be enabled separately on an authorized rollout;
+  local logging changes do not establish live observability.
+
+Acceptance SR-1–SR-5 respectively covers per-document admission, same-source joining
+and revocation, HTTP/client failure parity, manual countdown/Close/panel lifecycle,
+and sanitized bounded diagnostics. Verify offline first; real provider/native and
+authorized staging rollout remain separate gates. No model/dependency/DB change.
 
 Next is **RA-04 only**: shared reader Summary control/panel and typed web/desktop
 adapters, version-safe state, citations, concise AI label, loading/Retry/Close and

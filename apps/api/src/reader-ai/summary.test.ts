@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PublishedKnowledge } from "../db/repository.js";
 import { HttpAskArdenClient, ArdenAiAnswerError } from "../answers/ai-client.js";
@@ -180,7 +180,7 @@ describe("authenticated Summary HTTP and service adapter", () => {
     try {
       const response = await app.inject({ method: "GET", url: `/api/v1/organizations/${h.input.response.organizationId}/knowledge/published/${h.input.response.publishedVersionId}/summary/access${mode === "query" ? "?all=1" : ""}`,
         ...(mode === "body" ? { payload: { prompt: "not accepted" } } : {}) });
-      expect(response.statusCode).toBe(mode === "denied" ? 404 : mode === "anonymous" ? 401 : mode === "unavailable" ? 422 : mode === "query" || mode === "body" ? 400 : 200);
+      expect(response.statusCode).toBe(mode === "denied" ? 404 : mode === "anonymous" ? 401 : mode === "unavailable" ? 503 : mode === "query" || mode === "body" ? 400 : 200);
       expect(response.headers["cache-control"]).toBe("no-store");
       if (mode === "ok") {
         const context = { organizationId: h.input.response.organizationId, documentId: h.record.documentId,
@@ -230,5 +230,109 @@ describe("authenticated Summary HTTP and service adapter", () => {
     expect(String(fetch.mock.calls[0][0])).toBe("https://ai.example.test/v1/reader-summaries");
     expect(fetch.mock.calls[0][1].headers.authorization).toBe("Bearer test-only");
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual(fixture.response);
+  });
+});
+
+describe("Summary reliability: per-document admission and in-flight recovery", () => {
+  it("does not block document B after A completes and reports exact remaining cooldown for A", () => {
+    let time = 1_000; const gate = new SummaryAdmission(() => time);
+    const a = gate.reserve(id(1), id(2), id(3)); a.dispatch(); a.release();
+    gate.reserve(id(1), id(2), id(4)).release();
+    time += 58_500;
+    expect(() => gate.reserve(id(1), id(2), id(3))).toThrow(expect.objectContaining({ reason: "COOLDOWN", retryAfterSeconds: 2 }));
+    time += 1_500; expect(() => gate.reserve(id(1), id(2), id(3))).not.toThrow();
+  });
+  it("keeps actor/global bounds and distinguishes active work from capacity", () => {
+    const gate = new SummaryAdmission();
+    gate.reserve(id(1), id(2), id(3));
+    expect(() => gate.reserve(id(1), id(2), id(4))).toThrow(expect.objectContaining({ reason: "IN_PROGRESS", retryAfterSeconds: 5 }));
+    for (let i = 2; i <= 8; i++) gate.reserve(id(i), id(2), id(3));
+    expect(() => gate.reserve(id(9), id(2), id(3))).toThrow(expect.objectContaining({ reason: "CAPACITY", retryAfterSeconds: 5 }));
+  });
+  it("joins a reopened exact reader, echoes each request ID and retains no completed cache", async () => {
+    const h = harness(); let finish!: (value: unknown) => void;
+    h.ai.summarizeReaderSource.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const original = h.run(); await vi.waitFor(() => expect(h.ai.summarizeReaderSource).toHaveBeenCalledOnce());
+    const stages = vi.fn();
+    const reopened = h.engine.summarize(id(12), h.input.response.organizationId, h.record.publishedVersionId, id(99), stages);
+    await vi.waitFor(() => expect(stages).toHaveBeenCalledWith("JOIN", h.input.response.requestId));
+    finish(h.result); const [a, b] = await Promise.all([original, reopened]);
+    expect(h.ai.summarizeReaderSource).toHaveBeenCalledOnce(); expect(h.storage.read).toHaveBeenCalledOnce();
+    expect(a.requestId).toBe(h.input.response.requestId); expect(b.requestId).toBe(id(99));
+    expect(b.points).toEqual(a.points); expect(b.points).not.toBe(a.points);
+    expect(() => parsePublicReaderSummary(b, { organizationId: h.input.response.organizationId,
+      documentId: h.record.documentId, versionId: h.record.publishedVersionId,
+      contentHash: h.record.source.snapshotContentHash }, id(99))).not.toThrow();
+    await expect(h.run()).rejects.toMatchObject({ code: "BUSY", reason: "COOLDOWN" });
+  });
+  it("bounds join waiters without creating more work and never joins a different actor", async () => {
+    const h = harness(); const finish: Array<(value: unknown) => void> = [];
+    h.ai.summarizeReaderSource.mockImplementation(() => new Promise(resolve => { finish.push(resolve); }));
+    const original = h.run(); await vi.waitFor(() => expect(finish).toHaveLength(1));
+    const stages = vi.fn(), waiters = Array.from({ length: 8 }, (_, n) =>
+      h.engine.summarize(id(12), h.input.response.organizationId, h.record.publishedVersionId, id(100 + n), stages));
+    await vi.waitFor(() => expect(stages.mock.calls.filter(([stage]) => stage === "JOIN")).toHaveLength(8));
+    await expect(h.engine.summarize(id(12), h.input.response.organizationId, h.record.publishedVersionId, id(200)))
+      .rejects.toMatchObject({ code: "BUSY", reason: "CAPACITY" });
+    const other = h.engine.summarize(id(13), h.input.response.organizationId, h.record.publishedVersionId, h.input.response.requestId);
+    await vi.waitFor(() => expect(finish).toHaveLength(2));
+    finish.forEach(resolve => resolve(h.result)); await Promise.all([original, other, ...waiters]);
+    expect(h.ai.summarizeReaderSource).toHaveBeenCalledTimes(2);
+  });
+  it("rechecks the joining reader independently after valid generation", async () => {
+    const h = harness(); let finish!: (value: unknown) => void;
+    h.ai.summarizeReaderSource.mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    const original = h.run(); await vi.waitFor(() => expect(h.ai.summarizeReaderSource).toHaveBeenCalledOnce());
+    const revalidate = h.sources.revalidate.bind(h.sources);
+    vi.spyOn(h.sources, "revalidate").mockImplementation(async (...args) => {
+      if (checks++ === 1) throw new ReaderSourceError("NOT_FOUND");
+      return revalidate(...args);
+    });
+    let checks = 0;
+    const stages = vi.fn();
+    const reopened = h.engine.summarize(id(12), h.input.response.organizationId, h.record.publishedVersionId, id(99), stages);
+    const rejected = expect(reopened).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await vi.waitFor(() => expect(stages).toHaveBeenCalledWith("JOIN", h.input.response.requestId));
+    finish(h.result); await original; await rejected;
+    expect(h.ai.summarizeReaderSource).toHaveBeenCalledOnce(); expect(checks).toBe(2);
+  });
+  it("releases unsupported preflight without cooldown and preserves failure cooldown for every waiter", async () => {
+    const h = harness(); h.ai.summarizeReaderSource.mockRejectedValue(new ArdenAiAnswerError("AI_SERVICE_HTTP_422"));
+    await expect(h.run()).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    await expect(h.run()).rejects.toMatchObject({ code: "UNSUPPORTED" });
+    expect(h.ai.summarizeReaderSource).toHaveBeenCalledTimes(2);
+    let fail!: (value: Error) => void;
+    h.ai.summarizeReaderSource.mockReturnValue(new Promise((_resolve, reject) => { fail = reject; }));
+    const a = h.run(); await vi.waitFor(() => expect(h.ai.summarizeReaderSource).toHaveBeenCalledTimes(3));
+    const stages = vi.fn();
+    const b = h.engine.summarize(id(12), h.input.response.organizationId, h.record.publishedVersionId, id(99), stages);
+    const results = Promise.allSettled([a, b]);
+    await vi.waitFor(() => expect(stages).toHaveBeenCalledWith("JOIN", h.input.response.requestId));
+    fail(new ArdenAiAnswerError("AI_SUMMARY_TIMEOUT"));
+    for (const result of await results) {
+      expect(result.status).toBe("rejected");
+      if (result.status === "rejected") expect(result.reason).toMatchObject({ code: "TIMEOUT", retryAfterSeconds: expect.any(Number) });
+    }
+  });
+  it.each([
+    ["AI_SUMMARY_TIMEOUT", 504, "SUMMARY_TIMEOUT", true],
+    ["AI_SUMMARY_PROVIDER_BUSY", 503, "SUMMARY_PROVIDER_BUSY", true],
+    ["AI_SUMMARY_PROVIDER_AUTH", 503, "SUMMARY_PROVIDER_AUTH", false],
+    ["AI_SUMMARY_INVALID_OUTPUT", 502, "SUMMARY_INVALID_SUMMARY", true],
+  ] as const)("returns safe failure metadata for %s", async (upstream, status, code, retryable) => {
+    const h = harness(), logs: string[] = [];
+    const app = Fastify({ logController: new LogController({ disableRequestLogging: true }), logger: { stream: { write: (line: string) => { logs.push(line); } } } });
+    h.ai.summarizeReaderSource.mockRejectedValue(new ArdenAiAnswerError(upstream));
+    registerReaderSummaryRoutes(app, h.repository, h.storage, h.ai, async () => ({ userId: id(12) }), "^[0-9a-f-]{36}$");
+    try {
+      const response = await app.inject({ method: "POST", url: `/api/v1/organizations/${h.input.response.organizationId}/knowledge/published/${h.record.publishedVersionId}/summary`, payload: { requestId: h.input.response.requestId } });
+      expect(response.statusCode).toBe(status); expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json().error).toMatchObject({ code, retryable, retryAfterSeconds: expect.any(Number) });
+      expect(Number(response.headers["retry-after"])).toBe(response.json().error.retryAfterSeconds);
+      const event = logs.map(line => JSON.parse(line)).find(row => row.msg === "Reader Summary failed");
+      expect(event).toMatchObject({ operationId: h.input.response.requestId, code, stage: "GENERATION", durationMs: expect.any(Number) });
+      expect(logs.join("")).not.toContain(h.input.response.markdown);
+      expect(logs.join("")).not.toContain(h.publication.sourceUri);
+    } finally { await app.close(); }
   });
 });
