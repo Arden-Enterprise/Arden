@@ -1,11 +1,10 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import type { ActiveMembership, ArdenDataRepository, DecidedReview, AuthorizedAiSource, CreatedOrganization, CreateSharedDraftResult, OrganizationSetup, DecideReviewResult, DeleteDepartmentResult, DraftCursor, DraftListItem, DraftPatch, DraftWrite, KnowledgeOptions, MembershipSummary, OrganizationAdminData, PrivateContributionSource, PrivateDraft, PublishedKnowledge, ReviewerGrantInput, ReviewerGrantRecord, ReviewDetail, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission, StoredContentFields, SubmitKnowledgeDraftResult, UpdateSharedDraftResult, WithdrawKnowledgeSubmissionResult,
-  PublicationChangeInput, RequestPublicationChangeResult } from "./db/repository.js";
+import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult , type PublicationChangeInput, type RequestPublicationChangeResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -80,6 +79,7 @@ describe("API auth and private draft routes", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await app.close();
     await rm(root, { recursive: true, force: true });
   });
@@ -188,11 +188,105 @@ describe("API auth and private draft routes", () => {
     expect(response.json()).toEqual({
       actor: { id: ownerId, email: "owner@example.test", fullName: "Owner" },
       account: { passwordSetupRequired: false },
+      sessionExpiresAt: expect.any(String),
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
         status: "active", departmentId: null, departmentName: null, roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
       }],
     });
+  });
+
+  it.each(["password", "google"])("expires a %s session exactly 24 hours after sign-in", async (method) => {
+    const startedAt = Date.UTC(2026, 10, 13, 8);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    let cookie: string;
+    let setCookies: string | string[] | undefined;
+    if (method === "password") {
+      const signedIn = await app.inject({ method: "POST", url: "/api/v1/auth/sign-in",
+        headers: { origin: "http://localhost:5180" },
+        payload: { email: "owner@example.test", password: "synthetic-password" } });
+      expect(signedIn.statusCode).toBe(200);
+      setCookies = signedIn.headers["set-cookie"];
+      cookie = cookieHeader(setCookies);
+    } else {
+      const started = await app.inject("/api/v1/auth/google/start");
+      const callback = await app.inject({ method: "GET",
+        url: "/api/v1/auth/google/callback?code=synthetic-code&sb_flow_id=0123456789abcdef0123456789abcdef",
+        headers: { cookie: cookieHeader(started.headers["set-cookie"]) } });
+      expect(callback.statusCode).toBe(302);
+      setCookies = callback.headers["set-cookie"];
+      cookie = cookieHeader(setCookies);
+    }
+    expect(cookie).toContain("arden_session=v1.");
+    expect(JSON.stringify(setCookies)).toContain("Max-Age=86400");
+    const expectedExpiry = new Date(startedAt + 24 * 60 * 60 * 1000).toISOString();
+    expect((await app.inject({ url: "/api/v1/me", headers: { cookie } })).json().sessionExpiresAt).toBe(expectedExpiry);
+
+    const withoutSeal = cookie.split("; ").filter((part) => !part.startsWith("arden_session=")).join("; ");
+    const unbound = await app.inject({ url: "/api/v1/me", headers: { cookie: withoutSeal } });
+    expect(unbound.statusCode).toBe(401);
+    expect(JSON.stringify(unbound.headers["set-cookie"])).toContain("arden_session=; ");
+
+    clock.mockReturnValue(startedAt + 24 * 60 * 60 * 1000 - 1000);
+    expect((await app.inject({ url: "/api/v1/me", headers: { cookie } })).statusCode).toBe(200);
+    clock.mockReturnValue(startedAt + 24 * 60 * 60 * 1000);
+    const expired = await app.inject({ url: "/api/v1/me", headers: { cookie } });
+    expect(expired.statusCode).toBe(401);
+    expect(JSON.stringify(expired.headers["set-cookie"])).toContain("Max-Age=0");
+  });
+
+  it("keeps the original deadline when refresh tokens rotate", async () => {
+    const startedAt = Date.UTC(2026, 10, 13, 8);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
+    const signedIn = await app.inject({ method: "POST", url: "/api/v1/auth/sign-in",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test", password: "synthetic-password" } });
+    const originalCookie = cookieHeader(signedIn.headers["set-cookie"]);
+    authProvider.rotatedSession = { accessToken: "access-rotated", refreshToken: "refresh-rotated", expiresIn: 3600 };
+    clock.mockReturnValue(startedAt + 60 * 60 * 1000);
+    const refreshed = await app.inject({ url: "/api/v1/me", headers: { cookie: originalCookie } });
+    expect(refreshed.statusCode).toBe(200);
+    expect(refreshed.json().sessionExpiresAt).toBe(new Date(startedAt + 24 * 60 * 60 * 1000).toISOString());
+    expect(JSON.stringify(refreshed.headers["set-cookie"])).toContain("Max-Age=82800");
+    const rotatedCookie = cookieHeader(refreshed.headers["set-cookie"]);
+    expect(rotatedCookie).toContain("arden_access=access-rotated");
+    expect((await app.inject({ url: "/api/v1/me", headers: { cookie: rotatedCookie } })).statusCode).toBe(200);
+    const mixedCookie = rotatedCookie.replace("arden_session=", "arden_session=wrong");
+    expect((await app.inject({ url: "/api/v1/me", headers: { cookie: mixedCookie } })).statusCode).toBe(401);
+  });
+
+  it("shares secure password and desktop Google sessions across API replicas with one key", async () => {
+    const key = Buffer.alloc(32, 9);
+    const makeReplica = (sessionSigningKey: Buffer) => buildApp({
+      checkDatabase: async () => undefined, auth: authProvider,
+      authTrustedOrigins: ["https://arden.example.test"], secureCookies: true,
+      sessionSigningKey, repository, storage, invitationMailer,
+      publicWebOrigin: "https://arden.example.test", publicApiOrigin: "https://api.example.test",
+    });
+    const first = makeReplica(key);
+    const second = makeReplica(key);
+    const otherKey = makeReplica(Buffer.alloc(32, 8));
+    try {
+      const signedIn = await first.inject({ method: "POST", url: "/api/v1/auth/sign-in",
+        headers: { origin: "https://arden.example.test" },
+        payload: { email: "owner@example.test", password: "synthetic-password" } });
+      const passwordCookie = cookieHeader(signedIn.headers["set-cookie"]);
+      expect(passwordCookie).toContain("__Host-arden_session=v1.");
+      expect(JSON.stringify(signedIn.headers["set-cookie"])).toContain("Secure");
+      expect((await second.inject({ url: "/api/v1/me", headers: { cookie: passwordCookie } })).statusCode).toBe(200);
+      expect((await otherKey.inject({ url: "/api/v1/me", headers: { cookie: passwordCookie } })).statusCode).toBe(401);
+
+      const started = await first.inject("/api/v1/auth/google/start?client=desktop");
+      const callback = await first.inject({ method: "GET",
+        url: "/api/v1/auth/google/callback?code=synthetic-code&sb_flow_id=0123456789abcdef0123456789abcdef",
+        headers: { cookie: cookieHeader(started.headers["set-cookie"]) } });
+      expect(callback.headers.location).toContain("/api/v1/auth/google/desktop-complete?status=success");
+      const googleCookie = cookieHeader(callback.headers["set-cookie"]);
+      expect(googleCookie).toContain("__Host-arden_session=v1.");
+      expect((await second.inject({ url: "/api/v1/me", headers: { cookie: googleCookie } })).statusCode).toBe(200);
+    } finally {
+      await Promise.all([first.close(), second.close(), otherKey.close()]);
+    }
   });
 
   it("completes Google PKCE sign-in and requires a one-time Arden password", async () => {
@@ -214,10 +308,30 @@ describe("API auth and private draft routes", () => {
 
     const before = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
     expect(before.json().account).toEqual({ passwordSetupRequired: true });
+    for (const password of ["Abcdef!", "abcdefgh!", "Abcdefgh"]) {
+      const invalid = await app.inject({
+        method: "POST", url: "/api/v1/auth/password",
+        headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
+        payload: { password },
+      });
+      expect(invalid.statusCode).toBe(400);
+      expect(invalid.json().error.code).toBe("INVALID_PASSWORD");
+      expect(invalid.json().error.message).toBe("Password must have at least 8 characters, one uppercase letter, and one special character.");
+    }
+    const stillPending = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
+    expect(stillPending.json().account).toEqual({ passwordSetupRequired: true });
+    const tooLong = await app.inject({
+      method: "POST", url: "/api/v1/auth/password",
+      headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
+      payload: { password: "A!" + "a".repeat(99) },
+    });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().error.code).toBe("INVALID_PASSWORD");
+    expect(tooLong.json().error.message).toBe("Password must be 100 characters or fewer.");
     const updated = await app.inject({
       method: "POST", url: "/api/v1/auth/password",
       headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
-      payload: { password: "new-password" },
+      payload: { password: "A!" + "a".repeat(98) },
     });
     expect(updated.statusCode).toBe(204);
     const after = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
@@ -229,14 +343,14 @@ describe("API auth and private draft routes", () => {
     const conflict = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "existing@example.test", password: "secure-password", fullName: "Existing User" },
+      payload: { email: "existing@example.test", password: "Secure-password1!", fullName: "Existing User" },
     });
     expect(conflict.statusCode).toBe(202);
     authProvider.signUpBehavior = "success";
     const signup = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "fresh@example.test", password: "secure-password", fullName: "New User" },
+      payload: { email: "fresh@example.test", password: "Secure-password1!", fullName: "New User" },
     });
     expect(signup.statusCode).toBe(202);
     expect(signup.json()).toEqual(conflict.json());
@@ -245,18 +359,19 @@ describe("API auth and private draft routes", () => {
     const rejected = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "weak@example.test", password: "12345678", fullName: "Weak User" },
+      payload: { email: "rejected@example.test", password: "Secure-password1!", fullName: "Rejected User" },
     });
     expect(rejected.statusCode).toBe(400);
     expect(rejected.json().error).toMatchObject({
       code: "ACCOUNT_SETUP_UNAVAILABLE",
+      message: "Account setup could not be completed. Try a different password or sign in.",
     });
     authProvider.signUpBehavior = "success";
 
     const invalidEmail = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "123@gmail", password: "secure-password", fullName: "Invalid Email User" },
+      payload: { email: "123@gmail", password: "Secure-password1!", fullName: "Invalid Email User" },
     });
     expect(invalidEmail.statusCode).toBe(400);
     expect(invalidEmail.json().error).toMatchObject({
@@ -276,7 +391,7 @@ describe("API auth and private draft routes", () => {
     });
   });
 
-  it("handles forgot password requests, verification proxy, and password reset", async () => {
+  it("sends a recovery link and accepts only its verified browser session", async () => {
     const forgot = await app.inject({
       method: "POST", url: "/api/v1/auth/forgot-password",
       headers: { origin: "http://localhost:5180" },
@@ -285,12 +400,15 @@ describe("API auth and private draft routes", () => {
     expect(forgot.statusCode).toBe(202);
     expect(forgot.json().status).toBe("recovery_sent");
     expect(authProvider.lastResetEmail).toBe("owner@example.test");
+    expect(authProvider.lastResetRedirectTo).toBe("http://localhost:5180/reset-password");
 
     const verify = await app.inject({
       method: "GET", url: "/auth/v1/verify?token=valid-link&type=recovery",
     });
     expect(verify.statusCode).toBe(303);
     expect(verify.headers.location).toContain("reset-password");
+    const recoveryCookie = cookieHeader(verify.headers["set-cookie"]);
+    expect(recoveryCookie).toContain("arden_recovery=");
 
     const rootVerify = await app.inject({
       method: "GET", url: "/verify?token=valid-link&type=recovery",
@@ -298,46 +416,33 @@ describe("API auth and private draft routes", () => {
     expect(rootVerify.statusCode).toBe(303);
     expect(rootVerify.headers.location).toContain("reset-password");
 
-    const resetWithOtp = await app.inject({
+    const invalidLink = await app.inject({
+      method: "GET", url: "/auth/v1/verify?token=wrong-link&type=recovery",
+    });
+    expect(invalidLink.statusCode).toBe(303);
+    expect(invalidLink.headers.location).toBe("/reset-password?error=verification_failed");
+    expect(invalidLink.headers["set-cookie"]).toBeUndefined();
+
+    const resetWithCode = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
       headers: { origin: "http://localhost:5180" },
       payload: { email: "owner@example.test", token: "valid-token", newPassword: "new-secure-password" },
     });
-    expect(resetWithOtp.statusCode).toBe(200);
-    expect(resetWithOtp.json()).toEqual({ status: "password_updated" });
-    expect(authProvider.lastUpdatedPassword?.password).toBe("new-secure-password");
-    expect(cookieHeader(resetWithOtp.headers["set-cookie"])).toContain("arden_access=access-recovery");
+    expect(resetWithCode.statusCode).toBe(400);
+    expect(authProvider.lastUpdatedPassword).toBeNull();
 
-    const invalidOtp = await app.inject({
+    const missingProof = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "wrong-token", newPassword: "new-secure-password" },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "new-secure-password" },
     });
-    expect(invalidOtp.statusCode).toBe(401);
-    expect(invalidOtp.json().error.code).toBe("INVALID_TOKEN");
-
-    const reusedOtp = await app.inject({
-      method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "valid-token", newPassword: "second-password" },
-    });
-    expect(reusedOtp.statusCode).toBe(401);
-    expect(reusedOtp.json().error.code).toBe("INVALID_TOKEN");
-    expect(reusedOtp.json().error.message).toBe("The reset code has already been used.");
-
-    const reusedAccessToken = await app.inject({
-      method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180" },
-      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "third-password" },
-    });
-    expect(reusedAccessToken.statusCode).toBe(401);
-    expect(reusedAccessToken.json().error.code).toBe("INVALID_TOKEN");
-    expect(reusedAccessToken.json().error.message).toBe("The reset code has already been used.");
+    expect(missingProof.statusCode).toBe(401);
+    expect(missingProof.json().error.code).toBe("INVALID_TOKEN");
 
     const shortPassword = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "valid-token", newPassword: "short" },
+      headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "short" },
     });
     expect(shortPassword.statusCode).toBe(400);
     expect(shortPassword.json().error.code).toBe("INVALID_PASSWORD");
@@ -345,15 +450,55 @@ describe("API auth and private draft routes", () => {
 
     const rejectedPassword = await app.inject({
       method: "POST", url: "/api/v1/auth/reset-password",
-      headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", token: "valid-token-2", newPassword: "rejected-password" },
+      headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "rejected-password" },
     });
     expect(rejectedPassword.statusCode).toBe(400);
     expect(rejectedPassword.json().error.code).toBe("PASSWORD_REJECTED");
-    expect(rejectedPassword.json().error.message).toBe("Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.");
+    expect(authProvider.lastUpdatedPassword).toBeNull();
+
+    const resetWithLink = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "new-secure-password" },
+    });
+    expect(resetWithLink.statusCode).toBe(200);
+    expect(resetWithLink.json()).toEqual({ status: "password_updated" });
+    expect(authProvider.lastUpdatedPassword?.password).toBe("new-secure-password");
+    expect(cookieHeader(resetWithLink.headers["set-cookie"])).toContain("arden_access=access-recovery");
+
+    const reusedLink = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "second-password" },
+    });
+    expect(reusedLink.statusCode).toBe(401);
+    expect(reusedLink.json().error.code).toBe("INVALID_TOKEN");
+    expect(reusedLink.json().error.message).toBe("The reset link has already been used.");
+  });
+
+  it("rejects a recovery proof after its ten-minute lifetime", async () => {
+    const verify = await app.inject({ method: "GET", url: "/verify?token=valid-link&type=recovery" });
+    const recoveryCookie = cookieHeader(verify.headers["set-cookie"]);
+    const afterExpiry = Date.now() + 601_000;
+    const clock = vi.spyOn(Date, "now").mockReturnValue(afterExpiry);
+    try {
+      const reset = await app.inject({
+        method: "POST", url: "/api/v1/auth/reset-password",
+        headers: { origin: "http://localhost:5180", cookie: recoveryCookie },
+        payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "new-secure-password" },
+      });
+      expect(reset.statusCode).toBe(401);
+      expect(reset.json().error.code).toBe("INVALID_TOKEN");
+      expect(authProvider.lastUpdatedPassword).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("requires a verified current password for account changes and rejects session-only recovery", async () => {
+    const startedAt = Date.UTC(2026, 10, 13, 8);
+    const clock = vi.spyOn(Date, "now").mockReturnValue(startedAt);
     const signIn = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
       payload: { email: "owner@example.test", password: "synthetic-password" },
@@ -370,9 +515,17 @@ describe("API auth and private draft routes", () => {
     expect(wrong.statusCode).toBe(401);
     expect(wrong.json().error.code).toBe("INVALID_CURRENT_PASSWORD");
     expect(authProvider.lastUpdatedPassword).toBeNull();
+    const tooLong = await submit(change, { currentPassword: "synthetic-password", newPassword: "b".repeat(101) });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().error.code).toBe("INVALID_PASSWORD");
+    expect(tooLong.json().error.message).toBe("Password must be 100 characters or fewer.");
+    clock.mockReturnValue(startedAt + 60 * 60 * 1000);
     const updated = await submit(change, { currentPassword: "synthetic-password", newPassword });
     expect(updated.statusCode).toBe(200);
     expect(authProvider.lastUpdatedPassword).toEqual({ token: "access-owner", password: newPassword });
+    expect((await app.inject({ url: "/api/v1/me",
+      headers: { cookie: cookieHeader(updated.headers["set-cookie"]) } })).json().sessionExpiresAt)
+      .toBe(new Date(startedAt + 24 * 60 * 60 * 1000).toISOString());
   });
 
   it("binds a recovery-link update to the verified browser flow", async () => {
@@ -384,23 +537,56 @@ describe("API auth and private draft routes", () => {
       payload: { accessToken: "access-recovery", refreshToken, newPassword: "new-secure-password" },
     });
     expect((await reset("different-refresh")).statusCode).toBe(401);
+    const tooLong = await app.inject({
+      method: "POST", url: "/api/v1/auth/reset-password",
+      headers: { origin: "http://localhost:5180", cookie },
+      payload: { accessToken: "access-recovery", refreshToken: "refresh-recovery", newPassword: "b".repeat(101) },
+    });
+    expect(tooLong.statusCode).toBe(400);
+    expect(tooLong.json().error.code).toBe("INVALID_PASSWORD");
     expect((await reset("refresh-recovery")).statusCode).toBe(200);
     expect((await reset("refresh-recovery")).statusCode).toBe(401);
   });
 
-  it("applies the eight-character minimum at sign-up without changing sign-in validation", async () => {
+  it("enforces the account-creation requirements and the 100-character password cap", async () => {
     const headers = { origin: "http://localhost:5180" };
+    for (const password of ["Abcdef!", "abcdefgh!", "Abcdefgh"]) {
+      const signup = await app.inject({
+        method: "POST", url: "/api/v1/auth/sign-up", headers,
+        payload: { email: "owner@example.test", password, fullName: "Owner" },
+      });
+      expect(signup.statusCode).toBe(400);
+      expect(signup.json().error.code).toBe("INVALID_PASSWORD");
+      expect(signup.json().error.message).toBe("Password must have at least 8 characters, one uppercase letter, and one special character.");
+      expect(authProvider.lastSignUpCredentials).toBeNull();
+    }
     const signup = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up", headers,
-      payload: { email: "owner@example.test", password: "1234567", fullName: "Owner" },
+      payload: { email: "owner@example.test", password: "Abcdefg!", fullName: "Owner" },
     });
-    expect(signup.statusCode).toBe(400);
-    expect(signup.json().error.code).toBe("INVALID_PASSWORD");
-    expect(authProvider.lastSignUpCredentials).toBeNull();
+    expect(signup.statusCode).toBe(202);
+    const longSignup = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up", headers,
+      payload: { email: "long@example.test", password: "A!" + "a".repeat(98), fullName: "Long Password" },
+    });
+    expect(longSignup.statusCode).toBe(202);
+    const overLimit = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up", headers,
+      payload: { email: "longer@example.test", password: "A!" + "a".repeat(99), fullName: "Long Password" },
+    });
+    expect(overLimit.statusCode).toBe(400);
+    expect(overLimit.json().error.code).toBe("INVALID_PASSWORD");
+    expect(overLimit.json().error.message).toBe("Password must be 100 characters or fewer.");
     const signin = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers, payload: { email: "owner@example.test", password: "" },
     });
     expect(signin.json().error.code).toBe("INVALID_REQUEST");
+    const longSignIn = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in", headers, payload: { email: "owner@example.test", password: "a".repeat(101) },
+    });
+    expect(longSignIn.statusCode).toBe(400);
+    expect(longSignIn.json().error.code).toBe("INVALID_PASSWORD");
+    expect(longSignIn.json().error.message).toBe("Password must be 100 characters or fewer.");
   });
 
   it("allows the explicitly injected Kiet Local test actor to use core routes without a login cookie", async () => {
@@ -700,11 +886,11 @@ describe("API auth and private draft routes", () => {
   it("keeps invitation account setup non-enumerating and never starts an authenticated session", async () => {
     const existing = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up", headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test", password: "synthetic-password", fullName: "Owner" },
+      payload: { email: "owner@example.test", password: "Synthetic-password1!", fullName: "Owner" },
     });
     const newAccount = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up", headers: { origin: "http://localhost:5180" },
-      payload: { email: "new.member@example.test", password: "synthetic-password", fullName: "New Member" },
+      payload: { email: "new.member@example.test", password: "Synthetic-password1!", fullName: "New Member" },
     });
     expect(existing.statusCode).toBe(202);
     expect(newAccount.statusCode).toBe(202);
@@ -719,7 +905,7 @@ describe("API auth and private draft routes", () => {
       headers: { origin: "http://localhost:5180" },
       payload: {
         email: "invited.member@example.test",
-        password: "synthetic-password",
+        password: "Synthetic-password1!",
         fullName: "Invited Member",
         redirectTo: "http://localhost:5180/invite/test-token-123",
       },
@@ -732,7 +918,7 @@ describe("API auth and private draft routes", () => {
       headers: { origin: "http://localhost:5180" },
       payload: {
         email: "invited2@example.test",
-        password: "synthetic-password",
+        password: "Synthetic-password1!",
         fullName: "Invited Member 2",
         redirectTo: "https://evil.site/phish",
       },
@@ -749,7 +935,7 @@ describe("API auth and private draft routes", () => {
       headers: { origin: "http://localhost:5180" },
       payload: {
         email: "invited.cookie@example.test",
-        password: "synthetic-password",
+        password: "Synthetic-password1!",
         fullName: "Cookie Member",
         redirectTo: `http://localhost:5180/invite/${validToken}`,
       },
@@ -1000,6 +1186,34 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "POST", url, headers, payload: { ...payload, title: "Other" } })).statusCode).toBe(409);
   });
 
+  it("lists saved draft versions and reads old content only for the author", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const other = await desktopSession(app, "manager@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const created = await app.inject({ method: "POST", url: `${root}/new`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "idempotency-key": createKey },
+      payload: { title: "Runbook", body: "Original steps" } });
+    expect(created.statusCode).toBe(201);
+    const updated = await app.inject({ method: "PATCH", url: `${root}/${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
+      payload: { body: "Revised steps" } });
+    expect(updated.statusCode).toBe(200);
+    const listUrl = `${root}/${sharedDraftId}/versions`;
+    const listed = await app.inject({ method: "GET", url: listUrl, headers: { cookie: owner } });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers["cache-control"]).toBe("no-store");
+    expect(listed.json().items.map((item: { version: number }) => item.version)).toEqual([2, 1]);
+    expect(JSON.stringify(listed.json())).not.toContain("arden-private-object");
+    const old = await app.inject({ method: "GET", url: `${listUrl}/${sharedVersionId}`, headers: { cookie: owner } });
+    expect(old.statusCode).toBe(200);
+    expect(semanticDocumentText(old.json().body)).toBe("Original steps");
+    expect(JSON.stringify(old.json())).not.toContain("arden-private-object");
+    expect((await app.inject({ method: "GET", url: listUrl, headers: { cookie: other } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: `${listUrl}/${sharedVersionId}`, headers: { cookie: other } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: listUrl })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: `${listUrl}/${versionId}`, headers: { cookie: owner } })).statusCode).toBe(404);
+  });
+
   it("accepts new drafts and reviewer grants without a classification (decision 0013)", async () => {
     const session = await desktopSession(app, "owner@example.test");
     const root = `/api/v1/organizations/${organizationId}/knowledge`;
@@ -1018,6 +1232,11 @@ describe("API auth and private draft routes", () => {
     expect(grant.statusCode).toBe(201);
     expect(repository.reviewerGrant?.classifications).toEqual(["INTERNAL", "CONFIDENTIAL", "RESTRICTED"]);
     expect(repository.reviewerGrant).toMatchObject({ scope: "DEPARTMENT", level: "STANDARD" });
+    const duplicate = await app.inject({ method: "POST", url: `${root}/reviewer-grants`,
+      headers: { cookie: session, origin: "http://localhost:5180" },
+      payload: { reviewerMembershipId: otherId, departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff" } });
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.json().error.code).toBe("REVIEWER_GRANT_EXISTS");
   });
 
   it("creates whole-organization grants and rejects mismatched scope metadata (decision 0015)", async () => {
@@ -1045,6 +1264,10 @@ describe("API auth and private draft routes", () => {
       payload: { title: "Original PDF", pdfBase64, classification: "INTERNAL" } });
     expect(created.statusCode).toBe(201);
     expect(created.json()).toMatchObject({ body: "", pdfBase64, currentVersion: { mimeType: "application/pdf" } });
+    const historicPdf = await app.inject({ method: "GET",
+      url: `${root}/drafts/${sharedDraftId}/versions/${sharedVersionId}`, headers: { cookie: owner } });
+    expect(historicPdf.statusCode).toBe(200);
+    expect(historicPdf.json()).toMatchObject({ version: 1, mimeType: "application/pdf", pdfBase64 });
     const reopened = await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers: { cookie: owner } });
     expect(reopened.json().pdfBase64).toBe(pdfBase64);
     expect((await app.inject({ method: "GET", url: `${root}/drafts/${sharedDraftId}`, headers: { cookie: reviewer } })).statusCode).toBe(404);
@@ -1141,6 +1364,35 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "PATCH", url, headers: { ...headers, "if-match": '"1"' },
       payload: { title: "Stale" } })).statusCode).toBe(412);
     expect(semanticDocumentText((await app.inject({ method: "GET", url, headers })).json().body)).toBe("v2");
+  });
+
+  it("replaces a PDF under the same draft identity and rejects stale, invalid and other-author writes", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const other = await desktopSession(app, "manager@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const headers = { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' };
+    const original = Buffer.from("%PDF-1.4\noriginal\n%%EOF\n").toString("base64");
+    const replacement = Buffer.from("%PDF-1.4\nreplacement\n%%EOF\n").toString("base64");
+    expect((await app.inject({ method: "POST", url: `${root}/pdf`, headers: { ...headers, "idempotency-key": createKey },
+      payload: { title: "Versioned PDF", pdfBase64: original } })).statusCode).toBe(201);
+    const url = `${root}/${sharedDraftId}`;
+    expect((await app.inject({ method: "PATCH", url, headers: { ...headers, cookie: other }, payload: { pdfBase64: replacement } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PATCH", url, headers, payload: { pdfBase64: Buffer.from("not a PDF").toString("base64") } })).statusCode).toBe(400);
+    const updated = await app.inject({ method: "PATCH", url, headers, payload: { pdfBase64: replacement } });
+    expect(updated.statusCode).toBe(200);
+    expect(updated.json()).toMatchObject({ id: sharedDraftId, pdfBase64: replacement, currentVersion: { version: 2, mimeType: "application/pdf" } });
+    expect((await app.inject({ method: "PATCH", url, headers, payload: { pdfBase64: original } })).statusCode).toBe(412);
+    expect((await app.inject({ method: "GET", url, headers: { cookie: owner } })).json().pdfBase64).toBe(replacement);
+  });
+
+  it("keeps an empty editor draft saveable but refuses to submit it as knowledge", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    const headers = { cookie: owner, origin: "http://localhost:5180", "idempotency-key": createKey };
+    expect((await app.inject({ method: "POST", url: `${root}/new`, headers, payload: { title: "Incomplete", body: "   " } })).statusCode).toBe(201);
+    const result = await app.inject({ method: "POST", url: `${root}/${sharedDraftId}/submit`, headers: { ...headers, "if-match": '"1"' } });
+    expect(result.statusCode).toBe(409);
+    expect(result.json().error.message).toBe("Add document content before submitting.");
   });
 
   describe("Target Readers on draft save (T1.4)", () => {
@@ -1375,6 +1627,7 @@ describe("API auth and private draft routes", () => {
       const stored = await storage.write("Restricted runbook");
       repository.publication = { id: versionId, draftId: sharedDraftId, title: "Restricted runbook",
         classification: "INTERNAL", responsibleDepartmentId: engineeringDepartmentId,
+        responsibleDepartmentName: "Engineering",
         contentHash: stored.contentHash, sourceUri: stored.sourceUri, audienceRoleIds: [], targetReaders,
         publishedAt: new Date("2026-11-01T00:00:00.000Z"), validFrom: new Date("2026-11-01T00:00:00.000Z"),
         validUntil: null };
@@ -1441,10 +1694,12 @@ describe("API auth and private draft routes", () => {
       const headers = await ownerHeaders();
       const list = await app.inject({ method: "GET", url: `${root}/knowledge/published`, headers });
       expect(list.json().items).toHaveLength(1);
+      expect(list.json().items[0].responsibleDepartmentName).toBe("Engineering");
       expect(JSON.stringify(list.json())).not.toContain(otherId);
       const detail = await app.inject({ method: "GET", url: `${root}/knowledge/published/${versionId}`, headers });
       expect(detail.statusCode).toBe(200);
       expect(detail.json().body).toBe("Restricted runbook");
+      expect(detail.json().responsibleDepartmentName).toBe("Engineering");
       expect(detail.json().targetReaders).toEqual(readers ? { mode: readers.mode, departmentId: readers.departmentId } : null);
       const answer = await app.inject({ method: "POST", url: `${root}/ai/answers`, headers,
         payload: { query: "What does the runbook say?" } });
@@ -1639,8 +1894,10 @@ class FakeAuthProvider implements AuthProvider {
   readonly revokedSessions: string[] = [];
   signUpBehavior: "success" | "already_exists" | "rejected" = "success";
   lastResetEmail: string | null = null;
+  lastResetRedirectTo: string | null = null;
   lastUpdatedPassword: { token: string; password: string } | null = null;
   lastSignUpCredentials: SupabaseSignUp | null = null;
+  rotatedSession: { accessToken: string; refreshToken: string; expiresIn: number } | null = null;
   private readonly usersByAccessToken = new Map<string, { userId: string; email: string; passwordSetupRequired: boolean }>();
 
   async signIn(credentials: { email: string; password: string }) {
@@ -1665,7 +1922,10 @@ class FakeAuthProvider implements AuthProvider {
 
   async resolveSession(tokens: { accessToken: string }) {
     const user = this.usersByAccessToken.get(tokens.accessToken);
-    return user ? { kind: "authenticated" as const, ...user, fullName: user.userId === ownerId ? "Owner" : null, emailVerified: true } : { kind: "unauthenticated" as const };
+    if (user && this.rotatedSession) this.usersByAccessToken.set(this.rotatedSession.accessToken, user);
+    return user ? { kind: "authenticated" as const, ...user, fullName: user.userId === ownerId ? "Owner" : null,
+      emailVerified: true, ...(this.rotatedSession ? { rotatedSession: this.rotatedSession } : {}) }
+      : { kind: "unauthenticated" as const };
   }
 
   async signOut(tokens: { accessToken: string }) {
@@ -1689,20 +1949,9 @@ class FakeAuthProvider implements AuthProvider {
     user.passwordSetupRequired = false;
   }
 
-  async resetPasswordForEmail(email: string) {
+  async resetPasswordForEmail(email: string, redirectTo?: string) {
     this.lastResetEmail = email;
-  }
-
-  private readonly usedOtpTokens = new Set<string>();
-
-  async verifyOtp(params: { email: string; token: string }) {
-    const key = `${params.email}:${params.token}`;
-    if (this.usedOtpTokens.has(key)) throw new Error("INVALID_OTP");
-    if (params.token !== "valid-token" && params.token !== "valid-token-2") throw new Error("INVALID_OTP");
-    this.usedOtpTokens.add(key);
-    const tokens = { accessToken: params.token === "valid-token-2" ? "access-recovery-2" : "access-recovery", refreshToken: "refresh-recovery", expiresIn: 3600 };
-    this.usersByAccessToken.set(tokens.accessToken, { userId: ownerId, email: params.email, passwordSetupRequired: false });
-    return { tokens };
+    this.lastResetRedirectTo = redirectTo ?? null;
   }
 
   async updateUserPassword(tokens: { accessToken: string }, newPassword: string) {
@@ -1860,6 +2109,7 @@ class MemoryRepository implements ArdenDataRepository {
   currentVersion = 2;
   currentSource: StoredContentFields = { sourceUri: "arden-private-object://dddddddd-dddd-4ddd-8ddd-dddddddddddd", mimeType: "text/plain", contentHash: "not-used-in-forged-note" };
   sharedDraft: SharedKnowledgeDraft | null = null;
+  sharedVersions: KnowledgeDraftVersion[] = [];
   sharedSubmission: SharedKnowledgeSubmission | null = null;
   reviewerGrant: ReviewerGrantRecord | null = null;
   publication: PublishedKnowledge | null = null;
@@ -1927,7 +2177,6 @@ class MemoryRepository implements ArdenDataRepository {
       organizationReviewerAvailable: false,
       audiences: [{ id: "11111111-aaaa-4aaa-8aaa-111111111111", name: "Product members",
         departmentId: "ffffffff-ffff-4fff-8fff-ffffffffffff", kind: "DEPARTMENT_ALL" }],
-      categories: [{ id: "12121212-1212-4121-8121-121212121212", code: "GENERAL", name: "General", isDefault: true }],
     };
   }
 
@@ -2008,11 +2257,13 @@ class MemoryRepository implements ArdenDataRepository {
       id: sharedDraftId, organizationId, title: input.expectedSource.title,
       classification: input.classification, sourcePrivateVersionId: input.sourceVersionId,
       responsibleDepartmentId: null, targetScopeType: null, teamTag: null, projectTag: null, audienceRoleIds: [],
-      targetReaders: null, categoryId: null, keywords: [], changeDescription: null,
-      effectiveDate: null, expirationDate: null, relatedDocumentIds: [], versionId: sharedVersionId, sourceUri: input.copiedContent.sourceUri,
+      targetReaders: null, versionId: sharedVersionId, sourceUri: input.copiedContent.sourceUri,
       mimeType: input.copiedContent.mimeType, contentHash: input.copiedContent.contentHash,
       currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
     };
+    this.sharedVersions = [{ id: sharedVersionId, version: 1,
+      sourceUri: input.copiedContent.sourceUri, mimeType: input.copiedContent.mimeType,
+      contentHash: input.copiedContent.contentHash, createdAt: this.sharedDraft.createdAt }];
     return { kind: "created", draft: this.sharedDraft };
   }
 
@@ -2032,11 +2283,13 @@ class MemoryRepository implements ArdenDataRepository {
     this.sharedDraft = {
       id: sharedDraftId, organizationId, title: input.title, classification: input.classification,
       sourcePrivateVersionId: null, responsibleDepartmentId: null, targetScopeType: null,
-      teamTag: null, projectTag: null, audienceRoleIds: [], targetReaders: null, categoryId: null, keywords: [], changeDescription: null,
-      effectiveDate: null, expirationDate: null, relatedDocumentIds: [], versionId: sharedVersionId,
+      teamTag: null, projectTag: null, audienceRoleIds: [], targetReaders: null, versionId: sharedVersionId,
       sourceUri: input.content.sourceUri, mimeType: input.content.mimeType, contentHash: input.content.contentHash,
       currentVersion: 1, hasPendingSubmission: false, createdAt: new Date("2026-10-10T09:00:00.000Z"), updatedAt: new Date("2026-10-10T09:00:00.000Z"),
     };
+    this.sharedVersions = [{ id: sharedVersionId, version: 1,
+      sourceUri: input.content.sourceUri, mimeType: input.content.mimeType,
+      contentHash: input.content.contentHash, createdAt: this.sharedDraft.createdAt }];
     return { kind: "created", draft: this.sharedDraft };
   }
 
@@ -2048,6 +2301,18 @@ class MemoryRepository implements ArdenDataRepository {
   async getKnowledgeDraft(userId: string, requestedOrganization: string, requestedDraft: string): Promise<SharedKnowledgeDraft | null> {
     return userId === ownerId && requestedOrganization === organizationId && this.sharedDraft?.id === requestedDraft
       ? this.sharedDraft : null;
+  }
+
+  async listKnowledgeDraftVersions(userId: string, requestedOrganization: string,
+    requestedDraft: string): Promise<KnowledgeDraftVersion[] | null> {
+    if (!await this.getKnowledgeDraft(userId, requestedOrganization, requestedDraft)) return null;
+    return [...this.sharedVersions].reverse();
+  }
+
+  async getKnowledgeDraftVersion(userId: string, requestedOrganization: string,
+    requestedDraft: string, requestedVersion: string): Promise<KnowledgeDraftVersion | null> {
+    if (!await this.getKnowledgeDraft(userId, requestedOrganization, requestedDraft)) return null;
+    return this.sharedVersions.find((version) => version.id === requestedVersion) ?? null;
   }
 
   async updateKnowledgeDraft(userId: string, requestedOrganization: string, requestedDraft: string,
@@ -2075,6 +2340,9 @@ class MemoryRepository implements ArdenDataRepository {
         ? "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" : "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       currentVersion: expectedVersion + 1,
     };
+    this.sharedVersions.push({ id: this.sharedDraft.versionId, version: this.sharedDraft.currentVersion,
+      sourceUri: this.sharedDraft.sourceUri, mimeType: this.sharedDraft.mimeType,
+      contentHash: this.sharedDraft.contentHash, createdAt: this.sharedDraft.updatedAt });
     return { kind: "updated", draft: this.sharedDraft };
   }
 
@@ -2138,6 +2406,14 @@ class MemoryRepository implements ArdenDataRepository {
 
   async createReviewerGrant(userId: string, requestedOrganization: string, input: ReviewerGrantInput): Promise<ReviewerGrantRecord | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId || input.reviewerMembershipId !== otherId) return null;
+    if (this.reviewerGrant?.status === "ACTIVE" && this.reviewerGrant.scope === input.scope
+      && this.reviewerGrant.departmentId === input.departmentId
+      && this.reviewerGrant.teamTag === input.teamTag && this.reviewerGrant.projectTag === input.projectTag
+      && this.reviewerGrant.level === (input.level ?? "STANDARD")
+      && this.reviewerGrant.classifications.length === input.classifications.length
+      && input.classifications.every((classification) => this.reviewerGrant!.classifications.includes(classification))) {
+      throw new ReviewerGrantConflictError();
+    }
     this.reviewerGrant = { ...input, level: input.level ?? "STANDARD",
       id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", status: "ACTIVE",
       validFrom: new Date("2026-10-10T09:00:00.000Z") };

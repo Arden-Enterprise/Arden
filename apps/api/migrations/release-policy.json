@@ -177,20 +177,32 @@
     },
     {
       "id": "0030",
-      "filename": "0030_contribution_form_dates.sql",
-      "sha256": "f17469369c104fcb7abe7e84221a523922aa4e5cf7aa757c366f5b8bc8730433",
+      "filename": "0030_knowledge_management_catalog.sql",
+      "sha256": "dd3b336abff3752ec6a183ba040ccd10c94bb4b2f30fb23459b3a7423c908036",
       "rollout": "operator"
     },
     {
       "id": "0031",
-      "filename": "0031_publication_change_requests.sql",
-      "sha256": "8a74be3fd9a680ee0b03e436dc9fef602dd90d394b2f9cf98d80b378f9ad77b7",
+      "filename": "0031_deduplicate_reviewer_grants.sql",
+      "sha256": "a113f2824f5382b475d9c625d3ca25fb07d7ad58b6fefc8ef668f0d61539bd1c",
       "rollout": "operator"
     },
     {
       "id": "0032",
-      "filename": "0032_apply_publication_change_requests.sql",
-      "sha256": "ce6aa5d663745d5e2655b68102bd88360ce46c13ecda29f93a6c59da569eee9c",
+      "filename": "0032_reader_directory_email.sql",
+      "sha256": "525a03fafd4719beb92b91049d6e1edc09dde82925d4c0e8647c2d9208e5cc28",
+      "rollout": "operator"
+    },
+    {
+      "id": "0033",
+      "filename": "0033_publication_change_requests.sql",
+      "sha256": "d0fc8d6ff52c15ec02f16faaaf3cb0beab031be76e1d207aeb9b5a1f1e67749e",
+      "rollout": "operator"
+    },
+    {
+      "id": "0034",
+      "filename": "0034_apply_publication_change_requests.sql",
+      "sha256": "92993c6cf83bfca763264c70755f792db0d7344ed1545b68dda2fe0053315bf6",
       "rollout": "operator"
     }
   ]

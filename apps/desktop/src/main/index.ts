@@ -91,22 +91,29 @@ async function doApiRequest(request: DesktopApiRequest): Promise<DesktopApiRespo
   if (request.ifMatch) headers.set("if-match", request.ifMatch);
   if (request.idempotencyKey) headers.set("idempotency-key", request.idempotencyKey);
   if (jar.size > 0) headers.set("cookie", [...jar].map(([name, value]) => `${name}=${value}`).join("; "));
-  const response = await fetch(`${origin}${request.path}`, {
-    method: request.method,
-    headers,
-    body: request.body,
-    redirect: "error",
-  });
-  applySetCookies(jar, response.headers.getSetCookie());
-  await persistCookieJar(jar, origin);
-  const body = await response.text();
-  if (Buffer.byteLength(body, "utf8") > desktopApiResponseLimit(request)) throw new Error("The Arden response exceeded the desktop limit");
-  return {
-    status: response.status,
-    body,
-    etag: response.headers.get("etag") ?? undefined,
-    location: response.headers.get("location") ?? undefined,
-  };
+  const controller = request.timeoutMs === undefined ? undefined : new AbortController();
+  const timeout = request.timeoutMs === undefined ? undefined : setTimeout(() => controller?.abort(), request.timeoutMs);
+  try {
+    const response = await fetch(`${origin}${request.path}`, {
+      method: request.method,
+      headers,
+      body: request.body,
+      redirect: "error",
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    applySetCookies(jar, response.headers.getSetCookie());
+    await persistCookieJar(jar, origin);
+    const body = await response.text();
+    if (Buffer.byteLength(body, "utf8") > desktopApiResponseLimit(request)) throw new Error("The Arden response exceeded the desktop limit");
+    return {
+      status: response.status,
+      body,
+      etag: response.headers.get("etag") ?? undefined,
+      location: response.headers.get("location") ?? undefined,
+    };
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
 }
 
 ipcMain.handle("arden:api-request", async (event, value: unknown) => {
@@ -182,12 +189,14 @@ async function startDesktopGoogleSignIn(parent: BrowserWindow): Promise<void> {
         if (url.origin !== origin || url.pathname !== "/api/v1/auth/google/desktop-complete") return;
         if (url.searchParams.get("status") !== "success") return finish(new Error("Google sign-in could not be completed"));
         const cookies = await authSession.cookies.get({ url: origin });
-        const allowedNames = new Set(["arden_access", "arden_refresh", "__Host-arden_access", "__Host-arden_refresh"]);
+        const allowedNames = new Set(["arden_access", "arden_refresh", "arden_session",
+          "__Host-arden_access", "__Host-arden_refresh", "__Host-arden_session"]);
         const jar = await readCookieJar(origin);
         for (const name of allowedNames) jar.delete(name);
         for (const cookie of cookies) if (allowedNames.has(cookie.name) && cookie.value) jar.set(cookie.name, cookie.value);
         if (!["arden_access", "__Host-arden_access"].some((name) => jar.has(name)) ||
-          !["arden_refresh", "__Host-arden_refresh"].some((name) => jar.has(name))) {
+          !["arden_refresh", "__Host-arden_refresh"].some((name) => jar.has(name)) ||
+          !["arden_session", "__Host-arden_session"].some((name) => jar.has(name))) {
           return finish(new Error("Google sign-in did not return an Arden session"));
         }
         await persistCookieJar(jar, origin);

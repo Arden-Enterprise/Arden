@@ -1,4 +1,13 @@
 import type { Platform } from "./types";
+import type { KnowledgeMetadata } from "@arden/domain";
+
+export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
+  departmentId: string | null; memberIds: string[] };
+export type KnowledgeCatalogEntry = { id: string; name: string; description: string; status: "ACTIVE" | "INACTIVE"; version: number };
+export type KnowledgeCollection = KnowledgeCatalogEntry & { cover: "handbook" | "production"; documentIds: string[] };
+export type KnowledgeCatalog = { canManage: boolean; topics: KnowledgeCatalogEntry[]; collections: KnowledgeCollection[] };
+export type KnowledgeCatalogWrite = { name: string; description: string; status: "ACTIVE" | "INACTIVE";
+  cover?: "handbook" | "production"; documentIds?: string[] };
 import { parseAudienceGroup, parseAudienceGroupList, type AudienceGroupRecord,
   type AudienceGroupWrite } from "./audience-group-contracts";
 import type {} from "./desktop-session";
@@ -15,6 +24,7 @@ export type OrganizationMembership = {
 export type CurrentSession = {
   actor: { id: string; email?: string; fullName?: string | null };
   account: { passwordSetupRequired: boolean };
+  sessionExpiresAt?: string;
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
   testMode?: boolean;
@@ -46,10 +56,11 @@ export type KnowledgeOptions = {
   organizationReviewerAvailable?: boolean;
   audiences: Array<{ id: string; name: string; departmentId: string | null;
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
-  /** Active document categories (T3.2); undefined means the server predates categories. */
-  categories?: Array<{ id: string; code: string; name: string; isDefault: boolean }>;
 };
 export type KnowledgeDraftRecord = {
+  management?: KnowledgeMetadata | null;
+  hasPublishedVersion?: boolean;
+  targetReaders?: TargetReaders | null;
   id: string;
   organizationId: string;
   title: string;
@@ -66,15 +77,18 @@ export type KnowledgeDraftRecord = {
   currentVersion: { id: string; version: number; mimeType: "text/plain" | "application/pdf"; contentHash: string };
   createdAt: string;
   updatedAt: string;
-  /** T3.2 contribution form fields (absent from older servers). Dates are YYYY-MM-DD. */
-  categoryId?: string | null;
-  keywords?: string[];
-  changeDescription?: string | null;
-  effectiveDate?: string | null;
-  expirationDate?: string | null;
-  relatedDocumentIds?: string[];
 };
+export type KnowledgeDraftVersionSummary = {
+  id: string;
+  version: number;
+  mimeType: "text/plain" | "application/pdf";
+  createdAt: string;
+};
+export type KnowledgeDraftVersionRecord = KnowledgeDraftVersionSummary & { body: string; pdfBase64?: string };
 export type KnowledgeDraftSummary = {
+  management?: KnowledgeMetadata | null;
+  hasPublishedVersion?: boolean;
+  targetReaders?: TargetReaders | null;
   id: string;
   organizationId: string;
   title: string;
@@ -91,10 +105,11 @@ export type KnowledgeDraftSummary = {
   hasPendingSubmission: boolean;
   createdAt: string;
   updatedAt: string;
-  /** T3.2: absent from older servers. */
-  categoryId?: string | null;
 };
 export type KnowledgeSubmission = {
+  management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
+  proposedTargetReaders?: TargetReaders | null;
+  approvedTargetReaders?: TargetReaders | null;
   id: string;
   draftId: string;
   snapshotVersionId: string;
@@ -110,7 +125,7 @@ export type KnowledgeSubmission = {
   submittedAt: string;
   publishedVersionId: string | null;
   decisionComment: string | null;
-  /** T6.1: CONTENT, or a READER_CHANGE / WITHDRAWAL request about the current publication. */
+  /** T6.1/T6.2: CONTENT, or a READER_CHANGE / WITHDRAWAL request about the current publication. */
   requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
   requestReason?: string | null;
 };
@@ -156,7 +171,9 @@ export type PublishedKnowledge = {
   title: string;
   classification: KnowledgeClassification;
   responsibleDepartmentId: string;
-  documentCode?: string;
+  /** Display metadata, independent of the author's permitted department choices. */
+  responsibleDepartmentName?: string | null;
+  management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
   versionLabel?: string;
   summary?: string;
   audienceIds: string[];
@@ -217,6 +234,18 @@ export function loadKnowledgeDraft(platform: Platform, organizationId: string, d
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`);
 }
 
+export async function listKnowledgeDraftVersions(platform: Platform, organizationId: string,
+  draftId: string): Promise<KnowledgeDraftVersionSummary[]> {
+  const response = await request<{ items: KnowledgeDraftVersionSummary[] }>(platform,
+    `${knowledgePath(organizationId)}/drafts/${draftId}/versions`);
+  return response.items;
+}
+
+export function loadKnowledgeDraftVersion(platform: Platform, organizationId: string,
+  draftId: string, versionId: string): Promise<KnowledgeDraftVersionRecord> {
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}/versions/${versionId}`);
+}
+
 export function createNewKnowledgeDraft(platform: Platform, organizationId: string,
   // Decision 0013: classification is optional; the server defaults a new draft to INTERNAL.
   input: { title: string; body: string; classification?: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
@@ -227,25 +256,56 @@ export function createNewKnowledgeDraft(platform: Platform, organizationId: stri
 
 export async function createPdfKnowledgeDraft(platform: Platform, organizationId: string,
   input: { title: string; file: File; classification?: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
-  if (!/\.pdf$/i.test(input.file.name) || input.file.size === 0 || input.file.size > 5 * 1024 * 1024) {
+  const pdfBase64 = await encodeKnowledgePdf(input.file);
+  return request(platform, `${knowledgePath(organizationId)}/drafts/pdf`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ title: input.title, classification: input.classification, pdfBase64 }),
+  });
+}
+
+async function encodeKnowledgePdf(file: File): Promise<string> {
+  if (!/\.pdf$/i.test(file.name) || file.size === 0 || file.size > 5 * 1024 * 1024) {
     throw new ApiError(0, "Choose a PDF file up to 5 MB.");
   }
-  const bytes = new Uint8Array(await input.file.arrayBuffer());
+  const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
   }
-  return request(platform, `${knowledgePath(organizationId)}/drafts/pdf`, {
-    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ title: input.title, classification: input.classification, pdfBase64: btoa(binary) }),
+  return btoa(binary);
+}
+
+export async function replaceKnowledgePdf(platform: Platform, organizationId: string, draftId: string, version: number,
+  file: File, patch: Parameters<typeof saveKnowledgeDraft>[4]): Promise<KnowledgeDraftRecord> {
+  const pdfBase64 = await encodeKnowledgePdf(file);
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`, {
+    method: "PATCH", headers: { "If-Match": `"${version}"` }, body: JSON.stringify({ ...patch, pdfBase64 }),
   });
 }
 
 export function saveKnowledgeDraft(platform: Platform, organizationId: string, draftId: string, version: number,
-  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceIds" | "categoryId">>): Promise<KnowledgeDraftRecord> {
+  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">> & {
+    management?: KnowledgeMetadata; targetReaders?: TargetReaders }): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`, {
     method: "PATCH", headers: { "If-Match": `"${version}"` }, body: JSON.stringify(patch),
   });
+}
+
+export function loadKnowledgeCatalog(platform: Platform, organizationId: string): Promise<KnowledgeCatalog> {
+  return request(platform, `${knowledgePath(organizationId)}/catalog`);
+}
+export function saveKnowledgeCatalogEntry(platform: Platform, organizationId: string, kind: "topics" | "collections",
+  entry: KnowledgeCatalogEntry | null, input: KnowledgeCatalogWrite): Promise<KnowledgeCatalogEntry> {
+  return request(platform, `${knowledgePath(organizationId)}/catalog/${kind}${entry ? `/${entry.id}` : ""}`, {
+    method: entry ? "PATCH" : "POST", body: JSON.stringify(input),
+    headers: entry ? { "If-Match": `"catalog-${entry.version}"` } : {},
+  });
+}
+/** Decision 0021: a member of the organization found by name or email (Google Drive style). */
+export type KnowledgeReaderMatch = { id: string; name: string; email?: string; department?: string | null };
+export async function findKnowledgeReaders(platform: Platform, organizationId: string, query: string, ids: string[] = []) {
+  return (await request<{ items: KnowledgeReaderMatch[] }>(platform,
+    `${knowledgePath(organizationId)}/catalog/readers?q=${encodeURIComponent(query)}&ids=${encodeURIComponent(ids.join(","))}`)).items;
 }
 
 export function submitKnowledgeDraft(platform: Platform, organizationId: string, draftId: string,
@@ -366,9 +426,9 @@ export async function requestPasswordReset(platform: Platform, email: string): P
   });
 }
 
-export async function resetPasswordWithToken(
+export async function resetPasswordFromLink(
   platform: Platform,
-  params: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string }
+  params: { accessToken: string; refreshToken: string; newPassword: string }
 ): Promise<void> {
   await request(platform, "/api/v1/auth/reset-password", {
     method: "POST", body: JSON.stringify(params),
@@ -506,7 +566,7 @@ export async function inviteOrganizationMember(platform: Platform, organizationI
   return request(platform, `/api/v1/organizations/${organizationId}/invitations`, {
     method: "POST",
     body: JSON.stringify({ email, ...(departmentId ? { departmentId } : {}) }),
-  });
+  }, 30_000);
 }
 
 export async function resendOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
@@ -559,7 +619,7 @@ export async function apiRequest<T>(platform: Platform, path: string, init: Requ
 
 type ApiResponse = { status: number; body: string; etag?: string; location?: string };
 
-async function request<T>(platform: Platform, path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(platform: Platform, path: string, init: RequestInit = {}, timeoutMs?: number): Promise<T> {
   const rawMethod = init.method ?? "GET";
   if (rawMethod !== "GET" && rawMethod !== "POST" && rawMethod !== "PATCH") {
     throw new ApiError(0, "This request method is not available in the Arden client.");
@@ -582,23 +642,37 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
         body: typeof init.body === "string" ? init.body : undefined,
         ifMatch: headers.get("if-match") ?? undefined,
         ...(headers.has("idempotency-key") ? { idempotencyKey: headers.get("idempotency-key")! } : {}),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
     } else {
       const requestHeaders: Record<string, string> = { ...Object.fromEntries(headers.entries()) };
       if (init.body !== undefined) {
         requestHeaders["Content-Type"] = "application/json";
       }
-      const webResponse = await fetch(`${window.location.origin}${path}`, {
-        ...init,
-        credentials: "include",
-        headers: requestHeaders,
-      });
-      response = {
-        status: webResponse.status,
-        body: await webResponse.text(),
-        etag: webResponse.headers.get("etag") ?? undefined,
-        location: webResponse.headers.get("location") ?? undefined,
-      };
+      const controller = timeoutMs === undefined ? undefined : new AbortController();
+      const abortFromCaller = () => controller?.abort(init.signal?.reason);
+      if (controller && init.signal) {
+        if (init.signal.aborted) abortFromCaller();
+        else init.signal.addEventListener("abort", abortFromCaller, { once: true });
+      }
+      const timeout = timeoutMs === undefined ? undefined : setTimeout(() => controller?.abort(), timeoutMs);
+      try {
+        const webResponse = await fetch(`${window.location.origin}${path}`, {
+          ...init,
+          ...(controller ? { signal: controller.signal } : {}),
+          credentials: "include",
+          headers: requestHeaders,
+        });
+        response = {
+          status: webResponse.status,
+          body: await webResponse.text(),
+          etag: webResponse.headers.get("etag") ?? undefined,
+          location: webResponse.headers.get("location") ?? undefined,
+        };
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        if (controller && init.signal) init.signal.removeEventListener("abort", abortFromCaller);
+      }
     }
   } catch (cause) {
     if (cause instanceof ApiError) throw cause;

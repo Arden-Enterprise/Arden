@@ -31,7 +31,6 @@ export interface AuthProvider {
   completeGoogleSignIn?(code: string, flowId: string, verifier: string): Promise<GoogleOAuthResult>;
   setInitialPassword?(tokens: AuthSessionTokens, password: string): Promise<void>;
   resetPasswordForEmail?(email: string, redirectTo?: string): Promise<void>;
-  verifyOtp?(params: { email: string; token: string; type: "recovery" | "email" }): Promise<{ tokens: AuthSessionTokens }>;
   updateUserPassword?(tokens: AuthSessionTokens, newPassword: string): Promise<void>;
   verifyLink?(searchParams: string): Promise<string | null>;
 }
@@ -211,19 +210,6 @@ export class SupabaseAuthProvider implements AuthProvider {
     });
     if (error && !isClientAuthFailure(error)) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
     if (error) throw new Error("RESET_REQUEST_REJECTED");
-  }
-
-  async verifyOtp(params: { email: string; token: string; type: "recovery" | "email" }): Promise<{ tokens: AuthSessionTokens }> {
-    const { data, error } = await this.createAuthClient().auth.verifyOtp({
-      email: params.email,
-      token: params.token,
-      type: params.type,
-    });
-    if (error) throw new Error(isClientAuthFailure(error) ? "INVALID_OTP" : "SUPABASE_AUTH_UNAVAILABLE");
-    if (!data.session) throw new Error("INVALID_AUTH_RESPONSE");
-    const tokens = toTokens(data.session);
-    if (!tokens) throw new Error("INVALID_AUTH_RESPONSE");
-    return { tokens };
   }
 
   async updateUserPassword(tokens: AuthSessionTokens, newPassword: string): Promise<void> {

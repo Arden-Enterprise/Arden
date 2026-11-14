@@ -30,13 +30,14 @@ function renderList(onOpen = vi.fn()) {
 afterEach(cleanup);
 
 describe("REV-02 review list", () => {
-  it("groups pending and decided submissions with code, version, department, author and counts", () => {
+  it("groups pending and decided submissions with version, department, author and counts", () => {
     renderList();
     expect(screen.getByRole("button", { name: /Needs review\s*2/ }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByRole("button", { name: /Approved\s*1/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Rejected\s*1/ })).toBeTruthy();
     const first = screen.getByRole("button", { name: /Incident escalation runbook/ });
-    expect(within(first).getByText("FPD-SOP-061")).toBeTruthy();
+    // Decision 0021: no code is split out of the title.
+    expect(within(first).getByText("FPD-SOP-061 — Incident escalation runbook")).toBeTruthy();
     expect(within(first).getByText("v3")).toBeTruthy();
     expect(within(first).getByText("Product Engineering")).toBeTruthy();
     expect(within(first).getByText("Minh Tran")).toBeTruthy();

@@ -6,7 +6,8 @@ describe("knowledge library search", () => {
 
   it("matches governed metadata used by the search list", () => {
     expect(workflow).toBeDefined();
-    expect(matchesSampleKnowledge(workflow!, "NSS-SOP-052")).toBe(true);
+    // Decision 0021: documents have no code to search.
+    expect(matchesSampleKnowledge(workflow!, "NSS-SOP-052")).toBe(false);
     expect(matchesSampleKnowledge(workflow!, "knowledge governance")).toBe(true);
     expect(matchesSampleKnowledge(workflow!, "indexed and active")).toBe(true);
   });

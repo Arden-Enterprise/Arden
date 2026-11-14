@@ -104,7 +104,9 @@ try {
     "-e", "DATABASE_URL=postgresql://arden_api:disposable_runtime_only@db:5432/arden_test_images",
     "-e", "SUPABASE_URL=http://127.0.0.1:1", "-e", "SUPABASE_PUBLISHABLE_KEY=synthetic-not-a-live-key",
     "-e", "SUPABASE_AUTH_PUBLIC_URL=https://auth.example.test",
-    "-e", "ARDEN_AUTH_TRUSTED_ORIGINS=https://example.test", "-e", "ARDEN_PRIVATE_STORAGE_ROOT=/var/lib/arden/private", apiImage);
+    "-e", "ARDEN_AUTH_TRUSTED_ORIGINS=https://example.test",
+    "-e", `ARDEN_SESSION_SIGNING_KEY=${randomBytes(32).toString("hex")}`,
+    "-e", "ARDEN_PRIVATE_STORAGE_ROOT=/var/lib/arden/private", apiImage);
   await healthy(names.api);
   docker("run", "-d", "--name", names.web, "--network", prefix, "--read-only", "--cap-drop", "ALL",
     "--security-opt", "no-new-privileges:true", "--tmpfs", "/tmp:rw,nosuid,nodev,size=32m",

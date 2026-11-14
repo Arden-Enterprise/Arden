@@ -44,6 +44,16 @@ export type SemanticDocument = {
   blocks: SemanticBlock[];
 };
 
+/** Text-extractable source content; asset-only documents do not meet this boundary. */
+export function semanticDocumentHasText(document: SemanticDocument): boolean {
+  const hasInline = (items: SemanticInline[]) => items.some(item => item.type === "text" ? Boolean(item.text.trim())
+    : item.content.some(part => Boolean(part.text.trim())));
+  const hasBlocks = (blocks: SemanticBlock[]): boolean => blocks.some(block =>
+    (block.type === "table" ? block.content.some(row => row.cells.some(hasInline)) : hasInline(block.content))
+      || hasBlocks(block.children));
+  return hasBlocks(document.blocks);
+}
+
 export type SemanticDocumentParseResult =
   | { ok: true; document: SemanticDocument }
   | { ok: false; code: "INVALID_PREFIX" | "INVALID_JSON" | "INVALID_DOCUMENT"; message: string };

@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from "react";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage } from "@arden/domain";
 import { setAccountPassword, updateAccountPassword } from "../../shared/api-client";
 import { initialsOf } from "../../app/AppSidebar";
 import { Icon } from "../../shared/Icon";
@@ -31,6 +32,10 @@ export function AccountSettingsSection({
     setError(null);
     setSuccess(null);
 
+    if (currentPassword.length > accountPasswordMaximumLength || newPassword.length > accountPasswordMaximumLength) {
+      setError(accountPasswordMaximumLengthMessage);
+      return;
+    }
     if (newPassword.length < 8) {
       setError("Password must be at least 8 characters long.");
       return;
@@ -157,7 +162,7 @@ export function AccountSettingsSection({
                     value={currentPassword}
                     onChange={(event) => { setCurrentPassword(event.target.value); setError(null); }}
                     autoComplete="current-password"
-                    maxLength={1024}
+                    maxLength={accountPasswordMaximumLength}
                     required
                     disabled={busy}
                   />
@@ -172,7 +177,7 @@ export function AccountSettingsSection({
                   autoComplete="new-password"
                   placeholder="At least 8 characters"
                   minLength={8}
-                  maxLength={1024}
+                  maxLength={accountPasswordMaximumLength}
                   required
                   disabled={busy}
                 />
@@ -187,7 +192,7 @@ export function AccountSettingsSection({
                   autoComplete="new-password"
                   placeholder="Re-enter password"
                   minLength={8}
-                  maxLength={1024}
+                  maxLength={accountPasswordMaximumLength}
                   required
                   disabled={busy}
                 />

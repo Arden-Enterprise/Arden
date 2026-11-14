@@ -94,8 +94,8 @@ export function parseLocalTestAccounts(value: string | undefined): LocalTestAcco
     }
     const email = account.email.trim().toLowerCase();
     if (!/^[^\s@]+@example\.test$/.test(email) || account.fullName.trim().length < 1 || account.fullName.length > 200 ||
-      account.password.length < 16 || account.password.length > 1024 || account.password.includes("\u0000")) {
-      throw new Error(`Local test account ${index + 1} must use an @example.test email, a name, and a 16-character test password`);
+      account.password.length < 16 || account.password.length > 100 || account.password.includes("\u0000")) {
+      throw new Error(`Local test account ${index + 1} must use an @example.test email, a name, and a test password of 16 to 100 characters`);
     }
     if (seenIds.has(account.userId) || seenEmails.has(email)) throw new Error("Local test account IDs and emails must be unique");
     seenIds.add(account.userId);

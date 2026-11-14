@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ArdenRepository } from "./repository.js";
+import { ArdenRepository, ReviewerGrantConflictError } from "./repository.js";
+import { prepareKnowledgeFixture, submitLegacyKnowledgeFixture } from "./knowledge-fixture.test-support.js";
+import { registerKnowledgeCatalogVerification } from "../knowledge/catalog.integration.verification.js";
 import { PgIndexGenerationStore } from "../indexing/store.js";
 import type { IndexGenerationManifest } from "../indexing/contracts.js";
 import { canRead, type TargetReadersInput } from "../target-readers/policy.js";
@@ -37,17 +39,6 @@ let indexPool: Pool | null = null;
 const indexLogin = `arden_test_indexer_${ids.owner.replaceAll("-", "")}`;
 const indexPassword = randomUUID();
 
-/** T3.2: the required contribution form fields (the organization's default category). */
-async function submittableForm(organizationId: string) {
-  if (!pool) throw new Error("Test database is unavailable");
-  const category = await pool.query<{ category_id: string }>(`SELECT category_id FROM arden.document_category
-    WHERE organization_id = $1 AND is_default`, [organizationId]);
-  const categoryId = category.rows[0]?.category_id;
-  if (!categoryId) throw new Error("The organization has no default category");
-  // Effective and Expiration Dates are optional, so a submittable draft needs only a category (and readers).
-  return { categoryId };
-}
-
 describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => {
   beforeAll(async () => {
     if (!pool) throw new Error("ARDEN_TEST_DATABASE_URL was not provided");
@@ -68,10 +59,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0021_monotonic_publication_activation', '0022_organization_reviewer_grants',
           '0024_target_reader_selection', '0025_review_approved_readers', '0026_review_list_authors',
           '0027_document_category_relationships', '0028_audience_to_target_readers',
-          '0029_withdraw_pending_submission', '0030_contribution_form_dates',
-          '0031_publication_change_requests',
-          '0032_apply_publication_change_requests')`);
-    if (migration.rows[0]?.count !== "19") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0029_withdraw_pending_submission', '0031_deduplicate_reviewer_grants',
+          '0032_reader_directory_email', '0033_publication_change_requests',
+          '0034_apply_publication_change_requests')`);
+    if (migration.rows[0]?.count !== "20") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -99,6 +90,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await client.query(`INSERT INTO role (role_id, organization_id, code, name)
         VALUES ($1, $2, 'ALL_MEMBERS', 'Everyone in organization')`,
       [ids.organizationAudience, ids.organization]);
+      await client.query(`INSERT INTO audience
+        (audience_id, organization_id, kind, name, department_id, is_managed, legacy_role_id)
+        VALUES ($1, $2, 'DEPARTMENT_ALL', 'Synthetic department', $3, true, $1)`,
+      [ids.ownerRole, ids.organization, ids.department]);
       await client.query(`INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission WHERE code = 'PUBLISHED_CONTENT_VIEW'`,
       [ids.organizationAudience]);
@@ -148,6 +143,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     }
   });
 
+  // Trigger cleanup locks the same tables as target-readers.integration.test.ts.
+  // The API Vitest config keeps these files from running together on one database.
   afterAll(async () => {
     if (!pool) return;
     try {
@@ -167,6 +164,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("ALTER TABLE reader_selection DISABLE TRIGGER USER");
           await client.query("ALTER TABLE selected_reader DISABLE TRIGGER USER");
           await client.query("DELETE FROM audit_event WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM knowledge_collection_document WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM knowledge_collection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = $1", [ids.organization]);
           await client.query(`DELETE FROM published_knowledge_version
             WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
@@ -180,6 +179,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM reviewer_grant WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE author_membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM shared_draft WHERE author_membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM knowledge_topic WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM selected_reader WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM reader_selection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
@@ -304,6 +304,18 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(created).toMatchObject({ kind: "created", draft: { currentVersion: 1, sourcePrivateVersionId: source.versionId } });
     if (created.kind !== "created") return;
     expect(created.draft.sourceUri).not.toBe(source.sourceUri);
+    const firstVersion = await repository.listKnowledgeDraftVersions(ids.owner, ids.organization, created.draft.id);
+    expect(firstVersion).toMatchObject([{ id: created.draft.versionId, version: 1 }]);
+    await expect(repository.listKnowledgeDraftVersions(ids.manager, ids.organization, created.draft.id)).resolves.toBeNull();
+    await expect(repository.getKnowledgeDraftVersion(ids.manager, ids.organization,
+      created.draft.id, created.draft.versionId)).resolves.toBeNull();
+    const revisedDraft = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
+      created.draft.id, 1, { title: "Revised review notes" }, null, "integration-version-history-update");
+    expect(revisedDraft.kind).toBe("updated");
+    const versions = await repository.listKnowledgeDraftVersions(ids.owner, ids.organization, created.draft.id);
+    expect(versions?.map((version) => version.version)).toEqual([2, 1]);
+    expect(await repository.getKnowledgeDraftVersion(ids.owner, ids.organization,
+      created.draft.id, created.draft.versionId)).toMatchObject({ version: 1, contentHash: created.draft.contentHash });
     expect(await repository.createKnowledgeDraft(ids.owner, ids.organization, {
       ...input, copiedContent: { ...input.copiedContent, sourceUri: `arden-private-object://${randomUUID()}` },
     })).toMatchObject({ kind: "replayed", draft: { id: created.draft.id } });
@@ -354,6 +366,20 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       validUntil: null,
     }, "integration-reviewer-grant");
     expect(grant).toMatchObject({ reviewerMembershipId: ids.managerMembership, status: "ACTIVE" });
+    const grantInput = {
+      reviewerMembershipId: ids.managerMembership, scope: "DEPARTMENT" as const,
+      departmentId: ids.department, classifications: ["INTERNAL" as const],
+      level: "STANDARD" as const, teamTag: null, projectTag: null, validUntil: null,
+    };
+    await expect(repository.createReviewerGrant(ids.owner, ids.organization, grantInput,
+      "integration-duplicate-grant")).rejects.toBeInstanceOf(ReviewerGrantConflictError);
+    const tagged = { ...grantInput, teamTag: "operations" };
+    const concurrent = await Promise.allSettled([
+      repository.createReviewerGrant(ids.owner, ids.organization, tagged, "integration-tagged-grant-a"),
+      repository.createReviewerGrant(ids.owner, ids.organization, tagged, "integration-tagged-grant-b"),
+    ]);
+    expect(concurrent.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(concurrent.filter((result) => result.status === "rejected" && result.reason instanceof ReviewerGrantConflictError)).toHaveLength(1);
 
     const client = await pool.connect();
     try {
@@ -413,12 +439,12 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       });
       expect(created.kind).toBe("created");
       if (created.kind !== "created") throw new Error("Knowledge draft was not created");
+      await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership]);
       const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
         created.draft.id, created.draft.currentVersion, {
           responsibleDepartmentId: ids.department,
           targetScopeType: "ORGANIZATION",
           audienceRoleIds: [audienceId],
-          ...(await submittableForm(ids.organization)), targetReaders: { mode: "ORGANIZATION" },
         }, null, `integration-${title}-configure`);
       expect(configured.kind).toBe("updated");
       if (configured.kind !== "updated") throw new Error("Knowledge draft was not configured");
@@ -518,29 +544,38 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     if (created.kind !== "created") return;
 
     const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
+      // Legacy audience/reviewer fixture, upgraded with explicit reader metadata.
       responsibleDepartmentId: ids.department,
       targetScopeType: "ORGANIZATION",
       audienceRoleIds: [ids.readerAudience],
-      ...(await submittableForm(ids.organization)), targetReaders: { mode: "ORGANIZATION" },
     }, null, "integration-flow2-configure");
     expect(configured).toMatchObject({ kind: "updated", draft: { currentVersion: 2 } });
     if (configured.kind !== "updated") return;
+
+    await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership]);
 
     const submitted = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
       created.draft.id, configured.draft.currentVersion, randomUUID(), "integration-flow2-submit");
     expect(submitted.kind).toBe("submitted");
     if (submitted.kind !== "submitted") return;
 
-    const grant = await repository.createReviewerGrant(ids.owner, ids.organization, {
+    const grantInput = {
       reviewerMembershipId: ids.managerMembership,
-      scope: "DEPARTMENT",
+      scope: "DEPARTMENT" as const,
       departmentId: ids.department,
-      classifications: ["INTERNAL"],
-      level: "STANDARD",
+      classifications: ["INTERNAL" as const],
+      level: "STANDARD" as const,
       teamTag: null,
       projectTag: null,
       validUntil: null,
-    }, "integration-flow2-reviewer-grant");
+    };
+    const existingGrant = (await repository.listReviewerGrants(ids.owner, ids.organization))?.find((item) =>
+      item.reviewerMembershipId === ids.managerMembership && item.scope === "DEPARTMENT"
+      && item.departmentId === ids.department && item.level === "STANDARD" && item.status === "ACTIVE"
+      && item.teamTag === null && item.projectTag === null && item.validUntil === null
+      && item.classifications.length === 1 && item.classifications[0] === "INTERNAL");
+    const grant = existingGrant ?? await repository.createReviewerGrant(ids.owner, ids.organization,
+      grantInput, "integration-flow2-reviewer-grant");
     expect(grant).not.toBeNull();
 
     const assigned = await repository.listAssignedReviews(ids.manager, ids.organization);
@@ -616,7 +651,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const revised = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
       created.draft.id, configured.draft.currentVersion, { title: "Replacement candidate",
-        changeDescription: "Replacement candidate" }, null,
+        management: { type: "Guide", topicId: configured.draft.management?.topicId ?? (await repository.getKnowledgeDraft(ids.owner, ids.organization, created.draft.id))!.management!.topicId,
+          version: "2.0", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "Updated guidance." } }, null,
       "integration-flow3-revise");
     expect(revised).toMatchObject({ kind: "updated", draft: { currentVersion: 3 } });
     if (revised.kind !== "updated") return;
@@ -652,7 +688,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     let draftVersion = revised.draft.currentVersion;
     const candidate = async (title: string) => {
       const update = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
-        created.draft.id, draftVersion, { title, changeDescription: title }, null, "ordering-update");
+        created.draft.id, draftVersion, { title }, null, "ordering-update");
       if (update.kind !== "updated") throw new Error("Expected candidate edit");
       draftVersion = update.draft.currentVersion;
       const submission = await repository.submitKnowledgeDraft(ids.owner, ids.organization,
@@ -689,13 +725,12 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(sources).toEqual([expect.objectContaining({ generationId: newer.generationId, chunks: manifest.chunks })]);
     await expect(repository.listAuthorizedAiSources(ids.owner, ids.organization, [older.generationId])).resolves.toEqual([]);
 
-    // T3.2 requires readers at submit, so this publication carries the approved ORGANIZATION readers.
+    // The upgraded current workflow preserves the explicit approved readers.
     const ownerActor = await repository.getTargetReaderActor(ids.owner, ids.organization);
     expect(ownerActor).toEqual({ membershipId: ids.ownerMembership, organizationId: ids.organization,
       status: "ACTIVE", departmentIds: [ids.department] });
     const legacy = await repository.listPublishedKnowledge(ids.owner, ids.organization);
-    expect(legacy).toEqual([expect.objectContaining({ title: "Newest active publication",
-      targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] } })]);
+    expect(legacy).toEqual([expect.objectContaining({ title: "Newest active publication", targetReaders: expect.objectContaining({ mode: "SELECTED_MEMBERS" }) })]);
     expect(canRead(ownerActor, { organizationId: ids.organization, readers: legacy![0]!.targetReaders })).toBe(true);
   }, 15_000);
 
@@ -748,26 +783,18 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           contentHash: randomUUID().replaceAll("-", "").padEnd(64, "0") }, requestId: `t21-${title}-create`,
       });
       if (created.kind !== "created") throw new Error("Draft was not created");
+      await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership], targetReaders !== null);
       const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
         responsibleDepartmentId: ids.department, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.organizationAudience],
-        ...(await submittableForm(ids.organization)), targetReaders: targetReaders ?? { mode: "ORGANIZATION" },
+        ...(targetReaders ? { targetReaders } : {}),
       }, null, `t21-${title}-configure`);
       if (configured.kind !== "updated") throw new Error(`Draft was not configured: ${configured.kind}`);
-      const submitted = await repository.submitKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 2,
-        randomUUID(), `t21-${title}-submit`);
+      const legacyId = targetReaders === null ? await submitLegacyKnowledgeFixture(pool, ids.organization, created.draft.id) : null;
+      const submitted = legacyId ? { kind: "submitted" as const, submission: (await repository.listKnowledgeSubmissions(ids.owner, ids.organization))!.find(item => item.id === legacyId)! }
+        : await repository.submitKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 2,
+          randomUUID(), `t21-${title}-submit`);
       if (submitted.kind !== "submitted") throw new Error("Draft was not submitted");
       const submission = submitted.submission;
-      if (targetReaders === null) {
-        // T3.2 requires readers at submit; recreate a pre-Target Readers submission as legacy data.
-        const client = await pool!.connect();
-        try {
-          await client.query("BEGIN");
-          await client.query("SET LOCAL session_replication_role = replica");
-          await client.query("UPDATE arden.shared_submission SET proposed_selection_id = NULL WHERE submission_id = $1",
-            [submission.id]);
-          await client.query("COMMIT");
-        } finally { client.release(); }
-      }
       const decide = (approvedReaders?: TargetReadersInput, key = randomUUID(), action: "APPROVE" | "REJECT" = "APPROVE") =>
         repository.decideReview(ids.organizationReviewer, ids.organization, submission.id, action,
           submission.snapshotVersionId, submission.contentHash, action === "REJECT" ? "Clarify" : null, key,
@@ -874,6 +901,11 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     });
     expect(authorsForMember).toBe(0);
 
+    // A reader from the second department may read this publication, but may not
+    // select its owning department when authoring their own draft.
+    const crossDepartment = await submit("Owner name across departments", { mode: "ORGANIZATION" });
+    await expect(crossDepartment.decide()).resolves.toMatchObject({ kind: "decided" });
+
     // 5. Activate every queued generation; the narrowed publication admits A only, in RLS and in the API policy.
     const store = new PgIndexGenerationStore(indexPool);
     const workerId = randomUUID();
@@ -909,5 +941,19 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           FROM published_knowledge_version WHERE submission_id = $1`, [listed.submission.id]))).rows[0]!.id);
       expect(detailRead !== null).toBe(readable);
     }
+
+    const crossReader = readerFixtures[5]!.userId;
+    const choices = await repository.getKnowledgeOptions(crossReader, ids.organization);
+    expect(choices?.departments.map((item) => item.id)).toEqual([ids.secondDepartment]);
+    const crossPublication = (await repository.listPublishedKnowledge(crossReader, ids.organization))
+      ?.find((item) => item.draftId === crossDepartment.draftId);
+    expect(crossPublication).toMatchObject({ responsibleDepartmentId: ids.department,
+      responsibleDepartmentName: "Synthetic department" });
+    if (!crossPublication) throw new Error("Cross-department publication missing");
+    await expect(repository.getPublishedKnowledge(crossReader, ids.organization, crossPublication.id))
+      .resolves.toMatchObject({ responsibleDepartmentName: "Synthetic department" });
+    await expect(repository.getPublishedKnowledge(crossReader, randomUUID(), crossPublication.id)).resolves.toBeNull();
   }, 30_000);
 });
+
+registerKnowledgeCatalogVerification();

@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository } from "../db/repository.js";
+import { prepareKnowledgeFixture } from "../db/knowledge-fixture.test-support.js";
 import { canRead } from "./policy.js";
 
-// Flow 2 T1.1/T1.3/T1.4 against real PostgreSQL. This file never approves a submission, so it creates
-// no index jobs and cannot race repository.integration.test.ts, which owns the publish/activate path. Requires a disposable, fully migrated
-// database named arden_test_* (ARDEN_TEST_DATABASE_URL); skipped otherwise.
+// Flow 2 T1.1/T1.3/T1.4 against real PostgreSQL. Cleanup disables user triggers and holds
+// SHARE ROW EXCLUSIVE locks until commit. vitest.config.ts runs API files one at a time when
+// ARDEN_TEST_DATABASE_URL is set, so this cleanup cannot deadlock with another file's writes.
+// Requires a disposable, fully migrated database named arden_test_* ; skipped otherwise.
 const databaseUrl = process.env.ARDEN_TEST_DATABASE_URL;
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null;
 const repository = pool ? new ArdenRepository(pool) : null;
@@ -65,16 +67,6 @@ async function sqlState(work: (client: PoolClient) => Promise<unknown>): Promise
   }
 }
 
-/** T3.2: the required contribution form fields (the organization's default category). */
-async function submittableForm(organizationId: string) {
-  if (!pool) throw new Error("Test database is unavailable");
-  const category = await pool.query<{ category_id: string }>(`SELECT category_id FROM arden.document_category
-    WHERE organization_id = $1 AND is_default`, [organizationId]);
-  const categoryId = category.rows[0]?.category_id;
-  if (!categoryId) throw new Error("The organization has no default category");
-  // Effective and Expiration Dates are optional, so a submittable draft needs only a category (and readers).
-  return { categoryId };
-}
 
 describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 0024)", () => {
   beforeAll(async () => {
@@ -163,6 +155,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
             (SELECT shared_draft_id FROM shared_draft WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
           await client.query("DELETE FROM shared_draft_audience WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM shared_draft WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM knowledge_topic WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM selected_reader WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM reader_selection WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM audience WHERE organization_id = ANY($1::uuid[])", [orgs]);
@@ -284,6 +277,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(created.kind).toBe("created");
       if (created.kind !== "created") return;
       const draftId = created.draft.id;
+      await prepareKnowledgeFixture(pool!, ids.orgA, draftId, [ids.authorM, ids.engineerM], false);
       const save = (version: number, targetReaders: Parameters<ArdenRepository["updateKnowledgeDraft"]>[4]["targetReaders"]) =>
         repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, version, { targetReaders }, null, "readers-save");
 
@@ -304,7 +298,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
 
       const configured = await repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, 2, {
         responsibleDepartmentId: ids.sales, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.allMembersA],
-        targetReaders: { mode: "DEPARTMENT", departmentId: ids.engineering }, ...(await submittableForm(ids.orgA)),
+        targetReaders: { mode: "DEPARTMENT", departmentId: ids.engineering },
       }, null, "readers-configure");
       const department = { mode: "DEPARTMENT", departmentId: ids.engineering, memberIds: [] };
       expect(configured).toMatchObject({ kind: "updated", draft: { targetReaders: department } });
@@ -352,15 +346,15 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     return created.draft.id;
   };
 
-  /** A pending submission of a new draft by the author, readable by the whole organization. */
+  /** A pending submission with canonical intake fields and the fixture's legacy review projection. */
   const submitLegacyDraft = async (title: string) => {
     if (!repository) throw new Error("Test database is unavailable");
     const draftId = await createDraft(ids.author, ids.orgA, ids.authorM, title);
     const configured = await repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, 1, {
       responsibleDepartmentId: ids.sales, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.allMembersA],
-      targetReaders: { mode: "ORGANIZATION" }, ...(await submittableForm(ids.orgA)),
     }, null, "flow2-configure");
     if (configured.kind !== "updated") throw new Error(`Configure fixture failed: ${configured.kind}`);
+    await prepareKnowledgeFixture(pool!, ids.orgA, draftId, [ids.authorM, ids.engineerM]);
     const submitted = await repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 2, randomUUID(), "flow2-submit");
     if (submitted.kind !== "submitted") throw new Error(`Submit fixture failed: ${submitted.kind}`);
     return { draftId, submissionId: submitted.submission.id };
@@ -546,6 +540,29 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = ANY($1::uuid[])",
         [[organizationWide, partialSales]]));
       expect(outsiderView.rows).toEqual([{ shared_draft_id: organizationWide }]);
+
+      // After cutover the frozen selection, not a legacy role assignment, is authoritative.
+      const selectedView = () => asRuntime(ids.author, ids.orgA, (client) => client.query(
+        "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = $1", [partialSales]));
+      expect((await selectedView()).rows).toEqual([{ shared_draft_id: partialSales }]);
+      try {
+        const revoked = await asSuperuser((client) => client.query(`UPDATE role_assignment SET status = 'REVOKED'
+          WHERE membership_id = $1 AND role_id = $2 AND access_scope_id = $3`,
+        [ids.authorM, ids.salesRole, scopes.sales]));
+        expect(revoked.rowCount).toBe(1);
+        const legacyReaders = await asSuperuser((client) => client.query<{ membership_id: string }>(`
+          SELECT audience_reader_memberships($1, $2::uuid[], 'DEPARTMENT', $3) AS membership_id`,
+        [ids.orgA, [ids.salesRole], ids.sales]));
+        expect(legacyReaders.rows.map((row) => row.membership_id)).not.toContain(ids.authorM);
+        expect((await selectedView()).rows).toEqual([{ shared_draft_id: partialSales }]);
+        const denied = await asRuntime(ids.outsider, ids.orgA, (client) => client.query(
+          "SELECT shared_draft_id FROM knowledge_current_publication WHERE shared_draft_id = $1", [partialSales]));
+        expect(denied.rows).toEqual([]);
+      } finally {
+        await asSuperuser((client) => client.query(`UPDATE role_assignment SET status = 'ACTIVE'
+          WHERE membership_id = $1 AND role_id = $2 AND access_scope_id = $3`,
+        [ids.authorM, ids.salesRole, scopes.sales]));
+      }
     });
 
     it("runs only for the trusted operator role", async () => {
@@ -580,7 +597,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (!repository) throw new Error("Test database is unavailable");
       const approved = await submitLegacyDraft("Approved fixture");
       await asSuperuser((client) => client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'PREPARING',
-          approved_selection_id = proposed_selection_id WHERE submission_id = $1`, [approved.submissionId]));
+        approved_selection_id = proposed_selection_id
+        WHERE submission_id = $1`, [approved.submissionId]));
       await expect(repository.withdrawKnowledgeSubmission(ids.author, ids.orgA, approved.submissionId, "flow2-withdraw"))
         .resolves.toEqual({ kind: "conflict" });
       await expect(sqlState((client) => client.query(`UPDATE shared_submission SET status = 'WITHDRAWN', publication_state = 'NONE'
@@ -593,96 +611,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     });
   });
 
-  describe("T3.2 save draft and submit with all form fields", () => {
-    const save = (draftId: string, version: number, patch: Parameters<ArdenRepository["updateKnowledgeDraft"]>[4]) => {
-      if (!repository) throw new Error("Test database is unavailable");
-      return repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, version, patch, null, "form-save");
-    };
-    const categoryOf = async (organizationId: string, code: string) => (await asSuperuser((client) => client.query<{ id: string }>(
-      "SELECT category_id AS id FROM document_category WHERE organization_id = $1 AND code = $2", [organizationId, code]))).rows[0]!.id;
-
-    it("saves an incomplete form, reads every field back and names invalid fields", async () => {
-      const draftId = await createDraft(ids.author, ids.orgA, ids.authorM, "Form fields");
-      const related = await createDraft(ids.author, ids.orgA, ids.authorM, "Related guide");
-      const foreign = await createDraft(ids.foreign, ids.orgB, ids.foreignM, "Foreign guide");
-      const policy = await categoryOf(ids.orgA, "POLICY");
-      await expect(save(draftId, 1, { keywords: [" VPN "] })).resolves.toMatchObject({ kind: "updated",
-        draft: { keywords: ["VPN"], categoryId: null, effectiveDate: null } });
-      const saved = await save(draftId, 2, { categoryId: policy, effectiveDate: "2026-12-01", expirationDate: "2027-12-01",
-        changeDescription: " First edition ", relatedDocumentIds: [related] });
-      expect(saved).toMatchObject({ kind: "updated", draft: { categoryId: policy, effectiveDate: "2026-12-01",
-        expirationDate: "2027-12-01", changeDescription: "First edition", relatedDocumentIds: [related], keywords: ["VPN"] } });
-      await expect(repository!.getKnowledgeDraft(ids.author, ids.orgA, draftId)).resolves.toMatchObject({
-        categoryId: policy, relatedDocumentIds: [related], currentVersion: 3 });
-
-      const invalid: Array<[Parameters<ArdenRepository["updateKnowledgeDraft"]>[4], string]> = [
-        [{ categoryId: await categoryOf(ids.orgB, "POLICY") }, "categoryId"],
-        [{ keywords: ["vpn", "VPN"] }, "keywords"],
-        [{ expirationDate: "2026-11-30" }, "expirationDate"],
-        [{ effectiveDate: "2026-02-30" }, "effectiveDate"],
-        [{ relatedDocumentIds: [draftId] }, "relatedDocumentIds"],
-        [{ relatedDocumentIds: [foreign] }, "relatedDocumentIds"],
-        [{ changeDescription: "x".repeat(2001) }, "changeDescription"],
-      ];
-      for (const [patch, field] of invalid) {
-        await expect(save(draftId, 3, patch)).resolves.toMatchObject({ kind: "invalid-field", field });
-      }
-      await expect(repository!.getKnowledgeDraft(ids.author, ids.orgA, draftId)).resolves.toMatchObject({ currentVersion: 3 });
-      await expect(save(draftId, 3, { relatedDocumentIds: [] })).resolves.toMatchObject({ kind: "updated",
-        draft: { relatedDocumentIds: [] } });
-    });
-
-    it("refuses Submit while a required field is missing and names it", async () => {
-      if (!repository) throw new Error("Test database is unavailable");
-      const draftId = await createDraft(ids.author, ids.orgA, ids.authorM, "Incomplete form");
-      const form = await submittableForm(ids.orgA);
-      let version = 1;
-      const step = async (patch: Parameters<ArdenRepository["updateKnowledgeDraft"]>[4]) => {
-        const result = await save(draftId, version, patch);
-        if (result.kind !== "updated") throw new Error(`Save failed: ${result.kind}`);
-        version = result.draft.currentVersion;
-      };
-      const submit = () => repository!.submitKnowledgeDraft(ids.author, ids.orgA, draftId, version, randomUUID(), "form-submit");
-      await step({ responsibleDepartmentId: ids.sales, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.allMembersA] });
-      await expect(submit()).resolves.toMatchObject({ kind: "invalid-field", field: "categoryId", missing: true });
-      await step({ categoryId: form.categoryId });
-      await expect(submit()).resolves.toMatchObject({ kind: "invalid-field", field: "targetReaders", missing: true });
-      // Effective and Expiration Dates are optional; set here to check they are frozen.
-      await step({ targetReaders: { mode: "ORGANIZATION" }, effectiveDate: "2026-12-01", expirationDate: "2027-01-31",
-        keywords: ["handbook"] });
-      const submitted = await submit();
-      expect(submitted).toMatchObject({ kind: "submitted" });
-      if (submitted.kind !== "submitted") return;
-
-      // The form fields are frozen with the snapshot; later draft edits do not change the submission.
-      await step({ effectiveDate: "2027-03-01", expirationDate: null, keywords: [] });
-      const frozen = await asSuperuser((client) => client.query(`SELECT category_id, keywords,
-          to_char(effective_date, 'YYYY-MM-DD') AS effective_date, to_char(expiration_date, 'YYYY-MM-DD') AS expiration_date
-        FROM shared_submission WHERE submission_id = $1`, [submitted.submission.id]));
-      expect(frozen.rows[0]).toEqual({ category_id: form.categoryId, keywords: ["handbook"],
-        effective_date: "2026-12-01", expiration_date: "2027-01-31" });
-      await expect(sqlState((client) => client.query(`UPDATE shared_submission SET effective_date = '2027-01-01'
-        WHERE submission_id = $1`, [submitted.submission.id]))).resolves.toBe("55000");
-    });
-
-    it("requires a change description for a new version of an approved document", async () => {
-      if (!repository) throw new Error("Test database is unavailable");
-      const { draftId, submissionId } = await submitLegacyDraft("Versioned form");
-      await asSuperuser((client) => client.query(`UPDATE shared_submission SET status = 'APPROVED',
-          publication_state = 'PREPARING', approved_selection_id = proposed_selection_id
-        WHERE submission_id = $1`, [submissionId]));
-      const edited = await save(draftId, 2, { title: "Versioned form v2" });
-      if (edited.kind !== "updated") throw new Error("Edit failed");
-      await expect(repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 3, randomUUID(), "form-v2"))
-        .resolves.toMatchObject({ kind: "invalid-field", field: "changeDescription", missing: true });
-      const described = await save(draftId, 3, { changeDescription: "Renamed the guide" });
-      if (described.kind !== "updated") throw new Error("Edit failed");
-      await expect(repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 4, randomUUID(), "form-v2"))
-        .resolves.toMatchObject({ kind: "submitted" });
-    });
-  });
-
-  describe("T6.1 reader-change and withdrawal requests (migration 0031)", () => {
+  describe("T6.1 reader-change and withdrawal requests (migration 0033)", () => {
     /** Publishes a real approved submission by pointing the current publication at it (no index pipeline). */
     const publish = async (title: string) => {
       const { draftId, submissionId } = await submitLegacyDraft(title);
@@ -801,8 +730,11 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         .resolves.toBe("40001");
       await expect(ask(draftId, { type: "WITHDRAWAL", reason: "Again" })).resolves.toEqual({ kind: "not-published" });
       // Publishing again is a new content submission of a new version.
-      const edited = await repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, 2,
-        { title: "Published again", changeDescription: "Republished after review" }, null, "republish-edit");
+      const edited = await repository.updateKnowledgeDraft(ids.author, ids.orgA, draftId, 2, { title: "Published again" },
+        null, "republish-edit");
+      // A new business version with a Change Note, set like prepareKnowledgeFixture (this fixture keeps its audiences).
+      await asSuperuser((client) => client.query(`UPDATE shared_draft SET management = management
+        || jsonb_build_object('version', '2.0', 'changeNote', 'Republished after review') WHERE shared_draft_id = $1`, [draftId]));
       if (edited.kind !== "updated") throw new Error("Edit failed");
       await expect(repository.submitKnowledgeDraft(ids.author, ids.orgA, draftId, 3, randomUUID(), "republish"))
         .resolves.toMatchObject({ kind: "submitted", submission: { requestType: "CONTENT", status: "PENDING_REVIEW" } });

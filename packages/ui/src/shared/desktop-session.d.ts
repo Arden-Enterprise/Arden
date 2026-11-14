@@ -3,7 +3,7 @@ export {};
 declare global {
   interface Window {
     ardenDesktop?: {
-      requestApi(request: { path: string; method: "GET" | "POST" | "PATCH"; body?: string; ifMatch?: string; idempotencyKey?: string }): Promise<{
+      requestApi(request: { path: string; method: "GET" | "POST" | "PATCH"; body?: string; ifMatch?: string; idempotencyKey?: string; timeoutMs?: number }): Promise<{
         status: number;
         body: string;
         etag?: string;

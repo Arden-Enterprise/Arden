@@ -1,14 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../shared/Icon";
 import type { AssignedKnowledgeReview, DecidedKnowledgeReview } from "../shared/api-client";
-import { libraryTitleParts } from "./libraryDisplay";
 
 /**
  * REV-02 "Reviews · Linear list": the Reviews landing page. Needs review rows open the decision workspace
  * (REV-01); Approved and Rejected rows are the reviewer's own decided history and are read-only.
  */
 type GroupKey = "pending" | "approved" | "rejected";
-type Row = { id: string; title: string; code: string | null; versionNo: number | null; departmentId: string;
+type Row = { id: string; title: string; versionNo: number | null; departmentId: string;
   authorName: string | null; date: string; detail: string; status: GroupKey; openable: boolean };
 
 const groupLabels: Record<GroupKey, string> = { pending: "Needs review", approved: "Approved", rejected: "Rejected" };
@@ -63,24 +62,22 @@ export function ReviewList({ pending, decided, departmentName, busy, onOpen, onR
 
   const rows: Row[] = [
     ...pending.map((item): Row => {
-      const shown = libraryTitleParts(item.title, null);
-      return { id: item.submissionId, title: shown.title, code: shown.code, versionNo: item.versionNo ?? null,
+      return { id: item.submissionId, title: item.title, versionNo: item.versionNo ?? null,
         departmentId: item.departmentId, authorName: item.authorName ?? null, date: item.submittedAt,
         detail: item.approvalBlocked ? "Approval blocked: the readers can no longer be enforced. You can still reject."
           : `Submitted ${shortDate(item.submittedAt)}`, status: "pending", openable: true };
     }),
     ...decided.map((item): Row => {
-      const shown = libraryTitleParts(item.title, null);
       const outcome = item.decision === "APPROVED" ? "Approved" : "Rejected";
       const publication = item.decision === "APPROVED" ? publicationLabels[item.publicationState] : "";
-      return { id: item.submissionId, title: shown.title, code: shown.code, versionNo: item.versionNo,
+      return { id: item.submissionId, title: item.title, versionNo: item.versionNo,
         departmentId: item.departmentId, authorName: item.authorName, date: item.decidedAt,
         detail: [`${outcome} ${shortDate(item.decidedAt)}`, publication].filter(Boolean).join(" · "),
         status: item.decision === "APPROVED" ? "approved" : "rejected", openable: false };
     }),
   ];
   const normalized = query.trim().toLocaleLowerCase();
-  const matches = (row: Row) => !normalized || [row.title, row.code ?? "", departmentName(row.departmentId), row.authorName ?? ""]
+  const matches = (row: Row) => !normalized || [row.title, departmentName(row.departmentId), row.authorName ?? ""]
     .some((value) => value.toLocaleLowerCase().includes(normalized));
   const groups = (["pending", "approved", "rejected"] as const).map((key) => ({
     key, rows: rows.filter((row) => row.status === key && matches(row)),
@@ -95,7 +92,7 @@ export function ReviewList({ pending, decided, departmentName, busy, onOpen, onR
       <h1 id="review-board-title" className="sr-only">Reviews</h1>
       {filterOpen && <label className="review-board-filter">
         <Icon name="search" size={14} />
-        <input ref={filterInput} type="search" value={query} placeholder="Filter by title, code, department or author"
+        <input ref={filterInput} type="search" value={query} placeholder="Filter by title, department or author"
           aria-label="Filter reviews" onChange={(event) => setQuery(event.target.value)}
           onKeyDown={(event) => { if (event.key === "Escape") { setQuery(""); setFilterOpen(false); } }} />
       </label>}
@@ -135,7 +132,6 @@ export function ReviewList({ pending, decided, departmentName, busy, onOpen, onR
           {open && (group.rows.length ? <ul className="review-rows">
             {group.rows.map((row) => {
               const content = <>
-                <span className="review-row-code">{row.code ?? ""}</span>
                 <span className={`review-status-icon is-${row.status}`} aria-hidden="true"><Icon name={statusIcons[row.status]} size={14} /></span>
                 <span className="review-row-title">
                   <strong>{row.title}</strong>

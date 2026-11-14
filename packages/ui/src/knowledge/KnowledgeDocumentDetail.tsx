@@ -7,13 +7,16 @@ export type ReaderDocumentStatus = "EFFECTIVE" | "UPCOMING" | "EXPIRED";
 export type ReaderDocumentVersion = {
   id: string;
   label: string;
-  status: ReaderDocumentStatus;
+  status: ReaderDocumentStatus | "PUBLISHED";
   effectiveDate: string;
 };
 
 export type ReaderDocumentMetadata = {
+  type?: string;
+  topic?: string;
+  publishedDate?: string;
+  expirationDate?: string;
   title: string;
-  documentCode: string;
   ownerDepartment: string;
   summary: string;
   activeVersionId: string;
@@ -40,14 +43,15 @@ function writeInformationCollapsed(collapsed: boolean): void {
   try { window.localStorage.setItem(informationCollapsedKey, String(collapsed)); } catch { /* preference is optional */ }
 }
 
-function statusLabel(status: ReaderDocumentStatus): string {
+function statusLabel(status: ReaderDocumentStatus | "PUBLISHED"): string {
+  if (status === "PUBLISHED") return "Published";
   if (status === "UPCOMING") return "Upcoming";
   if (status === "EXPIRED") return "Expired";
   return "Effective";
 }
 
 function dateLabel(value: string): string {
-  const date = new Date(value);
+  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value);
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat(undefined, {
     year: "numeric", month: "short", day: "numeric",
   }).format(date);
@@ -125,7 +129,8 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
             aria-label="Hide document information" title="Hide document information" onClick={() => toggleInformation(true)}><Icon name="sidebar" size={14} /></button>
         </div>
         <dl>
-          <div><dt>Document code</dt><dd>{metadata.documentCode}</dd></div>
+          {metadata.type && <div><dt>Type</dt><dd>{metadata.type}</dd></div>}
+          {metadata.topic && <div><dt>Topic</dt><dd>{metadata.topic}</dd></div>}
           <div><dt>Version</dt><dd><label><span className="sr-only">Document version</span><select
             value={activeVersion.id}
             onChange={(event) => onVersionChange?.(event.target.value)}
@@ -136,13 +141,15 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
           <div><dt>Status</dt><dd><span className={`island-chip knowledge-reader-status is-${activeVersion.status.toLowerCase()}`}>
             {statusLabel(activeVersion.status)}</span></dd></div>
           {metadata.sensitiveLabel && <div><dt>Classification</dt><dd><span className="island-chip tone-warning">{metadata.sensitiveLabel}</span></dd></div>}
-          <div><dt>Effective date</dt><dd>{dateLabel(activeVersion.effectiveDate)}</dd></div>
+          {metadata.publishedDate && <div><dt>Published date</dt><dd>{dateLabel(metadata.publishedDate)}</dd></div>}
+          <div><dt>Effective date</dt><dd>{activeVersion.effectiveDate ? dateLabel(activeVersion.effectiveDate) : "—"}</dd></div>
+          {metadata.expirationDate && <div><dt>Expiration Date</dt><dd>{dateLabel(metadata.expirationDate)}</dd></div>}
           <div><dt>Owner department</dt><dd>{metadata.ownerDepartment}</dd></div>
         </dl>
-        <section className="knowledge-reader-summary" aria-labelledby="document-summary-title">
+        {metadata.summary && <section className="knowledge-reader-summary" aria-labelledby="document-summary-title">
           <h3 id="document-summary-title">Summary</h3>
           <p>{metadata.summary}</p>
-        </section>
+        </section>}
       </aside>
 
       <article className="island knowledge-reader-surface" aria-label={`${metadata.title}, version ${activeVersion.label}`}>

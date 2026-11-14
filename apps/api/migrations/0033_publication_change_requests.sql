@@ -8,7 +8,7 @@ SET search_path TO arden, public;
 -- database refuses an approval of a change request.
 --
 -- Operator rollout: replaces two reviewed SECURITY DEFINER validation routines; apply as the trusted
--- superuser so they keep their postgres owner (20 in total, unchanged).
+-- superuser so they keep their postgres owner (21 in total, unchanged).
 
 ALTER TABLE shared_submission ADD COLUMN request_type text NOT NULL DEFAULT 'CONTENT';
 ALTER TABLE shared_submission ADD COLUMN request_reason text;
@@ -30,7 +30,8 @@ DROP INDEX uq_flow2_submitted_snapshot;
 CREATE UNIQUE INDEX uq_flow2_submitted_snapshot ON shared_submission (shared_draft_version_id)
     WHERE shared_draft_version_id IS NOT NULL AND request_type = 'CONTENT';
 
--- Same rules as 0030, with the request columns added to the immutable tuple.
+-- Same rules as 0027, with the request columns added to the immutable tuple. KM-v1 metadata (0030) is
+-- protected separately by freeze_knowledge_management.
 CREATE OR REPLACE FUNCTION protect_flow2_submission_snapshot()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -41,7 +42,7 @@ BEGIN
         NEW.title, NEW.classification, NEW.team_tag, NEW.project_tag,
         NEW.audience_role_ids, NEW.policy_version, NEW.review_rule, NEW.content_uri, NEW.mime_type,
         NEW.content_hash, NEW.submit_request_id, NEW.proposed_selection_id,
-        NEW.category_id, NEW.keywords, NEW.change_description, NEW.effective_date, NEW.expiration_date,
+        NEW.category_id, NEW.keywords, NEW.change_description,
         NEW.request_type, NEW.request_reason, NEW.target_published_version_id)
        IS DISTINCT FROM
        (OLD.shared_draft_version_id, OLD.shared_draft_id, OLD.snapshot_version_no,
@@ -50,7 +51,7 @@ BEGIN
         OLD.title, OLD.classification, OLD.team_tag, OLD.project_tag,
         OLD.audience_role_ids, OLD.policy_version, OLD.review_rule, OLD.content_uri, OLD.mime_type,
         OLD.content_hash, OLD.submit_request_id, OLD.proposed_selection_id,
-        OLD.category_id, OLD.keywords, OLD.change_description, OLD.effective_date, OLD.expiration_date,
+        OLD.category_id, OLD.keywords, OLD.change_description,
         OLD.request_type, OLD.request_reason, OLD.target_published_version_id) THEN
         RAISE EXCEPTION 'Submitted snapshot is immutable' USING ERRCODE = '55000';
     END IF;
@@ -196,3 +197,51 @@ $$;
 REVOKE ALL ON FUNCTION reject_change_request_approval() FROM PUBLIC;
 CREATE TRIGGER trg_reject_change_request_approval BEFORE INSERT ON review_decision
 FOR EACH ROW EXECUTE FUNCTION reject_change_request_approval();
+
+-- 0030 (KM-v1) copies the working draft's metadata into a new submission. A change request is about the
+-- published version, so it repeats that version's frozen document code and metadata instead.
+CREATE OR REPLACE FUNCTION freeze_knowledge_management() RETURNS trigger
+LANGUAGE plpgsql SET search_path = arden, pg_temp AS $$
+DECLARE source record;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF OLD.document_code IS DISTINCT FROM NEW.document_code
+           OR (TG_TABLE_NAME <> 'shared_draft' AND OLD.management IS DISTINCT FROM NEW.management) THEN
+            RAISE EXCEPTION 'Document identity and snapshot metadata are immutable' USING ERRCODE = '55000';
+        END IF;
+        RETURN NEW;
+    END IF;
+    -- Nested IF: only shared_submission rows have request_type (plpgsql does not short-circuit AND).
+    IF TG_TABLE_NAME = 'shared_submission' THEN
+        IF NEW.request_type <> 'CONTENT' THEN
+            SELECT released.document_code, released.management INTO STRICT source
+              FROM published_knowledge_version pv
+              JOIN shared_submission released ON released.submission_id = pv.submission_id
+             WHERE pv.published_version_id = NEW.target_published_version_id
+               AND pv.shared_draft_id = NEW.shared_draft_id;
+            NEW.document_code := source.document_code;
+            NEW.management := source.management;
+            RETURN NEW;
+        END IF;
+    END IF;
+    IF TG_TABLE_NAME = 'shared_submission' THEN
+        SELECT d.document_code, CASE WHEN d.management IS NULL THEN NULL ELSE
+            d.management || jsonb_build_object('topicName', topic.name) END AS management
+            INTO STRICT source FROM shared_draft d
+            LEFT JOIN knowledge_topic topic ON topic.topic_id = d.management_topic_id
+                AND topic.organization_id = d.organization_id
+            WHERE d.shared_draft_id = NEW.shared_draft_id AND d.organization_id = NEW.organization_id;
+    ELSE
+        SELECT s.document_code, s.management INTO STRICT source FROM shared_submission s
+            WHERE s.submission_id = NEW.submission_id;
+    END IF;
+    NEW.document_code := source.document_code;
+    NEW.management := source.management;
+    IF TG_TABLE_NAME = 'shared_submission' AND NEW.management IS NOT NULL THEN
+        NEW.management := NEW.management || jsonb_build_object('releaseKind', CASE WHEN EXISTS (
+            SELECT 1 FROM shared_submission prior WHERE prior.shared_draft_id = NEW.shared_draft_id
+              AND prior.publication_state IN ('ACTIVE', 'SUPERSEDED')) THEN 'UPDATED' ELSE 'NEW' END);
+    END IF;
+    RETURN NEW;
+END;
+$$;

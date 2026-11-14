@@ -123,19 +123,56 @@ describe("invitation page feedback", () => {
     await screen.findByText("Join Arden Demo");
 
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    expect(screen.getByText("At least 8 characters")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Show password" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
-    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "secret123" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Secret123!" } });
     fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
 
     await waitFor(() => {
       expect(signUp).toHaveBeenCalledWith(
         "web",
         "member@example.com",
-        "secret123",
+        "Secret123!",
         "New User",
         `${window.location.origin}/invite/invite-token-abc`,
       );
     });
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
+  });
+
+  it("blocks invitation account setup when either new password check is missing", async () => {
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token-abc", onAccepted: vi.fn() }));
+    await screen.findByText("Join Arden Demo");
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    const password = screen.getByLabelText("Password");
+    const form = screen.getByRole("button", { name: "Create account and accept" }).closest("form")!;
+
+    for (const invalidPassword of ["abcdefgh!", "Abcdefgh"]) {
+      fireEvent.change(password, { target: { value: invalidPassword } });
+      fireEvent.submit(form);
+      expect(signUp).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert").textContent).toContain("one uppercase letter, and one special character");
+    }
+  });
+
+  it("shows password guidance and keeps the entry after invitation account setup is rejected", async () => {
+    vi.mocked(signUp).mockRejectedValueOnce(new ApiError(400, "Account setup could not be completed.", "ACCOUNT_SETUP_UNAVAILABLE"));
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token-abc", onAccepted: vi.fn() }));
+    await screen.findByText("Join Arden Demo");
+
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    const password = screen.getByLabelText("Password") as HTMLInputElement;
+    fireEvent.change(password, { target: { value: "ValidPass1!" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("password meets the listed requirements");
+    expect(password.value).toBe("ValidPass1!");
+    expect(screen.getByText("At least 8 characters")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
   });
 
   it("calls acceptInvitation when accepted by authenticated user", async () => {

@@ -9,8 +9,8 @@ SET search_path TO arden, public;
 -- Both apply only while the request still names the current publication. A withdrawal is refused while a
 -- newer approved version is still being prepared, because its activation would publish the document again.
 --
--- Operator rollout: adds one reviewed SECURITY DEFINER routine (apply_publication_change); apply as the
--- trusted superuser so it keeps its postgres owner.
+-- Operator rollout: adds one reviewed SECURITY DEFINER routine (apply_publication_change, 22 in total);
+-- apply as the trusted superuser so it keeps its postgres owner.
 
 -- An approved change request has no index preparation of its own; a released version can end WITHDRAWN.
 ALTER TABLE shared_submission DROP CONSTRAINT ck_shared_submission_publication_state;

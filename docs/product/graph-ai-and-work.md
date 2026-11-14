@@ -6,6 +6,71 @@ Provenance: ARD-50 records the project lead's graph/chat request and UI ownershi
 
 ## F11 Library and search
 
+### Knowledge management refinement (KM-v1, accepted 12 November 2026)
+
+Decision owner: requesting project maintainer. Origin: maintainer's QMS-informed
+Library review and approved interactive reference. Recorded by Codex. The maintainer
+explicitly approved applying the reference and subsequently confirmed Org Admin
+catalog ownership. Private attribution/discussion remains in Knowledge. Baseline:
+Core staging `0e25b71`, main `9fa3d34`; delivery branch `feat/knowledge-management`,
+tracking ARD-77. Acceptance is not deployment evidence.
+
+Delivery checkpoint: the maintainer has not accepted the implemented UI and has
+handed its revision to the UI owner. The metadata, catalog and authorization
+contract below remains accepted. Current screen composition and generated cover
+art are candidates, not approved final visuals; F11-KM6 visual acceptance remains
+open. This branch is a source handoff, not a staging release.
+
+Keep Arden's Island shell, typography, icons and violet/graphite palette. Library
+has Discover, All documents and My Contributions; Reviews remains separate.
+Discover contains search, business Topics, optional curated Collections and newly
+published documents. All documents is a searchable register with Type, Topic and
+Owner Department filters. Returning from a reader preserves the Library selection.
+Use original Arden artwork for collection covers, not reference-company assets.
+
+Required **at submission**, not draft save: Title, Type, one primary Topic,
+Content (editor or text-extractable PDF), business Version, Effective Date and
+explicit Target Readers. Types: Policy & Standard, Procedure, Guide, Reference,
+Lessons Learned. Expiration Date is optional and cannot precede Effective Date.
+An update to previously published knowledge requires a Change Note. Business
+Version is not the technical save revision. Document Code is retired
+([ADR 0021](../decisions/0021-reader-email-search-and-no-document-code.md), 14 November 2026): documents are
+identified by title, version and link, and the explicit Target Readers picker finds members by name or email.
+Owner Department follows the author's primary department. Author, Published Date,
+Last Updated and current-version identity are system-owned. Published Date means
+availability; Effective Date means applicability. An upcoming Effective Date alone
+does not prevent authorized reading. Applicability is Upcoming / Effective /
+Expired, separate from submission/preparation states. Do not introduce a separate
+Superseded reader status.
+
+Remove Classification, Team/Project permission tags, redundant Category/Location/
+Handbook Type, upload Summary, Keywords and Review Cycle from the standardized
+form. Preserve frozen review provenance and existing authorization behind the UI.
+Collections are optional reading bundles, not upload requirements or access grants.
+Org Admin alone creates/manages Topics and Collections; authors select existing
+active Topics. Curators may add only documents they can currently read. Every
+collection read, count, cover, title and document projection must be filtered by
+current reader authorization; the admin role is not a content-read bypass.
+
+Legacy pending snapshots keep their frozen contract. Do not infer canonical
+metadata from PDF names or silently broaden old readers. Legacy publications stay
+readable under existing rules until a separately authorized metadata backfill.
+No staging reset/re-index, production changes, new AI capability, OCR or image
+understanding is part of this implementation. Temporal AI version selection is
+separate from the human-readable applicability dates.
+
+| Acceptance ID | Observable case | Delivery evidence |
+| --- | --- | --- |
+| F11-KM1 | Discover/register use real authorized documents; filters, counts, New/Updated and Back work without mock fallback. | Local UI/pure filtering tests; browser Collection → register → reader → Back. No staging backfill/deploy. |
+| F11-KM2 | Admin manages catalog; non-admin and cross-organization writes fail; stale edits conflict without overwrite. | Real runtime PostgreSQL catalog tests, HTTP/precondition tests, post-ownership rerun. |
+| F11-KM3 | Collection curation rejects unreadable sources; revocation removes content and derived discovery/counts. | Real active Org Admin denied curation of a real restricted publication; membership/retired-pointer checks. |
+| F11-KM4 | Incomplete drafts save; submit requires normalized metadata and explicit readers; date/change-note validation is clear. | Domain/API/real DB cases; browser form. PDF replacement shares the existing optimistic revision path. |
+| F11-KM5 | Metadata/code are frozen with review and publication; later draft/catalog edits do not rewrite an approved version. | Actual submit → approve → index activation, pending edits and SQL immutability denial; current Topic label frozen at submit. |
+| F11-KM6 | Shared web/desktop UI preserves style, accessible loading/empty/error/cancel paths; original assets are actually consumed. | UI interaction tests and web/desktop builds; local browser art/filter/reader/dirty-Cancel checks. Native runtime not certified. |
+
+Local implementation/verification notes and the separately authorized migration,
+backfill and release boundary: [Knowledge management rollout](../engineering/knowledge-management.md).
+
 Path: permitted reader opens current published library → searches/filters → selects a result → reads the correct source/version or sees an understandable empty/denied/error state.
 
 | Acceptance ID | Complete path to verify | Evidence / remaining |
