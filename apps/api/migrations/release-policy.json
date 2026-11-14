@@ -186,6 +186,12 @@
       "filename": "0031_deduplicate_reviewer_grants.sql",
       "sha256": "a113f2824f5382b475d9c625d3ca25fb07d7ad58b6fefc8ef668f0d61539bd1c",
       "rollout": "operator"
+    },
+    {
+      "id": "0032",
+      "filename": "0032_reader_directory_email.sql",
+      "sha256": "525a03fafd4719beb92b91049d6e1edc09dde82925d4c0e8647c2d9208e5cc28",
+      "rollout": "operator"
     }
   ]
 }

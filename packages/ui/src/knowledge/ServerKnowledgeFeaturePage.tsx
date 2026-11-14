@@ -20,7 +20,7 @@ import {
 import type { Platform } from "../shared/types";
 import { PdfDocument, PdfViewer, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
 import { ReviewList, initialsOf } from "./ReviewList";
-import { libraryDateLabel, libraryTitleParts } from "./libraryDisplay";
+import { libraryDateLabel } from "./libraryDisplay";
 import { ownerDepartment } from "./readerSelection";
 import { KnowledgeCatalogEditor } from "./KnowledgeCatalogEditor";
 import { KnowledgeLibraryBrowse, emptyLibraryFilters } from "./KnowledgeLibraryBrowse";
@@ -412,7 +412,6 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const selectedContributionLatest = selectedContribution ? latestByDraft.get(selectedContribution.id) : undefined;
   const activeReview = review ? reviews.find((item) => item.submissionId === review.id) : undefined;
   const reviewIndex = review ? reviews.findIndex((item) => item.submissionId === review.id) : -1;
-  const reviewTitle = review ? libraryTitleParts(review.title, null) : null;
   const noteRequired = commentSubmitted && !comment.trim();
   /** Decides, then opens the neighbouring submission once the queue has refreshed. */
   const decideAndAdvance = (action: "APPROVE" | "REJECT") => {
@@ -447,8 +446,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <button type="button" className="review-crumb-link" disabled={busy} onClick={backToAllReviews}>Reviews</button>
             <span className="review-crumb-separator" aria-hidden="true"><Icon name="chevron" size={11} /></span>
             <span className="review-crumb-current" aria-current="page" title={review.title}>
-              {reviewTitle?.code && <span className="review-crumb-code">{reviewTitle.code}</span>}
-              <span>{reviewTitle?.title ?? review.title}</span>
+              <span>{review.title}</span>
             </span>
           </nav>
           {reviewIndex >= 0 && <span className="review-detail-position">{reviewIndex + 1} / {reviews.length}</span>}
@@ -479,7 +477,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             </div>
             : <div ref={reviewBodyRef} className="review-detail-document" tabIndex={0} aria-label={`Submitted document: ${review.title}`}>
               <article className="review-detail-text">
-                <h1 id="review-detail-title">{reviewTitle?.title ?? review.title}</h1>
+                <h1 id="review-detail-title">{review.title}</h1>
                 <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
                   key={`review:${review.id}:${review.snapshotVersionId}`} body={review.body}
                   instanceKey={`review:${review.id}:${review.snapshotVersionId}`} /></Suspense>
@@ -505,7 +503,6 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                   <div><dt>Department</dt><dd title={departmentName(review.responsibleDepartmentId)}>{departmentName(review.responsibleDepartmentId)}</dd></div>
                   <div><dt>Readers</dt><dd>{review.proposedTargetReaders ? targetReadersLabel(review.proposedTargetReaders, departmentName) : audienceNames(review.audienceIds)}</dd></div>
                   {review.management ? <>
-                    <div><dt>Document code</dt><dd>{review.documentCode ?? "—"}</dd></div>
                     <div><dt>Type</dt><dd>{review.management.type ?? "—"}</dd></div>
                     <div><dt>Topic</dt><dd>{review.management.topicName ?? "—"}</dd></div>
                     <div><dt>Version</dt><dd>{review.management.version}</dd></div>
@@ -582,7 +579,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <article className="island draft-document" aria-label="Draft">
             <div className="draft-document-toolbar">
               <span className={`island-chip has-dot ${chipTone(currentDraftStatus?.tone ?? "")}`}>{currentDraftStatus?.label}</span>
-              <span className="island-meta">{draft.documentCode}{draft.documentCode ? " · " : ""}{draft.currentVersion.mimeType === "application/pdf" ? "PDF" : "Text"}{dirty ? " · Unsaved changes" : ""}</span>
+              <span className="island-meta">{draft.currentVersion.mimeType === "application/pdf" ? "PDF" : "Text"}{dirty ? " · Unsaved changes" : ""}</span>
               {draft.currentVersion.mimeType === "application/pdf" && <label className="km-replace-pdf secondary-button">
                 {replacementPdf ? replacementPdf.name : "Replace PDF"}<input type="file" accept=".pdf,application/pdf" disabled={busy}
                   aria-label="Replace PDF" onChange={event => { const file = event.target.files?.[0] ?? null;
@@ -647,7 +644,6 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         focusTarget={openedCitation}
         metadata={{
           title: document.title,
-          documentCode: document.documentCode ?? "Not assigned",
           ownerDepartment: publicationDepartmentName(document),
           summary: document.summary ?? "",
           type: document.management?.type ?? undefined, topic: document.management?.topicName,
@@ -687,14 +683,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             headers={["DOCUMENT", "DEPARTMENT", "UPDATED", "STATUS"]}>
             {filteredDrafts.map((item) => {
               const status = draftStatus(item, latestByDraft.get(item.id));
-              const shown = libraryTitleParts(item.title, null);
               return <IslandRow key={item.id} selected={selectedContributionId === item.id} className="library-row">
                 <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name library-row-name" onClick={() => setSelectedContributionId(item.id)}
                   aria-label={`Open details for ${item.title}`} title={item.title}>
                   <span className="library-row-icon" aria-hidden="true"><Icon name={item.mimeType === "application/pdf" ? "pdf" : "document"} size={16} /></span>
                   <span className="library-row-copy">
-                    {shown.code && <span className="library-row-code">{shown.code}</span>}
-                    <span className="library-row-heading"><strong className="library-row-title">{shown.title}</strong>{item.management?.version && <span className="library-row-version">{item.management.version}</span>}</span>
+                    <span className="library-row-heading"><strong className="library-row-title">{item.title}</strong>{item.management?.version && <span className="library-row-version">{item.management.version}</span>}</span>
                     <span className="library-row-meta"><span className="library-row-audience">{targetReadersLabel(item.targetReaders, departmentName)}</span></span>
                   </span></button></IslandCell>
                 <IslandCell className="island-row-cell library-row-secondary">{departmentName(item.responsibleDepartmentId)}</IslandCell>

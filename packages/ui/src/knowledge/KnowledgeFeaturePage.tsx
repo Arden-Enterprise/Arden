@@ -72,7 +72,7 @@ function SampleKnowledgeFeaturePage({ view, active = true, organizationName = "F
         onBack={() => { setOpenedDocument(null); setOpenedCitation(null); }}
         onVersionChange={(activeVersionId) => { setOpenedDocument({ ...openedDocument, activeVersionId }); setOpenedCitation(null); }}
         content={<div className="knowledge-reader-sample-page">
-          <header><span>{openedDocument.documentCode} / VERSION {openedDocument.versions.find((version) => version.id === openedDocument.activeVersionId)?.label}</span><h2>{openedDocument.title}</h2></header>
+          <header><span>VERSION {openedDocument.versions.find((version) => version.id === openedDocument.activeVersionId)?.label}</span><h2>{openedDocument.title}</h2></header>
           {openedDocument.sourceBlocks.map((block) => <section key={block.id} data-source-block-id={block.id}>
             {block.heading && <h3>{block.heading}</h3>}<p>{block.text}</p>
           </section>)}

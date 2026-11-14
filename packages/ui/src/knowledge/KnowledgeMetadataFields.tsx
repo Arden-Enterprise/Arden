@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { knowledgeTypes, type KnowledgeMetadata } from "@arden/domain";
-import { ApiError, findKnowledgeReaders, type KnowledgeCatalogEntry, type TargetReaders } from "../shared/api-client";
+import { ApiError, findKnowledgeReaders, type KnowledgeCatalogEntry, type KnowledgeReaderMatch, type TargetReaders } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { Icon } from "../shared/Icon";
 
@@ -23,8 +23,8 @@ export function KnowledgeMetadataFields({ value, readers, topics, departments, b
   onChange: (value: KnowledgeMetadata) => void; onReaders: (value: TargetReaders) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [matches, setMatches] = useState<Array<{ id: string; name: string }>>([]);
-  const [names, setNames] = useState<Record<string, string>>({});
+  const [matches, setMatches] = useState<KnowledgeReaderMatch[]>([]);
+  const [known, setKnown] = useState<Record<string, KnowledgeReaderMatch>>({});
   const [error, setError] = useState("");
   const [searching, setSearching] = useState(false);
   const memberKey = readers?.mode === "SELECTED_MEMBERS" ? readers.memberIds.join(",") : "";
@@ -37,7 +37,7 @@ export function KnowledgeMetadataFields({ value, readers, topics, departments, b
       setSearching(true); setError("");
       void findKnowledgeReaders(platform, organizationId, query, ids).then(items => {
         if (!present) return;
-        setMatches(items); setNames(previous => ({ ...previous, ...Object.fromEntries(items.map(item => [item.id, item.name])) }));
+        setMatches(items); setKnown(previous => ({ ...previous, ...Object.fromEntries(items.map(item => [item.id, item])) }));
       }).catch(cause => { if (present) setError(cause instanceof ApiError ? cause.message : "Couldn’t load members."); })
         .finally(() => { if (present) setSearching(false); });
     }, 250);
@@ -64,12 +64,21 @@ export function KnowledgeMetadataFields({ value, readers, topics, departments, b
       {readers?.mode === "DEPARTMENT" && <select aria-label="Reader department" value={readers.departmentId ?? ""} onChange={event => onReaders({ ...readers, departmentId: event.target.value || null })}>
         <option value="">Choose department</option>{departments.map(department => <option key={department.id} value={department.id}>{department.name}</option>)}</select>}
       {readers?.mode === "SELECTED_MEMBERS" && <>
-        <div className="km-selected-readers">{readers.memberIds.map(id => <button key={id} type="button" onClick={() => onReaders({ ...readers, memberIds: readers.memberIds.filter(member => member !== id) })}>
-          {names[id] ?? "Selected member"}<Icon name="close" size={11} /><span className="sr-only">Remove</span></button>)}</div>
-        <input type="search" maxLength={80} aria-label="Find members" placeholder="Search member names…" value={query} onChange={event => setQuery(event.target.value)} />
+        <div className="km-selected-readers">{readers.memberIds.map(id => <button key={id} type="button" title={known[id]?.email}
+          onClick={() => onReaders({ ...readers, memberIds: readers.memberIds.filter(member => member !== id) })}>
+          {known[id]?.name ?? "Selected member"}<Icon name="close" size={11} /><span className="sr-only">Remove {known[id]?.name ?? "member"}</span></button>)}</div>
+        {/* Decision 0021: add people by name or email, like sharing in Google Drive; only this organization's members. */}
+        <input type="search" maxLength={80} aria-label="Add people by name or email" placeholder="Add people by name or email"
+          value={query} onChange={event => setQuery(event.target.value)} />
         {query.trim().length >= 2 && <ul className="km-member-results">{matches.filter(member => !readers.memberIds.includes(member.id)).map(member => <li key={member.id}><button type="button" disabled={readers.memberIds.length >= 100}
-          onClick={() => { onReaders({ ...readers, memberIds: [...readers.memberIds, member.id] }); setQuery(""); }}>{member.name}<Icon name="plus" size={12} /></button></li>)}</ul>}
-        <small role="status">{searching ? "Finding members…" : error || (query.trim().length >= 2 && !matches.length ? "No members found." : `${readers.memberIds.length} selected · choose 2–100`)}</small>
+          aria-label={`Add ${member.name}${member.email ? `, ${member.email}` : ""}`}
+          onClick={() => { onReaders({ ...readers, memberIds: [...readers.memberIds, member.id] }); setQuery(""); }}>
+          <span className="km-member-identity"><strong>{member.name}</strong>
+            {(member.email || member.department) && <small>{[member.email, member.department].filter(Boolean).join(" · ")}</small>}</span>
+          <Icon name="plus" size={12} /></button></li>)}</ul>}
+        <small role="status">{searching ? "Finding members…" : error || (query.trim().length >= 2 && !matches.length
+          ? (query.includes("@") ? "No member with this email in this organization." : "No members found.")
+          : `${readers.memberIds.length} selected · choose 2–100`)}</small>
       </>}
     </fieldset>
   </div>;

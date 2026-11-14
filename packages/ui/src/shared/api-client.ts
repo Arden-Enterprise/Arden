@@ -58,7 +58,6 @@ export type KnowledgeOptions = {
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
 };
 export type KnowledgeDraftRecord = {
-  documentCode?: string;
   management?: KnowledgeMetadata | null;
   hasPublishedVersion?: boolean;
   targetReaders?: TargetReaders | null;
@@ -87,7 +86,6 @@ export type KnowledgeDraftVersionSummary = {
 };
 export type KnowledgeDraftVersionRecord = KnowledgeDraftVersionSummary & { body: string; pdfBase64?: string };
 export type KnowledgeDraftSummary = {
-  documentCode?: string;
   management?: KnowledgeMetadata | null;
   hasPublishedVersion?: boolean;
   targetReaders?: TargetReaders | null;
@@ -109,7 +107,6 @@ export type KnowledgeDraftSummary = {
   updatedAt: string;
 };
 export type KnowledgeSubmission = {
-  documentCode?: string | null;
   management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
   proposedTargetReaders?: TargetReaders | null;
   approvedTargetReaders?: TargetReaders | null;
@@ -171,7 +168,6 @@ export type PublishedKnowledge = {
   responsibleDepartmentId: string;
   /** Display metadata, independent of the author's permitted department choices. */
   responsibleDepartmentName?: string | null;
-  documentCode?: string | null;
   management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
   versionLabel?: string;
   summary?: string;
@@ -300,8 +296,10 @@ export function saveKnowledgeCatalogEntry(platform: Platform, organizationId: st
     headers: entry ? { "If-Match": `"catalog-${entry.version}"` } : {},
   });
 }
+/** Decision 0021: a member of the organization found by name or email (Google Drive style). */
+export type KnowledgeReaderMatch = { id: string; name: string; email?: string; department?: string | null };
 export async function findKnowledgeReaders(platform: Platform, organizationId: string, query: string, ids: string[] = []) {
-  return (await request<{ items: Array<{ id: string; name: string }> }>(platform,
+  return (await request<{ items: KnowledgeReaderMatch[] }>(platform,
     `${knowledgePath(organizationId)}/catalog/readers?q=${encodeURIComponent(query)}&ids=${encodeURIComponent(ids.join(","))}`)).items;
 }
 

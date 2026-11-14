@@ -33,8 +33,9 @@ Content (editor or text-extractable PDF), business Version, Effective Date and
 explicit Target Readers. Types: Policy & Standard, Procedure, Guide, Reference,
 Lessons Learned. Expiration Date is optional and cannot precede Effective Date.
 An update to previously published knowledge requires a Change Note. Business
-Version is not the technical save revision. Document Code is generated once per
-logical document, independent of Type/department, and stays stable across versions.
+Version is not the technical save revision. Document Code is retired
+([ADR 0021](../decisions/0021-reader-email-search-and-no-document-code.md), 14 November 2026): documents are
+identified by title, version and link, and the explicit Target Readers picker finds members by name or email.
 Owner Department follows the author's primary department. Author, Published Date,
 Last Updated and current-version identity are system-owned. Published Date means
 availability; Effective Date means applicability. An upcoming Effective Date alone

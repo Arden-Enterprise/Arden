@@ -74,8 +74,13 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     const activeTopic = (await catalog.list(member, org)).topics[0]!;
     expect((await catalog.list(member, org)).canManage).toBe(false);
     expect((await catalog.list(owner, org)).canManage).toBe(true);
-    expect(await catalog.readers(member, org, "Catalog", [])).toEqual(expect.arrayContaining([{ id: ownerMembership, name: "Catalog owner" }]));
+    // Decision 0021: name or email search, returning the full email like sharing in Google Drive.
+    expect(await catalog.readers(member, org, "Catalog", [])).toEqual(expect.arrayContaining([expect.objectContaining({
+      id: ownerMembership, name: "Catalog owner", email: `${owner}@example.test` })]));
+    expect(await catalog.readers(member, org, `${owner}@EXAMPLE.test`, [])).toEqual([expect.objectContaining({ id: ownerMembership })]);
+    expect(await catalog.readers(member, org, "nobody@other.test", [])).toEqual([]);
     expect(await catalog.readers(foreign, org, "Catalog", [])).toEqual([]);
+    expect(await catalog.readers(foreign, org, `${owner}@example.test`, [])).toEqual([]);
 
     const draft = await repo.createNewKnowledgeDraft(owner, org, { actorMembershipId: ownerMembership, title: "Governed guide",
       classification: "INTERNAL", idempotencyKey: randomUUID(), content: { sourceUri: "arden-private-object://catalog-fixture",
@@ -117,7 +122,9 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     };
     const publicationId = await activate();
     const publication = await repo.getPublishedKnowledge(member, org, publicationId);
-    expect(publication).toMatchObject({ documentCode: draft.draft.documentCode, management: { version: "1.0", effectiveDate: "2027-01-01" } });
+    // Decision 0021: no Document Code is returned.
+    expect(publication).toMatchObject({ management: { version: "1.0", effectiveDate: "2027-01-01" } });
+    expect(publication).not.toHaveProperty("documentCode");
     const collection = await catalog.write(owner, org, "collections", null, null, { name: "Engineering handbook", description: "",
       status: "ACTIVE", cover: "production", documentIds: [publicationId] }, "curate");
     expect((await catalog.list(member, org)).collections[0]!.documentIds).toEqual([publicationId]);

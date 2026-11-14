@@ -49,7 +49,6 @@ export type PrivateContributionSource = {
   contentHash: string;
 };
 export type SharedKnowledgeDraft = {
-  documentCode?: string;
   management?: (KnowledgeMetadata & { schemaVersion?: number }) | null;
   hasPublishedVersion?: boolean;
   id: string;
@@ -98,7 +97,6 @@ export type UpdateSharedDraftResult =
   | { kind: "invalid-target-readers"; field: TargetReadersField; reason: string }
   | { kind: "updated"; draft: SharedKnowledgeDraft };
 export type SharedKnowledgeSubmission = {
-  documentCode?: string | null;
   management?: (KnowledgeMetadata & { topicName?: string }) | null;
   id: string;
   draftId: string;
@@ -194,7 +192,6 @@ export type DecideReviewResult =
   | { kind: "not-found" }
   | { kind: "conflict" };
 export type PublishedKnowledge = {
-  documentCode?: string | null;
   management?: (KnowledgeMetadata & { topicName?: string }) | null;
   id: string;
   draftId: string;
@@ -263,7 +260,6 @@ function readersAuditSummary(readers: ReaderSelection) {
   return { mode: readers.mode, departmentId: readers.departmentId, memberCount: readers.memberIds.length };
 }
 type SharedDraftRow = ReaderSelectionColumns & {
-  document_code: string;
   management: KnowledgeMetadata | null;
   has_published_version: boolean;
   shared_draft_id: string;
@@ -290,7 +286,7 @@ type SharedDraftRow = ReaderSelectionColumns & {
 };
 const sharedDraftSelect = `
   SELECT d.shared_draft_id, d.title, d.classification, d.source_private_version_id,
-         d.document_code, d.management,
+         d.management,
          EXISTS (SELECT 1 FROM shared_submission prior WHERE prior.shared_draft_id = d.shared_draft_id
            AND prior.publication_state IN ('ACTIVE', 'SUPERSEDED')) AS has_published_version,
          d.author_membership_id, d.status,
@@ -311,7 +307,7 @@ const sharedDraftSelect = `
 
 function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnowledgeDraft {
   return {
-    documentCode: row.document_code, management: row.management, hasPublishedVersion: row.has_published_version,
+    management: row.management, hasPublishedVersion: row.has_published_version,
     id: row.shared_draft_id,
     organizationId,
     title: row.title,
@@ -334,7 +330,6 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
   };
 }
 type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
-  document_code: string | null;
   management: (KnowledgeMetadata & { topicName?: string }) | null;
   submission_id: string;
   shared_draft_id: string;
@@ -366,7 +361,7 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
 // so it is detected even when the reviewer cannot see the snapshot's group or department audiences.
 const submissionSelect = `
   SELECT s.submission_id, s.shared_draft_id, s.shared_draft_version_id,
-         s.document_code, s.management,
+         s.management,
          s.snapshot_version_no,
          s.title, s.classification, s.responsible_department_id, s.target_scope_type,
          s.target_department_id, s.audience_role_ids, s.content_hash, s.content_uri,
@@ -385,7 +380,7 @@ const submissionSelect = `
     LEFT JOIN review_decision rd ON rd.submission_id = s.submission_id AND rd.flow2`;
 function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmission {
   return {
-    documentCode: row.document_code, management: row.management,
+    management: row.management,
     id: row.submission_id,
     draftId: row.shared_draft_id,
     snapshotVersionId: row.shared_draft_version_id,
@@ -450,7 +445,6 @@ function reviewAuthorizationFromRow(row: SharedSubmissionRow, organizationId: st
   };
 }
 type PublishedKnowledgeRow = ReaderSelectionColumns & {
-  document_code: string | null;
   management: (KnowledgeMetadata & { topicName?: string }) | null;
   published_version_id: string;
   shared_draft_id: string;
@@ -479,7 +473,7 @@ type AuthorizedAiSourceRow = ReaderSelectionColumns & {
 };
 const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
-         pv.document_code, pv.management,
+         pv.management,
          pv.responsible_department_id, pv.content_hash, pv.content_uri,
          owner_department.name AS responsible_department_name,
          pv.audience_role_ids, pv.published_at,
@@ -491,7 +485,7 @@ const publishedKnowledgeSelect = `
       AND owner_department.organization_id = cp.organization_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
   return {
-    documentCode: row.document_code, management: row.management,
+    management: row.management,
     id: row.published_version_id,
     draftId: row.shared_draft_id,
     title: row.title,

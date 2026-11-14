@@ -75,7 +75,7 @@ export function KnowledgeCatalogEditor({ platform, organizationId, catalog, publ
           </fieldset>
           <fieldset className="km-curation" disabled={busy}><legend>Documents</legend>
             <input type="search" aria-label="Filter documents for collection" placeholder="Find a document…" value={search} onChange={event => setSearch(event.target.value)} />
-            <div className="km-curation-list">{publications.filter(item => `${item.title} ${item.documentCode ?? ""}`.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(item =>
+            <div className="km-curation-list">{publications.filter(item => item.title.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(item =>
               <label key={item.id}><input type="checkbox" checked={value.documentIds?.includes(item.id) ?? false}
                 onChange={event => setValue({ ...value, documentIds: event.target.checked ? [...(value.documentIds ?? []), item.id]
                   : value.documentIds?.filter(id => id !== item.id) })} /><span>{item.title}</span></label>)}

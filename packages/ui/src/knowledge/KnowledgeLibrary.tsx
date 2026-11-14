@@ -17,36 +17,36 @@ export type SampleKnowledgeDocument = ReaderDocumentMetadata & {
 };
 
 export const sampleDocuments: SampleKnowledgeDocument[] = [
-  { id: "release-readiness-checklist", title: "Release readiness checklist", documentCode: "NSS-SOP-012", ownerDepartment: "Platform Engineering",
+  { id: "release-readiness-checklist", title: "Release readiness checklist", ownerDepartment: "Platform Engineering",
     summary: "Defines the evidence and ownership checks required before a production release is approved.",
     activeVersionId: "release-v2", versions: [
       { id: "release-v2", label: "2.0", status: "EFFECTIVE", effectiveDate: "2026-09-15" },
       { id: "release-v1", label: "1.0", status: "EXPIRED", effectiveDate: "2026-03-10" },
     ], details: "Checklist · Platform Engineering", status: "Published", scope: "Company-wide", type: "Checklist", previewHeading: "Release controls",
     sourceBlocks: [{ id: "release-evidence", heading: "Release controls", text: "Every production release must include named ownership, tested rollback evidence and the recorded approval outcome before deployment begins." }] },
-  { id: "checkout-timeout-decision", title: "Checkout timeout decision", documentCode: "NSS-STD-019", ownerDepartment: "Product Engineering",
+  { id: "checkout-timeout-decision", title: "Checkout timeout decision", ownerDepartment: "Product Engineering",
     summary: "Records the accepted checkout timeout behavior, operating limits and escalation path for affected services.",
     activeVersionId: "checkout-v1", versions: [{ id: "checkout-v1", label: "1.0", status: "EFFECTIVE", effectiveDate: "2026-08-22" }],
     details: "Decision · Product Engineering", status: "Published", scope: "Department", type: "Decision", previewHeading: "Accepted timeout behavior",
     sourceBlocks: [{ id: "accepted-timeout", heading: "Accepted timeout behavior", text: "Checkout requests use the agreed service timeout and follow the documented escalation path when the dependency exceeds its operating limit." }] },
-  { id: "operations-ownership-handover", title: "Operations ownership handover", documentCode: "NSS-SOP-028", ownerDepartment: "Infrastructure Operations",
+  { id: "operations-ownership-handover", title: "Operations ownership handover", ownerDepartment: "Infrastructure Operations",
     summary: "Documents service ownership, unresolved risks and the operational contacts required for the handover.",
     activeVersionId: "handover-v1", versions: [{ id: "handover-v1", label: "1.0", status: "UPCOMING", effectiveDate: "2026-11-01" }],
     details: "Handover · Infrastructure Operations", status: "In review", scope: "Company-wide", type: "Handover", previewHeading: "Ownership transition",
     sourceBlocks: [{ id: "handover-ownership", heading: "Ownership transition", text: "The receiving team accepts service ownership only after open risks, operational contacts and escalation responsibilities are recorded." }] },
-  { id: "incident-retrospective-18-sep", title: "Incident retrospective - 18 Sep", documentCode: "NSS-STD-034", ownerDepartment: "Infrastructure Operations",
+  { id: "incident-retrospective-18-sep", title: "Incident retrospective - 18 Sep", ownerDepartment: "Infrastructure Operations",
     summary: "Captures the incident timeline, contributing conditions and follow-up work identified by the response team.",
     activeVersionId: "incident-v1", versions: [{ id: "incident-v1", label: "1.0", status: "EFFECTIVE", effectiveDate: "2026-09-20" }],
     details: "Retrospective · Your personal workspace", status: "Private", scope: "Private", type: "Retrospective", previewHeading: "Incident findings",
     sourceBlocks: [{ id: "incident-findings", heading: "Incident findings", text: "The response team recorded the incident timeline, contributing conditions and follow-up owners for private working use." }] },
-  { id: "data-retention-policy-mapping", title: "Data retention policy mapping", documentCode: "NSS-POL-041", ownerDepartment: "Security & Compliance",
+  { id: "data-retention-policy-mapping", title: "Data retention policy mapping", ownerDepartment: "Security & Compliance",
     summary: "Maps retained data categories to their approved retention periods and accountable control owners.",
     activeVersionId: "retention-v3", versions: [
       { id: "retention-v3", label: "3.0", status: "EFFECTIVE", effectiveDate: "2026-10-01" },
       { id: "retention-v2", label: "2.0", status: "EXPIRED", effectiveDate: "2025-10-01" },
     ], details: "Policy · Security & Compliance", status: "Published", scope: "Company-wide", type: "Policy", previewHeading: "Retention responsibilities",
     sourceBlocks: [{ id: "retention-responsibilities", heading: "Retention responsibilities", text: "Control owners must apply the approved retention period to each data category and record any exception through the security review process." }] },
-  { id: "knowledge-publication-workflow", title: "Knowledge publication workflow", documentCode: "NSS-SOP-052", ownerDepartment: "Knowledge Governance",
+  { id: "knowledge-publication-workflow", title: "Knowledge publication workflow", ownerDepartment: "Knowledge Governance",
     summary: "Defines how an authored draft becomes an authorized, indexed and active knowledge publication.",
     activeVersionId: "publication-workflow-v2-1", versions: [
       { id: "publication-workflow-v2-1", label: "2.1", status: "EFFECTIVE", effectiveDate: "2026-10-12" },
@@ -56,7 +56,7 @@ export const sampleDocuments: SampleKnowledgeDocument[] = [
       { id: "immutable-submission", heading: "Review snapshot", text: "Submitting a working draft for review creates an immutable snapshot. Later edits remain in the working draft and do not change the submitted version." },
       { id: "activation-boundary", heading: "Publication activation", text: "Approval prepares the reviewed snapshot. Search and Ask Arden can use it only after indexing succeeds and the release is activated." },
     ] },
-  { id: "reviewer-responsibility-guide", title: "Reviewer responsibility guide", documentCode: "NSS-GDE-053", ownerDepartment: "Product Engineering",
+  { id: "reviewer-responsibility-guide", title: "Reviewer responsibility guide", ownerDepartment: "Product Engineering",
     summary: "Clarifies reviewer authority, decision boundaries and responsibility for an exact submitted version.",
     activeVersionId: "reviewer-guide-v1-4", versions: [{ id: "reviewer-guide-v1-4", label: "1.4", status: "EFFECTIVE", effectiveDate: "2026-10-08" }],
     details: "Guide · Product Engineering", status: "Published", scope: "Department", type: "Guide", previewHeading: "Reviewer decision boundary",
@@ -68,7 +68,7 @@ export const samplePublications = sampleDocuments.filter((document) => document.
 export function matchesSampleKnowledge(document: SampleKnowledgeDocument, query: string): boolean {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return true;
-  return [document.title, document.documentCode, document.ownerDepartment, document.summary, document.type]
+  return [document.title, document.ownerDepartment, document.summary, document.type]
     .some((value) => value.toLocaleLowerCase().includes(normalized));
 }
 
@@ -110,7 +110,7 @@ export function KnowledgeLibrary({ active, createdDraft, onCreate, onOpenDocumen
         const version = document.versions.find((item) => item.id === document.activeVersionId) ?? document.versions[0];
         return <IslandRow key={document.id}>
           <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name knowledge-result-name" onClick={() => onOpenDocument(document)}>
-            <span><strong>{document.title}</strong><small>{document.documentCode} · {document.type}</small></span>
+            <span><strong>{document.title}</strong><small>{document.type}</small></span>
           </button></IslandCell>
           <IslandCell>{document.ownerDepartment}</IslandCell>
           <IslandCell className="island-row-cell is-number">v{version?.label ?? "Current"}</IslandCell>

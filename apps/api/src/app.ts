@@ -1711,7 +1711,7 @@ export function buildApp(dependencies: AppDependencies) {
         }
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
-          documentCode: publication.documentCode, management: publication.management,
+          management: publication.management,
           classification: publication.classification,
           responsibleDepartmentId: publication.responsibleDepartmentId,
           responsibleDepartmentName: publication.responsibleDepartmentName,
@@ -2083,7 +2083,7 @@ async function readKnowledgeContent(storage: PrivateContentStorage, sourceUri: s
 
 function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
   return {
-    documentCode: draft.documentCode, management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
+    management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
     id: draft.id,
     organizationId: draft.organizationId,
     title: draft.title,
@@ -2110,7 +2110,7 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
 
 function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
   return {
-    documentCode: draft.documentCode, management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
+    management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
     id: draft.id,
     organizationId: draft.organizationId,
     title: draft.title,
@@ -2134,7 +2134,7 @@ function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
 
 function representSubmission(submission: SharedKnowledgeSubmission) {
   return {
-    documentCode: submission.documentCode, management: submission.management,
+    management: submission.management,
     id: submission.id,
     draftId: submission.draftId,
     snapshotVersionId: submission.snapshotVersionId,
