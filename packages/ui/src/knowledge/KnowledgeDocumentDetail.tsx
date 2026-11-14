@@ -4,6 +4,7 @@ import type { KnowledgeCitationReference } from "./knowledgeCitation";
 import { useReaderSummary, type ReaderSummaryOptions } from "./useReaderSummary";
 import { ReaderSummaryPanel } from "./ReaderSummaryPanel";
 import { ReaderQuestionPanel } from "./ReaderQuestionPanel";
+import { useReaderAccess } from "./useReaderAccess";
 
 export type ReaderDocumentStatus = "EFFECTIVE" | "UPCOMING" | "EXPIRED";
 
@@ -76,7 +77,8 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
 }) {
   const [panel, setPanel] = useState<"summary" | "question" | null>(null);
   const [questionMounted, setQuestionMounted] = useState(false), questionButton = useRef<HTMLButtonElement>(null);
-  const summary = useReaderSummary(summaryOptions ? { ...summaryOptions, visible: panel === "summary" } : undefined);
+  const access = useReaderAccess(summaryOptions);
+  const summary = useReaderSummary(summaryOptions ? { ...summaryOptions, visible: panel === "summary" } : undefined, access);
   const summaryId = useId(), summaryButton = useRef<HTMLButtonElement>(null);
   const closeSummary = () => { summary.close(); setPanel(null); summaryButton.current?.focus(); };
   const closeQuestion = () => { setQuestionMounted(false); setPanel(null); questionButton.current?.focus(); };
@@ -176,19 +178,19 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
             {summaryOptions && <button ref={summaryButton} type="button" className="secondary-button reader-ai-summary-trigger"
               aria-expanded={panel === "summary" && summary.state.status !== "closed"} aria-controls={summaryId}
               onClick={() => {
-                if (panel === "summary" && summary.state.status !== "closed") { closeSummary(); return; }
+                if (panel === "summary" && summary.state.status !== "closed") return;
                 setPanel("summary"); if (summary.state.status === "closed") void summary.open();
               }}>Summary</button>}
             {summaryOptions && <button ref={questionButton} type="button" className="secondary-button"
               aria-expanded={panel === "question"} onClick={() => {
-                if (panel === "question") { closeQuestion(); return; }
+                if (panel === "question") return;
                 setQuestionMounted(true); setPanel("question");
               }}>Ask this document</button>}
             {surfaceActions}</div>}
         </header>
         {panel === "summary" && <ReaderSummaryPanel id={summaryId} summary={summary} onClose={closeSummary} />}
         {questionMounted && summaryOptions?.active && <ReaderQuestionPanel
-          options={{ ...summaryOptions, visible: panel === "question" }} onClose={closeQuestion}
+          options={{ ...summaryOptions, visible: panel === "question" }} access={access} onClose={closeQuestion}
           key={JSON.stringify([summaryOptions.platform, summaryOptions.context])} />}
         <div className="knowledge-reader-content">{content}</div>
       </article>
