@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { applicabilityStatus, emptyKnowledgeMetadata, isCalendarDate, metadataSubmissionErrors, validKnowledgeMetadata } from "./knowledge-metadata.js";
+import { validityStatus, emptyKnowledgeMetadata, isCalendarDate, metadataSubmissionErrors, validKnowledgeMetadata } from "./knowledge-metadata.js";
 import { plainTextToSemanticDocument, semanticDocumentHasText } from "./semantic-document.js";
 
 describe("business document metadata", () => {
   it("allows incomplete drafts but not incomplete submissions", () => {
     expect(validKnowledgeMetadata(emptyKnowledgeMetadata())).toBe(true);
-    expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).toHaveLength(4);
+    expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).toHaveLength(3);
+    expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).not.toContain("Choose an effective date.");
   });
   it("validates calendar dates and the optional inclusive expiration date", () => {
     expect(isCalendarDate("2026-02-29")).toBe(false);
@@ -14,14 +15,20 @@ describe("business document metadata", () => {
     expect(validKnowledgeMetadata(value)).toBe(false);
     value.expirationDate = "2026-11-12";
     expect(validKnowledgeMetadata(value)).toBe(true);
-    expect(applicabilityStatus(value, "2026-11-12")).toBe("Effective");
-    expect(applicabilityStatus(value, "2026-11-13")).toBe("Expired");
-    expect(applicabilityStatus(value, "2026-11-11")).toBe("Upcoming");
+    expect(validityStatus(value, "2026-11-12")).toEqual({ status: "Expiring soon", daysLeft: 0 });
+    expect(validityStatus(value, "2026-11-13")).toEqual({ status: "Expired", daysLeft: 0 });
+    expect(validityStatus(value, "2026-11-11").status).toBe("Upcoming");
   });
   it("requires change notes only for updates and never invents legacy dates", () => {
     expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), true)).toContain("Add a change note.");
     expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).not.toContain("Add a change note.");
-    expect(applicabilityStatus(null, "2026-11-12")).toBeNull();
+    expect(validityStatus(null, "2026-11-12")).toEqual({ status: "Current", daysLeft: null });
+  });
+  it("is in force from approval and warns 30 days before the optional expiration", () => {
+    const value = { ...emptyKnowledgeMetadata(), expirationDate: "2026-12-31" };
+    expect(validityStatus(value, "2026-11-15")).toEqual({ status: "Current", daysLeft: 46 });
+    expect(validityStatus(value, "2026-12-01")).toEqual({ status: "Expiring soon", daysLeft: 30 });
+    expect(validityStatus({ ...value, expirationDate: null }, "2030-01-01")).toEqual({ status: "Current", daysLeft: null });
   });
   it("distinguishes empty editor structure and images from text-extractable content", () => {
     expect(semanticDocumentHasText(plainTextToSemanticDocument(" \n ", () => "empty"))).toBe(false);

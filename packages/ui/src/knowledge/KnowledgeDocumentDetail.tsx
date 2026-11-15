@@ -5,13 +5,16 @@ import { useReaderSummary, type ReaderSummaryOptions } from "./useReaderSummary"
 import { ReaderSummaryPanel } from "./ReaderSummaryPanel";
 import { ReaderQuestionPanel } from "./ReaderQuestionPanel";
 
-export type ReaderDocumentStatus = "EFFECTIVE" | "UPCOMING" | "EXPIRED";
+export type ReaderDocumentStatus = "EFFECTIVE" | "EXPIRING" | "UPCOMING" | "EXPIRED";
 
 export type ReaderDocumentVersion = {
   id: string;
   label: string;
   status: ReaderDocumentStatus | "PUBLISHED";
-  effectiveDate: string;
+  /** Whole days until the expiration date, for EXPIRING. */
+  expiresInDays?: number;
+  /** Retained for sample history; the reader no longer shows effective dates. */
+  effectiveDate?: string;
 };
 
 export type ReaderDocumentMetadata = {
@@ -21,6 +24,8 @@ export type ReaderDocumentMetadata = {
   expirationDate?: string;
   title: string;
   ownerDepartment: string;
+  /** Who may read this version, in plain words (Whole organization, a department, selected members). */
+  readers?: string;
   summary: string;
   activeVersionId: string;
   versions: ReaderDocumentVersion[];
@@ -46,11 +51,14 @@ function writeInformationCollapsed(collapsed: boolean): void {
   try { window.localStorage.setItem(informationCollapsedKey, String(collapsed)); } catch { /* preference is optional */ }
 }
 
-function statusLabel(status: ReaderDocumentStatus | "PUBLISHED"): string {
-  if (status === "PUBLISHED") return "Published";
-  if (status === "UPCOMING") return "Upcoming";
-  if (status === "EXPIRED") return "Expired";
-  return "Effective";
+function statusLabel(version: ReaderDocumentVersion): string {
+  if (version.status === "UPCOMING") return "Upcoming";
+  if (version.status === "EXPIRED") return "Expired";
+  if (version.status === "EXPIRING") {
+    const days = version.expiresInDays ?? 0;
+    return days === 0 ? "Expires today" : `Expires in ${days} ${days === 1 ? "day" : "days"}`;
+  }
+  return "Current";
 }
 
 function dateLabel(value: string): string {
@@ -90,7 +98,9 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
   };
   const activeVersion = metadata.versions.find((version) => version.id === metadata.activeVersionId)
     ?? metadata.versions[0];
-  const hasEffectiveVersion = metadata.versions.some((version) => version.status === "EFFECTIVE");
+  const hasEffectiveVersion = metadata.versions.some((version) => version.status === "EFFECTIVE" || version.status === "EXPIRING" || version.status === "PUBLISHED");
+  // A selector appears only when there is something to choose; one version is shown as plain text.
+  const canChooseVersion = Boolean(onVersionChange) && metadata.versions.length > 1;
   const visibleFocus = focusTarget?.versionId === activeVersion?.id ? focusTarget : null;
 
   useEffect(() => {
@@ -120,7 +130,7 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
     if (event.key === "Escape" && panel === "summary") { event.stopPropagation(); closeSummary(); }
   }}>
     <button type="button" className="knowledge-reader-back" onClick={onBack}>
-      <Icon name="arrow" size={12} />Library
+      <Icon name="arrow" size={12} />Home
     </button>
     {activeVersion.status === "EXPIRED" && <div className="island-note is-warning knowledge-reader-expired" role="note">
       <Icon name="warning" size={16} />
@@ -144,20 +154,21 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
         <dl>
           {metadata.type && <div><dt>Type</dt><dd>{metadata.type}</dd></div>}
           {metadata.topic && <div><dt>Topic</dt><dd>{metadata.topic}</dd></div>}
-          <div><dt>Version</dt><dd><label><span className="sr-only">Document version</span><select
+          <div><dt>Version</dt><dd>{canChooseVersion ? <label><span className="sr-only">Document version</span><select
             value={activeVersion.id}
             onChange={(event) => onVersionChange?.(event.target.value)}
-            disabled={!onVersionChange || metadata.versions.length < 2}
           >{metadata.versions.map((version) => <option key={version.id} value={version.id}>
-            {version.label}{version.status === "EXPIRED" ? " (Expired)" : ""}
-          </option>)}</select></label></dd></div>
-          <div><dt>Status</dt><dd><span className={`island-chip knowledge-reader-status is-${activeVersion.status.toLowerCase()}`}>
-            {statusLabel(activeVersion.status)}</span></dd></div>
+            {version.label || "Not recorded"}{version.status === "EXPIRED" ? " (Expired)" : ""}
+          </option>)}</select></label>
+            : activeVersion.label ? <span className="knowledge-reader-version">{activeVersion.label}</span>
+              : <span className="knowledge-reader-unset">Not recorded</span>}</dd></div>
+          <div><dt>Status</dt><dd><span className={`island-chip knowledge-reader-status is-${activeVersion.status === "PUBLISHED" ? "effective" : activeVersion.status.toLowerCase()}`}>
+            {statusLabel(activeVersion)}</span></dd></div>
           {metadata.sensitiveLabel && <div><dt>Classification</dt><dd><span className="island-chip tone-warning">{metadata.sensitiveLabel}</span></dd></div>}
-          {metadata.publishedDate && <div><dt>Published date</dt><dd>{dateLabel(metadata.publishedDate)}</dd></div>}
-          <div><dt>Effective date</dt><dd>{activeVersion.effectiveDate ? dateLabel(activeVersion.effectiveDate) : "—"}</dd></div>
-          {metadata.expirationDate && <div><dt>Expiration Date</dt><dd>{dateLabel(metadata.expirationDate)}</dd></div>}
+          {metadata.expirationDate && <div><dt>Valid until</dt><dd>{dateLabel(metadata.expirationDate)}</dd></div>}
+          {metadata.readers && <div><dt>Readers</dt><dd>{metadata.readers}</dd></div>}
           <div><dt>Owner department</dt><dd>{metadata.ownerDepartment}</dd></div>
+          {metadata.publishedDate && <div><dt>Published</dt><dd>{dateLabel(metadata.publishedDate)}</dd></div>}
         </dl>
         {metadata.summary && <section className="knowledge-reader-summary" aria-labelledby="document-summary-title">
           <h3 id="document-summary-title">Summary</h3>
@@ -171,7 +182,7 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
             aria-label="Show document information" title="Show document information" onClick={() => toggleInformation(false)}><Icon name="sidebar" size={14} /></button>}
           <Icon name="pdf" size={14} />
           <h1 title={metadata.title}>{metadata.title}</h1>
-          <small>{activeVersion.label}</small>
+          {activeVersion.label && <small>v{activeVersion.label}</small>}
           {(surfaceActions || summaryOptions) && <div className="knowledge-reader-surface-actions">
             {summaryOptions && <button ref={summaryButton} type="button" className="secondary-button reader-ai-summary-trigger"
               aria-expanded={panel === "summary" && summary.state.status !== "closed"} aria-controls={summaryId}

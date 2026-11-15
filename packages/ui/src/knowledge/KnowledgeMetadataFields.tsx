@@ -6,7 +6,8 @@ import { Icon } from "../shared/Icon";
 
 export function editableKnowledgeMetadata(value: KnowledgeMetadata): KnowledgeMetadata {
   // The response may carry server-owned snapshot labels; never send them as inputs.
-  return { type: value.type, topicId: value.topicId, version: value.version, effectiveDate: value.effectiveDate,
+  // A publication is in force from approval (requested 15 Nov 2026), so saving clears any older effective date.
+  return { type: value.type, topicId: value.topicId, version: value.version, effectiveDate: null,
     expirationDate: value.expirationDate, changeNote: value.changeNote };
 }
 
@@ -51,9 +52,8 @@ export function KnowledgeMetadataFields({ value, readers, topics, departments, b
       <option value="">Choose topic</option>{topics.filter(topic => topic.status === "ACTIVE" || topic.id === value.topicId).map(topic => <option key={topic.id} value={topic.id} disabled={topic.status !== "ACTIVE"}>{topic.name}{topic.status !== "ACTIVE" ? " (Inactive)" : ""}</option>)}</select>
       {!topics.some(topic => topic.status === "ACTIVE") && <small>Ask an admin to add a topic.</small>}</label>
     <label className="island-field">Version *<input disabled={busy} maxLength={30} placeholder="e.g. 1.0" value={value.version} onChange={event => onChange({ ...value, version: event.target.value })} /></label>
-    <label className="island-field">Effective Date *<input disabled={busy} type="date" value={value.effectiveDate ?? ""} onChange={event => onChange({ ...value, effectiveDate: event.target.value || null })} /></label>
-    <label className="island-field">Expiration Date<input disabled={busy} type="date" min={value.effectiveDate ?? undefined} value={value.expirationDate ?? ""} onChange={event => onChange({ ...value, expirationDate: event.target.value || null })} /></label>
-    {value.effectiveDate && value.expirationDate && value.expirationDate < value.effectiveDate && <small className="field-error" role="alert">Expiration Date must be on or after Effective Date.</small>}
+    <label className="island-field">Valid until<input disabled={busy} type="date" value={value.expirationDate ?? ""} onChange={event => onChange({ ...value, effectiveDate: null, expirationDate: event.target.value || null })} />
+      <small>Optional. The document applies from approval.</small></label>
     {isUpdate && <label className="island-field">Change Note *<textarea disabled={busy} rows={3} maxLength={1000} placeholder="What changed in this version?" value={value.changeNote} onChange={event => onChange({ ...value, changeNote: event.target.value })} /></label>}
     <fieldset className="km-readers" disabled={busy}><legend>Target Readers *</legend>
       <select aria-label="Target Readers" value={readers?.mode ?? ""} onChange={event => {

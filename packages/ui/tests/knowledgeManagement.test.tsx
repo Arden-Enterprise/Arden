@@ -75,7 +75,7 @@ describe("live Library management components", () => {
     const view = render(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: null, topics: [topic], departments: [],
       busy: false, isUpdate: false, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders }));
     expect((screen.getByRole("combobox", { name: "Target Readers" }) as HTMLSelectElement).value).toBe("");
-    expect(screen.getByLabelText("Expiration Date")).toBeTruthy(); expect(screen.queryByLabelText("Change Note *")).toBeNull();
+    expect(screen.getByLabelText(/^Valid until/)).toBeTruthy(); expect(screen.queryByLabelText(/Effective Date/)).toBeNull(); expect(screen.queryByLabelText("Change Note *")).toBeNull();
     fireEvent.change(screen.getByRole("combobox", { name: "Target Readers" }), { target: { value: "SELECTED_MEMBERS" } });
     expect(onReaders).toHaveBeenCalledWith({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] });
     view.rerender(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] },
