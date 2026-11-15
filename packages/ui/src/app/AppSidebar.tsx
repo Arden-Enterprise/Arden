@@ -178,10 +178,10 @@ export function AppSidebar({
 
       <div className="sidebar-workspace-row">
         <button type="button" className="access-card" disabled={!canSwitchWorkspace} tabIndex={collapsed && canSwitchWorkspace ? -1 : undefined} onClick={onSwitchWorkspace}
-          aria-label={`Workspace: ${organizationName}${canSwitchWorkspace ? ". Switch workspace" : ""}`} title={organizationName}>
+          aria-label={`Workspace: ${organizationName}${canSwitchWorkspace ? ". Switch or create workspace" : ""}`} title={organizationName}>
           <span className="access-card-mark" aria-hidden="true">{initialsOf(organizationName)}</span>
           <span className="access-card-copy"><strong id="access-card-title">{organizationName}</strong>
-            <span>{authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`} · {sessionLabel}</span></span>
+            <span>{canSwitchWorkspace ? "Switch or create workspace" : authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`} · {sessionLabel}</span></span>
           {canSwitchWorkspace && <span className="access-card-switch" aria-hidden="true"><Icon name="expand" size={14} /></span>}
         </button>
         {onToggleCollapsed && <button type="button" className="sidebar-nav-item sidebar-collapse" onClick={onToggleCollapsed}

@@ -48,7 +48,7 @@ describe("organization batch invitations", () => {
   it("previews recipients, skips existing and invalid addresses, and reports partial delivery accurately", async () => {
     vi.mocked(apiClient.inviteOrganizationMember)
       .mockResolvedValueOnce({ deliveryMode: "email" })
-      .mockRejectedValueOnce(new ApiError(502, "The invitation was saved but its email was not delivered.", "INVITATION_DELIVERY_FAILED"));
+      .mockRejectedValueOnce(new ApiError(502, "The invitation was saved, but mail server acceptance was not confirmed.", "INVITATION_DELIVERY_FAILED"));
     const input = await openInvitationForm();
     fireEvent.change(input, { target: { value: "FIRST@example.com, second@example.com;first@example.com\nmember@example.com pending@example.com bad@" } });
     expect(screen.getByText(/2 ready · 4 skipped/)).toBeTruthy();
@@ -59,8 +59,9 @@ describe("organization batch invitations", () => {
 
     await waitFor(() => expect(apiClient.inviteOrganizationMember).toHaveBeenCalledTimes(2));
     expect(vi.mocked(apiClient.inviteOrganizationMember).mock.calls.map((call) => call[3])).toEqual(["first@example.com", "second@example.com"]);
-    await waitFor(() => expect(screen.getByText(/Batch finished: 1 email sent, 0 saved locally, 4 to review/)).toBeTruthy());
-    expect(screen.getByText("Saved · email not delivered. Use Resend in the list.")).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(/Batch finished: 1 email accepted by the mail server, 0 saved locally, 4 to review/)).toBeTruthy());
+    expect(screen.getByText("Accepted by mail server · delivery pending")).toBeTruthy();
+    expect(screen.getByText("Saved · mail handoff unconfirmed. Check provider status before resending.")).toBeTruthy();
     expect(input.value).toBe("");
     expect(apiClient.loadOrganizationAdministration).toHaveBeenCalledTimes(2);
   });
@@ -83,7 +84,7 @@ describe("organization batch invitations", () => {
     fireEvent.change(input, { target: { value: "solo@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: "Send invitation" }));
     await waitFor(() => expect(apiClient.inviteOrganizationMember).toHaveBeenCalledWith("web", "org-1", null, "solo@example.com"));
-    await waitFor(() => expect(screen.getByText(/Batch finished: 1 email sent/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Batch finished: 1 email accepted by the mail server/)).toBeTruthy());
   });
 
   it("keeps the draft locked while recipients are sent one at a time", async () => {
@@ -103,7 +104,7 @@ describe("organization batch invitations", () => {
     expect(apiClient.inviteOrganizationMember).toHaveBeenCalledTimes(1);
     finishFirst({ deliveryMode: "email" });
     await waitFor(() => expect(apiClient.inviteOrganizationMember).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getByText(/Batch finished: 2 emails sent/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Batch finished: 2 emails accepted by the mail server/)).toBeTruthy());
     await waitFor(() => expect(onSending).toHaveBeenLastCalledWith(false));
   });
 });

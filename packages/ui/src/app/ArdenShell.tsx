@@ -235,7 +235,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
   const shellRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | null>(null);
+  const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | "workspace-select" | null>(null);
   const [serverSession, setServerSession] = useState<CurrentSession | null>(null);
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
   const [createdKnowledgeDraft, setCreatedKnowledgeDraft] = useState<CreatedKnowledgeDraft | null>(null);
@@ -293,9 +293,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (recoveryTokens) {
       setRecoveryTokens(null);
     }
-    const allowed = current.memberships.filter((membership) => membership.status === "active");
-    if (allowed.length === 1) enterServerOrganization(allowed[0]);
-    else setEntryView("workspace-select");
+    setEntryView("workspace-select");
   };
 
   useEffect(() => {
@@ -515,12 +513,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           await apiCreateOrganization(platform, name, departmentName);
           await acceptServerSession(await currentSession(platform));
         }}
-        onBack={() => {
-          void apiSignOut(platform).catch(() => undefined);
-          setServerSession(null);
-          privateNotes.reset();
-          setEntryView("sign-in");
-        }}
+        onBack={finishSignOut}
         onContinue={(organizationId) => {
           const membership = serverSession.memberships.find((item) => item.organization.id === organizationId);
           if (membership) enterServerOrganization(membership);
@@ -598,6 +591,27 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     finishSignOut();
   };
 
+  const showWorkspaceSelector = () => {
+    setServerOrganizationId(null);
+    setContributionAttempt(null);
+    privateNotes.reset();
+    setNavOpen(false);
+    setContextOpen(false);
+    setEntryView("workspace-select");
+  };
+
+  const openWorkspaceSelector = () => {
+    if (invitationBatchSending) {
+      setIslandToast({ message: "Wait for invitations to finish before switching workspaces.", onDismiss: () => setIslandToast(null) });
+      return;
+    }
+    if (organizationDirty || privateNotes.hasUnsavedDrafts) {
+      setPendingAction("workspace-select");
+      return;
+    }
+    showWorkspaceSelector();
+  };
+
   const contextControl = { contextOpen, onToggleContext: () => { setNavOpen(false); setContextOpen((open) => !open); } };
   const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
@@ -642,16 +656,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined}
-        canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
+        canSwitchWorkspace={Boolean(serverSession)}
         collapsed={navCollapsed}
         onToggleCollapsed={() => setNavCollapsed((collapsed) => !collapsed)}
-        onSwitchWorkspace={() => {
-          if (invitationBatchSending) {
-            setIslandToast({ message: "Wait for invitations to finish before switching workspaces.", onDismiss: () => setIslandToast(null) });
-            return;
-          }
-          setNavOpen(false); setContextOpen(false); setEntryView("workspace-select");
-        }}
+        onSwitchWorkspace={openWorkspaceSelector}
         onCloseNavigation={() => setNavOpen(false)}
         onNavigate={navigate}
         onSignOut={signOut}
@@ -670,8 +678,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           <WaitingRoomPage
             organizationName={activeMembership?.organization.name ?? "Organization"}
             memberEmail={serverSession?.actor.email ?? ""}
-            canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
-            onSwitchWorkspace={() => { setNavOpen(false); setContextOpen(false); setEntryView("workspace-select"); }}
+            canSwitchWorkspace={Boolean(serverSession)}
+            onSwitchWorkspace={openWorkspaceSelector}
             onRefresh={() => {
               void restoreSession(platform).then((current) => {
                 if (current) acceptServerSession(current);
@@ -729,6 +737,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           onDiscard={() => {
             if (pendingAction === "exit") finishSignOut();
             else if (pendingAction === "setup") { setOrganizationDirty(false); setEntryView("setup"); }
+            else if (pendingAction === "workspace-select") {
+              setOrganizationDirty(false);
+              showWorkspaceSelector();
+            }
             else {
               setOrganizationDirty(false);
               setActiveView(pendingAction);

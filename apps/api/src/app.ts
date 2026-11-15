@@ -159,7 +159,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["email", "password"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
           password: { type: "string", minLength: 1, maxLength: accountPasswordMaximumLength },
         },
       },
@@ -277,7 +277,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["email", "password", "fullName"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
           password: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
           fullName: { type: "string", minLength: 1, maxLength: 200 },
           redirectTo: { type: "string", minLength: 1, maxLength: 2048 },
@@ -315,6 +315,11 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
       }
 
+      const normalizedFullName = request.body.fullName.trim();
+      if (!normalizedFullName) {
+        return reply.code(400).send(safeError("INVALID_FULL_NAME", "Enter your name.", request.id));
+      }
+
       if (!meetsAccountPasswordRequirements(request.body.password)) {
         return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordRequirementsMessage, request.id));
       }
@@ -323,7 +328,7 @@ export function buildApp(dependencies: AppDependencies) {
         await dependencies.auth.signUp({
           email: normalizedEmail,
           password: request.body.password,
-          fullName: request.body.fullName.trim(),
+          fullName: normalizedFullName,
           redirectTo: validatedRedirectTo,
         });
       } catch (error) {
@@ -351,7 +356,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["email"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
         },
       },
     },
@@ -361,16 +366,22 @@ export function buildApp(dependencies: AppDependencies) {
     if (!isNormalizedEmail(normalizedEmail)) {
       return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
     }
+    const checkEmailResponse = {
+      status: "recovery_sent",
+      message: "If an account with this email exists, check your inbox for a reset link. Another link may take time.",
+    };
     try {
       const origin = request.headers.origin || dependencies.publicWebOrigin || "http://127.0.0.1:5180";
       await dependencies.auth.resetPasswordForEmail(normalizedEmail, `${origin}/reset-password`);
-      return reply.code(202).send({
-        status: "recovery_sent",
-        message: "If an account with this email exists, a password reset email has been sent.",
-      });
+      return reply.code(202).send(checkEmailResponse);
     } catch (error) {
+      if (error instanceof Error && (error.message === "RESET_RATE_LIMITED" || error.message === "RESET_REQUEST_REJECTED")) {
+        // Provider client rejections can depend on account existence, so keep this response identical to success.
+        request.log.warn({ providerRejection: error.message, requestId: request.id }, "Password reset provider request rejected");
+        return reply.code(202).send(checkEmailResponse);
+      }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password reset request failed");
-      return authUnavailable(reply, request);
+      return reply.code(503).send(safeError("RESET_UNAVAILABLE", "A reset link could not be requested right now. Try again later.", request.id));
     }
   });
 
@@ -703,7 +714,7 @@ export function buildApp(dependencies: AppDependencies) {
         type: "object", additionalProperties: false, required: ["email"],
         properties: {
           departmentId: { type: "string", pattern: uuidPattern },
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
         },
       },
     },
@@ -734,7 +745,7 @@ export function buildApp(dependencies: AppDependencies) {
         });
       } catch (error) {
         request.log.error({ errorType: safeErrorType(error), invitationId: invitation.invitationId, requestId: request.id }, "Invitation email delivery failed");
-        return reply.code(502).send({ ...safeError("INVITATION_DELIVERY_FAILED", "The invitation was saved but its email was not delivered. Retry sending it from organization administration.", request.id), invitationId: invitation.invitationId });
+        return reply.code(502).send({ ...safeError("INVITATION_DELIVERY_FAILED", "The invitation was saved, but mail server acceptance was not confirmed. Check provider status before resending it.", request.id), invitationId: invitation.invitationId });
       }
       return reply.code(202).send({
         invitationId: invitation.invitationId,
@@ -784,7 +795,7 @@ export function buildApp(dependencies: AppDependencies) {
       });
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), invitationId: request.params.invitationId, requestId: request.id }, "Invitation resend failed");
-      return reply.code(502).send(safeError("INVITATION_DELIVERY_FAILED", "The invitation could not be delivered. Retry sending it from organization administration.", request.id));
+      return reply.code(502).send(safeError("INVITATION_DELIVERY_FAILED", "Mail server acceptance was not confirmed. Check provider status before resending the invitation.", request.id));
     }
   });
 
