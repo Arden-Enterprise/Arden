@@ -7,6 +7,7 @@ import { ApiError, askArden, listAiConversations, loadAiConversation, type AiCon
   type AiConversationSummary, type AiVersionScope } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { answerMessage, starterPrompts, type AskArdenMessage } from "./askArdenModel";
+import { CitedAnswer } from "./CitedAnswer";
 
 const ardenOrbSource = new URL("./assets/arden-orb-source.png", import.meta.url).href;
 
@@ -200,17 +201,9 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
           {error && <div className="ask-thread-notice" role="alert"><Icon name="warning" size={14} /><span>{error}</span></div>}
           {messages.map((message) => <article key={message.id} className={`ask-message is-${message.role}`}>
             <div className="ask-message-meta"><span>{message.role === "member" ? "You" : "Arden"}</span>{message.insufficientEvidence && <small>Not enough information</small>}{message.unavailable && <small>Unavailable</small>}</div>
-            <div className="ask-message-body"><p>{message.body}</p></div>
-            {Boolean(message.citations?.length) && <div className="ask-citations" aria-label="Sources">
-              <span className="ask-citation-label">Sources</span>
-              {message.citations?.map((citation, index) => <button type="button" className="ask-citation"
-                key={`${citation.documentId}:${citation.versionId}:${citation.blockId ?? "source"}:${index}`}
-                onClick={() => onOpenCitation?.(citation)} disabled={!onOpenCitation}
-                aria-label={`Open source ${index + 1}: ${citation.title}, ${citation.version}`}>
-                <span>{index + 1}</span><div><strong>{citation.documentCode ? `${citation.documentCode} · ` : ""}{citation.title}</strong><small>{citation.version}{citation.page ? ` · Page ${citation.page}` : ""} · {citation.scope}</small></div>
-                <Icon name="arrow" size={13} />
-              </button>)}
-            </div>}
+            <div className="ask-message-body">{message.role === "assistant" && message.citations?.length
+              ? <CitedAnswer body={message.body} citations={message.citations} onOpen={onOpenCitation} />
+              : <p>{message.body}</p>}</div>
           </article>)}
           {pending && <div className="ask-answer-pending" role="status"><span />Searching documents…</div>}
         </section>}

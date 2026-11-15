@@ -10,6 +10,7 @@ export const iconGlyphs = {
   lock: "\uf8d5",
   logout: "\ufc0c",
   plus: "\ufaac",
+  minus: "\uf94e",
   search: "\ufbba",
   work: "\uf2e9",
   chat: "\uf4a1",
