@@ -13,7 +13,7 @@ export function ReaderSummaryPanel({ id, summary, onClose }: { id: string;
       <button type="button" className="secondary-button" onClick={onClose}>Close</button>
     </header>
     {(state.status === "loading" || state.status === "checking") && <div className="reader-ai-summary-wait" role="status">
-      <span>{state.status === "loading" ? "Preparing summary…" : "Checking access…"}</span>
+      <span>{state.status === "loading" ? "Preparing summary…" : "Updating…"}</span>
       <div className="reader-ai-summary-skeleton" aria-hidden="true"><i /><i /><i /></div>
     </div>}
     {state.status === "error" && <div className="reader-ai-summary-error" role="alert">

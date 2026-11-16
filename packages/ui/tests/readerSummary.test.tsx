@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { createElement } from "react";
+import { createElement, StrictMode, useState } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeDocumentDetail, type ReaderDocumentMetadata } from "../src/knowledge/KnowledgeDocumentDetail";
@@ -7,6 +7,8 @@ import type { ReaderSummaryOptions } from "../src/knowledge/useReaderSummary";
 import * as api from "../src/shared/reader-summary-api";
 import { ApiError } from "../src/shared/api-client";
 import { deferred, readerContext, readerId, readerSummaryFixture } from "./readerSummary.test-support";
+import { PdfViewer } from "../src/knowledge/PdfDocument";
+import type { KnowledgeCitationReference } from "../src/knowledge/knowledgeCitation";
 
 const metadata: ReaderDocumentMetadata = { title: "Working together", ownerDepartment: "HR", summary: "",
   activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE", effectiveDate: "2026-11-01" }] };
@@ -17,9 +19,56 @@ function fixture() {
   const props = { metadata, summaryOptions: options, content: createElement("p", { "data-source-block-id": "source-rule" }, "Original document"), onBack: vi.fn() };
   return { options, generation, check, props };
 }
+function tabVisibility() {
+  const visibility = vi.spyOn(document, "visibilityState", "get");
+  return (value: DocumentVisibilityState) => { visibility.mockReturnValue(value); fireEvent(document, new Event("visibilitychange")); };
+}
 beforeEach(() => { localStorage.clear(); vi.stubGlobal("matchMedia", () => ({ matches: true })); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("exact-version on-request Summary reader", () => {
+  it("ignores visible-only blur/focus and repeated selection of the active panel", async () => {
+    const h = fixture(); render(createElement(StrictMode, null, createElement(KnowledgeDocumentDetail, h.props)));
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Only approved readers can use this guidance.");
+    for (let index = 0; index < 3; index++) {
+      fireEvent.blur(window); fireEvent.focus(window);
+      fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    }
+    expect(screen.getByText("Only approved readers can use this guidance.")).toBeTruthy();
+    expect(h.generation).toHaveBeenCalledOnce(); expect(h.check).not.toHaveBeenCalled();
+  });
+  it("preserves the citation and PDF object/page across internal focus and information controls", async () => {
+    const h = fixture();
+    function Reader() {
+      const [citation, setCitation] = useState<KnowledgeCitationReference | null>(null);
+      return createElement(KnowledgeDocumentDetail, { ...h.props, summaryOptions: { ...h.options, onCitation: setCitation },
+        content: createElement(PdfViewer, { url: "blob:synthetic", title: "Synthetic source", page: citation?.page }) });
+    }
+    render(createElement(Reader)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Only approved readers can use this guidance.");
+    fireEvent.click(screen.getByRole("button", { name: /View source for point 1/ })); await act(async () => {});
+    const pdf = screen.getByLabelText("PDF preview: Synthetic source, page 2");
+    fireEvent.blur(window); fireEvent.focus(window);
+    fireEvent.click(screen.getByRole("button", { name: "Hide document information" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show document information" }));
+    expect(screen.getByLabelText("PDF preview: Synthetic source, page 2")).toBe(pdf);
+    expect(pdf.getAttribute("data")).toBe("blob:synthetic#page=2");
+    expect(h.check).toHaveBeenCalledOnce(); expect(h.generation).toHaveBeenCalledOnce();
+  });
+  it("keeps a shared return check running while switching panels", async () => {
+    const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props));
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    await screen.findByText("Only approved readers can use this guidance.");
+    const pending = deferred<void>(); h.check.mockReturnValue(pending.promise);
+    const visibility = tabVisibility(); visibility("hidden"); visibility("visible");
+    expect(screen.getByText("Updating…")).toBeTruthy();
+    const signal = h.check.mock.calls[0][2];
+    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    expect(signal.aborted).toBe(false); expect(h.check).toHaveBeenCalledOnce();
+    await act(async () => pending.resolve()); await screen.findByText("Only approved readers can use this guidance.");
+    expect(h.generation).toHaveBeenCalledOnce();
+  });
   it("counts down before manual Retry, never auto-generates and cleans its timer on Close", async () => {
     vi.useFakeTimers();
     const interval = vi.spyOn(globalThis, "setInterval"), clear = vi.spyOn(globalThis, "clearInterval");
@@ -102,18 +151,18 @@ describe("exact-version on-request Summary reader", () => {
     if (status === 503) { h.generation.mockImplementation(async (_p, context, id) => readerSummaryFixture(id, context)); fireEvent.click(screen.getByRole("button", { name: "Retry" })); await screen.findByText("Only approved readers can use this guidance."); }
     expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
   });
-  it("hides a completed result across blur/focus, then withholds it after revoked access", async () => {
+  it("withholds a completed result after actual hidden-tab return and revoked access", async () => {
     const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
     await screen.findByText("Only approved readers can use this guidance.");
-    fireEvent.blur(window); expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
-    h.check.mockRejectedValue(new ApiError(404, "denied")); fireEvent.focus(window);
+    const visibility = tabVisibility(); visibility("hidden"); expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
+    h.check.mockRejectedValue(new ApiError(404, "denied")); visibility("visible");
     await screen.findByText("This document is unavailable."); expect(h.options.onAccessLost).toHaveBeenCalledOnce();
     expect(h.generation).toHaveBeenCalledTimes(1); expect(screen.queryByRole("button", { name: /View source for point/ })).toBeNull();
   });
   it("retries an access check, not paid generation, after a connection failure", async () => {
     const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
     await screen.findByText("Only approved readers can use this guidance."); h.check.mockRejectedValueOnce(new ApiError(0, "offline"));
-    fireEvent.blur(window); fireEvent.focus(window); await screen.findByRole("alert");
+    const visibility = tabVisibility(); visibility("hidden"); visibility("visible"); await screen.findByRole("alert");
     fireEvent.click(screen.getByRole("button", { name: "Retry" })); await screen.findByText("Only approved readers can use this guidance.");
     expect(h.generation).toHaveBeenCalledTimes(1); expect(h.check).toHaveBeenCalledTimes(2);
   });
@@ -159,14 +208,14 @@ describe("exact-version on-request Summary reader", () => {
     await act(async () => {}); expect(h.check).toHaveBeenCalledOnce();
     expect(h.generation).toHaveBeenCalledOnce();
   });
-  it("withholds generation completed while blurred until access is checked on return", async () => {
+  it("withholds generation completed in a hidden tab until access is checked on return", async () => {
     const h = fixture(), pending = deferred<ReturnType<typeof readerSummaryFixture>>(); h.generation.mockReturnValue(pending.promise);
     render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
-    fireEvent.blur(window);
+    const visibility = tabVisibility(); visibility("hidden");
     await act(async () => pending.resolve(readerSummaryFixture(readerId(4))));
     expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
-    expect(screen.getByText("Checking access…")).toBeTruthy();
-    fireEvent.focus(window); await screen.findByText("Only approved readers can use this guidance.");
+    expect(screen.queryByText("Updating…")).toBeNull();
+    visibility("visible"); await screen.findByText("Only approved readers can use this guidance.");
     expect(h.check).toHaveBeenCalledOnce(); expect(h.generation).toHaveBeenCalledOnce();
   });
   it.each(["inactive", "version"])("does not resurrect a discarded result when returning from %s to the original context", async mode => {
