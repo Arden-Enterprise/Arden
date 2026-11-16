@@ -1,22 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { Icon, type IconName } from "../shared/Icon";
+import { Icon } from "../shared/Icon";
 import { OrganizationDialog } from "./OrganizationDialog";
 import { InviteMemberDialog } from "./InvitationsPanel";
 import { membershipReadiness, transitionOrganization } from "./organizationWorkflow";
 import { isPrimaryRole, primaryRoles, type OrganizationMember, type OrganizationPreview } from "./previewModel";
-
-const roleDetails: Record<string, { icon: IconName; detail: string; tag: string }> = {
-  Member: { icon: "document", detail: "Read authorized knowledge · Create and submit", tag: "Contribute" },
-  "Organization Admin": { icon: "work", detail: "Organization metadata, departments and audience groups", tag: "Configure" },
-};
-
-export function SystemRoleOverview() {
-  return <section className="organization-surface organization-role-overview">
-    <span className="meta-label organization-amber">ORGANIZATION CAPABILITIES</span><h2>Responsibility with clear limits</h2>
-    <div className="organization-role-list">{primaryRoles.map((role) => <div key={role} className="organization-role-row"><Icon name={roleDetails[role].icon} size={24} /><div><strong>{role}</strong><small>{roleDetails[role].detail}</small></div><span>{roleDetails[role].tag}</span></div>)}</div>
-    <div className="organization-notice is-success"><strong>Private means owner only</strong><span>Administrator and reviewer responsibilities do not grant access to another member's private document content.</span></div>
-  </section>;
-}
 
 export function EffectiveAccessPreview({ organization, member }: { organization: OrganizationPreview; member?: OrganizationMember }) {
   const department = organization.departments.find((item) => item.id === member?.departmentId);

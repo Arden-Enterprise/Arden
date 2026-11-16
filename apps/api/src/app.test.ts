@@ -16,7 +16,6 @@ import { parseSemanticDocument } from "@arden/domain";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { evidenceManifest, evidenceText, MemoryConversationStore } from "./answers/conversation.test-support.js";
 import type { RetrievalRequest, RetrievalResponse, GenerationRequest, GenerationResponse } from "./answers/governed-contracts.js";
-import type { AiAnswerRequest, AiAnswerResponse } from "./answers/contracts.js";
 import { validateSelection, type ReaderActor, type SelectionFacts, type TargetReadersInput } from "./target-readers/policy.js";
 import { resolveApprovedReaders, sameReaders } from "./target-readers/narrowing.js";
 
@@ -1145,6 +1144,11 @@ describe("API auth and private draft routes", () => {
       id: sharedDraftId, title: "Review notes", classification: "INTERNAL", status: "ACTIVE",
       currentVersion: { version: 1 },
     });
+    // The copy route returns the same draft representation as /drafts/new and the draft detail.
+    const detail = await app.inject({ method: "GET", url: `${url}/${sharedDraftId}`, headers: { cookie: session } });
+    const { body: _createdBody, ...createdFields } = created.json();
+    const { body: _detailBody, ...detailFields } = detail.json();
+    expect(Object.keys(createdFields).sort()).toEqual(Object.keys(detailFields).sort());
     expect(semanticDocumentText(created.json().body)).toBe("Private body");
     expect(repository.currentSource.sourceUri).toBe(originalUri);
     expect(repository.sharedDraft?.sourceUri).not.toBe(originalUri);
@@ -2103,13 +2107,12 @@ class MemorySystemAdministrationStore implements SystemAdministrationStore {
 }
 
 class FakeAskArdenClient implements AskArdenClient {
-  lastRequest: AiAnswerRequest | null = null;
+  lastRequest: RetrievalRequest | null = null;
   onAnswer: (() => void) | null = null;
   sourceBlockIds = ["mfa"];
 
   async retrieve(request: RetrievalRequest): Promise<RetrievalResponse> {
-    this.lastRequest = { contractVersion: 1, requestId: request.requestId, organizationId: request.organizationId,
-      query: request.query, allowedGenerationIds: request.allowedGenerationIds };
+    this.lastRequest = request;
     return { contractVersion: 2, requestId: request.requestId, standaloneQuery: request.query, retrievalMode: "HYBRID",
       evidence: [{ generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
         chunkId: "b".repeat(64), content: evidenceText, ...evidenceManifest,
@@ -2119,26 +2122,6 @@ class FakeAskArdenClient implements AskArdenClient {
     this.onAnswer?.();
     return { contractVersion: 2, requestId: request.requestId, status: "ANSWERED", answer: "MFA is required by the security policy.",
       citations: [{ chunkId: "b".repeat(64), quote: evidenceText }], usedEvidence: request.evidence.map((chunk) => chunk.chunkId) };
-  }
-
-  async answer(request: AiAnswerRequest): Promise<AiAnswerResponse> {
-    this.lastRequest = request;
-    this.onAnswer?.();
-    return {
-      contractVersion: 1,
-      requestId: request.requestId,
-      status: "ANSWERED",
-      answer: "MFA is required by the security policy.",
-      citations: [{
-        generationId,
-        snapshotVersionId: sharedVersionId,
-        snapshotContentHash: "a".repeat(64),
-        chunkId: "b".repeat(64),
-        sourceBlockIds: this.sourceBlockIds,
-        parentSectionBlockId: null,
-        excerpt: "All team members must use MFA.",
-      }],
-    };
   }
 }
 
