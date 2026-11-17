@@ -34,7 +34,7 @@ describe("invitation batch delivery", () => {
   it("sends sequentially and continues after a saved invitation whose email failed", async () => {
     const send = vi.fn()
       .mockResolvedValueOnce({ deliveryMode: "email" })
-      .mockRejectedValueOnce(new ApiError(502, "The invitation was saved but its email was not delivered.", "INVITATION_DELIVERY_FAILED"))
+      .mockRejectedValueOnce(new ApiError(502, "The invitation was saved, but mail server acceptance was not confirmed.", "INVITATION_DELIVERY_FAILED"))
       .mockResolvedValueOnce({ deliveryMode: "local-test-no-email" });
     const progress = vi.fn();
     const results = await sendInvitationBatch(["one@example.com", "two@example.com", "three@example.com"], send, progress);

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiRequest, beginGoogleSignIn, createKnowledgeDraft, createNewKnowledgeDraft, createPdfKnowledgeDraft, currentSession,
-  decideKnowledgeReview, deleteDepartment, getInvitationPreview, saveKnowledgeDraft, setAccountPassword, signIn, signOut, signUp,
-  submitKnowledgeDraft } from "../src/shared/api-client";
+  decideKnowledgeReview, deleteDepartment, getInvitationPreview, requestPublicationChange, saveKnowledgeDraft, setAccountPassword,
+  signIn, signOut, signUp, submitKnowledgeDraft } from "../src/shared/api-client";
 
 const actorId = "11111111-1111-4111-8111-111111111111";
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -302,5 +302,33 @@ describe("governed knowledge transport", () => {
     expect(JSON.parse(init.body as string)).toEqual({ action: "APPROVE",
       expectedSnapshotVersionId: createdDraft.currentVersion.id,
       expectedContentHash: createdDraft.currentVersion.contentHash, comment: null });
+  });
+  it("sends narrowed approved readers only when the reviewer chose them (T2.2)", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ status: "APPROVED" }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const readers = { mode: "SELECTED_MEMBERS" as const, departmentId: null, memberIds: [actorId, sourceVersionId] };
+    await decideKnowledgeReview("web", organizationId, {
+      id: sourceVersionId, draftId: createdDraft.id, snapshotVersionId: createdDraft.currentVersion.id,
+      title: "Runbook", classification: "INTERNAL", responsibleDepartmentId: sourceVersionId,
+      targetScopeType: "DEPARTMENT", targetDepartmentId: sourceVersionId, audienceIds: [],
+      contentHash: createdDraft.currentVersion.contentHash, status: "PENDING_REVIEW", publicationState: "NONE",
+      submittedAt: "2026-10-12T00:00:00.000Z", publishedVersionId: null, decisionComment: null, body: "Steps", mimeType: "text/plain",
+      submittedByMembershipId: actorId, teamTag: null, projectTag: null,
+    }, "APPROVE", null, idempotencyKey, readers);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).approvedReaders).toEqual(readers);
+  });
+
+  it("posts an author's change request with its idempotency key (T6.4)", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ status: "PENDING_REVIEW" }, { status: 201 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await requestPublicationChange("web", organizationId, createdDraft.id, { type: "WITHDRAWAL", reason: "Outdated" }, idempotencyKey);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`https://arden.example.test/api/v1/organizations/${organizationId}/knowledge/documents/${createdDraft.id}/change-requests`);
+    expect(init.method).toBe("POST");
+    expect(new Headers(init.headers).get("idempotency-key")).toBe(idempotencyKey);
+    expect(JSON.parse(init.body as string)).toEqual({ type: "WITHDRAWAL", reason: "Outdated" });
   });
 });

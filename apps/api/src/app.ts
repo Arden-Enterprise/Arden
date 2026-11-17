@@ -4,7 +4,7 @@ import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meet
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
   type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
-  type SharedKnowledgeDraft, type SharedKnowledgeSubmission } from "./db/repository.js";
+  type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type GovernanceDocumentView } from "./db/repository.js";
 import { newSessionExpiry, readSessionExpiry, sealSession } from "./auth/session-timebox.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
@@ -161,7 +161,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["email", "password"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
           password: { type: "string", minLength: 1, maxLength: accountPasswordMaximumLength },
         },
       },
@@ -279,7 +279,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["email", "password", "fullName"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
           password: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
           fullName: { type: "string", minLength: 1, maxLength: 200 },
           redirectTo: { type: "string", minLength: 1, maxLength: 2048 },
@@ -317,6 +317,11 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
       }
 
+      const normalizedFullName = request.body.fullName.trim();
+      if (!normalizedFullName) {
+        return reply.code(400).send(safeError("INVALID_FULL_NAME", "Enter your name.", request.id));
+      }
+
       if (!meetsAccountPasswordRequirements(request.body.password)) {
         return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordRequirementsMessage, request.id));
       }
@@ -325,7 +330,7 @@ export function buildApp(dependencies: AppDependencies) {
         await dependencies.auth.signUp({
           email: normalizedEmail,
           password: request.body.password,
-          fullName: request.body.fullName.trim(),
+          fullName: normalizedFullName,
           redirectTo: validatedRedirectTo,
         });
       } catch (error) {
@@ -353,7 +358,7 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["email"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
         },
       },
     },
@@ -363,16 +368,22 @@ export function buildApp(dependencies: AppDependencies) {
     if (!isNormalizedEmail(normalizedEmail)) {
       return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
     }
+    const checkEmailResponse = {
+      status: "recovery_sent",
+      message: "If an account with this email exists, check your inbox for a reset link. Another link may take time.",
+    };
     try {
       const origin = request.headers.origin || dependencies.publicWebOrigin || "http://127.0.0.1:5180";
       await dependencies.auth.resetPasswordForEmail(normalizedEmail, `${origin}/reset-password`);
-      return reply.code(202).send({
-        status: "recovery_sent",
-        message: "If an account with this email exists, a password reset email has been sent.",
-      });
+      return reply.code(202).send(checkEmailResponse);
     } catch (error) {
+      if (error instanceof Error && (error.message === "RESET_RATE_LIMITED" || error.message === "RESET_REQUEST_REJECTED")) {
+        // Provider client rejections can depend on account existence, so keep this response identical to success.
+        request.log.warn({ providerRejection: error.message, requestId: request.id }, "Password reset provider request rejected");
+        return reply.code(202).send(checkEmailResponse);
+      }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password reset request failed");
-      return authUnavailable(reply, request);
+      return reply.code(503).send(safeError("RESET_UNAVAILABLE", "A reset link could not be requested right now. Try again later.", request.id));
     }
   });
 
@@ -705,7 +716,7 @@ export function buildApp(dependencies: AppDependencies) {
         type: "object", additionalProperties: false, required: ["email"],
         properties: {
           departmentId: { type: "string", pattern: uuidPattern },
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
         },
       },
     },
@@ -736,7 +747,7 @@ export function buildApp(dependencies: AppDependencies) {
         });
       } catch (error) {
         request.log.error({ errorType: safeErrorType(error), invitationId: invitation.invitationId, requestId: request.id }, "Invitation email delivery failed");
-        return reply.code(502).send({ ...safeError("INVITATION_DELIVERY_FAILED", "The invitation was saved but its email was not delivered. Retry sending it from organization administration.", request.id), invitationId: invitation.invitationId });
+        return reply.code(502).send({ ...safeError("INVITATION_DELIVERY_FAILED", "The invitation was saved, but mail server acceptance was not confirmed. Check provider status before resending it.", request.id), invitationId: invitation.invitationId });
       }
       return reply.code(202).send({
         invitationId: invitation.invitationId,
@@ -786,7 +797,7 @@ export function buildApp(dependencies: AppDependencies) {
       });
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), invitationId: request.params.invitationId, requestId: request.id }, "Invitation resend failed");
-      return reply.code(502).send(safeError("INVITATION_DELIVERY_FAILED", "The invitation could not be delivered. Retry sending it from organization administration.", request.id));
+      return reply.code(502).send(safeError("INVITATION_DELIVERY_FAILED", "Mail server acceptance was not confirmed. Check provider status before resending the invitation.", request.id));
     }
   });
 
@@ -1323,6 +1334,237 @@ export function buildApp(dependencies: AppDependencies) {
         return representSubmission(result.submission);
       } catch (error) {
         request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge submission withdrawal failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0023: the Organization Admin governance catalog. Metadata only; `readable` marks documents the
+  // Admin already reads, which open in the Library instead of an inspection.
+  app.get<{ Params: { organizationId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/governance/publications", {
+      schema: { params: { type: "object", required: ["organizationId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId } = request.params;
+        const items = await dependencies.repository.listGovernancePublications(context.userId, organizationId);
+        if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+        const readable = new Set((await dependencies.repository.listPublishedKnowledge(context.userId, organizationId) ?? [])
+          .map((item) => item.draftId));
+        reply.header("Cache-Control", "no-store");
+        return { items: items.map((item) => ({ ...item, publishedAt: item.publishedAt.toISOString(),
+          readable: readable.has(item.documentId) })) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Governance catalog failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.post<{ Params: { organizationId: string; documentId: string }; Body: { reason: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/governance/publications/:documentId/inspections", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false, required: ["reason"],
+          properties: { reason: { type: "string", maxLength: 4000 } } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, documentId } = request.params;
+        const readable = (await dependencies.repository.listPublishedKnowledge(context.userId, organizationId) ?? [])
+          .some((item) => item.draftId === documentId);
+        if (readable) return reply.code(409).send(safeError("ALREADY_A_READER",
+          "You can already read this document in the Library.", request.id));
+        const result = await dependencies.repository.openGovernanceInspection(context.userId, organizationId, documentId,
+          request.body.reason);
+        if (result.kind === "invalid-reason") return reply.code(400).send(safeError("INVALID_REASON",
+          "Give a reason of 1 to 1000 characters.", request.id));
+        if (result.kind !== "opened") return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(201).send({ inspectionId: result.inspectionId });
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Governance inspection open failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string; inspectionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/governance/inspections/:inspectionId", {
+      schema: { params: { type: "object", required: ["organizationId", "inspectionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, inspectionId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, inspectionId } = request.params;
+        const ended = () => reply.code(404).send(safeError("INSPECTION_ENDED",
+          "This inspection has ended. Open the document again with a reason.", request.id));
+        const view = await dependencies.repository.useGovernanceInspection(context.userId, organizationId, inspectionId);
+        if (!view) return ended();
+        const content = await readKnowledgeContent(dependencies.storage, view.sourceUri, view.contentHash, view.mimeType);
+        const still = await dependencies.repository.useGovernanceInspection(context.userId, organizationId, inspectionId);
+        if (!still || still.contentHash !== view.contentHash) return ended();
+        reply.header("Cache-Control", "no-store");
+        return { ...representGovernanceView(view, content), inspectionId,
+          readers: { mode: view.readerMode, departmentId: view.readerDepartmentId, names: view.readerNames },
+          reason: view.reason, expiresAt: still.expiresAt.toISOString() };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Governance inspection read failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0023: the responsible reviewer's read-only view of a current publication (not a reader source).
+  app.get<{ Params: { organizationId: string; documentId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/responsible-view", {
+      schema: { params: { type: "object", required: ["organizationId", "documentId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, documentId } = request.params;
+        const view = await dependencies.repository.getResponsiblePublicationView(context.userId, organizationId, documentId);
+        if (!view) return reply.code(404).send(resourceNotAvailable(request.id));
+        const content = await readKnowledgeContent(dependencies.storage, view.sourceUri, view.contentHash, view.mimeType);
+        const still = await dependencies.repository.getResponsiblePublicationView(context.userId, organizationId, documentId);
+        if (!still || still.contentHash !== view.contentHash) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return representGovernanceView(view, content);
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Responsible publication view failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0024: direct withdrawal only by a current Organization Admin, with a reason.
+  app.post<{ Params: { organizationId: string; documentId: string }; Body: { reason: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/withdrawal", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false, required: ["reason"],
+          properties: { reason: { type: "string", maxLength: 4000 } } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.withdrawPublicationDirectly(context.userId,
+          request.params.organizationId, request.params.documentId, request.body.reason);
+        if (result.kind === "invalid-reason") return reply.code(400).send(safeError("INVALID_REASON",
+          "Give a reason of 1 to 1000 characters.", request.id));
+        if (result.kind === "preparing") return reply.code(409).send(safeError("NEWER_VERSION_PREPARING",
+          "A newer version is being prepared. Withdraw it after it finishes.", request.id));
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { status: "WITHDRAWN" };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Direct withdrawal failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0023: a reader reports a problem with the current publication they can read.
+  app.post<{ Params: { organizationId: string; publishedVersionId: string }; Body: { message: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/published/:publishedVersionId/reports", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "publishedVersionId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, publishedVersionId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false, required: ["message"],
+          properties: { message: { type: "string", maxLength: 4000 } } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, publishedVersionId } = request.params;
+        const message = request.body.message.trim();
+        if (!message || [...message].length > 1000) return reply.code(400).send(safeError("INVALID_MESSAGE",
+          "Describe the problem in 1 to 1000 characters.", request.id));
+        const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
+        const publication = actor ? await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId) : null;
+        if (!actor || !publication || !canRead(actor, { organizationId, readers: publication.targetReaders })) {
+          return reply.code(404).send(resourceNotAvailable(request.id));
+        }
+        const result = await dependencies.repository.reportPublicationProblem(context.userId, organizationId,
+          publication.draftId, publishedVersionId, message);
+        if (result.kind === "duplicate") return reply.code(409).send(safeError("ALREADY_REPORTED",
+          "You already reported this document. The responsible reviewers can see it.", request.id));
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(201).send({ id: result.reportId });
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/reports", {
+      schema: { params: { type: "object", required: ["organizationId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const items = await dependencies.repository.listPublicationReports(context.userId, request.params.organizationId);
+        if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { items: items.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report list failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.post<{ Params: { organizationId: string; reportId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/reports/:reportId/dismiss", {
+      schema: { params: { type: "object", required: ["organizationId", "reportId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, reportId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const closed = await dependencies.repository.dismissPublicationReport(context.userId,
+          request.params.organizationId, request.params.reportId);
+        if (!closed) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { status: "CLOSED" };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report dismiss failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // T6.3 retry (decision 0011, FAILED -> PREPARING): the author prepares their approved snapshot again after a
+  // temporary failure. Idempotent by state, so it takes no Idempotency-Key; a repeat returns the same result.
+  app.post<{ Params: { organizationId: string; submissionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/submissions/:submissionId/publication-retry", {
+      schema: { params: { type: "object", required: ["organizationId", "submissionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, submissionId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.retryKnowledgePublication(context.userId,
+          request.params.organizationId, request.params.submissionId);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "not-failed") return reply.code(409).send(safeError("PUBLICATION_NOT_FAILED",
+          "Only a publication that failed to prepare can be tried again.", request.id));
+        if (result.kind === "not-retryable") return reply.code(409).send(safeError("PUBLICATION_NOT_RETRYABLE",
+          "This failure cannot be fixed by trying again.", request.id));
+        if (result.kind === "superseded") return reply.code(409).send(safeError("PUBLICATION_SUPERSEDED",
+          "A newer version of this document is already published.", request.id));
+        reply.header("Cache-Control", "no-store");
+        return representSubmission(result.submission);
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge publication retry failed");
         return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
       }
     });
@@ -2111,7 +2353,17 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     publishedVersionId: submission.publishedVersionId,
     requestType: submission.requestType,
     requestReason: submission.requestReason,
+    publicationFailure: submission.publicationFailure,
+    withdrawal: submission.withdrawal ? { by: submission.withdrawal.by, reason: submission.withdrawal.reason,
+      at: submission.withdrawal.at.toISOString() } : null,
   };
+}
+
+function representGovernanceView(view: GovernanceDocumentView, content: { body: string; pdfBase64?: string }) {
+  return { documentId: view.documentId, publishedVersionId: view.publishedVersionId, title: view.title,
+    mimeType: view.mimeType, contentHash: view.contentHash, ...content,
+    responsibleDepartmentId: view.responsibleDepartmentId,
+    readers: { mode: view.readerMode, departmentId: view.readerDepartmentId } };
 }
 
 /** Full selection for the author and reviewers of a draft or submission. */
@@ -2172,7 +2424,10 @@ function safeErrorType(error: unknown): string {
 }
 
 function isNormalizedEmail(email: string): boolean {
-  return email.length <= 320 && email === email.trim().toLowerCase() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  if (email.length > 320 || email !== email.trim().toLowerCase() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
+  const domain = email.slice(email.lastIndexOf("@") + 1);
+  return domain.length <= 253 && domain.split(".").every((label) =>
+    label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
 }
 
 function isValidLabel(value: string, maxLength: number): boolean {

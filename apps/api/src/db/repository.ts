@@ -5,6 +5,7 @@ import { PgConversationStore, type ConversationStore } from "../answers/conversa
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
 import type { VersionScope } from "../answers/governed-contracts.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
+import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
@@ -123,7 +124,12 @@ export type SharedKnowledgeSubmission = {
   /** T6.1: CONTENT for a new version; READER_CHANGE or WITHDRAWAL for a request about the current publication. */
   requestType: PublicationRequestType;
   requestReason: string | null;
+  /** T6.3 retry: why preparation failed, only while `publicationState` is FAILED. TEMPORARY can be retried. */
+  publicationFailure: PublicationFailureKind | null;
+  /** New direct withdrawals are Admin-only (0024); historical reviewer provenance remains readable. */
+  withdrawal: { by: "REVIEWER" | "ORGANIZATION_ADMIN"; reason: string; at: Date } | null;
 };
+export type PublicationFailureKind = "TEMPORARY" | "CONTENT" | "SYSTEM";
 export type PublicationRequestType = "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
 export type PublicationChangeInput = {
   type: "READER_CHANGE" | "WITHDRAWAL";
@@ -146,6 +152,34 @@ export type SubmitKnowledgeDraftResult =
   | { kind: "not-found" }
   | { kind: "conflict" }
   | { kind: "not-ready" };
+export type GovernanceReaderMode = "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
+/** Decision 0023: the Organization Admin catalog. Metadata only: no reader count, names or content. */
+export type GovernancePublication = {
+  documentId: string; publishedVersionId: string; title: string; responsibleDepartmentId: string | null;
+  readerMode: GovernanceReaderMode; readerDepartmentId: string | null; versionLabel: string | null;
+  snapshotVersionNo: number | null; publishedAt: Date; openReports: number;
+};
+/** A live audited inspection, or the responsible reviewer's view: the current version's content source. */
+export type GovernanceDocumentView = {
+  documentId: string; publishedVersionId: string; title: string; sourceUri: string; contentHash: string;
+  mimeType: string; responsibleDepartmentId: string | null; readerMode: GovernanceReaderMode;
+  readerDepartmentId: string | null;
+};
+export type GovernanceInspectionView = GovernanceDocumentView & { readerNames: string[]; reason: string; expiresAt: Date };
+export type PublicationReport = {
+  id: string; documentId: string; publishedVersionId: string; title: string; message: string;
+  reporterName: string; createdAt: Date; stillCurrent: boolean; canView: boolean;
+};
+export type OpenGovernanceInspectionResult =
+  | { kind: "opened"; inspectionId: string } | { kind: "not-found" } | { kind: "not-admin" } | { kind: "invalid-reason" };
+export type DirectWithdrawalResult = { kind: "withdrawn" } | { kind: "not-found" } | { kind: "preparing" } | { kind: "invalid-reason" };
+export type ReportPublicationResult = { kind: "reported"; reportId: string } | { kind: "not-found" } | { kind: "duplicate" };
+export type RetryKnowledgePublicationResult =
+  | { kind: "preparing"; submission: SharedKnowledgeSubmission }
+  | { kind: "not-found" }
+  | { kind: "not-failed" }
+  | { kind: "not-retryable" }
+  | { kind: "superseded" };
 export type WithdrawKnowledgeSubmissionResult =
   | { kind: "withdrawn"; submission: SharedKnowledgeSubmission }
   | { kind: "replayed"; submission: SharedKnowledgeSubmission }
@@ -382,6 +416,10 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
   request_type: PublicationRequestType;
   request_reason: string | null;
   target_published_version_id: string | null;
+  publication_failure: PublicationFailureKind | null;
+  withdrawn_by: "REVIEWER" | "ORGANIZATION_ADMIN" | null;
+  withdrawn_reason: string | null;
+  withdrawn_at: Date | null;
 };
 // organization_wide: the frozen audience includes the organization audience. That kind is valid only at
 // Organization scope (audience_snapshot_enforceable) and audience_member_read shows it to every active member,
@@ -400,11 +438,27 @@ const submissionSelect = `
            SELECT 1 FROM audience a WHERE a.organization_id = s.organization_id
               AND a.audience_id = ANY(s.audience_role_ids) AND a.kind = 'ORGANIZATION_ALL')) AS organization_wide,
          cp.published_version_id,
-         rd.comment AS decision_comment, s.request_type, s.request_reason, s.target_published_version_id
+         rd.comment AS decision_comment, s.request_type, s.request_reason, s.target_published_version_id,
+         knowledge_publication_failure_kind(s.publication_failure_code) AS publication_failure,
+         s.withdrawn_by, s.withdrawn_reason, s.withdrawn_at
     FROM shared_submission s
     LEFT JOIN published_knowledge_version pv ON pv.submission_id = s.submission_id
     LEFT JOIN knowledge_current_publication cp ON cp.published_version_id = pv.published_version_id
     LEFT JOIN review_decision rd ON rd.submission_id = s.submission_id AND rd.flow2`;
+type GovernanceViewRow = {
+  document_id: string; published_version_id: string; title: string; content_uri: string; content_hash: string;
+  mime_type: string; responsible_department_id: string | null; reader_mode: GovernanceReaderMode;
+  reader_department_id: string | null;
+};
+function mapGovernanceView(row: GovernanceViewRow): GovernanceDocumentView {
+  return { documentId: row.document_id, publishedVersionId: row.published_version_id, title: row.title,
+    sourceUri: row.content_uri, contentHash: row.content_hash, mimeType: row.mime_type,
+    responsibleDepartmentId: row.responsible_department_id, readerMode: row.reader_mode,
+    readerDepartmentId: row.reader_department_id };
+}
+function sqlStateOf(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "code" in error ? String((error as { code: unknown }).code) : null;
+}
 function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmission {
   return {
     management: row.management,
@@ -428,6 +482,9 @@ function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmissio
     decisionComment: row.decision_comment,
     requestType: row.request_type,
     requestReason: row.request_reason,
+    publicationFailure: row.publication_state === "FAILED" ? row.publication_failure ?? "SYSTEM" : null,
+    withdrawal: row.withdrawn_by && row.withdrawn_reason && row.withdrawn_at
+      ? { by: row.withdrawn_by, reason: row.withdrawn_reason, at: row.withdrawn_at } : null,
   };
 }
 type ReviewerGrantRow = {
@@ -605,6 +662,19 @@ export interface ArdenDataRepository {
   submitKnowledgeDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number,
     idempotencyKey: string, requestId: string): Promise<SubmitKnowledgeDraftResult>;
   listKnowledgeSubmissions(userId: string, organizationId: string): Promise<SharedKnowledgeSubmission[] | null>;
+  retryKnowledgePublication(userId: string, organizationId: string, submissionId: string):
+    Promise<RetryKnowledgePublicationResult>;
+  listGovernancePublications(userId: string, organizationId: string): Promise<GovernancePublication[] | null>;
+  openGovernanceInspection(userId: string, organizationId: string, documentId: string, reason: string):
+    Promise<OpenGovernanceInspectionResult>;
+  useGovernanceInspection(userId: string, organizationId: string, inspectionId: string): Promise<GovernanceInspectionView | null>;
+  getResponsiblePublicationView(userId: string, organizationId: string, documentId: string): Promise<GovernanceDocumentView | null>;
+  withdrawPublicationDirectly(userId: string, organizationId: string, documentId: string, reason: string):
+    Promise<DirectWithdrawalResult>;
+  reportPublicationProblem(userId: string, organizationId: string, documentId: string, publishedVersionId: string,
+    message: string): Promise<ReportPublicationResult>;
+  listPublicationReports(userId: string, organizationId: string): Promise<PublicationReport[] | null>;
+  dismissPublicationReport(userId: string, organizationId: string, reportId: string): Promise<boolean>;
   withdrawKnowledgeSubmission(userId: string, organizationId: string, submissionId: string,
     requestId: string): Promise<WithdrawKnowledgeSubmissionResult>;
   requestPublicationChange(userId: string, organizationId: string, documentId: string,
@@ -796,7 +866,7 @@ export class ArdenRepository implements ArdenDataRepository {
             audience_id, organization_id, kind, department_id, name, description, is_managed, legacy_role_id)
           VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
             'Every active member of the department', true, $1)`,
-        [departmentRoleId, organizationId, departmentId, `${baseDepartmentName} members`]);
+        [departmentRoleId, organizationId, departmentId, departmentAudienceName(baseDepartmentName)]);
 
         await client.query(`
           INSERT INTO role_permission (role_id, permission_id)
@@ -1057,7 +1127,7 @@ export class ArdenRepository implements ArdenDataRepository {
           created_by_membership_id)
         VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
           'Every active member of the department', true, $1, $5)`,
-      [roleId, organizationId, departmentId, `${name} members`, actorMembershipId]);
+      [roleId, organizationId, departmentId, departmentAudienceName(name), actorMembershipId]);
       await client.query(`
         INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission
@@ -1793,6 +1863,148 @@ export class ArdenRepository implements ArdenDataRepository {
         WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2
         ORDER BY s.submitted_at DESC, s.submission_id DESC LIMIT 100`, [organizationId, membership]);
       return result.rows.map(mapSharedSubmission);
+    });
+  }
+
+  /** Decision 0023 catalog. Null when the actor is not a current Organization Admin (0037 re-checks it). */
+  async listGovernancePublications(userId: string, organizationId: string): Promise<GovernancePublication[] | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      try {
+        await client.query("SAVEPOINT governance_catalog");
+        const result = await client.query<{ document_id: string; published_version_id: string; title: string;
+          responsible_department_id: string | null; reader_mode: GovernanceReaderMode; reader_department_id: string | null;
+          version_label: string | null; snapshot_version_no: number | null; published_at: Date; open_reports: number }>(
+          "SELECT * FROM list_governance_publications()");
+        return result.rows.map((row) => ({ documentId: row.document_id, publishedVersionId: row.published_version_id,
+          title: row.title, responsibleDepartmentId: row.responsible_department_id, readerMode: row.reader_mode,
+          readerDepartmentId: row.reader_department_id, versionLabel: row.version_label,
+          snapshotVersionNo: row.snapshot_version_no, publishedAt: row.published_at, openReports: row.open_reports }));
+      } catch (error) {
+        if (sqlStateOf(error) === "42501") { await client.query("ROLLBACK TO SAVEPOINT governance_catalog"); return null; }
+        throw error;
+      }
+    });
+  }
+
+  /** Opens one audited inspection (0037 commits the audit event with it). */
+  async openGovernanceInspection(userId: string, organizationId: string, documentId: string, reason: string):
+    Promise<OpenGovernanceInspectionResult> {
+    const trimmed = reason.trim();
+    if (!trimmed || [...trimmed].length > 1000) return { kind: "invalid-reason" };
+    return this.withActorContext(userId, organizationId, async (client) => {
+      try {
+        await client.query("SAVEPOINT governance_open");
+        const result = await client.query<{ inspection_id: string | null }>(
+          "SELECT open_governance_inspection($1, $2) AS inspection_id", [documentId, trimmed]);
+        const id = result.rows[0]?.inspection_id;
+        return id ? { kind: "opened", inspectionId: id } : { kind: "not-found" };
+      } catch (error) {
+        const state = sqlStateOf(error);
+        if (state === "42501") { await client.query("ROLLBACK TO SAVEPOINT governance_open"); return { kind: "not-admin" }; }
+        if (state === "22023") { await client.query("ROLLBACK TO SAVEPOINT governance_open"); return { kind: "invalid-reason" }; }
+        throw error;
+      }
+    });
+  }
+
+  async useGovernanceInspection(userId: string, organizationId: string, inspectionId: string):
+    Promise<GovernanceInspectionView | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const result = await client.query<GovernanceViewRow & { reader_names: string[]; reason: string; expires_at: Date }>(
+        "SELECT * FROM use_governance_inspection($1)", [inspectionId]);
+      const row = result.rows[0];
+      return row ? { ...mapGovernanceView(row), readerNames: row.reader_names, reason: row.reason, expiresAt: row.expires_at } : null;
+    });
+  }
+
+  async getResponsiblePublicationView(userId: string, organizationId: string, documentId: string):
+    Promise<GovernanceDocumentView | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const result = await client.query<GovernanceViewRow>("SELECT * FROM responsible_publication_view($1)", [documentId]);
+      return result.rows[0] ? mapGovernanceView(result.rows[0]) : null;
+    });
+  }
+
+  async withdrawPublicationDirectly(userId: string, organizationId: string, documentId: string, reason: string):
+    Promise<DirectWithdrawalResult> {
+    const trimmed = reason.trim();
+    if (!trimmed || [...trimmed].length > 1000) return { kind: "invalid-reason" };
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const result = await client.query<{ outcome: string }>(
+        "SELECT withdraw_publication_directly($1, $2) AS outcome", [documentId, trimmed]);
+      const outcome = result.rows[0]?.outcome;
+      if (outcome === "WITHDRAWN") return { kind: "withdrawn" };
+      if (outcome === "PREPARING") return { kind: "preparing" };
+      if (outcome === "NOT_FOUND") return { kind: "not-found" };
+      throw new Error("Direct withdrawal returned no outcome");
+    });
+  }
+
+  /** The insert policy re-checks that the actor can read the current publication. */
+  async reportPublicationProblem(userId: string, organizationId: string, documentId: string, publishedVersionId: string,
+    message: string): Promise<ReportPublicationResult> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const membership = await this.activeActorMembership(client, userId, organizationId);
+      if (!membership) return { kind: "not-found" };
+      const reportId = randomUUID();
+      try {
+        await client.query("SAVEPOINT publication_report");
+        await client.query(`INSERT INTO publication_report (report_id, organization_id, shared_draft_id,
+            published_version_id, reporter_membership_id, message) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [reportId, organizationId, documentId, publishedVersionId, membership, message.trim()]);
+        return { kind: "reported", reportId };
+      } catch (error) {
+        const state = sqlStateOf(error);
+        if (state === "23505") { await client.query("ROLLBACK TO SAVEPOINT publication_report"); return { kind: "duplicate" }; }
+        if (state === "42501" || state === "23503") {
+          await client.query("ROLLBACK TO SAVEPOINT publication_report"); return { kind: "not-found" };
+        }
+        throw error;
+      }
+    });
+  }
+
+  async listPublicationReports(userId: string, organizationId: string): Promise<PublicationReport[] | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      const result = await client.query<{ report_id: string; document_id: string; published_version_id: string;
+        title: string; message: string; reporter_name: string; created_at: Date; still_current: boolean; can_view: boolean }>(
+        "SELECT * FROM list_publication_reports()");
+      return result.rows.map((row) => ({ id: row.report_id, documentId: row.document_id,
+        publishedVersionId: row.published_version_id, title: row.title, message: row.message,
+        reporterName: row.reporter_name, createdAt: row.created_at, stillCurrent: row.still_current, canView: row.can_view }));
+    });
+  }
+
+  async dismissPublicationReport(userId: string, organizationId: string, reportId: string): Promise<boolean> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const result = await client.query<{ outcome: string }>("SELECT close_publication_report($1) AS outcome", [reportId]);
+      return result.rows[0]?.outcome === "CLOSED";
+    });
+  }
+
+  /**
+   * T6.3 retry: the author restarts preparation of their approved snapshot after a TEMPORARY failure.
+   * retry_knowledge_publication (0036) decides eligibility and records the audit event; a repeat while the
+   * snapshot is preparing again is a no-op. No new review: the snapshot and its approved readers are unchanged.
+   */
+  async retryKnowledgePublication(userId: string, organizationId: string, submissionId: string):
+    Promise<RetryKnowledgePublicationResult> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const outcome = await client.query<{ outcome: string }>(
+        "SELECT retry_knowledge_publication($1) AS outcome", [submissionId]);
+      switch (outcome.rows[0]?.outcome) {
+        case "PREPARING": break;
+        case "NOT_FOUND": return { kind: "not-found" };
+        case "NOT_FAILED": return { kind: "not-failed" };
+        case "NOT_RETRYABLE": return { kind: "not-retryable" };
+        case "SUPERSEDED": return { kind: "superseded" };
+        default: throw new Error("Publication retry returned no outcome");
+      }
+      const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
+        WHERE s.submission_id = $1`, [submissionId]);
+      if (!result.rows[0]) throw new Error("Retried submission is not readable");
+      return { kind: "preparing", submission: mapSharedSubmission(result.rows[0]) };
     });
   }
 

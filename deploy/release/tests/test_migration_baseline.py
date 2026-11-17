@@ -1,6 +1,7 @@
 import copy
 import hashlib
 import json
+import re
 from importlib.util import module_from_spec, spec_from_file_location
 import sys
 import tempfile
@@ -315,6 +316,18 @@ class MigrationBaselineTests(unittest.TestCase):
         self.assertIn("ALTER FUNCTION %s OWNER TO postgres", repair)
         for forbidden in ("DISABLE ROW LEVEL SECURITY", "NO FORCE", "ALTER ROLE", "INSERT INTO", "DELETE FROM", "CREATE POLICY"):
             self.assertNotIn(forbidden, repair)
+
+    def test_recovery_inventory_matches_the_ci_ownership_count(self):
+        root = Path(__file__).resolve().parents[3]
+        repair = (root / "deploy" / "release" / "security-definer-owner-repair.sql").read_text(encoding="utf-8")
+        inventory = repair[repair.index("expected_names text[] := ARRAY["):repair.index("];", repair.index("expected_names"))]
+        names = re.findall(r"'([a-z0-9_]+)'", inventory)
+        self.assertEqual(len(names), len(set(names)))
+        verifier = (root / "tools" / "verification" / "migration-owner.py").read_text(encoding="utf-8")
+        expected = re.search(r'preserved != "(\d+)"', verifier)
+        self.assertIsNotNone(expected)
+        self.assertEqual(len(names), int(expected.group(1)),
+                         "Update the repair inventory with every reviewed SECURITY DEFINER routine")
 
 if __name__ == "__main__":
     unittest.main()

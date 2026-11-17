@@ -35,14 +35,14 @@ export type NavigationItem = {
   planned?: boolean;
 };
 
+/** Home is the published-knowledge start page (requested 15 Nov 2026); it replaced the sample My Work dashboard. */
 export const workNavigation: NavigationItem[] = [
-  { label: "My Work", shortLabel: "My Work", icon: "work", view: "my-work" },
+  { label: "Home", shortLabel: "Home", icon: "home", view: "knowledge" },
   { label: "Ask Arden", shortLabel: "Ask", icon: "chat", view: "ask-arden" },
   { label: "Private Notes", shortLabel: "Notes", icon: "lock", view: "personal-workspace" },
 ];
 
 export const knowledgeNavigation: NavigationItem[] = [
-  { label: "Library", shortLabel: "Library", icon: "knowledge", view: "knowledge" },
   { label: "Reviews", shortLabel: "Reviews", icon: "review", view: "review-queue" },
   { label: "Integrations", shortLabel: "Integrations", icon: "integrations", planned: true },
 ];
@@ -50,12 +50,12 @@ export const knowledgeNavigation: NavigationItem[] = [
 export const adminNavigation: NavigationItem = { label: "Administration", shortLabel: "Admin", icon: "organization", view: "organization-access" };
 
 /** Server-backed sessions expose Ask Arden through the authenticated Core API and restrict destinations with connected server workflows. */
-export function navigationDisabled(item: NavigationItem, authenticated: boolean, isUnassigned?: boolean): boolean {
+export function navigationDisabled(item: NavigationItem, _authenticated: boolean, isUnassigned?: boolean): boolean {
   if (item.planned) return true;
   if (isUnassigned && (item.view === "personal-workspace" || item.view === "review-queue" || item.view === "knowledge-handover")) {
     return true;
   }
-  return authenticated && item.view === "my-work";
+  return false;
 }
 
 export function initialsOf(label: string): string {
@@ -178,10 +178,10 @@ export function AppSidebar({
 
       <div className="sidebar-workspace-row">
         <button type="button" className="access-card" disabled={!canSwitchWorkspace} tabIndex={collapsed && canSwitchWorkspace ? -1 : undefined} onClick={onSwitchWorkspace}
-          aria-label={`Workspace: ${organizationName}${canSwitchWorkspace ? ". Switch workspace" : ""}`} title={organizationName}>
+          aria-label={`Workspace: ${organizationName}${canSwitchWorkspace ? ". Switch or create workspace" : ""}`} title={organizationName}>
           <span className="access-card-mark" aria-hidden="true">{initialsOf(organizationName)}</span>
           <span className="access-card-copy"><strong id="access-card-title">{organizationName}</strong>
-            <span>{authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`} · {sessionLabel}</span></span>
+            <span>{canSwitchWorkspace ? "Switch or create workspace" : authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`} · {sessionLabel}</span></span>
           {canSwitchWorkspace && <span className="access-card-switch" aria-hidden="true"><Icon name="expand" size={14} /></span>}
         </button>
         {onToggleCollapsed && <button type="button" className="sidebar-nav-item sidebar-collapse" onClick={onToggleCollapsed}
@@ -193,7 +193,7 @@ export function AppSidebar({
       <nav className="sidebar-navigation" aria-label="Workspace">
         <span className="meta-label navigation-label">WORK</span>
         {workNavigation.map(navButton)}
-        <span className="meta-label navigation-label">KNOWLEDGE</span>
+        <span className="meta-label navigation-label">REVIEW</span>
         {knowledgeNavigation.map(navButton)}
         {((previewRole === "admin" && !authenticated) || showAdmin) && <>
           <span className="meta-label navigation-label">MANAGE ORGANIZATION</span>

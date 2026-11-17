@@ -1,0 +1,44 @@
+/* Flow 2 T2.2 (reviewer approves fewer readers), T6.4 (author requests a reader change or withdrawal)
+   and T6.3 (author sees why an approved version did not publish and may retry a temporary failure). */
+
+.review-approved-readers { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.review-approved-readers > legend { padding: 0; }
+.review-approved-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; font-size: 13px; line-height: 1.4; cursor: pointer; }
+.review-approved-choice input { margin: 2px 0 0; accent-color: var(--arden-accent); }
+.review-approved-choice strong { display: block; color: var(--arden-text-primary); font-weight: 600; }
+.review-approved-choice small { display: block; overflow: hidden; color: var(--arden-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.review-approved-members { display: grid; gap: 4px; max-height: 220px; margin: 0 0 0 24px; padding: 0; overflow-y: auto; list-style: none; }
+.review-approved-members label { display: flex; gap: 8px; align-items: center; min-height: 28px; color: var(--arden-text-primary); font-size: 13px; cursor: pointer; }
+.review-approved-members input { margin: 0; accent-color: var(--arden-accent); }
+.review-approved-members span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-approved-readers .km-readers { margin-left: 24px; }
+.review-approved-readers > small { color: var(--arden-text-secondary); font-size: 11px; }
+
+.publication-change-form { display: grid; gap: 14px; margin-top: 12px; }
+.publication-change-form .publication-change-effect { color: var(--arden-text-secondary); font-size: 13px; line-height: 1.5; }
+.publication-change-reason textarea { width: 100%; min-height: 96px; resize: vertical; }
+.publication-change-reason small { color: var(--arden-text-secondary); font-size: 11px; }
+.publication-change-reason small.field-error, .publication-change-form > small.field-error { color: var(--arden-danger); }
+.publication-change-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.publication-failure { display: grid; gap: 6px; justify-items: start; border-color: var(--arden-danger); }
+.publication-failure strong { color: var(--arden-danger); font-size: 13px; }
+.publication-failure p { margin: 0; color: var(--arden-text-secondary); font-size: 13px; line-height: 1.5; }
+
+/* Decision 0023 governance: Administration → Documents, reported problems, inspection view. */
+.governance-documents { display: grid; gap: 14px; }
+.governance-search { max-width: 360px; }
+.governance-row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.governance-danger-text { color: var(--arden-danger); }
+.primary-button.governance-danger { background: var(--arden-danger); border-color: var(--arden-danger); }
+.governance-reports { display: grid; gap: 10px; }
+.governance-section-head { display: flex; gap: 8px; align-items: center; }
+.governance-section-head h2 { margin: 0; font-size: 15px; }
+.governance-report-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.governance-report { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: flex-start;
+  padding: 10px 12px; border: 1px solid var(--arden-border, rgba(127, 127, 127, .25)); border-radius: 8px; }
+.governance-report-copy { display: grid; gap: 4px; min-width: 0; flex: 1 1 240px; }
+.governance-report-copy p { margin: 0; color: var(--arden-text-primary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.governance-report-copy small { color: var(--arden-text-secondary); font-size: 12px; }
+.governance-report-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.governance-view { display: grid; gap: 12px; min-width: 0; }
+.governance-view-meta { color: var(--arden-text-secondary); font-size: 13px; }

@@ -63,6 +63,15 @@ Version-matched official docs, repository code/tests, and authorized decisions.
 
 ## Status and synchronization
 
+[0024: Admin-only direct withdrawal](0024-admin-only-direct-withdrawal.md) refines
+0023: reviewers keep scoped view/report handling but cannot withdraw directly.
+Inspection notifications are explicitly deferred for this release; audit remains.
+Implementation is on PR #52 only until actual integration/release is verified.
+
+The Home start page and reader validity rules are [0022: Home start page and reader
+validity](0022-home-start-page-and-reader-validity.md), accepted on 15 November 2026;
+implementation is on branch `feat/home-reader-information` only.
+
 The governed-answering refinement is [0021: hybrid answering and applicable-version
 sources](0021-governed-hybrid-answering.md), accepted implementation scope with
 paired local verification. Publication/deployment and real-provider acceptance

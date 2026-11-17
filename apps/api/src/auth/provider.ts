@@ -208,6 +208,9 @@ export class SupabaseAuthProvider implements AuthProvider {
     const { error } = await this.createAuthClient().auth.resetPasswordForEmail(email, {
       redirectTo: redirectTo || undefined,
     });
+    if (error?.status === 429 || error?.code === "over_email_send_rate_limit" || error?.code === "over_request_rate_limit") {
+      throw new Error("RESET_RATE_LIMITED");
+    }
     if (error && !isClientAuthFailure(error)) throw new Error("SUPABASE_AUTH_UNAVAILABLE");
     if (error) throw new Error("RESET_REQUEST_REJECTED");
   }

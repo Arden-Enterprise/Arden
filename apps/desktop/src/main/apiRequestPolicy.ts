@@ -19,7 +19,12 @@ const knowledgeDraftItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/
 const knowledgeDraftVersions = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/versions(?:/${uuid})?$`);
 const knowledgeDraftVersionItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/versions/${uuid}$`);
 const knowledgeDraftSubmit = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/submit$`);
-const knowledgeSubmissionWithdraw = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/submissions/${uuid}/withdraw$`);
+const knowledgeSubmissionWithdraw = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/submissions/${uuid}/(withdraw|publication-retry)$`);
+const knowledgeChangeRequest = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/documents/${uuid}/change-requests$`);
+// Decision 0023 governance: reads, and actions that carry a reason or message body.
+const governanceRead = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/(governance/publications|governance/inspections/${uuid}|documents/${uuid}/responsible-view|reports)$`);
+const governanceWithBody = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/(governance/publications/${uuid}/inspections|documents/${uuid}/withdrawal|published/${uuid}/reports)$`);
+const governanceDismiss = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reports/${uuid}/dismiss$`);
 const knowledgeReviewItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}$`);
 const knowledgeReviewDecision = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}/decisions$`);
 const publishedKnowledgeItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}$`);
@@ -130,8 +135,16 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && !request.body && Boolean(request.ifMatch) && Boolean(request.idempotencyKey);
   const knowledgeDecision = knowledgeReviewDecision.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
+  // T5.1 withdrawal and T6.3 publication retry: bodyless author actions that are idempotent by state.
   const knowledgeWithdraw = knowledgeSubmissionWithdraw.test(url.pathname) && request.method === "POST"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
+  // T6.1/T6.4: an author's reader-change or withdrawal request carries a body and an idempotency key.
+  const knowledgeChange = knowledgeChangeRequest.test(url.pathname) && request.method === "POST"
+    && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
+  const governance = (governanceRead.test(url.pathname) && request.method === "GET" && !request.body)
+    || (governanceWithBody.test(url.pathname) && request.method === "POST" && Boolean(request.body))
+    || (governanceDismiss.test(url.pathname) && request.method === "POST" && !request.body);
+  const governanceAllowed = governance && !request.ifMatch && !request.idempotencyKey;
   const grantCreate = reviewerGrantCollection.test(url.pathname)
     && request.method === "POST" && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const grantDeactivate = reviewerGrantDeactivate.test(url.pathname) && request.method === "POST"
@@ -189,7 +202,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const catalogQuery = catalogGet && url.pathname.endsWith("/readers")
     && [...url.searchParams.keys()].every(key => key === "q" || key === "ids");
   return (catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
-    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || readerSummary || adminGet
+    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke) && (!url.search || queryAllowed || catalogQuery);

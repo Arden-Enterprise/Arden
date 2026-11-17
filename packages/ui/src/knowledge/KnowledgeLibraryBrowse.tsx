@@ -1,4 +1,4 @@
-import { applicabilityStatus, knowledgeTypes } from "@arden/domain";
+import { knowledgeTypes, validityStatus } from "@arden/domain";
 import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import type { KnowledgeCatalog, PublishedKnowledge } from "../shared/api-client";
@@ -19,12 +19,18 @@ export function filterLibrary(items: PublishedKnowledge[], catalog: KnowledgeCat
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id));
 }
 
+/** One status vocabulary for Home and the reader: Current, Expires in N days, Expired (older drafts may still be Upcoming). */
+export function validityLabel({ status, daysLeft }: ReturnType<typeof validityStatus>): string {
+  if (status === "Expiring soon") return daysLeft === 0 ? "Expires today" : `Expires in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}`;
+  return status;
+}
+
 function DocumentRegister({ items, onOpen, recent = false }: { items: PublishedKnowledge[]; onOpen: (id: string) => void; recent?: boolean }) {
   return <IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={900}
     columns="minmax(270px, 2.8fr) minmax(120px, 1fr) minmax(130px, 1fr) 70px 115px 100px"
-    headers={["DOCUMENT", "TYPE", "OWNER", "VERSION", recent ? "PUBLISHED" : "EFFECTIVE DATE", "STATUS"]}>
+    headers={["DOCUMENT", "TYPE", "OWNER", "VERSION", recent ? "PUBLISHED" : "VALID UNTIL", "STATUS"]}>
     {items.map(item => {
-      const applicability = applicabilityStatus(item.management, new Date().toLocaleDateString("en-CA"));
+      const validity = validityStatus(item.management, new Date().toLocaleDateString("en-CA"));
       const release = item.management?.releaseKind;
       return <IslandRow key={item.id} className="library-row">
         <IslandCell className="island-row-cell is-name"><button className="island-row-name library-row-name" type="button" aria-label={`Read ${item.title}`} onClick={() => onOpen(item.id)}>
@@ -35,8 +41,8 @@ function DocumentRegister({ items, onOpen, recent = false }: { items: PublishedK
         <IslandCell className="library-row-secondary">{item.management?.type ?? "—"}</IslandCell>
         <IslandCell className="library-row-secondary">{item.responsibleDepartmentName ?? "—"}</IslandCell>
         <IslandCell className="library-row-secondary">{item.management?.version || "—"}</IslandCell>
-        <IslandCell className="library-row-date">{recent ? libraryDateLabel(item.publishedAt) : item.management?.effectiveDate ? libraryDateLabel(`${item.management.effectiveDate}T00:00:00`) : "—"}</IslandCell>
-        <IslandCell><span className={`km-applicability is-${applicability?.toLowerCase() ?? "published"}`}>{applicability ?? "Published"}</span></IslandCell>
+        <IslandCell className="library-row-date">{recent ? libraryDateLabel(item.publishedAt) : item.management?.expirationDate ? libraryDateLabel(`${item.management.expirationDate}T00:00:00`) : <span className="km-no-expiry">No expiry</span>}</IslandCell>
+        <IslandCell><span className={`km-applicability is-${validity.status.toLowerCase().replace(" ", "-")}`}>{validityLabel(validity)}</span></IslandCell>
       </IslandRow>;
     })}
   </IslandTable>;
@@ -64,7 +70,7 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
         {catalog?.canManage && <button className="km-text-button" type="button" onClick={onManage}>Manage catalog <Icon name="sliders" size={13} /></button>}</header>
         <div className="km-topics">{catalog?.topics.filter(topic => topic.status === "ACTIVE").map(topic => <button key={topic.id} type="button" onClick={() => browseWith({ topicId: topic.id })}>
           <span>{topic.name}</span><small>{items.filter(item => item.management?.topicId === topic.id).length}</small><Icon name="chevron" size={12} /></button>)}</div>
-        {!catalog?.topics.some(topic => topic.status === "ACTIVE") && <p className="km-empty-inline">No topics yet.{catalog?.canManage ? " Add one in Manage catalog." : ""}</p>}
+        {!catalogError && !catalog?.topics.some(topic => topic.status === "ACTIVE") && <p className="km-empty-inline">No topics yet.{catalog?.canManage ? " Add one in Manage catalog." : ""}</p>}
       </section>
       <section aria-labelledby="km-collections"><header className="km-section-heading"><div><h2 id="km-collections">Collections</h2><p>Curated documents, brought together.</p></div></header>
         <div className="km-collections">{collections.map(collection => <button className="km-collection" type="button" key={collection.id} onClick={() => browseWith({ collectionId: collection.id })}>

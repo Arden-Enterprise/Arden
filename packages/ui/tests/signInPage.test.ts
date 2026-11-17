@@ -62,7 +62,7 @@ describe("SignInPage password reset flow", () => {
     );
 
     const emailInput = screen.getByPlaceholderText("name@company.com") as HTMLInputElement;
-    fireEvent.change(emailInput, { target: { value: "test@example.com" } });
+    fireEvent.change(emailInput, { target: { value: " test@example.com " } });
     const submitButton = screen.getByRole("button", { name: /send reset link/i });
     fireEvent.click(submitButton);
 
@@ -79,6 +79,72 @@ describe("SignInPage password reset flow", () => {
     fireEvent.click(screen.getByRole("button", { name: /send another link/i }));
     expect(screen.getByRole("heading", { name: /reset your password/i })).toBeTruthy();
     expect((screen.getByPlaceholderText("name@company.com") as HTMLInputElement).value).toBe("test@example.com");
+  });
+
+  it("keeps the resend form usable when recovery is unavailable", async () => {
+    vi.mocked(apiClient.requestPasswordReset).mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new apiClient.ApiError(503, "A reset link could not be requested right now. Try again later.", "RESET_UNAVAILABLE"))
+      .mockResolvedValueOnce(undefined);
+    render(createElement(SignInPage, {
+      platform: "web", initialMode: "forgot-password",
+      onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+    fireEvent.change(screen.getByPlaceholderText("name@company.com"), { target: { value: "test@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: /send reset link/i }));
+    await screen.findByRole("heading", { name: /check your email/i });
+    fireEvent.click(screen.getByRole("button", { name: /send another link/i }));
+    fireEvent.click(screen.getByRole("button", { name: /send reset link/i }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("A reset link could not be requested right now."));
+    expect(screen.getByRole("heading", { name: /reset your password/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /send reset link/i }));
+    await screen.findByRole("heading", { name: /check your email/i });
+    expect(apiClient.requestPasswordReset).toHaveBeenCalledTimes(3);
+  });
+
+  it("trims sign-in email edges but rejects whitespace inside the address", async () => {
+    vi.mocked(apiClient.signIn).mockResolvedValue({ actor: { id: "user-1", email: "user@example.test", fullName: "User" }, account: { passwordSetupRequired: false }, memberships: [] });
+    render(createElement(SignInPage, {
+      platform: "web", onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+    const email = screen.getByPlaceholderText("name@company.com");
+    fireEvent.change(email, { target: { value: " user@example.test " } });
+    fireEvent.blur(email);
+    expect((email as HTMLInputElement).value).toBe("user@example.test");
+    fireEvent.change(screen.getByPlaceholderText("Enter your password"), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
+    await waitFor(() => expect(apiClient.signIn).toHaveBeenCalledWith("web", "user@example.test", "password"));
+    fireEvent.change(email, { target: { value: "u ser@example.test" } });
+    fireEvent.change(screen.getByPlaceholderText("Enter your password"), { target: { value: "password" } });
+    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
+    expect(apiClient.signIn).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert").textContent).toContain("Enter a valid email address.");
+  });
+
+  it("shows and hides a sign-in password without submitting", () => {
+    render(createElement(SignInPage, {
+      platform: "web", onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+    const password = screen.getByPlaceholderText("Enter your password") as HTMLInputElement;
+    expect(password.type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Show password" }));
+    expect(password.type).toBe("text");
+    expect(apiClient.signIn).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(password.type).toBe("password");
+  });
+
+  it("shows reset password entries independently without registration checklist", () => {
+    render(createElement(SignInPage, {
+      platform: "web", initialMode: "reset-password",
+      recoveryTokens: { accessToken: "access-recovery", refreshToken: "refresh-recovery" },
+      onEnterPreview: vi.fn(), onOpenSetup: vi.fn(), onAuthenticated: vi.fn(),
+    }));
+    const password = screen.getByPlaceholderText("Enter new password (min. 8 characters)") as HTMLInputElement;
+    const confirmation = screen.getByPlaceholderText("Confirm new password") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "Show new password" }));
+    expect(password.type).toBe("text");
+    expect(confirmation.type).toBe("password");
+    expect(screen.queryByText("Password requirements")).toBeNull();
   });
 
   it("does not claim a link was sent for an invalid email or failed request", async () => {
@@ -310,19 +376,20 @@ describe("SignInPage password reset flow", () => {
     }));
 
     fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
-    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: "new@example.test" } });
+    fireEvent.change(screen.getByLabelText("Email address"), { target: { value: " new@example.test " } });
     const password = screen.getByLabelText("Password") as HTMLInputElement;
     fireEvent.change(password, { target: { value: "ValidPass1!" } });
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     await waitFor(() => expect(apiClient.signUp).toHaveBeenCalledTimes(1));
+    expect(apiClient.signUp).toHaveBeenCalledWith("web", "new@example.test", "ValidPass1!", "New User");
     expect((await screen.findByRole("alert")).textContent).toContain("password meets the listed requirements");
     expect(password.value).toBe("ValidPass1!");
 
     fireEvent.change(password, { target: { value: "Better-password-123!" } });
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
     await waitFor(() => expect(apiClient.signUp).toHaveBeenCalledTimes(2));
-    expect((await screen.findByRole("alert")).textContent).toContain("Check your email to continue.");
+    expect((await screen.findByRole("alert")).textContent).toContain("If email confirmation is required, check your inbox.");
   });
 
   it("clears the registration password when an existing account returns to sign-in", async () => {

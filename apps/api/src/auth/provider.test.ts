@@ -11,6 +11,28 @@ afterEach(() => {
 });
 
 describe("SupabaseAuthProvider Google OAuth URL boundary", () => {
+  it("classifies a provider recovery rate limit", async () => {
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ code: "over_email_send_rate_limit", msg: "Too many requests" }), {
+      status: 429,
+      headers: { "content-type": "application/json", "x-supabase-api-version": "2024-01-01" },
+    }));
+    const { SupabaseAuthProvider } = await import("./provider.js");
+    const provider = new SupabaseAuthProvider(privateAuthUrl, publishableKey);
+    await expect(provider.resetPasswordForEmail("owner@example.test", "https://app.example.test/reset-password"))
+      .rejects.toThrow("RESET_RATE_LIMITED");
+  });
+
+  it("classifies an email-send limit by its provider code when the status differs", async () => {
+    vi.stubGlobal("fetch", async () => new Response(JSON.stringify({ code: "over_email_send_rate_limit", msg: "Please wait" }), {
+      status: 400,
+      headers: { "content-type": "application/json", "x-supabase-api-version": "2024-01-01" },
+    }));
+    const { SupabaseAuthProvider } = await import("./provider.js");
+    const provider = new SupabaseAuthProvider(privateAuthUrl, publishableKey);
+    await expect(provider.resetPasswordForEmail("owner@example.test", "https://app.example.test/reset-password"))
+      .rejects.toThrow("RESET_RATE_LIMITED");
+  });
+
   it("blocks production Google sign-in when the public Auth origin is missing", async () => {
     const { resolveSupabaseAuthPublicUrl, SupabaseAuthProvider } = await import("./provider.js");
     expect(resolveSupabaseAuthPublicUrl(undefined, privateAuthUrl)).toBeUndefined();
