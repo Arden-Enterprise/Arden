@@ -4,7 +4,7 @@
 .organization-live-admin .workspace-page-header { padding: 8px 12px 12px; }
 .organization-live-admin .organization-access-heading .meta-label { display: block; }
 .organization-live-admin .organization-access-heading h1 { font-size: 34px; line-height: 1.2; }
-.organization-live-admin .admin-tabs { justify-self: start; max-width: calc(100% - 24px); margin: 0 12px; padding: 4px; gap: 2px; overflow-x: auto; }
+.organization-live-admin .admin-tabs { justify-self: start; margin: 0 12px; padding: 4px; gap: 2px; overflow: visible; }
 .organization-live-admin .admin-tabs button { min-height: var(--arden-control-sm); padding: 0 12px; border-bottom: 0; color: var(--arden-text-secondary); }
 .organization-live-admin .admin-tabs button[aria-selected="true"] { color: var(--arden-text-primary); }
 .organization-live-admin .admin-tabs button .island-badge { margin-left: 0; padding: 0 7px; color: var(--arden-text-secondary); background: var(--arden-surface-raised); }

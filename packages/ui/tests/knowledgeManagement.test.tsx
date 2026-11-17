@@ -22,15 +22,9 @@ describe("live Library management components", () => {
   it("does not report an empty Topic catalog when loading the catalog failed", () => {
     render(createElement(KnowledgeLibraryBrowse, { items: [], catalog: null,
       catalogError: "Catalog is unavailable.", query: "", filters: emptyLibraryFilters(),
-      onFilters: vi.fn(), discover: true, onBrowse: vi.fn(), onOpen: vi.fn() }));
+      onFilters: vi.fn(), discover: true, onBrowse: vi.fn(), onOpen: vi.fn(), onManage: vi.fn() }));
     expect(screen.getByText("Catalog is unavailable.")).toBeTruthy();
     expect(screen.queryByText(/No topics yet/)).toBeNull();
-  });
-  it("keeps catalog editing out of Knowledge Library even for an Org Admin", () => {
-    render(createElement(KnowledgeLibraryBrowse, { items: [], catalog: { ...catalog, canManage: true },
-      catalogError: "", query: "", filters: emptyLibraryFilters(),
-      onFilters: vi.fn(), discover: true, onBrowse: vi.fn(), onOpen: vi.fn() }));
-    expect(screen.queryByRole("button", { name: /Manage catalog/ })).toBeNull();
   });
   it("uses exact canonical fields, not title prefixes, and keeps sort/filter behavior deterministic", () => {
     // Decision 0021: there is no Document Code to search.
@@ -46,7 +40,7 @@ describe("live Library management components", () => {
     function Browse() {
       const [filters, setFilters] = useState(emptyLibraryFilters), [discover, setDiscover] = useState(true);
       return createElement(KnowledgeLibraryBrowse, { items: [publication], catalog, catalogError: "", query: "", filters,
-        onFilters: setFilters, discover, onBrowse: () => setDiscover(false), onOpen });
+        onFilters: setFilters, discover, onBrowse: () => setDiscover(false), onOpen, onManage: vi.fn() });
     }
     render(createElement(Browse));
     expect(screen.queryByRole("button", { name: /Manage catalog/ })).toBeNull();
@@ -60,7 +54,7 @@ describe("live Library management components", () => {
   });
   it("hides empty/unreadable collections and presents unavailable catalog honestly", () => {
     render(createElement(KnowledgeLibraryBrowse, { items: [], catalog, catalogError: "Catalog is unavailable.", query: "", filters: emptyLibraryFilters(),
-      onFilters: vi.fn(), discover: true, onBrowse: vi.fn(), onOpen: vi.fn() }));
+      onFilters: vi.fn(), discover: true, onBrowse: vi.fn(), onOpen: vi.fn(), onManage: vi.fn() }));
     expect(screen.queryByRole("button", { name: /Employee handbook/ })).toBeNull();
     expect(screen.getByText("No documents available")).toBeTruthy();
     expect(screen.getByText("Catalog is unavailable.")).toBeTruthy();

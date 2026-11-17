@@ -13,7 +13,6 @@ import {
 import type { Platform } from "../shared/types";
 import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
 import { ServerAudienceGroupPanel } from "./ServerAudienceGroupPanel";
-import { OrganizationCatalogPanel } from "./OrganizationCatalogPanel";
 import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { Icon } from "../shared/Icon";
 import { IslandFilterMenu } from "../shared/IslandFilterMenu";
@@ -24,12 +23,11 @@ import { departmentDeletionSummary, filterOrganizationMembers, isOrganizationAdm
 import { MAX_INVITATIONS_PER_BATCH, planInvitationBatch, sendInvitationBatch, type InvitationBatchPlan, type InvitationSendResult } from "./invitationBatch";
 
 type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void;
-  onSendingInvitationsChange?: (sending: boolean) => void } & ContextControlProps;
-type AdminTab = "members" | "departments" | "audiences" | "catalog" | "invitations" | "reviewers";
+  onSendingInvitationsChange?: (sending: boolean) => void; onOpenKnowledgeLibrary?: () => void } & ContextControlProps;
+type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers";
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
 const tabNames: Record<AdminTab, string> = {
-  members: "Members", departments: "Departments", audiences: "Readers", catalog: "Topics",
-  invitations: "Invitations", reviewers: "Review permissions",
+  members: "Members", departments: "Departments", audiences: "Readers", invitations: "Invitations", reviewers: "Review permissions",
 };
 const invitationTone: Record<InvitationState, string> = { PENDING: "tone-info", ACCEPTED: "tone-success", EXPIRED: "", REVOKED: "" };
 function titleCase(value: string): string { return value[0] + value.slice(1).toLowerCase(); }
@@ -48,12 +46,11 @@ function invitationResultLabel(result: InvitationSendResult): string {
 }
 
 export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext,
-  onDirtyChange, onSendingInvitationsChange }: Props) {
+  onDirtyChange, onSendingInvitationsChange, onOpenKnowledgeLibrary }: Props) {
   const [data, setData] = useState<OrganizationAdministration | null>(null);
   const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
   const [tab, setTab] = useState<AdminTab>("members");
   const [audienceDirty, setAudienceDirty] = useState(false);
-  const [catalogDirty, setCatalogDirty] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null);
   const [invitationFilter, setInvitationFilter] = useState<InvitationFilter>("ALL");
@@ -88,9 +85,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
-  const reportAudienceDirty = useCallback((dirty: boolean) => setAudienceDirty(dirty), []);
-  useEffect(() => { onDirtyChange?.(audienceDirty || catalogDirty); }, [audienceDirty, catalogDirty, onDirtyChange]);
-  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+  const reportAudienceDirty = useCallback((dirty: boolean) => {
+    setAudienceDirty(dirty);
+    onDirtyChange?.(dirty);
+  }, [onDirtyChange]);
 
   const reload = useCallback(async () => {
     const [administration, grants] = await Promise.all([
@@ -149,10 +147,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const selectTab = (next: AdminTab) => {
     if (inviteProgress) return;
-    if ((tab === "audiences" && audienceDirty) || (tab === "catalog" && catalogDirty)) {
-      if (next !== tab) setPendingTab(next);
-      return;
-    }
+    if (tab === "audiences" && next !== "audiences" && audienceDirty) { setPendingTab(next); return; }
     setError(""); setMessage(""); setTab(next);
     document.querySelector(".organization-live-admin .workspace-scroll-region")?.scrollTo(0, 0);
   };
@@ -233,7 +228,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const tabCount: Record<AdminTab, number> = {
     members: members.length, departments: data?.departments.length ?? 0,
     audiences: memberAudienceGroups.length,
-    catalog: 0,
     invitations: data?.invitations.filter((item) => item.status === "PENDING" && new Date(item.expiresAt).getTime() > Date.now()).length ?? 0,
     reviewers: reviewerGrants.filter((grant) => grant.status === "ACTIVE").length,
   };
@@ -271,11 +265,16 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         titleId="organization-live-admin-title" action={headerAction} />
       <div className="island-seg admin-tabs" role="tablist" aria-label="Administration sections">{(Object.keys(tabNames) as AdminTab[]).map((name) => <button key={name}
         type="button" role="tab" aria-selected={tab === name} disabled={Boolean(inviteProgress)} onClick={() => selectTab(name)}>{tabNames[name]}
-        {name !== "audiences" && name !== "catalog" && <span className="island-badge">{tabCount[name]}</span>}</button>)}</div>
+        {name !== "audiences" && <span className="island-badge">{tabCount[name]}</span>}</button>)}</div>
     </div>}>
       {loading ? <div role="status" className="admin-loading island"><span className="sr-only">Loading organization data…</span>{[0, 1, 2].map((index) => <div key={index} className="admin-skeleton-row" aria-hidden="true"><span /><div><span /><span /></div></div>)}</div> : error && !data ? <div className="organization-notice is-danger" role="alert"><strong>Couldn’t load members.</strong><span>Try again.</span><button type="button" className="secondary-button" onClick={() => { setLoading(true); setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")).finally(() => setLoading(false)); }}>Try again</button></div> : data && <>
         {error && !selectedMember && <p className="admin-feedback is-error" role="alert">{error}</p>}
         {tab === "members" && <div role="tabpanel" aria-label="Members" className="admin-tabpanel">
+          {onOpenKnowledgeLibrary && <div className="organization-notice is-info">
+            <strong>Topics for contributions</strong>
+            <span>Org Admins add Topics in Knowledge Library → Discover → Manage catalog.</span>
+            <button type="button" className="secondary-button" onClick={onOpenKnowledgeLibrary}>Open Knowledge</button>
+          </div>}
           <div className="admin-filters">
             <label className="workspace-search admin-search"><Icon name="search" size={15} /><span className="sr-only">Search members</span><input type="search" placeholder="Filter by name or email" value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} /></label>
             <IslandFilterMenu label="Filter department" value={memberDepartment} onChange={setMemberDepartment}
@@ -363,10 +362,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         {tab === "audiences" && <div role="tabpanel" aria-label="Audiences" className="admin-roles"><ServerAudienceGroupPanel platform={platform} organizationId={organizationId} organizationName={organizationName}
           members={data.members} departments={data.departments}
           onDirtyChange={reportAudienceDirty} onGroupsChanged={() => void reload().catch(() => setError("Audiences changed, but organization data could not refresh."))} createSignal={audienceCreateSignal} /></div>}
-        {tab === "catalog" && <div role="tabpanel" aria-label="Topics and collections" className="admin-tabpanel">
-          <OrganizationCatalogPanel platform={platform} organizationId={organizationId}
-            onDirtyChange={setCatalogDirty} onClose={() => setTab("members")} />
-        </div>}
         {tab === "invitations" && <div role="tabpanel" aria-label="Invitations" className="admin-tabpanel">
           <div className="island-seg is-filter" role="group" aria-label="Filter by status">{invitationFilters.map((filter) => <button key={filter} type="button"
             aria-pressed={invitationFilter === filter} onClick={() => setInvitationFilter(filter)}>{filter === "ALL" ? "All" : titleCase(filter)}<span className="island-badge">{invitationCounts[filter]}</span></button>)}</div>
@@ -465,8 +460,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     </WorkspacePageContent>
     {confirmation && <IslandConfirm title={confirmation.title} description={confirmation.description} actionLabel={confirmation.action}
       busy={busy} error={error} onCancel={() => setConfirmation(null)} onConfirm={confirmAction} />}
-    {pendingTab && <KnowledgeDialog confirmation title="Discard unsaved changes?" onClose={() => setPendingTab(null)}>
-      <p>Changes have not been saved. Discard them and open {tabNames[pendingTab]}?</p>
+    {pendingTab && <KnowledgeDialog confirmation title="Discard unsaved audience changes?" onClose={() => setPendingTab(null)}>
+      <p>Changes to this audience group have not been saved. Discard them and open {tabNames[pendingTab]}?</p>
       <div className="dialog-actions"><button type="button" className="secondary-button" autoFocus onClick={() => setPendingTab(null)}>Keep editing</button>
         <button type="button" className="admin-danger-button" onClick={() => { setTab(pendingTab); setPendingTab(null); }}>Discard changes</button></div>
     </KnowledgeDialog>}
