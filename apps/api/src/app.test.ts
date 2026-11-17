@@ -450,6 +450,25 @@ describe("API auth and private draft routes", () => {
     expect(internalSpace.json().error.code).toBe("INVALID_EMAIL");
   });
 
+  it.each(["sign-in", "sign-up", "forgot-password", "invitation"])("rejects malformed email domains before %s side effects", async (route) => {
+    const cookie = await desktopSession(app, "owner@example.test");
+    const signIn = vi.spyOn(authProvider, "signIn"), signUp = vi.spyOn(authProvider, "signUp");
+    const recover = vi.spyOn(authProvider, "resetPasswordForEmail"), invite = vi.spyOn(repository, "createInvitation");
+    for (const email of ["user@example..test", "user@.example.test", "user@example.test.", "user@-example.test", "user@example-.test", "user@exam_ple.test"]) {
+      const response = await app.inject({ method: "POST",
+        url: route === "invitation" ? `/api/v1/organizations/${organizationId}/invitations` : `/api/v1/auth/${route}`,
+        headers: { cookie, origin: "http://localhost:5180" },
+        payload: { email: ` ${email} `, ...(route === "sign-in" || route === "sign-up" ? { password: "Synthetic-password!" } : {}),
+          ...(route === "sign-up" ? { fullName: "Synthetic member" } : {}) },
+      });
+      expect(response.statusCode, email).toBe(400);
+      expect(response.json().error.code).toBe("INVALID_EMAIL");
+    }
+    expect(signIn).not.toHaveBeenCalled(); expect(signUp).not.toHaveBeenCalled();
+    expect(recover).not.toHaveBeenCalled(); expect(invite).not.toHaveBeenCalled();
+    expect(invitationMailer.sent).toHaveLength(0);
+  });
+
   it("sends a recovery link and accepts only its verified browser session", async () => {
     const forgot = await app.inject({
       method: "POST", url: "/api/v1/auth/forgot-password",

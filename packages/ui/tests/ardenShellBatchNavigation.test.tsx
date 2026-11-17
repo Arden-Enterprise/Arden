@@ -46,18 +46,44 @@ beforeEach(() => {
     memberships: [{ organization: { id: "org-1", name: "Test Org" }, status: "active", departmentId: "dept-1", roleCodes: ["ORG_ADMIN"], canUsePrivateWorkspace: true }],
   });
   vi.mocked(apiClient.apiRequest).mockResolvedValue({ items: [], nextCursor: null });
+  vi.spyOn(apiClient, "listKnowledgeDrafts").mockResolvedValue([]);
+  vi.spyOn(apiClient, "listKnowledgeSubmissions").mockResolvedValue([]);
+  vi.spyOn(apiClient, "listPublishedKnowledge").mockResolvedValue([]);
+  vi.spyOn(apiClient, "listKnowledgeReviewBoard").mockResolvedValue({ items: [], decided: [] });
+  vi.spyOn(apiClient, "loadKnowledgeOptions").mockResolvedValue({ departments: [], audiences: [] });
+  vi.spyOn(apiClient, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   vi.stubGlobal("scrollTo", vi.fn());
 });
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   Reflect.deleteProperty(HTMLDialogElement.prototype, "showModal");
   Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
   vi.unstubAllGlobals();
 });
 
 describe("ArdenShell invitation batch navigation", () => {
+  it("preserves an unsaved shared draft until workspace switching is confirmed", async () => {
+    render(createElement(ArdenShell, { platform: "web" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Library", exact: true })[0]);
+    fireEvent.click(await screen.findByRole("button", { name: "Create from PDF" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved shared draft" } });
+    const workspaceButton = screen.getByRole("button", { name: /Workspace: Test Org.*Switch or create workspace/i });
+    fireEvent.click(workspaceButton);
+    expect(screen.getByRole("heading", { name: "Discard changes?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Keep working" }));
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("Unsaved shared draft");
+    fireEvent.click(workspaceButton);
+    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(screen.getByRole("heading", { name: "Choose your workspace" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Test Org/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Workspace: Test Org.*Switch or create workspace/i }));
+    expect(screen.queryByRole("heading", { name: "Discard changes?" })).toBeNull();
+  });
+
   it("lets a member with one workspace open the selector and create another", async () => {
     render(createElement(ArdenShell, { platform: "web" }));
     expect(await screen.findByRole("heading", { name: "Choose your workspace" })).toBeTruthy();

@@ -223,6 +223,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [pendingMemberEntry, setPendingMemberEntry] = useState<string | null>(null);
   const [organization, setOrganization] = useState<OrganizationPreview | null>(null);
   const [organizationDirty, setOrganizationDirty] = useState(false);
+  const [knowledgeDirty, setKnowledgeDirty] = useState(false);
   const [invitationBatchSending, setInvitationBatchSending] = useState(false);
   const [activeView, setActiveView] = useState<WorkspaceView>("my-work");
   const privateNotes = usePrivateNotes(initialNotes);
@@ -406,6 +407,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setOrganization(null);
     setOrganizationDirty(false);
     setActiveView("my-work");
+    setKnowledgeDirty(false);
     privateNotes.reset();
     setInvitationId("");
     setAccessMemberId("");
@@ -584,7 +586,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       setIslandToast({ message: "Wait for invitations to finish before signing out.", onDismiss: () => setIslandToast(null) });
       return;
     }
-    if (organizationDirty || privateNotes.hasUnsavedDrafts) {
+    if (organizationDirty || knowledgeDirty || privateNotes.hasUnsavedDrafts) {
       setPendingAction("exit");
       return;
     }
@@ -592,6 +594,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   };
 
   const showWorkspaceSelector = () => {
+    setKnowledgeDirty(false);
     setServerOrganizationId(null);
     setContributionAttempt(null);
     privateNotes.reset();
@@ -605,7 +608,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       setIslandToast({ message: "Wait for invitations to finish before switching workspaces.", onDismiss: () => setIslandToast(null) });
       return;
     }
-    if (organizationDirty || privateNotes.hasUnsavedDrafts) {
+    if (organizationDirty || knowledgeDirty || privateNotes.hasUnsavedDrafts) {
       setPendingAction("workspace-select");
       return;
     }
@@ -707,6 +710,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
           citationTarget={knowledgeCitationTarget}
           onAssignedReviewCount={setAssignedReviewCount}
+          onDirtyChange={setKnowledgeDirty}
           onNavigate={navigate} {...contextControl} />
       </div>
       </ErrorBoundary>

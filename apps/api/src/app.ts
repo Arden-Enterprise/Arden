@@ -2194,7 +2194,10 @@ function safeErrorType(error: unknown): string {
 }
 
 function isNormalizedEmail(email: string): boolean {
-  return email.length <= 320 && email === email.trim().toLowerCase() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  if (email.length > 320 || email !== email.trim().toLowerCase() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
+  const domain = email.slice(email.lastIndexOf("@") + 1);
+  return domain.length <= 253 && domain.split(".").every((label) =>
+    label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
 }
 
 function isValidLabel(value: string, maxLength: number): boolean {

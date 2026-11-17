@@ -51,6 +51,7 @@ type Props = ContextControlProps & {
   createdDraftId: string | null;
   citationTarget?: KnowledgeNavigationTarget | null;
   onAssignedReviewCount?: (count: number) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 };
 
 type EditorValues = Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" |
@@ -71,7 +72,7 @@ function errorMessage(error: unknown): string {
 }
 
 export function ServerKnowledgeFeaturePage({ platform, organizationId, organizationName,
-  view, active, createdDraftId, citationTarget, onAssignedReviewCount, contextOpen, onToggleContext }: Props) {
+  view, active, createdDraftId, citationTarget, onAssignedReviewCount, onDirtyChange, contextOpen, onToggleContext }: Props) {
   const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
   const [submissions, setSubmissions] = useState<KnowledgeSubmission[]>([]);
   const [published, setPublished] = useState<PublishedKnowledge[]>([]);
@@ -362,6 +363,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   }
   const dirty = Boolean(replacementPdf || (draft && editor && JSON.stringify(editor) !== JSON.stringify(valuesFromDraft(draft))));
   const creationDirty = Boolean(newTitle || newFile || newBody !== newBodyBaseline.current);
+  const unsaved = (screen === "create" && creationDirty) || (screen === "editor" && dirty) || Boolean(review && comment.trim());
+  useEffect(() => { onDirtyChange?.(unsaved); }, [unsaved, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
   const guardDiscard = (changed: boolean, action: () => void) => {
     if (busy) return;
     if (changed) setDiscardAction(() => action); else action();
