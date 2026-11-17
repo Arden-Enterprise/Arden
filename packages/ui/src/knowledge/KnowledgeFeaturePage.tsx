@@ -22,6 +22,7 @@ export type KnowledgeFeaturePageProps = ContextControlProps & {
   departmentName?: string;
   createdDraft?: CreatedKnowledgeDraft | null;
   onAssignedReviewCount?: (count: number) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   citationTarget?: KnowledgeNavigationTarget | null;
   onNavigate?: (view: KnowledgeFeatureView) => void;
   /** Signed-in member who is waiting for a department: Home explains the limited reading scope. */
@@ -35,6 +36,7 @@ export function KnowledgeFeaturePage(props: KnowledgeFeaturePageProps) {
     return <ServerKnowledgeFeaturePage platform={props.platform} organizationId={props.organizationId}
       organizationName={props.organizationName ?? "Organization"} view={props.view} active={props.active ?? true}
       createdDraftId={props.createdDraft?.id ?? null} onAssignedReviewCount={props.onAssignedReviewCount}
+      onDirtyChange={props.onDirtyChange}
       citationTarget={props.citationTarget} awaitingAssignment={props.awaitingAssignment}
       contextOpen={props.contextOpen} onToggleContext={props.onToggleContext} />;
   }
