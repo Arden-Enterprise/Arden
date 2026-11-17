@@ -43,6 +43,14 @@ while their input tables use FORCE RLS and runtime-only policies silently change
 validation and worker behavior. Never bulk-transfer routines as ordinary ownership
 housekeeping. The migration-role probe must reject that broken ownership split.
 
+Views have their own execution context: retaining a trusted function owner does
+not make an owner-context view read as that function. The private
+`governance_current_publication` view uses `security_invoker` so its guarded
+SECURITY DEFINER callers retain the intended execution identity after view
+ownership transfer. The runtime has no direct view privilege. `security_barrier`
+alone does not provide this property; keep table RLS and existing entry-point
+authorization intact.
+
 Do not change FORCE RLS, actor/organization transaction settings, internal function
 owners, reviewer/audience gates or indexing execution privileges independently.
 Review them together and run the real runtime/worker workflow suite after the full
@@ -71,6 +79,14 @@ contributor and agent, not to one named tool.
 - Final approval moves the exact approved snapshot to publication preparation. It does not change the current pointer. Only complete indexing followed by atomic activation makes that version visible to search/RAG. There is no manual publisher role. Keep review, preparation and activation separately auditable; a mutable draft cannot become visible through a generic update endpoint.
 - Enforce transitions transactionally and reject stale version/conflicting approvals. Archival, unpublishing, and revocation must have explicit visibility semantics and audit evidence.
 - Who may recover private content remains a separate decision; do not create an undocumented bypass while implementing convenience tools.
+- Organization Admin content access is governed by [decision 0023](../decisions/0023-organization-admin-governance-access.md):
+  - The catalog shows metadata only.
+  - Content outside the Admin's readership opens only through an audited inspection: a required reason, one published version, 15 minutes idle or 2 hours maximum, and the role rechecked on every request.
+  - Authority comes from the current role and grant tables inside the reviewed routines of migration 0037, never from the app's `arden.org_admin` setting.
+  - Record the audit event before serving content; if recording fails, refuse access.
+  - Inspection and the responsible-reviewer view are never Library, search, Ask Arden or citation sources.
+  - Under [decision 0024](../decisions/0024-admin-only-direct-withdrawal.md) and forward operator 0038, only a current Organization Admin may withdraw directly; a matching reviewer grant or client Admin setting is insufficient. Reason/audit and author-visible Admin provenance remain mandatory. Responsible-reviewer read/report handling and approval of author withdrawal requests are unchanged.
+  - This release explicitly defers inspection notifications. Audit records are not automatic alerts; the deferral does not permanently remove the notification requirement.
 
 ## 4. Derived data, search, graph, and revocation
 

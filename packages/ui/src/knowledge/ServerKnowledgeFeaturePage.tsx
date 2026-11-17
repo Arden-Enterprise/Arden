@@ -9,7 +9,7 @@ import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import {
   ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listKnowledgeReviewBoard,
   listKnowledgeDrafts, listKnowledgeSubmissions, listPublishedKnowledge, loadKnowledgeDraft,
-  withdrawKnowledgeSubmission,
+  withdrawKnowledgeSubmission, retryKnowledgePublication,
   loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, saveKnowledgeDraft, loadKnowledgeCatalog, replaceKnowledgePdf,
   submitKnowledgeDraft, type AssignedKnowledgeReview, type DecidedKnowledgeReview, type KnowledgeDraftRecord,
   type KnowledgeDraftSummary, type KnowledgeOptions, type KnowledgeReviewDetail,
@@ -27,11 +27,15 @@ import { ownerDepartment } from "./readerSelection";
 import { KnowledgeCatalogEditor } from "./KnowledgeCatalogEditor";
 import { KnowledgeLibraryBrowse, emptyLibraryFilters } from "./KnowledgeLibraryBrowse";
 import { KnowledgeMetadataFields, editableKnowledgeMetadata, targetReadersLabel } from "./KnowledgeMetadataFields";
+import { targetReadersComplete } from "./TargetReadersField";
 import { ActionToast } from "../shared/ActionToast";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { draftStatus, statusLabel, validatePdfFile } from "./knowledgeStatus";
 import { KnowledgeDocumentDetail } from "./KnowledgeDocumentDetail";
+import { PublicationReportsPanel, ReportProblemButton } from "./PublicationGovernance";
 import { KnowledgeDialog } from "./KnowledgeDialog";
+import { ApprovedReadersField, approvedReadersReady } from "./ApprovedReadersField";
+import { PublicationChangeDialog, publicationChangeSentMessage, type PublicationChangeType } from "./PublicationChangeDialog";
 import type { KnowledgeNavigationTarget } from "./knowledgeCitation";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
@@ -123,12 +127,16 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [comment, setComment] = useState("");
   const [commentSubmitted, setCommentSubmitted] = useState(false);
   const [decisionToConfirm, setDecisionToConfirm] = useState<"APPROVE" | "REJECT" | null>(null);
+  /** T2.2: null approves the proposed readers as they are; otherwise the narrowed selection. */
+  const [approvedReaders, setApprovedReaders] = useState<TargetReaders | null>(null);
   const createRequestKey = useRef<string | null>(null);
   const newBodyBaseline = useRef(newBody);
   const [discardAction, setDiscardAction] = useState<(() => void) | null>(null);
   const [withdrawConfirmId, setWithdrawConfirmId] = useState<string | null>(null);
+  /** T6.4: the change the author is asking a reviewer to make to a published document. */
+  const [changeRequest, setChangeRequest] = useState<PublicationChangeType | null>(null);
   const submitRequestKey = useRef<string | null>(null);
-  const decisionRequest = useRef<{ action: "APPROVE" | "REJECT"; key: string } | null>(null);
+  const decisionRequest = useRef<{ action: "APPROVE" | "REJECT"; readers: string; key: string } | null>(null);
   const openedCreatedDraftId = useRef<string | null>(null);
   const openedCitationId = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -293,6 +301,12 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     await refresh();
   });
 
+  const retryPublication = (submissionId: string) => void run(async () => {
+    await retryKnowledgePublication(platform, organizationId, submissionId);
+    setMessage("Publication restarted");
+    await refresh();
+  });
+
   const openReview = (id: string) => guardDiscard(Boolean(comment.trim()), () => { void run(async () => {
     const loaded = await loadKnowledgeReview(platform, organizationId, id);
     setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
@@ -306,10 +320,14 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   };
   const decide = (action: "APPROVE" | "REJECT") => void run(async () => {
     if (!review) return;
+    const readers = action === "APPROVE" ? approvedReaders : null;
+    const signature = readers ? JSON.stringify(readers) : "";
+    // A retry reuses the key only for the same decision; changed readers are a different request.
     const existing = decisionRequest.current;
-    const key = existing?.action === action ? existing.key : crypto.randomUUID();
-    decisionRequest.current = { action, key };
-    const result = await decideKnowledgeReview(platform, organizationId, review, action, comment.trim() || null, key);
+    const key = existing?.action === action && existing.readers === signature ? existing.key : crypto.randomUUID();
+    decisionRequest.current = { action, readers: signature, key };
+    const result = await decideKnowledgeReview(platform, organizationId, review, action, comment.trim() || null, key,
+      readers ?? undefined);
     decisionRequest.current = null; setReview(null); setDecisionToConfirm(null);
     await refresh();
     setMessage(result.status === "APPROVED"
@@ -318,7 +336,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   });
 
   // A newly opened submission starts at the top of its document, and a pending confirmation never carries over to it.
-  useEffect(() => { reviewBodyRef.current?.scrollTo?.({ top: 0 }); setDecisionToConfirm(null); }, [review?.id]);
+  useEffect(() => { reviewBodyRef.current?.scrollTo?.({ top: 0 }); setDecisionToConfirm(null); setApprovedReaders(null); }, [review?.id]);
   // After a decision clears the submission and the queue refreshes, open its neighbour if it is still listed.
   useEffect(() => {
     if (busy) return;
@@ -402,9 +420,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const metadataErrors = editor ? metadataSubmissionErrors(editor.management, draft?.hasPublishedVersion ?? false) : [];
   const versionAlreadyPublished = Boolean(draft && editor && submissions.some(item => item.draftId === draft.id
     && ["ACTIVE", "SUPERSEDED"].includes(item.publicationState) && item.management?.version === editor.management.version));
-  const readersReady = Boolean(editor?.targetReaders && (editor.targetReaders.mode === "ORGANIZATION"
-    || (editor.targetReaders.mode === "DEPARTMENT" && editor.targetReaders.departmentId)
-    || (editor.targetReaders.mode === "SELECTED_MEMBERS" && editor.targetReaders.memberIds.length >= 2)));
+  const readersReady = targetReadersComplete(editor?.targetReaders);
   const parsedEditor = editor ? parseSemanticDocument(editor.body) : null;
   const hasContent = Boolean(draft?.currentVersion.mimeType === "application/pdf" || (parsedEditor?.ok ? semanticDocumentHasText(parsedEditor.document) : editor?.body.trim()));
   const ready = Boolean(ownerDepartmentId && editor?.title.trim() && hasContent && readersReady && !metadataErrors.length && !versionAlreadyPublished
@@ -434,6 +450,14 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const audienceNames = (ids?: string[] | null) => (Array.isArray(ids) ? ids : []).map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? "Unavailable group").join(", ") || "None";
   const selectedContribution = drafts.find((item) => item.id === selectedContributionId) ?? null;
   const selectedContributionLatest = selectedContribution ? latestByDraft.get(selectedContribution.id) : undefined;
+  // T6.4: only a document with a current publication and no open request can ask for a reader change or withdrawal.
+  const selectedContributionPublished = Boolean(selectedContribution && submissions.some(item => item.draftId === selectedContribution.id
+    && item.status === "APPROVED" && item.publicationState === "ACTIVE"));
+  const canRequestPublicationChange = selectedContributionPublished && !selectedContribution?.hasPendingSubmission
+    && selectedContributionLatest?.status !== "PENDING_REVIEW";
+  const pendingChangeRequest = selectedContributionLatest?.status === "PENDING_REVIEW"
+    && selectedContributionLatest.requestType && selectedContributionLatest.requestType !== "CONTENT"
+    ? selectedContributionLatest.requestType : null;
   const activeReview = review ? reviews.find((item) => item.submissionId === review.id) : undefined;
   const reviewIndex = review ? reviews.findIndex((item) => item.submissionId === review.id) : -1;
   const noteRequired = commentSubmitted && !comment.trim();
@@ -462,8 +486,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
       search={librarySearch} searchActive={Boolean(librarySearch && query)} chrome={screen === "document" && document ? "reader" : "full"} />
     <div className={`knowledge-feature-page knowledge-live-page${view === "review-queue" && !loading ? " is-review" : ""}`}>
       {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-      {loading ? <div className="island island-empty" role="status">Loading documents…</div> : view === "review-queue" && !review ? <ReviewList pending={reviews} decided={decidedReviews}
-        departmentName={departmentName} busy={busy} onOpen={openReview} onRefresh={() => void refresh()} />
+      {loading ? <div className="island island-empty" role="status">Loading documents…</div> : view === "review-queue" && !review ? <>
+        <PublicationReportsPanel platform={platform} organizationId={organizationId} departmentName={departmentName} />
+        <ReviewList pending={reviews} decided={decidedReviews}
+        departmentName={departmentName} busy={busy} onOpen={openReview} onRefresh={() => void refresh()} /></>
       : view === "review-queue" && review ? <section className="island review-detail" aria-labelledby="review-detail-title">
         <header className="review-detail-bar">
           <nav className="review-detail-crumbs" aria-label="Breadcrumb">
@@ -543,6 +569,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                   </>}
                 </dl>
               </section>
+              <ApprovedReadersField review={review} value={approvedReaders} departments={options?.departments ?? []}
+                departmentName={departmentName} busy={busy} platform={platform} organizationId={organizationId}
+                onChange={value => { setApprovedReaders(value); setDecisionToConfirm(null); }} />
               {activeReview?.approvalBlocked && <p className="island-note is-warning review-blocked-note" role="note"><Icon name="warning" size={14} /><span>Reader selection is no longer valid. You can still reject.</span></p>}
               <label className="review-note">
                 <span className="review-note-label"><span>Note to the author</span>
@@ -557,7 +586,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                 <strong id="review-confirm-title">{decisionToConfirm === "APPROVE" ? reviewRequestPresentation(review.requestType).title : "Reject this submission?"}</strong>
                 <p id="review-confirm-body">{decisionToConfirm === "APPROVE"
                   ? reviewRequestPresentation(review.requestType).effect
-                  : "Your note will be sent to the author."}</p>
+                  : "Your note will be sent to the author."}
+                  {decisionToConfirm === "APPROVE" && approvedReaders
+                    && <> Readers: <strong>{approvedReadersLabel(approvedReaders, departmentName, review)}</strong>.</>}</p>
                 {error && <p role="alert" className="knowledge-live-error">{error}</p>}
                 <div className="review-decision-actions">
                   <button type="button" className="secondary-button" disabled={busy} onClick={() => setDecisionToConfirm(null)}>Cancel</button>
@@ -567,7 +598,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               </div> : <>
                 <div className="review-decision-actions">
                   <button type="button" className="secondary-button review-reject" disabled={busy} onClick={() => { if (requireDecisionReason()) setDecisionToConfirm("REJECT"); }}>Reject</button>
-                  <button type="button" className="primary-button review-approve" disabled={busy || activeReview?.approvalBlocked} onClick={() => setDecisionToConfirm("APPROVE")}><Icon name="check" size={14} />Approve</button>
+                  <button type="button" className="primary-button review-approve" disabled={busy || activeReview?.approvalBlocked || !approvedReadersReady(approvedReaders)} onClick={() => setDecisionToConfirm("APPROVE")}><Icon name="check" size={14} />Approve</button>
                 </div>
                 <small id="knowledge-decision-help" className="field-error" role={noteRequired ? "alert" : undefined}>{noteRequired ? "Enter a reason." : ""}</small>
               </>}
@@ -689,9 +720,8 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         onBack={() => { setOpenedCitation(null); setScreen("library"); }}
         surfaceActions={<>
           {readerPdfUrl && <a className="secondary-button" href={readerPdfUrl} download={pdfFileName(document.title)}><Icon name="download" size={13} />Download</a>}
-          {/* Placeholder for Flow 4 issue reporting; it stays disabled until that workflow exists. */}
-          <button type="button" className="secondary-button" disabled aria-label="Report an issue — not available yet" title="Report an issue is not available yet">
-            <Icon name="flag" size={13} />Report an issue</button></>}
+          <ReportProblemButton platform={platform} organizationId={organizationId} publishedVersionId={document.id}
+            title={document.title} onReported={setMessage} /></>}
         content={document.mimeType === "application/pdf" && document.pdfBase64
           ? <PdfReader base64={document.pdfBase64} title={document.title} focus={openedCitation} />
           : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
@@ -748,7 +778,14 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               <dt>Type</dt><dd>{selectedContribution.management?.type ?? "—"}</dd>
               <dt>Department</dt><dd>{departmentName(selectedContribution.responsibleDepartmentId)}</dd>
               <dt>Readers</dt><dd>{targetReadersLabel(selectedContribution.targetReaders, departmentName)}</dd>
+              {pendingChangeRequest && <><dt>Request</dt><dd>{reviewRequestPresentation(pendingChangeRequest).label} · awaiting review</dd></>}
             </dl>
+            {selectedContributionLatest?.withdrawal && <blockquote className="island-box contribution-reason">
+              <strong>{selectedContributionLatest.withdrawal.by === "REVIEWER" ? "Withdrawn by a reviewer" : "Withdrawn by an administrator"}</strong>
+              <p>{selectedContributionLatest.withdrawal.reason}</p></blockquote>}
+            {selectedContributionLatest?.status === "APPROVED" && selectedContributionLatest.publicationState === "FAILED"
+              && <PublicationFailureNotice failure={selectedContributionLatest.publicationFailure ?? "SYSTEM"} busy={busy}
+                onRetry={() => retryPublication(selectedContributionLatest.id)} />}
             <section className="island-detail-section" aria-label="History"><h3>History</h3>
               <DraftVersionHistory draftId={selectedContribution.id}
                 versions={historyVersions?.draftId === selectedContribution.id ? historyVersions.items : null}
@@ -758,7 +795,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             {selectedContributionLatest?.status === "PENDING_REVIEW" && withdrawConfirmId === selectedContributionLatest.id
               && <div className="island-box contribution-withdraw" role="alertdialog" aria-labelledby="withdraw-title" aria-describedby="withdraw-body">
                 <strong id="withdraw-title">Withdraw this review request?</strong>
-                <p id="withdraw-body">Reviewers will no longer see this version. Your draft stays, and you can submit it again.</p>
+                <p id="withdraw-body">{pendingChangeRequest
+                  ? "Reviewers will no longer see this request. The published document does not change."
+                  : "Reviewers will no longer see this version. Your draft stays, and you can submit it again."}</p>
                 <div className="contribution-withdraw-actions">
                   <button type="button" className="secondary-button" disabled={busy} onClick={() => setWithdrawConfirmId(null)}>Keep request</button>
                   <button type="button" className="secondary-button contribution-withdraw-confirm" disabled={busy} onClick={() => withdrawSubmission(selectedContributionLatest.id)}>{busy ? "Withdrawing…" : "Withdraw request"}</button>
@@ -767,6 +806,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             <div className="island-side-footer contribution-actions"><button type="button" className="primary-button" disabled={busy} onClick={() => openDraft(selectedContribution.id)}>Open draft</button>
               {selectedContributionLatest?.status === "PENDING_REVIEW" && withdrawConfirmId !== selectedContributionLatest.id
                 && <button type="button" className="secondary-button" disabled={busy} onClick={() => setWithdrawConfirmId(selectedContributionLatest.id)}>Withdraw request</button>}
+              {canRequestPublicationChange && <>
+                <button type="button" className="secondary-button" disabled={busy} onClick={() => setChangeRequest("READER_CHANGE")}>Change readers</button>
+                <button type="button" className="secondary-button contribution-withdraw-confirm" disabled={busy} onClick={() => setChangeRequest("WITHDRAWAL")}>Withdraw document</button>
+              </>}
               </div>
           </aside>}
         </div> : <div className="island island-empty"><h3>{drafts.length ? "No matching drafts" : "No contributions yet"}</h3>{drafts.length > 0 && <p>Try another title.</p>}<button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button></div>)}
@@ -782,10 +825,32 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             key={viewedVersion.id} body={viewedVersion.body} instanceKey={viewedVersion.id} /></Suspense>}
       </div>
     </KnowledgeDialog>}
+    {changeRequest && selectedContribution && <PublicationChangeDialog type={changeRequest} documentTitle={selectedContribution.title}
+      documentId={selectedContribution.id} platform={platform} organizationId={organizationId}
+      departments={options?.departments ?? []} onClose={() => setChangeRequest(null)}
+      onSent={() => { const sent = changeRequest; setChangeRequest(null); setMessage(publicationChangeSentMessage(sent)); void refresh(); }} />}
     {discardAction && <DiscardChangesDialog exiting={false} onCancel={() => setDiscardAction(null)} onDiscard={() => {
       discardAction(); setDiscardAction(null);
     }} />}
   </main>;
+}
+
+const publicationFailureCopy = {
+  TEMPORARY: "Arden couldn't prepare this approved version because a service was briefly unavailable. Try again; it won't need another review.",
+  CONTENT: "Arden couldn't read this file. Fix it in the draft and submit it again.",
+  SYSTEM: "Arden couldn't prepare this approved version because of a system problem. Trying again won't help; contact your administrator.",
+} as const;
+
+/** T6.3: why an approved version did not publish, and a retry only when trying again can help. */
+function PublicationFailureNotice({ failure, busy, onRetry }: {
+  failure: NonNullable<KnowledgeSubmission["publicationFailure"]>; busy: boolean; onRetry: () => void;
+}) {
+  return <div className="island-box publication-failure" role="status">
+    <strong>Not published</strong>
+    <p>{publicationFailureCopy[failure]}</p>
+    {failure === "TEMPORARY" && <button type="button" className="secondary-button" disabled={busy} onClick={onRetry}>
+      {busy ? "Trying again…" : "Try again"}</button>}
+  </div>;
 }
 
 function DraftVersionHistory({ draftId, versions, error, currentVersion, submissions, busy, onOpen, onRetry }: {
@@ -809,6 +874,15 @@ function DraftVersionHistory({ draftId, versions, error, currentVersion, submiss
       </button></li>;
     })}
   </ol>;
+}
+
+/** Names kept members when the reviewer narrowed a selected-member proposal. */
+function approvedReadersLabel(readers: TargetReaders, departmentName: (id: string | null) => string,
+  review: KnowledgeReviewDetail): string {
+  if (readers.mode !== "SELECTED_MEMBERS") return targetReadersLabel(readers, departmentName);
+  const names = new Map((review.proposedReaders?.members ?? []).map(member => [member.membershipId, member.displayName]));
+  const known = readers.memberIds.map(id => names.get(id)).filter((name): name is string => Boolean(name));
+  return known.length === readers.memberIds.length && known.length <= 3 ? known.join(", ") : targetReadersLabel(readers, departmentName);
 }
 
 const statusChipTone: Record<string, string> = { "is-info": "tone-info", "is-success": "tone-success", "is-danger": "tone-danger", "is-attention": "tone-warning" };

@@ -20,14 +20,16 @@ import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { countInvitations, invitationFilters, invitationState, visibleInvitations, type InvitationFilter, type InvitationState } from "./invitationStatus";
 import { DepartmentDetailIsland, grantCoverageLabel, grantValidity, MemberDetailIsland, memberInitials, memberStatus as describeMemberStatus } from "./AdminDetailIslands";
 import { departmentDeletionSummary, filterOrganizationMembers, isOrganizationAdminMember, membersInDepartment } from "./memberAdministration";
+import { GovernanceDocumentsPanel } from "../knowledge/PublicationGovernance";
 import { MAX_INVITATIONS_PER_BATCH, planInvitationBatch, sendInvitationBatch, type InvitationBatchPlan, type InvitationSendResult } from "./invitationBatch";
 
 type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void;
   onSendingInvitationsChange?: (sending: boolean) => void; onOpenKnowledgeLibrary?: () => void } & ContextControlProps;
-type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers";
+type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers" | "documents";
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
 const tabNames: Record<AdminTab, string> = {
   members: "Members", departments: "Departments", audiences: "Readers", invitations: "Invitations", reviewers: "Review permissions",
+  documents: "Documents",
 };
 const invitationTone: Record<InvitationState, string> = { PENDING: "tone-info", ACCEPTED: "tone-success", EXPIRED: "", REVOKED: "" };
 function titleCase(value: string): string { return value[0] + value.slice(1).toLowerCase(); }
@@ -232,6 +234,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     audiences: memberAudienceGroups.length,
     invitations: data?.invitations.filter((item) => item.status === "PENDING" && new Date(item.expiresAt).getTime() > Date.now()).length ?? 0,
     reviewers: reviewerGrants.filter((grant) => grant.status === "ACTIVE").length,
+    documents: 0,
   };
   const focusTabForm = (targetTab: AdminTab, selector: string) => {
     selectTab(targetTab);
@@ -267,7 +270,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         titleId="organization-live-admin-title" action={headerAction} />
       <div className="island-seg admin-tabs" role="tablist" aria-label="Administration sections">{(Object.keys(tabNames) as AdminTab[]).map((name) => <button key={name}
         type="button" role="tab" aria-selected={tab === name} disabled={Boolean(inviteProgress)} onClick={() => selectTab(name)}>{tabNames[name]}
-        {name !== "audiences" && <span className="island-badge">{tabCount[name]}</span>}</button>)}</div>
+        {name !== "audiences" && name !== "documents" && <span className="island-badge">{tabCount[name]}</span>}</button>)}</div>
     </div>}>
       {loading ? <div role="status" className="admin-loading island"><span className="sr-only">Loading organization data…</span>{[0, 1, 2].map((index) => <div key={index} className="admin-skeleton-row" aria-hidden="true"><span /><div><span /><span /></div></div>)}</div> : error && !data ? <div className="organization-notice is-danger" role="alert"><strong>Couldn’t load members.</strong><span>Try again.</span><button type="button" className="secondary-button" onClick={() => { setLoading(true); setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")).finally(() => setLoading(false)); }}>Try again</button></div> : data && <>
         {error && !selectedMember && <p className="admin-feedback is-error" role="alert">{error}</p>}
@@ -417,6 +420,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           </aside>
           </div>
         </div>}
+        {tab === "documents" && <div role="tabpanel" aria-label="Documents"><GovernanceDocumentsPanel platform={platform}
+          organizationId={organizationId} departmentName={departmentName} /></div>}
         {tab === "reviewers" && <div role="tabpanel" aria-label="Review permissions" className="admin-tabpanel">
           <div className="island-seg is-filter" role="group" aria-label="Filter review permissions">{(["ACTIVE", "INACTIVE"] as const).map((filter) => <button key={filter} type="button"
             aria-pressed={grantFilter === filter} onClick={() => setGrantFilter(filter)}>{titleCase(filter)}<span className="island-badge">{reviewerGrants.filter((item) => item.status === filter).length}</span></button>)}</div>
