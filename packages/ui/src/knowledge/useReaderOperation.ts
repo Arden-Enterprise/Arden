@@ -1,31 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError } from "../shared/api-client";
-import { checkReaderSummaryAccess } from "../shared/reader-summary-api";
 import type { ReaderSummaryContext } from "../shared/reader-summary-contracts";
 import type { Platform } from "../shared/types";
 import type { KnowledgeCitationReference } from "./knowledgeCitation";
+import { ReaderAccessInterrupted, type ReaderAccessSession } from "./useReaderAccess";
 
 export type ReaderOperationOptions = { platform: Platform; context: ReaderSummaryContext; active: boolean; visible?: boolean;
   onCitation: (citation: KnowledgeCitationReference | null) => void; onAccessLost: () => void };
-type State<Result> = { key: string | null; status: "closed" | "loading" | "checking" | "ready" | "error";
+type State<Result> = { key: string | null; status: "closed" | "loading" | "checking" | "paused" | "ready" | "error";
   result?: Result; message?: string; retry?: boolean; retryAt?: number };
 
 /** Ephemeral exact-reader state. A delivered derivative is never a reusable read grant. */
-export function useReaderOperation<Result, Input>(options: ReaderOperationOptions | undefined, config: {
+export function useReaderOperation<Result, Input>(options: ReaderOperationOptions | undefined, access: ReaderAccessSession, config: {
   label: string; busyRetrySeconds?: number; run: (options: ReaderOperationOptions, input: Input, signal: AbortSignal) => Promise<Result>;
 }) {
-  const key = options?.active ? JSON.stringify([options.platform, options.context.organizationId, options.context.documentId,
-    options.context.versionId, options.context.contentHash]) : null;
+  const key = access.key;
   const visible = options?.visible !== false;
-  const current = useRef({ key, options, config }); current.current = { key, options, config };
+  const current = useRef({ key, options, config, access }); current.current = { key, options, config, access };
   const sequence = useRef(0), controller = useRef<AbortController | null>(null);
   const operation = useRef<"generate" | "check" | null>(null);
-  const paused = useRef(false);
   const candidate = useRef<{ key: string; result: Result } | null>(null);
   const lastInput = useRef<{ value: Input } | null>(null);
   const [stored, setState] = useState<State<Result>>({ key: null, status: "closed" });
   const [clock, setClock] = useState(Date.now);
-  const state: State<Result> = key && stored.key === key ? stored : { key, status: "closed" };
+  const scoped: State<Result> = key && stored.key === key ? stored : { key, status: "closed" };
+  const state: State<Result> = scoped.status === "ready" && (access.hidden || access.needsCheck)
+    ? { key, status: access.hidden ? "paused" : "checking" } : scoped;
   const valid = (scope: string, ticket: number) => current.current.key === scope && sequence.current === ticket;
   const invalidate = () => { sequence.current++; controller.current?.abort(); controller.current = null; operation.current = null; };
   const close = () => {
@@ -50,8 +50,8 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
         : code === "SUMMARY_TIMEOUT" ? "Summary took too long. Please retry."
         : !retryable ? `${config.label} is unavailable.`
         : status === 429 ? "Wait a moment, then retry." : `${config.label} is unavailable. Please retry.` });
-    current.current.options?.onCitation(null);
-    if (denied) current.current.options?.onAccessLost();
+    if (denied || unsupported) current.current.options?.onCitation(null);
+    if (denied && current.current.access.deny()) current.current.options?.onAccessLost();
   };
   useEffect(() => {
     if (stored.status !== "error" || !stored.retry || !stored.retryAt || stored.retryAt <= Date.now()) return;
@@ -71,21 +71,26 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
       const result = await operationConfig.run(settings, input, abort.signal);
       if (!valid(scope, ticket)) return;
       candidate.current = { key: scope, result };
-      setState(paused.current ? { key: scope, status: "checking" } : { key: scope, status: "ready", result });
+      setState({ key: scope, status: "ready", result });
     } catch (cause) { if (valid(scope, ticket)) failure(cause, scope); }
     finally { if (valid(scope, ticket)) operation.current = null; }
   };
   const check = async (citation?: KnowledgeCitationReference) => {
     const { key: scope, options: config } = current.current, saved = candidate.current;
     if (!scope || !config || saved?.key !== scope || operation.current) return;
-    invalidate(); const ticket = sequence.current, abort = new AbortController(); controller.current = abort;
+    invalidate(); const ticket = sequence.current;
     operation.current = "check"; setState({ key: scope, status: "checking" });
     try {
-      await checkReaderSummaryAccess(config.platform, config.context, abort.signal);
+      await current.current.access.check(Boolean(citation));
       if (!valid(scope, ticket)) return;
       setState({ key: scope, status: "ready", result: saved.result });
       if (citation) config.onCitation(citation);
-    } catch (cause) { if (valid(scope, ticket)) failure(cause, scope); }
+    } catch (cause) {
+      if (valid(scope, ticket)) {
+        if (cause instanceof ReaderAccessInterrupted) setState({ key: scope, status: "ready", result: saved.result });
+        else failure(cause, scope);
+      }
+    }
     finally { if (valid(scope, ticket)) operation.current = null; }
   };
   const latestCheck = useRef(check); latestCheck.current = check;
@@ -98,28 +103,9 @@ export function useReaderOperation<Result, Input>(options: ReaderOperationOption
     };
   }, [key]);
   useEffect(() => {
-    paused.current = document.visibilityState === "hidden" || !visible;
-    const suspend = () => {
-      paused.current = true;
-      if (candidate.current?.key !== key || !key) return;
-      invalidate(); setState({ key, status: "checking" });
-      current.current.options?.onCitation(null);
-    };
-    const resume = () => {
-      if (paused.current && visible && document.visibilityState !== "hidden") {
-        paused.current = false; void latestCheck.current();
-      }
-    };
-    const visibility = () => document.visibilityState === "hidden" || !visible ? suspend() : resume();
-    if (paused.current) suspend();
-    else if (candidate.current?.key === key) void latestCheck.current();
-    window.addEventListener("blur", suspend); window.addEventListener("focus", resume);
-    document.addEventListener("visibilitychange", visibility);
-    return () => {
-      window.removeEventListener("blur", suspend); window.removeEventListener("focus", resume);
-      document.removeEventListener("visibilitychange", visibility);
-    };
-  }, [key, visible]);
+    if (visible && !access.hidden && access.needsCheck && stored.status === "ready"
+      && candidate.current?.key === key) void latestCheck.current();
+  }, [key, visible, access.hidden, access.needsCheck, stored.status]);
   return { state, open, close, navigate: check, retryAfterSeconds: Math.max(0, Math.ceil(((state.retryAt ?? 0) - clock) / 1_000)),
     retry: () => {
       if (state.status !== "error" || !state.retry || (state.retryAt ?? 0) > Date.now()) return;

@@ -87,7 +87,7 @@ export function KnowledgeLibrary({ active, createdDraft, onCreate, onOpenDocumen
     && (!departmentOnly || document.ownerDepartment === "Product Engineering")
     && (documentType === "All types" || document.type === documentType));
   return <>
-    <KnowledgeHeading eyebrow="WORKSPACE / KNOWLEDGE" title="Knowledge, connected."  action={<button type="button" className="primary-button" onClick={onCreate}>Explore sample creation</button>} />
+    <KnowledgeHeading eyebrow="KNOWLEDGE · SAMPLE" title="Home"  action={<button type="button" className="primary-button" onClick={onCreate}>Explore sample creation</button>} />
     {createdDraft && <section className="knowledge-server-draft" aria-labelledby="knowledge-server-draft-title">
       <span className="meta-label knowledge-tone-jade">CREATED ON ARDEN SERVER · NOT PUBLISHED</span>
       <h2 id="knowledge-server-draft-title">{createdDraft.title}</h2>
@@ -105,7 +105,7 @@ export function KnowledgeLibrary({ active, createdDraft, onCreate, onOpenDocumen
     <div className="knowledge-section-heading"><h2>Published documents</h2><span>{filtered.length} accessible sample documents</span></div>
     {filtered.length > 0 ? <IslandTable label="Published knowledge search results" minWidth={820}
       columns="minmax(280px, 2fr) minmax(150px, 1fr) 90px 130px 110px"
-      headers={["DOCUMENT", "OWNER", "VERSION", "EFFECTIVE DATE", "STATUS"]}>
+      headers={["DOCUMENT", "OWNER", "VERSION", "VALID UNTIL", "STATUS"]}>
       {filtered.map((document) => {
         const version = document.versions.find((item) => item.id === document.activeVersionId) ?? document.versions[0];
         return <IslandRow key={document.id}>
@@ -114,8 +114,8 @@ export function KnowledgeLibrary({ active, createdDraft, onCreate, onOpenDocumen
           </button></IslandCell>
           <IslandCell>{document.ownerDepartment}</IslandCell>
           <IslandCell className="island-row-cell is-number">v{version?.label ?? "Current"}</IslandCell>
-          <IslandCell className="island-row-cell is-number">{version ? shortDate(version.effectiveDate) : "Not set"}</IslandCell>
-          <IslandCell><span className={`island-chip knowledge-reader-status is-${(version?.status ?? "EFFECTIVE").toLowerCase()}`}>{version?.status === "UPCOMING" ? "Upcoming" : version?.status === "EXPIRED" ? "Expired" : "Effective"}</span></IslandCell>
+          <IslandCell className="island-row-cell is-number">{document.expirationDate ? shortDate(document.expirationDate) : "No expiry"}</IslandCell>
+          <IslandCell><span className={`island-chip knowledge-reader-status is-${(version?.status ?? "EFFECTIVE").toLowerCase()}`}>{version?.status === "UPCOMING" ? "Upcoming" : version?.status === "EXPIRED" ? "Expired" : "Current"}</span></IslandCell>
         </IslandRow>;
       })}
     </IslandTable> : <div className="knowledge-empty"><h2>No matching publications</h2><p>Try another keyword, document code or owner department.</p><button type="button" className="secondary-button" onClick={() => { setQuery(""); setDepartmentOnly(false); setDocumentType("All types"); }}>Clear filters</button></div>}

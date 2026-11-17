@@ -274,7 +274,7 @@ and native use only the exact scoped Summary routes and fixed bounded deadlines.
 Add bodyless authenticated GET on the publication's `summary/access` subresource,
 using RA-02's existing runtime-RLS exact-source gate. It returns only document/version/
 content-hash identity, calls no model and does not expose source payloads. Recheck
-before revealing a completed panel after window focus/visibility return and before
+before revealing a completed panel after an actual hidden-tab return and before
 source navigation. Withhold points during checks and after failed/denied checks;
 known access loss also closes the human document in the parent. Revalidation failure
 never starts another generation automatically. Unseen remote revocation cannot recall
@@ -290,17 +290,26 @@ the reauthorization rules above. No teammate consultation is claimed.
 
 - Summary and Q&A are mutually exclusive **visible panels**, with separate ephemeral results.
   Switching hides the other panel without discarding its question, result or in-flight request.
-  Returning never automatically generates again; a retained result is withheld until the
-  existing no-model access probe succeeds. An in-flight response completed while hidden is
-  similarly withheld. Only the visible panel checks access on window return.
-- Explicit Close/Escape (or toggling the already-open action off) cancels local waiting and
+  Internal panel/PDF/DOM focus changes do not invalidate the current reader or run a probe.
+  Returning never automatically generates again. After the browser tab was actually hidden,
+  retained results are withheld until one shared no-model access probe succeeds; an in-flight
+  response completed while hidden is similarly withheld. Both panels share that source check.
+- Explicit Close/Escape cancels local waiting and
   discards that panel, leaving the other panel's hidden state intact. Context change, leaving
   the reader, inactive session and unmount still discard both. Retention is limited to this
   mounted reader, not localStorage, a multi-document cache or persisted history.
-- Focus/visibility notifications for one suspension trigger one access check, even if focus
-  arrives after a visible-event check has completed. Blur/return remains fail-closed; this
-  refinement does not introduce a grace period for revoked readers or suppress checks at
-  citation navigation. Failed checks never regenerate; denial closes the parent reader.
+- Only an actual document hidden/visible cycle invalidates the reader's access checkpoint;
+  window blur alone is not a security event. Concurrent source probes join one in-flight
+  check and panel switches do not abort it. Keep the PDF page/citation while checking;
+  denial clears derived results and closes the parent reader. Failed checks never regenerate.
+  Already-selected panel buttons are idempotent; only Close/Escape discards that panel.
+
+Minimal lifecycle refinement, accepted 14 November 2026: after the diagnosed focus/panel
+conflict, the maintainer explicitly approved this replacement of per-panel/blur checking
+and toggle-to-discard. This deliberately stops detecting unseen remote changes on every
+internal panel movement; no instantaneous foreground revocation is claimed. Actual
+hidden-tab return and citation navigation remain fail-closed, as do backend authorization
+before/after AI. No grace-period timer, persistent cache, polling or dependency is added.
 
 Acceptance: round trips call generation once per operation; delayed hidden responses do not
 leak; explicit Close and context changes clear the intended state; denied/offline revalidation
@@ -313,6 +322,17 @@ the old result. The first explicit Summary click in the new session starts a fre
 mere context reactivation never generates automatically. Round-trip identity regressions
 cover both active → inactive → active and version A → B → A.
 
+Local minimal-refinement evidence: shared Reader/access suites pass 62 cases,
+including StrictMode, no blur-only checks, stable citation/PDF object, shared
+pending return checks, known denial and late completion. Root regression passes
+API 401 / 33 environment-gated skips, UI 329, Domain 11, native policy 13 and remote
+16; typecheck and web/API/Electron builds pass. The synthetic browser verifies
+active-button idempotence and immediate Summary/Q&A round trips on web and the
+desktop-bridge simulation. Genuine Electron/native PDF and signed-in staging
+acceptance remain unverified. This refinement is prepared for staging PR review
+on 15 November 2026, not merged or deployed; final review/CI evidence belongs in the PR;
+there is no provider call, new dependency, migration, persistent cache or AI change.
+
 Citation navigation stays in the open exact version, displays the original excerpt,
 uses the trusted source block/section anchor and PDF page when unambiguous. Do not
 claim precise PDF text highlighting with the browser-native PDF viewer; its supported
@@ -320,6 +340,21 @@ behavior is page navigation plus the cited-passage highlight above the source.
 Client wait is bounded at 300 seconds (source preparation plus generation); native
 main derives that deadline from the fixed route, not renderer-selected arbitrary
 timeouts. Close invalidates local waiting and does not promise provider cancellation.
+
+#### Inline citation viewer refinement — 17 November 2026
+
+Published PDF sources now use the pinned PDF.js runtime and its same-build local worker.
+The viewer navigates to a cited page and marks matching text. Rich-text sources use
+source ranges. Display matching tolerates wrapping and typography and can mark only
+the quote opening when it spans pages. This is a best-effort navigation aid, not a
+replacement for server evidence validation or proof that an answer is supported.
+Sentence-to-citation placement without explicit markers is also heuristic.
+
+Review regression tests cover UTF-16 offset mapping, pending-load cleanup and visible
+page-render failure. The loading task is destroyed when its reader closes, including
+before parsing completes. Local synthetic in-app-browser inspection covers a two-page
+PDF, exact passage highlight, zoom and corrupt-file fallback. This does not certify
+genuine Electron, signed-in end-to-end access, scanned PDFs or image understanding.
 
 Acceptance RA-04-A: strict web/native adapters, closed request/response shapes and
 allow-list/method/query/body confusion tests. RA-04-B: user-triggered panel, all
@@ -435,7 +470,7 @@ the reader's document/publication/hash. Query/payload/identity confusion fails c
 | --- | --- |
 | RA-04-A | 88 focused Core source/Summary/client cases, including real Fastify public responses round-tripped through the UI runtime parsers. Client web/native transport contract tests and 11 native-policy tests pass. No arbitrary native timeout or request body/query widening. |
 | RA-04-B | 36 focused UI/adapter cases cover manual generation, loading/errors/unsupported, Retry/Close, Escape/focus, safe text and citation gating. Actual synthetic local browser inspection confirms these states and source navigation. |
-| RA-04-C | Tests discard late generation/access results after context change, dismissal and unmount; ready results/citations are cleared on version change and withheld across blur/visibility return. Completion while blurred stays withheld until revalidation. Real disposable PostgreSQL verifies access identity, cross-organization denial and suspended membership during/after fake generation. |
+| RA-04-C | Tests discard late generation/access results after context change, dismissal and unmount; ready results are withheld across actual hidden-tab return, not internal blur/panel changes under the later accepted refinement. Version change clears results/citations. Real disposable PostgreSQL at this checkpoint verifies access identity, cross-organization denial and suspended membership during/after fake generation. |
 | RA-04-D | Local shared component visually inspected at 1440×1000 and 1024×900; no horizontal overflow at 1024. Text source anchors gain the citation class. PDF object URL gets `#page=2`, with the original passage visible above it. Native PDF rendering was not visible in the in-app browser. Desktop bridge simulation and the Electron build pass, but genuine Electron interaction and signed-in paired-service end-to-end acceptance remain unverified. |
 
 Final root regression: API 338 pass / 26 gated skips, UI 257 pass, Domain 9 pass,
@@ -516,7 +551,7 @@ on Q&A. This does not certify relevance/complete coverage of a large document.
 The initial reader interaction is stateless: each question is standalone. Do not
 silently import previous questions/answers (including pronoun-only follow-ups) as
 evidence. Retry is explicit; dismissal/version switch abandons transient output and
-must not imply provider cancellation. Source clicks and focus return use the shared
+must not imply provider cancellation. Source clicks and actual hidden-tab return use the shared
 read-access probe. Keep the original document and existing Island styling; provide
 Ask this document, question input, Answer, loading/unsupported/error/Retry and Close.
 

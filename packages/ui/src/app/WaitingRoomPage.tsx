@@ -82,7 +82,7 @@ export function WaitingRoomPage({
               )}
               {canSwitchWorkspace && (
                 <button type="button" className="secondary-button" onClick={onSwitchWorkspace}>
-                  Switch workspace
+                  Switch or create workspace
                 </button>
               )}
               {onSignOut && (

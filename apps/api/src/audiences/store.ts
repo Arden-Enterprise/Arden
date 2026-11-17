@@ -171,7 +171,23 @@ export class PgAudienceGroupStore implements AudienceGroupStore {
       if (group.status !== "ACTIVE") throw new AudienceGroupError("AUDIENCE_GROUP_UNAVAILABLE");
       const member = await client.query(`SELECT 1 FROM organization_membership om
         JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-        WHERE om.membership_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`,
+        WHERE om.membership_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'
+          AND (EXISTS (
+            SELECT 1 FROM department_membership dm
+            JOIN department d ON d.department_id = dm.department_id
+            WHERE dm.membership_id = om.membership_id AND dm.is_primary AND dm.status = 'ACTIVE'
+              AND d.organization_id = om.organization_id AND d.status = 'ACTIVE'
+          ) OR EXISTS (
+            SELECT 1 FROM role_assignment ra
+            JOIN role r ON r.role_id = ra.role_id
+            JOIN access_scope s ON s.access_scope_id = ra.access_scope_id
+            WHERE ra.membership_id = om.membership_id AND ra.status = 'ACTIVE'
+              AND ra.valid_from <= now() AND (ra.valid_until IS NULL OR ra.valid_until > now())
+              AND r.code = 'ORG_ADMIN' AND r.organization_id IS NULL
+              AND r.is_system AND r.status = 'ACTIVE'
+              AND s.organization_id = om.organization_id AND s.scope_type = 'ORGANIZATION'
+              AND s.status = 'ACTIVE'
+          ))`,
       [membershipId, organizationId]);
       if (!member.rowCount) throw new AudienceGroupError("AUDIENCE_GROUP_UNAVAILABLE");
       let groupMembershipId: string;

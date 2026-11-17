@@ -405,6 +405,17 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     }
   });
 
+  it("rejects adding an active member without a primary department to a reader group", async () => {
+    if (!repository) throw new Error("Test database is unavailable");
+    await expect(repository.audienceGroups.addMember(ids.owner, ids.organization, ids.readerAudience,
+      ids.organizationReviewerMembership, "unassigned-reader-group-test"))
+      .rejects.toMatchObject({ code: "AUDIENCE_GROUP_UNAVAILABLE" });
+    const groups = await repository.audienceGroups.list(ids.owner, ids.organization);
+    expect(groups.find(group => group.id === ids.readerAudience)?.members
+      .some(member => member.membershipId === ids.organizationReviewerMembership && member.status === "ACTIVE"))
+      .toBe(false);
+  });
+
   it("keeps organization and department reviewer scopes disjoint and exposes grant availability", async () => {
     if (!repository || !pool) throw new Error("Test database is unavailable");
 

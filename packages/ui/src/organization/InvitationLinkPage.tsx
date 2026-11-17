@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements } from "@arden/domain";
 import { AuthLayout } from "../sign-in/AuthLayout";
 import { NewPasswordField, accountPasswordRequirementMessage } from "../sign-in/NewPasswordField";
+import { VisiblePasswordField } from "../sign-in/VisiblePasswordField";
 import {
   acceptInvitation,
   ApiError,
@@ -120,6 +121,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
 
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    setEmail(email.trim());
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setError("Enter a valid email address.");
       setBusy(false);
@@ -163,6 +165,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
 
   const handleSignUp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    setEmail(email.trim());
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setError("Enter a valid email address.");
       setBusy(false);
@@ -193,7 +196,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
         ? `${window.location.origin}/invite/${encodeURIComponent(token)}`
         : undefined;
       await signUp(platform, email.trim(), password, fullName.trim(), redirectTo);
-      setMessage("Check your email to continue.");
+      setMessage("If email confirmation is required, check your inbox. Otherwise, sign in to accept the invitation.");
       setMode("sign-in");
       setPassword("");
     } catch (cause) {
@@ -408,6 +411,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       placeholder="name@company.com"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
+                      onBlur={(event) => setEmail(event.target.value.trim())}
                     />
                     {invitation && email.trim() && email.trim().toLowerCase() !== invitation.email.toLowerCase() && (
                       <span style={{ color: "#f0b0a5", fontSize: "11px", marginTop: "4px" }}>
@@ -415,18 +419,8 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       </span>
                     )}
                   </label>
-                  <label>
-                    <span>Password</span>
-                    <input
-                      autoComplete="current-password"
-                      type="password"
-                      required
-                      maxLength={accountPasswordMaximumLength}
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                    />
-                  </label>
+                  <VisiblePasswordField label="Password" value={password} onChange={setPassword}
+                    autoComplete="current-password" placeholder="Enter your password" />
                   <button type="submit" className="auth-primary" disabled={busy}>
                     {busy ? "Signing in and accepting…" : "Sign in and accept invitation"}
                   </button>
@@ -455,6 +449,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       placeholder="name@company.com"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
+                      onBlur={(event) => setEmail(event.target.value.trim())}
                     />
                     {invitation && email.trim() && email.trim().toLowerCase() !== invitation.email.toLowerCase() && (
                       <span style={{ color: "#f0b0a5", fontSize: "11px", marginTop: "4px" }}>

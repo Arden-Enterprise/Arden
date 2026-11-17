@@ -1,5 +1,18 @@
 # Implementation status and rollout boundaries
 
+## Minimal reader lifecycle refinement — review preparation, 15 November 2026
+
+After the focus/panel diagnosis, the maintainer approved the
+[minimal Reader AI refinement](reader-ai.md#ra-0405-refinement-switching-panels-is-not-close-accepted-14-november-2026).
+One exact-reader access session is shared by Summary/Q&A. Internal panel changes,
+PDF/DOM focus and repeated active-panel selection do not recheck/discard results;
+actual hidden-tab return and citation navigation still validate current access.
+Close/context changes clear transient results; known denial remains fail-closed.
+PDF page/citation is no longer cleared on blur or a temporary check failure.
+Prepared for a PR targeting staging; not merged or deployed. No backend/AI/DB/
+dependency change or paid call. The final review/CI checkpoint belongs in the PR.
+Genuine Electron/native PDF and signed-in staging acceptance remain separate.
+
 ## Summary reliability — local follow-up, 14 November 2026
 
 The accepted [SR-1–SR-5 refinement](reader-ai.md#summary-reliability-refinement--accepted-14-november-2026)

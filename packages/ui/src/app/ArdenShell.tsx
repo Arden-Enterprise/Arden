@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppSidebar } from "./AppSidebar";
 import { MobileTabIsland } from "./MobileTabIsland";
 import { KnowledgePane } from "./KnowledgePane";
-import { MyWorkPage } from "../my-work/MyWorkPage";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
 import { SignInPage } from "../sign-in/SignInPage";
 import { clearRecoveryTokens, readRecoveryTokens, storeRecoveryTokens } from "../sign-in/recovery-session";
@@ -58,20 +57,6 @@ const initialNotes: PrivateNote[] = [
 ];
 
 const paneContent: Record<WorkspaceView, PaneContent> = {
-  "my-work": {
-    eyebrow: "ACTIVE CONTEXT",
-    title: "Today’s priorities",
-    description:
-      "3 sample tasks need action, 5 reviews are waiting and one handover is at risk.",
-    suggestions: [
-      "Prioritize overdue tasks",
-      "Summarize pending handovers",
-      "Explain today’s access alerts",
-    ],
-    boundaryTitle: "Authorized review scope",
-    boundaryBody:
-      "When the APIs are connected, this view must be limited to assigned review content and company-wide published knowledge. Private documents remain excluded.",
-  },
   "ask-arden": {
     eyebrow: "ASK ARDEN CONTEXT",
     title: "Published knowledge only",
@@ -99,7 +84,7 @@ const paneContent: Record<WorkspaceView, PaneContent> = {
     boundaryBody: "Demo · Temporary changes",
   },
   "knowledge": {
-    eyebrow: "KNOWLEDGE CONTEXT", title: "Your shared library",
+    eyebrow: "KNOWLEDGE CONTEXT", title: "Home",
     description: "Explore clearly labeled sample records and any draft created in this session.",
     suggestions: ["Inspect the source version", "Review the intended audience"],
     boundaryTitle: "Shared knowledge", boundaryBody: "Sample records only. Real results must be selected by server-authorized scope.",
@@ -223,8 +208,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [pendingMemberEntry, setPendingMemberEntry] = useState<string | null>(null);
   const [organization, setOrganization] = useState<OrganizationPreview | null>(null);
   const [organizationDirty, setOrganizationDirty] = useState(false);
+  const [knowledgeDirty, setKnowledgeDirty] = useState(false);
   const [invitationBatchSending, setInvitationBatchSending] = useState(false);
-  const [activeView, setActiveView] = useState<WorkspaceView>("my-work");
+  const [activeView, setActiveView] = useState<WorkspaceView>("knowledge");
   const privateNotes = usePrivateNotes(initialNotes);
   const [contextOpen, setContextOpen] = useState(false);
   const [navOpen, setNavOpen] = useState(false);
@@ -235,7 +221,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
   const shellRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | null>(null);
+  const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | "workspace-select" | null>(null);
   const [serverSession, setServerSession] = useState<CurrentSession | null>(null);
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
   const [createdKnowledgeDraft, setCreatedKnowledgeDraft] = useState<CreatedKnowledgeDraft | null>(null);
@@ -260,8 +246,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setKnowledgeCitationTarget(null);
     setOrganization(null);
     setPreviewRole(null);
-    const isUnassigned = !membership.departmentId && !membership.canUsePrivateWorkspace;
-    setActiveView(isUnassigned ? "my-work" : "personal-workspace");
+    setActiveView("knowledge");
     setEntryView("workspace");
     if (membership.canUsePrivateWorkspace) {
       void privateNotes.connectServer(platform, membership.organization.id);
@@ -293,9 +278,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (recoveryTokens) {
       setRecoveryTokens(null);
     }
-    const allowed = current.memberships.filter((membership) => membership.status === "active");
-    if (allowed.length === 1) enterServerOrganization(allowed[0]);
-    else setEntryView("workspace-select");
+    setEntryView("workspace-select");
   };
 
   useEffect(() => {
@@ -386,7 +369,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setPreviewRole(member?.role === "Organization Admin" ? "admin" : "member");
     setPreviewMemberId(memberId);
     if (memberId !== previewMemberId) privateNotes.reset([]);
-    setActiveView("my-work");
+    setActiveView("knowledge");
     setKnowledgeCitationTarget(null);
     setEntryView("workspace");
     setPendingMemberEntry(null);
@@ -407,7 +390,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setEntryView("sign-in");
     setOrganization(null);
     setOrganizationDirty(false);
-    setActiveView("my-work");
+    setActiveView("knowledge");
+    setKnowledgeDirty(false);
     privateNotes.reset();
     setInvitationId("");
     setAccessMemberId("");
@@ -515,19 +499,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           await apiCreateOrganization(platform, name, departmentName);
           await acceptServerSession(await currentSession(platform));
         }}
-        onBack={() => {
-          void apiSignOut(platform).catch(() => undefined);
-          setServerSession(null);
-          privateNotes.reset();
-          setEntryView("sign-in");
-        }}
+        onBack={finishSignOut}
         onContinue={(organizationId) => {
           const membership = serverSession.memberships.find((item) => item.organization.id === organizationId);
           if (membership) enterServerOrganization(membership);
         }}
       />;
     }
-    return <WorkspaceSelectPage organizationName={organization?.name ?? "FPT Digital"} onBack={() => { setPreviewRole(null); setOrganization(null); privateNotes.reset(); setEntryView("sign-in"); }} onContinue={() => { setActiveView("my-work"); setEntryView("workspace"); }} />;
+    return <WorkspaceSelectPage organizationName={organization?.name ?? "FPT Digital"} onBack={() => { setPreviewRole(null); setOrganization(null); privateNotes.reset(); setEntryView("sign-in"); }} onContinue={() => { setActiveView("knowledge"); setEntryView("workspace"); }} />;
   }
 
   /**
@@ -591,11 +570,33 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       setIslandToast({ message: "Wait for invitations to finish before signing out.", onDismiss: () => setIslandToast(null) });
       return;
     }
-    if (organizationDirty || privateNotes.hasUnsavedDrafts) {
+    if (organizationDirty || knowledgeDirty || privateNotes.hasUnsavedDrafts) {
       setPendingAction("exit");
       return;
     }
     finishSignOut();
+  };
+
+  const showWorkspaceSelector = () => {
+    setKnowledgeDirty(false);
+    setServerOrganizationId(null);
+    setContributionAttempt(null);
+    privateNotes.reset();
+    setNavOpen(false);
+    setContextOpen(false);
+    setEntryView("workspace-select");
+  };
+
+  const openWorkspaceSelector = () => {
+    if (invitationBatchSending) {
+      setIslandToast({ message: "Wait for invitations to finish before switching workspaces.", onDismiss: () => setIslandToast(null) });
+      return;
+    }
+    if (organizationDirty || knowledgeDirty || privateNotes.hasUnsavedDrafts) {
+      setPendingAction("workspace-select");
+      return;
+    }
+    showWorkspaceSelector();
   };
 
   const contextControl = { contextOpen, onToggleContext: () => { setNavOpen(false); setContextOpen((open) => !open); } };
@@ -626,7 +627,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   return (
     <WorkspaceNavigationContext.Provider value={{ open: navOpen, setOpen: setNavOpen }}>
     <StatusIslandContext.Provider value={{ toast: islandToast, setToast: setIslandToast, confirm: islandConfirm, setConfirm: setIslandConfirm }}>
-    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${navCollapsed ? " is-nav-collapsed" : ""}${activeView === "my-work" ? " is-my-work" : ""}`}>
+    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${navCollapsed ? " is-nav-collapsed" : ""}`}>
       <a className="skip-link" href="#arden-main">Skip to content</a>
       <AppSidebar
         activeView={activeView}
@@ -642,16 +643,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined}
-        canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
+        canSwitchWorkspace={Boolean(serverSession)}
         collapsed={navCollapsed}
         onToggleCollapsed={() => setNavCollapsed((collapsed) => !collapsed)}
-        onSwitchWorkspace={() => {
-          if (invitationBatchSending) {
-            setIslandToast({ message: "Wait for invitations to finish before switching workspaces.", onDismiss: () => setIslandToast(null) });
-            return;
-          }
-          setNavOpen(false); setContextOpen(false); setEntryView("workspace-select");
-        }}
+        onSwitchWorkspace={openWorkspaceSelector}
         onCloseNavigation={() => setNavOpen(false)}
         onNavigate={navigate}
         onSignOut={signOut}
@@ -670,8 +665,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           <WaitingRoomPage
             organizationName={activeMembership?.organization.name ?? "Organization"}
             memberEmail={serverSession?.actor.email ?? ""}
-            canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
-            onSwitchWorkspace={() => { setNavOpen(false); setContextOpen(false); setEntryView("workspace-select"); }}
+            canSwitchWorkspace={Boolean(serverSession)}
+            onSwitchWorkspace={openWorkspaceSelector}
             onRefresh={() => {
               void restoreSession(platform).then((current) => {
                 if (current) acceptServerSession(current);
@@ -681,10 +676,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
             onSignOut={signOut}
             {...contextControl}
           />
-        ) : activeView === "my-work" ? (
-          <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
         ) : activeView === "organization-access" && serverOrganizationId && activeMembership && liveAdmin ? (
-          <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} onSendingInvitationsChange={(sending) => { setInvitationBatchSending(sending); if (!sending) setIslandToast(null); }} {...contextControl} />
+          <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} onOpenKnowledgeLibrary={() => navigate("knowledge")} onSendingInvitationsChange={(sending) => { setInvitationBatchSending(sending); if (!sending) setIslandToast(null); }} {...contextControl} />
         ) : activeView === "organization-access" && organization && previewRole === "admin" ? (
           <OrganizationAccessPage organization={organization} onChange={setOrganization} onDirtyChange={setOrganizationDirty} onOpenSetup={() => { if (organizationDirty) setPendingAction("setup"); else setEntryView("setup"); }} onPreviewInvitation={(id) => { setInvitationId(id); setEntryView("invitation"); }} onPreviewAccess={(id) => { setAccessMemberId(id); setEntryView("access"); }} {...contextControl} />
         ) : activeView === "personal-workspace" ? (
@@ -698,7 +691,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           departmentName={activeMembership ? "Personal contribution" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
           createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
           citationTarget={knowledgeCitationTarget}
-          onAssignedReviewCount={setAssignedReviewCount}
+          onAssignedReviewCount={setAssignedReviewCount} awaitingAssignment={isUnassignedMember}
+          onDirtyChange={setKnowledgeDirty}
           onNavigate={navigate} {...contextControl} />
       </div>
       </ErrorBoundary>
@@ -729,6 +723,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           onDiscard={() => {
             if (pendingAction === "exit") finishSignOut();
             else if (pendingAction === "setup") { setOrganizationDirty(false); setEntryView("setup"); }
+            else if (pendingAction === "workspace-select") {
+              setOrganizationDirty(false);
+              showWorkspaceSelector();
+            }
             else {
               setOrganizationDirty(false);
               setActiveView(pendingAction);

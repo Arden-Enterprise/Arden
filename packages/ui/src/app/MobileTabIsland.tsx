@@ -11,8 +11,8 @@ export function MobileTabIsland({ activeView, authenticated, assignedReviewCount
   onNavigate: (view: WorkspaceView) => void;
 }) {
   const items: NavigationItem[] = [
-    ...workNavigation.filter((item) => item.view === "my-work" || item.view === "ask-arden" || item.view === "personal-workspace"),
-    ...knowledgeNavigation.filter((item) => item.view === "knowledge" || item.view === "review-queue"),
+    ...workNavigation,
+    ...knowledgeNavigation.filter((item) => item.view === "review-queue"),
   ];
   return <nav className="mobile-tab-island" aria-label="Primary">
     {items.map((item) => {

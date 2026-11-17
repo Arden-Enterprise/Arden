@@ -32,7 +32,8 @@
 .km-release { padding: 1px 5px; border-radius: 3px; color: var(--arden-violet); background: var(--arden-surface-hover); font-size: 10px; }
 .km-applicability { color: var(--arden-text-secondary); font-size: 12px; }
 .km-applicability.is-upcoming { color: var(--arden-violet); }
-.km-applicability.is-expired { color: var(--arden-warning); }
+.km-applicability.is-expired, .km-applicability.is-expiring-soon { color: var(--arden-warning); }
+.km-no-expiry { color: var(--arden-text-muted); }
 .km-catalog { padding: 22px; }
 .km-catalog-layout { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(0, 2.5fr); gap: 30px; }
 .km-catalog-nav { padding-right: 22px; border-right: 1px solid var(--arden-border); }

@@ -12,6 +12,7 @@ import {
 } from "../shared/api-client";
 import { AuthLayout } from "./AuthLayout";
 import { NewPasswordField, accountPasswordRequirementMessage } from "./NewPasswordField";
+import { VisiblePasswordField } from "./VisiblePasswordField";
 
 export type SignInMode = "sign-in" | "register" | "forgot-password" | "check-email" | "reset-password";
 
@@ -146,7 +147,9 @@ export function SignInPage({
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isValidEmail(email)) {
+    const normalizedEmail = email.trim();
+    setEmail(normalizedEmail);
+    if (!isValidEmail(normalizedEmail)) {
       setNotice({ text: "Enter a valid email address." });
       return;
     }
@@ -161,10 +164,10 @@ export function SignInPage({
     setBusy("submit");
     setNotice(null);
     try {
-      await onAuthenticated(await signIn(platform, email.trim(), password));
+      await onAuthenticated(await signIn(platform, normalizedEmail, password));
     } catch (error) {
       if (error instanceof ApiError && error.code === "EMAIL_NOT_CONFIRMED") {
-        setUnconfirmedEmail(email.trim());
+        setUnconfirmedEmail(normalizedEmail);
         setNotice({ text: "Check your email to verify your account." });
       } else {
         setNotice({ text: error instanceof Error ? error.message : "Sign in could not be completed." });
@@ -177,7 +180,9 @@ export function SignInPage({
 
   const handleSignUp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isValidEmail(email)) {
+    const normalizedEmail = email.trim();
+    setEmail(normalizedEmail);
+    if (!isValidEmail(normalizedEmail)) {
       setNotice({ text: "Enter a valid email address." });
       return;
     }
@@ -196,9 +201,9 @@ export function SignInPage({
     setBusy("submit");
     setNotice(null);
     try {
-      await signUp(platform, email.trim(), password, fullName.trim());
+      await signUp(platform, normalizedEmail, password, fullName.trim());
       setNotice({
-        text: "Check your email to continue.",
+        text: "If email confirmation is required, check your inbox. Otherwise, sign in to continue.",
         isSuccess: true,
       });
       setMode("sign-in");
@@ -224,14 +229,16 @@ export function SignInPage({
 
   const handleForgotPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isValidEmail(email)) {
+    const normalizedEmail = email.trim();
+    setEmail(normalizedEmail);
+    if (!isValidEmail(normalizedEmail)) {
       setNotice({ text: "Enter a valid email address." });
       return;
     }
     setBusy("submit");
     setNotice(null);
     try {
-      await requestPasswordReset(platform, email.trim());
+      await requestPasswordReset(platform, normalizedEmail);
       setMode("check-email");
     } catch (cause) {
       setNotice({
@@ -322,24 +329,15 @@ export function SignInPage({
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
+                    onBlur={(event) => setEmail(event.target.value.trim())}
                     autoComplete="username"
                     placeholder="name@company.com"
                     maxLength={320}
                     required
                   />
                 </label>
-                <label>
-                  <span>Password</span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete="current-password"
-                    placeholder="Enter your password"
-                    maxLength={accountPasswordMaximumLength}
-                    required
-                  />
-                </label>
+                <VisiblePasswordField label="Password" value={password} onChange={setPassword}
+                  autoComplete="current-password" placeholder="Enter your password" />
                 <button type="submit" className="auth-primary" disabled={busy !== null}>
                   {busy === "submit" ? "Signing in..." : "Sign in"}
                 </button>
@@ -385,6 +383,7 @@ export function SignInPage({
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
+                    onBlur={(event) => setEmail(event.target.value.trim())}
                     autoComplete="username"
                     placeholder="name@company.com"
                     maxLength={320}
@@ -420,6 +419,7 @@ export function SignInPage({
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
+                    onBlur={(event) => setEmail(event.target.value.trim())}
                     autoComplete="email"
                     placeholder="name@company.com"
                     maxLength={320}
@@ -446,7 +446,7 @@ export function SignInPage({
             <>
               <h1 id="auth-title" ref={checkEmailHeading} tabIndex={-1}>Check your email</h1>
               <div className="auth-message is-success" role="status">
-                If an account with this email exists, check your inbox for a password reset link. Open it to set a new password.
+                If an account with this email exists, check your inbox for a password reset link. Open it to set a new password. Another link may take time.
               </div>
               <button type="button" className="auth-primary" onClick={() => switchMode("forgot-password")}>Send another link</button>
               <div className="auth-footer-links">
@@ -473,32 +473,10 @@ export function SignInPage({
                 </>
               ) : (
                 <form noValidate onSubmit={handleResetPassword}>
-                  <label>
-                    <span>New password</span>
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      autoComplete="new-password"
-                      placeholder="Enter new password (min. 8 characters)"
-                      minLength={8}
-                      maxLength={accountPasswordMaximumLength}
-                      required
-                    />
-                  </label>
-                  <label>
-                    <span>Confirm new password</span>
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(event) => setConfirmPassword(event.target.value)}
-                      autoComplete="new-password"
-                      placeholder="Confirm new password"
-                      minLength={8}
-                      maxLength={accountPasswordMaximumLength}
-                      required
-                    />
-                  </label>
+                  <VisiblePasswordField label="New password" value={password} onChange={setPassword}
+                    autoComplete="new-password" placeholder="Enter new password (min. 8 characters)" minLength={8} />
+                  <VisiblePasswordField label="Confirm new password" value={confirmPassword} onChange={setConfirmPassword}
+                    autoComplete="new-password" placeholder="Confirm new password" minLength={8} />
                   <button type="submit" className="auth-primary" disabled={busy !== null}>
                     {busy === "submit" ? "Updating password..." : "Update password"}
                   </button>

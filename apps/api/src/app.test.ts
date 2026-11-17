@@ -378,10 +378,11 @@ describe("API auth and private draft routes", () => {
     const signup = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-up",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "fresh@example.test", password: "Secure-password1!", fullName: "New User" },
+      payload: { email: " fresh@example.test ", password: "Secure-password1!", fullName: "New User" },
     });
     expect(signup.statusCode).toBe(202);
     expect(signup.json()).toEqual(conflict.json());
+    expect(authProvider.lastSignUpCredentials?.email).toBe("fresh@example.test");
 
     authProvider.signUpBehavior = "rejected";
     const rejected = await app.inject({
@@ -419,11 +420,60 @@ describe("API auth and private draft routes", () => {
     });
   });
 
+  it("rejects a whitespace-only account name before requesting provider sign-up", async () => {
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-up",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "fresh@example.test", password: "Secure-password1!", fullName: "   " },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toMatchObject({ code: "INVALID_FULL_NAME", message: "Enter your name." });
+    expect(authProvider.lastSignUpCredentials).toBeNull();
+  });
+
+  it("trims surrounding email whitespace but rejects whitespace inside an address", async () => {
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "  OWNER@EXAMPLE.TEST  ", password: "synthetic-password" },
+    });
+    expect(response.statusCode).toBe(200);
+    const session = await app.inject({ method: "GET", url: "/api/v1/me",
+      headers: { cookie: cookieHeader(response.headers["set-cookie"]) } });
+    expect(session.json().actor.email).toBe("owner@example.test");
+    const internalSpace = await app.inject({
+      method: "POST", url: "/api/v1/auth/sign-in",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner @example.test", password: "synthetic-password" },
+    });
+    expect(internalSpace.statusCode).toBe(400);
+    expect(internalSpace.json().error.code).toBe("INVALID_EMAIL");
+  });
+
+  it.each(["sign-in", "sign-up", "forgot-password", "invitation"])("rejects malformed email domains before %s side effects", async (route) => {
+    const cookie = await desktopSession(app, "owner@example.test");
+    const signIn = vi.spyOn(authProvider, "signIn"), signUp = vi.spyOn(authProvider, "signUp");
+    const recover = vi.spyOn(authProvider, "resetPasswordForEmail"), invite = vi.spyOn(repository, "createInvitation");
+    for (const email of ["user@example..test", "user@.example.test", "user@example.test.", "user@-example.test", "user@example-.test", "user@exam_ple.test"]) {
+      const response = await app.inject({ method: "POST",
+        url: route === "invitation" ? `/api/v1/organizations/${organizationId}/invitations` : `/api/v1/auth/${route}`,
+        headers: { cookie, origin: "http://localhost:5180" },
+        payload: { email: ` ${email} `, ...(route === "sign-in" || route === "sign-up" ? { password: "Synthetic-password!" } : {}),
+          ...(route === "sign-up" ? { fullName: "Synthetic member" } : {}) },
+      });
+      expect(response.statusCode, email).toBe(400);
+      expect(response.json().error.code).toBe("INVALID_EMAIL");
+    }
+    expect(signIn).not.toHaveBeenCalled(); expect(signUp).not.toHaveBeenCalled();
+    expect(recover).not.toHaveBeenCalled(); expect(invite).not.toHaveBeenCalled();
+    expect(invitationMailer.sent).toHaveLength(0);
+  });
+
   it("sends a recovery link and accepts only its verified browser session", async () => {
     const forgot = await app.inject({
       method: "POST", url: "/api/v1/auth/forgot-password",
       headers: { origin: "http://localhost:5180" },
-      payload: { email: "owner@example.test" },
+      payload: { email: " owner@example.test " },
     });
     expect(forgot.statusCode).toBe(202);
     expect(forgot.json().status).toBe("recovery_sent");
@@ -503,6 +553,43 @@ describe("API auth and private draft routes", () => {
     expect(reusedLink.statusCode).toBe(401);
     expect(reusedLink.json().error.code).toBe("INVALID_TOKEN");
     expect(reusedLink.json().error.message).toBe("The reset link has already been used.");
+  });
+
+  it("keeps recovery cooldown responses indistinguishable from successful requests", async () => {
+    const request = {
+      method: "POST" as const, url: "/api/v1/auth/forgot-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test" },
+    };
+    const firstResponse = await app.inject(request);
+    authProvider.resetFailure = "RESET_RATE_LIMITED";
+    const cooldownResponse = await app.inject(request);
+    expect(firstResponse.statusCode).toBe(202);
+    expect(cooldownResponse.statusCode).toBe(202);
+    expect(cooldownResponse.json()).toEqual(firstResponse.json());
+  });
+
+  it("keeps provider client rejections non-enumerating", async () => {
+    authProvider.resetFailure = "RESET_REQUEST_REJECTED";
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/forgot-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test" },
+    });
+    expect(response.statusCode).toBe(202);
+    expect(response.json().status).toBe("recovery_sent");
+  });
+
+  it("uses recovery-specific wording for provider outages", async () => {
+    authProvider.resetFailure = "SUPABASE_AUTH_UNAVAILABLE";
+    const response = await app.inject({
+      method: "POST", url: "/api/v1/auth/forgot-password",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email: "owner@example.test" },
+    });
+    expect(response.statusCode).toBe(503);
+    expect(response.json().error).toMatchObject({ code: "RESET_UNAVAILABLE",
+      message: "A reset link could not be requested right now. Try again later." });
   });
 
   it("rejects a recovery proof after its ten-minute lifetime", async () => {
@@ -790,7 +877,7 @@ describe("API auth and private draft routes", () => {
     const created = await app.inject({
       method: "POST", url: `/api/v1/organizations/${organizationId}/invitations`,
       headers: { cookie: adminSession, origin: "http://localhost:5180" },
-      payload: { email: "New.Member@Example.Test" },
+      payload: { email: " New.Member@Example.Test " },
     });
     expect(created.statusCode).toBe(202);
     expect(JSON.stringify(created.json())).not.toContain("token");
@@ -2059,6 +2146,7 @@ class FakeAuthProvider implements AuthProvider {
   signUpBehavior: "success" | "already_exists" | "rejected" = "success";
   lastResetEmail: string | null = null;
   lastResetRedirectTo: string | null = null;
+  resetFailure: string | null = null;
   lastUpdatedPassword: { token: string; password: string } | null = null;
   lastSignUpCredentials: SupabaseSignUp | null = null;
   rotatedSession: { accessToken: string; refreshToken: string; expiresIn: number } | null = null;
@@ -2114,6 +2202,7 @@ class FakeAuthProvider implements AuthProvider {
   }
 
   async resetPasswordForEmail(email: string, redirectTo?: string) {
+    if (this.resetFailure) throw new Error(this.resetFailure);
     this.lastResetEmail = email;
     this.lastResetRedirectTo = redirectTo ?? null;
   }

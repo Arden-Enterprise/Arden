@@ -10,6 +10,7 @@ export const iconGlyphs = {
   lock: "\uf8d5",
   logout: "\ufc0c",
   plus: "\ufaac",
+  minus: "\uf94e",
   search: "\ufbba",
   work: "\uf2e9",
   chat: "\uf4a1",
@@ -38,6 +39,8 @@ export const iconGlyphs = {
   "arrow-up": "\uf19f",
   download: "\uf591",
   "open-external": "\uf1b3",
+  home: "\uf7b8",
+  flag: "\uf695",
 } as const;
 
 export type IconName = keyof typeof iconGlyphs;
