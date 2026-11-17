@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ApiError, saveKnowledgeCatalogEntry, type KnowledgeCatalog, type KnowledgeCatalogEntry,
   type KnowledgeCatalogWrite, type KnowledgeCollection, type PublishedKnowledge } from "../shared/api-client";
 import type { Platform } from "../shared/types";
@@ -10,9 +10,10 @@ import productionCover from "../assets/knowledge/production-handbook.png";
 export const knowledgeCovers = { handbook: handbookCover, production: productionCover };
 const blank = (): KnowledgeCatalogWrite => ({ name: "", description: "", status: "ACTIVE" });
 
-export function KnowledgeCatalogEditor({ platform, organizationId, catalog, publications, onSaved, onClose }: {
+export function KnowledgeCatalogEditor({ platform, organizationId, catalog, publications, onSaved, onClose,
+  backLabel = "Back to Library", onDirtyChange }: {
   platform: Platform; organizationId: string; catalog: KnowledgeCatalog; publications: PublishedKnowledge[];
-  onSaved: () => Promise<void>; onClose: () => void;
+  onSaved: () => Promise<void>; onClose: () => void; backLabel?: string; onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [kind, setKind] = useState<"topics" | "collections">("topics");
   const [entry, setEntry] = useState<KnowledgeCatalogEntry | null>(null);
@@ -23,6 +24,8 @@ export function KnowledgeCatalogEditor({ platform, organizationId, catalog, publ
   const [search, setSearch] = useState("");
   const [discard, setDiscard] = useState<(() => void) | null>(null);
   const dirty = JSON.stringify(value) !== baseline;
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
   const guard = (action: () => void) => { if (dirty) setDiscard(() => action); else action(); };
   const select = (nextKind: typeof kind, next: KnowledgeCatalogEntry | null) => guard(() => {
     const collection = next as KnowledgeCollection | null;
@@ -43,7 +46,7 @@ export function KnowledgeCatalogEditor({ platform, organizationId, catalog, publ
   return <section className="island km-catalog" aria-labelledby="km-catalog-title">
     <header className="km-section-heading"><div><h2 id="km-catalog-title">Manage catalog</h2>
       <p>Organize knowledge without changing who can read it.</p></div>
-      <button className="secondary-button" type="button" disabled={busy} onClick={() => guard(onClose)}>Back to Library</button></header>
+      <button className="secondary-button" type="button" disabled={busy} onClick={() => guard(onClose)}>{backLabel}</button></header>
     <div className="km-catalog-layout">
       <nav className="km-catalog-nav" aria-label="Catalog items">
         {(["topics", "collections"] as const).map(group => <section key={group}>

@@ -42,9 +42,9 @@ function DocumentRegister({ items, onOpen, recent = false }: { items: PublishedK
   </IslandTable>;
 }
 
-export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, filters, onFilters, discover, onBrowse, onOpen, onManage }: {
+export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, filters, onFilters, discover, onBrowse, onOpen }: {
   items: PublishedKnowledge[]; catalog: KnowledgeCatalog | null; catalogError: string; query: string; filters: LibraryFilters;
-  onFilters: (filters: LibraryFilters) => void; discover: boolean; onBrowse: () => void; onOpen: (id: string) => void; onManage: () => void;
+  onFilters: (filters: LibraryFilters) => void; discover: boolean; onBrowse: () => void; onOpen: (id: string) => void;
 }) {
   const filtered = filterLibrary(items, catalog, query, filters);
   const owners = [...new Map(items.map(item => [item.responsibleDepartmentId, item.responsibleDepartmentName ?? "Unknown department"])).entries()]
@@ -60,11 +60,10 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
           <Icon name={type === "Policy & Standard" ? "shield" : type === "Procedure" ? "layers" : type === "Guide" ? "knowledge" : type === "Reference" ? "document" : "chat"} size={20} />
           <strong>{type}</strong><span>{items.filter(item => item.management?.type === type).length}</span></button>)}
       </div></section>
-      <section aria-labelledby="km-topics"><header className="km-section-heading"><h2 id="km-topics">Topics</h2>
-        {catalog?.canManage && <button className="km-text-button" type="button" onClick={onManage}>Manage catalog <Icon name="sliders" size={13} /></button>}</header>
+      <section aria-labelledby="km-topics"><header className="km-section-heading"><h2 id="km-topics">Topics</h2></header>
         <div className="km-topics">{catalog?.topics.filter(topic => topic.status === "ACTIVE").map(topic => <button key={topic.id} type="button" onClick={() => browseWith({ topicId: topic.id })}>
           <span>{topic.name}</span><small>{items.filter(item => item.management?.topicId === topic.id).length}</small><Icon name="chevron" size={12} /></button>)}</div>
-        {!catalogError && !catalog?.topics.some(topic => topic.status === "ACTIVE") && <p className="km-empty-inline">No topics yet.{catalog?.canManage ? " Add one in Manage catalog." : ""}</p>}
+        {!catalogError && !catalog?.topics.some(topic => topic.status === "ACTIVE") && <p className="km-empty-inline">No topics yet. Org Admins add Topics in Administration → Topics.</p>}
       </section>
       <section aria-labelledby="km-collections"><header className="km-section-heading"><div><h2 id="km-collections">Collections</h2><p>Curated documents, brought together.</p></div></header>
         <div className="km-collections">{collections.map(collection => <button className="km-collection" type="button" key={collection.id} onClick={() => browseWith({ collectionId: collection.id })}>

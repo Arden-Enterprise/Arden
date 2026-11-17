@@ -23,7 +23,6 @@ import { ReviewList, initialsOf } from "./ReviewList";
 import { reviewRequestPresentation } from "./reviewRequest";
 import { libraryDateLabel } from "./libraryDisplay";
 import { ownerDepartment } from "./readerSelection";
-import { KnowledgeCatalogEditor } from "./KnowledgeCatalogEditor";
 import { KnowledgeLibraryBrowse, emptyLibraryFilters } from "./KnowledgeLibraryBrowse";
 import { KnowledgeMetadataFields, editableKnowledgeMetadata, targetReadersLabel } from "./KnowledgeMetadataFields";
 import { ActionToast } from "../shared/ActionToast";
@@ -80,7 +79,6 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [options, setOptions] = useState<KnowledgeOptions | null>(null);
   const [catalog, setCatalog] = useState<KnowledgeCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
-  const [managingCatalog, setManagingCatalog] = useState(false);
   const [libraryFilters, setLibraryFilters] = useState(emptyLibraryFilters);
   const [draft, setDraft] = useState<KnowledgeDraftRecord | null>(null);
   const [editor, setEditor] = useState<EditorValues | null>(null);
@@ -674,21 +672,18 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : "Knowledge Library"}
           description={libraryTab === "drafts" ? ""
             : `${published.length} ${published.length === 1 ? "document" : "documents"} you can read in ${organizationName}`}
-          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
-            {catalog?.canManage && libraryTab !== "discover" && <button type="button" className="secondary-button" onClick={() => setManagingCatalog(true)}>Manage catalog</button>}
+          action={<div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
             <button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button>
             <button type="button" className="primary-button" onClick={() => openCreate("pdf")}><Icon name="plus" size={14} />Create from PDF</button></div>} />
-        {!managingCatalog && <div className="island-seg knowledge-library-tabs" role="tablist" aria-label="Knowledge library">
+        <div className="island-seg knowledge-library-tabs" role="tablist" aria-label="Knowledge library">
           <button type="button" role="tab" aria-selected={libraryTab === "discover"} onClick={() => setLibraryTab("discover")}>Discover</button>
           <button type="button" role="tab" aria-selected={libraryTab === "published"} onClick={() => setLibraryTab("published")}>All documents<span className="island-badge">{published.length}</span></button>
           <button type="button" role="tab" aria-selected={libraryTab === "drafts"} onClick={() => setLibraryTab("drafts")}>My Contributions<span className="island-badge">{drafts.length}</span></button>
-        </div>}
-        {managingCatalog && catalog?.canManage ? <KnowledgeCatalogEditor platform={platform} organizationId={organizationId}
-          catalog={catalog} publications={published} onSaved={reload} onClose={() => setManagingCatalog(false)} />
-          : libraryTab !== "drafts" && <KnowledgeLibraryBrowse items={published.map(item => ({ ...item, responsibleDepartmentName: publicationDepartmentName(item) }))} catalog={catalog} catalogError={catalogError}
+        </div>
+        {libraryTab !== "drafts" && <KnowledgeLibraryBrowse items={published.map(item => ({ ...item, responsibleDepartmentName: publicationDepartmentName(item) }))} catalog={catalog} catalogError={catalogError}
             query={query} filters={libraryFilters} onFilters={setLibraryFilters} discover={libraryTab === "discover"}
-            onBrowse={() => setLibraryTab("published")} onOpen={openPublished} onManage={() => setManagingCatalog(true)} />}
-        {!managingCatalog && libraryTab === "drafts" && (filteredDrafts.length ? <div className="island-split">
+            onBrowse={() => setLibraryTab("published")} onOpen={openPublished} />}
+        {libraryTab === "drafts" && (filteredDrafts.length ? <div className="island-split">
           <div className="island-main"><IslandTable label="My contributions" minWidth={620} columns="minmax(240px, 1.8fr) minmax(110px, 1fr) 110px minmax(150px, auto)"
             headers={["DOCUMENT", "DEPARTMENT", "UPDATED", "STATUS"]}>
             {filteredDrafts.map((item) => {

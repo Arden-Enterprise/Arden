@@ -52,6 +52,12 @@ active Topics. Curators may add only documents they can currently read. Every
 collection read, count, cover, title and document projection must be filtered by
 current reader authorization; the admin role is not a content-read bypass.
 
+UI placement clarification, 17 November 2026: the requesting maintainer confirmed
+that Topic creation belongs directly in Administration → Topics.
+Knowledge Library keeps Topic discovery for readers. This changes navigation,
+not catalog ownership or publication access. The clarification was recorded
+against fetched main `9fa3d34` and staging `8a1d8fa` on `fix/admin-manual-findings`.
+
 Legacy pending snapshots keep their frozen contract. Do not infer canonical
 metadata from PDF names or silently broaden old readers. Legacy publications stay
 readable under existing rules until a separately authorized metadata backfill.
