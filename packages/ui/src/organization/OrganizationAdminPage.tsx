@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 import { ActionToast } from "../shared/ActionToast";
@@ -80,14 +80,15 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [pendingTab, setPendingTab] = useState<AdminTab | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    if (departmentError && !busy && tab === "departments") {
-      document.getElementById("admin-department-name")?.focus();
-    }
-  }, [departmentError, busy, tab]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
+  const departmentFocusPending = useRef(false);
+  useEffect(() => {
+    if (busy || !departmentFocusPending.current) return;
+    departmentFocusPending.current = false;
+    if (!confirmation && tab === "departments") document.getElementById("admin-department-name")?.focus();
+  }, [departmentError, busy, confirmation, tab]);
   const reportAudienceDirty = useCallback((dirty: boolean) => setAudienceDirty(dirty), []);
   useEffect(() => { onDirtyChange?.(audienceDirty || catalogDirty); }, [audienceDirty, catalogDirty, onDirtyChange]);
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
@@ -173,6 +174,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     setDepartmentError("");
     void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentNameInput(""); },
       "Department created", (message) => {
+        departmentFocusPending.current = true;
         setDepartmentError(message);
       });
   };

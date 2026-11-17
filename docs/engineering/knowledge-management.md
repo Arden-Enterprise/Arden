@@ -112,3 +112,7 @@ live rollout are separate evidence. The register currently loads metadata for th
 authorized list; larger catalogs need a measured server-pagination slice before
 claiming enterprise-scale performance. Original image provenance is recorded in
 `packages/ui/src/assets/knowledge/README.md`.
+
+Administration focuses the department-name field once for a new create failure,
+after it is enabled. Retained error text must not steal focus on tab return,
+unrelated requests or while a confirmation is open.

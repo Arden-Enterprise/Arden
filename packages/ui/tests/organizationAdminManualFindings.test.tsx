@@ -13,7 +13,7 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/shared/api-client")>();
   return { ...actual,
     loadOrganizationAdministration: vi.fn(), listReviewerGrants: vi.fn(),
-    createDepartment: vi.fn(), loadAudienceGroups: vi.fn(), saveAudienceGroup: vi.fn(),
+    createDepartment: vi.fn(), deleteDepartment: vi.fn(), loadAudienceGroups: vi.fn(), saveAudienceGroup: vi.fn(),
     loadKnowledgeCatalog: vi.fn(), listPublishedKnowledge: vi.fn(), saveKnowledgeCatalogEntry: vi.fn(),
   };
 });
@@ -62,6 +62,39 @@ describe("organization admin manual findings", () => {
     await waitFor(() => expect(apiClient.createDepartment).toHaveBeenCalledWith("web", "org", "A".repeat(80)));
     expect(await screen.findByText("Could not create department.")).toBeTruthy();
     expect(document.activeElement).toBe(input);
+  });
+
+  it("does not refocus an old department error on tab return", async () => {
+    vi.mocked(apiClient.createDepartment).mockRejectedValue(new ApiError(500, "Create failed."));
+    openAdmin();
+    fireEvent.click(await screen.findByRole("tab", { name: /Departments/i }));
+    fireEvent.change(screen.getByRole("textbox", { name: "New department" }), { target: { value: "New" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create department" }));
+    await screen.findByText("Create failed.");
+    fireEvent.click(screen.getByRole("tab", { name: /Members/i }));
+    const tab = screen.getByRole("tab", { name: /Departments/i }); tab.focus(); fireEvent.click(tab);
+    expect(document.activeElement).toBe(tab);
+  });
+
+  it("keeps focus out of the name field when an unrelated deletion fails", async () => {
+    vi.mocked(apiClient.loadOrganizationAdministration).mockResolvedValue({ ...administration,
+      departments: [{ id: "empty", name: "Empty", defaultRoleId: "role", defaultRoleName: "Empty members" }] });
+    vi.mocked(apiClient.createDepartment).mockRejectedValue(new ApiError(500, "Create failed."));
+    vi.mocked(apiClient.deleteDepartment).mockRejectedValue(new ApiError(500, "Delete failed."));
+    openAdmin();
+    fireEvent.click(await screen.findByRole("tab", { name: /Departments/i }));
+    const input = screen.getByRole("textbox", { name: "New department" });
+    fireEvent.change(input, { target: { value: "New" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create department" }));
+    await screen.findByText("Create failed.");
+    fireEvent.click(screen.getByRole("button", { name: "Open Empty" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete department", exact: true }));
+    const dialog = await screen.findByRole("alertdialog");
+    const confirm = within(dialog).getByRole("button", { name: "Delete department", exact: true });
+    confirm.focus(); fireEvent.click(confirm);
+    await within(dialog).findByText("Delete failed.");
+    expect(document.activeElement).not.toBe(input);
+    expect(screen.getByRole("alertdialog")).toBe(dialog);
   });
 
   it("makes custom group renaming visible and omits unassigned members from Add", async () => {
