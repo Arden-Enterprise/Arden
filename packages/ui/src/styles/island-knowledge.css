@@ -339,6 +339,7 @@
 .pdf-reader-pages:focus-visible { outline: 2px solid var(--arden-focus-ring); outline-offset: -2px; }
 .pdf-reader-page { --scale-round-x: 1px; --scale-round-y: 1px; position: relative; background: #fff; box-shadow: 0 10px 28px rgb(0 0 0 / 35%); }
 .pdf-reader-page canvas { display: block; }
+.pdf-reader-page > .pdf-reader-unavailable { position: absolute; inset: 0; display: grid; align-content: center; background: #fff; color: #444; }
 .pdf-reader-page .textLayer {
   position: absolute; inset: 0; overflow: clip; line-height: 1; text-align: initial; transform-origin: 0 0; z-index: 0;
   --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size));

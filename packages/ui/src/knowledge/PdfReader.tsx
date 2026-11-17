@@ -57,22 +57,27 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
   const [target, setTarget] = useState<Target | null>(null);
 
   useEffect(() => {
-    let present = true, loaded: PDFDocumentProxy | null = null;
+    let present = true;
+    let task: ReturnType<PdfRuntime["getDocument"]> | null = null;
+    const destroy = () => { void task?.destroy().catch(() => undefined); };
     setDocument(null); setSizes([]); setFailed(false); setTarget(null);
     void (async () => {
       const pdf = await import("./pdfRuntime");
+      if (!present) return;
       // pdf.js transfers the buffer to its worker, so each load gets its own copy.
-      const task = pdf.getDocument({ data: decode(base64), isEvalSupported: false });
-      loaded = await task.promise;
+      task = pdf.getDocument({ data: decode(base64), isEvalSupported: false });
+      const loaded = await task.promise;
+      if (!present) return;
       const pages: PageSize[] = [];
       for (let number = 1; number <= loaded.numPages; number++) {
+        if (!present) return;
         const viewport = (await loaded.getPage(number)).getViewport({ scale: 1 });
         pages.push({ width: viewport.width, height: viewport.height });
       }
-      if (!present) { void loaded.destroy(); return; }
+      if (!present) return;
       setRuntime(pdf); setSizes(pages); setDocument(loaded);
-    })().catch(() => { if (present) setFailed(true); });
-    return () => { present = false; void loaded?.destroy(); };
+    })().catch(() => { if (present) setFailed(true); destroy(); });
+    return () => { present = false; destroy(); };
   }, [base64]);
 
   useEffect(() => {
@@ -145,6 +150,7 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
   const text = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
   const [rendered, setRendered] = useState(0);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const page = element.current;
@@ -157,6 +163,7 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
   const shouldRender = near || highlight !== null;
   useEffect(() => {
     if (!shouldRender || !canvas.current || !text.current) return;
+    setFailed(false);
     let present = true;
     let renderTask: { cancel(): void; promise: Promise<void> } | null = null;
     let textLayer: { cancel(): void } | null = null;
@@ -169,7 +176,7 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
       target.width = Math.floor(viewport.width * ratio);
       target.height = Math.floor(viewport.height * ratio);
       const context = target.getContext("2d");
-      if (!context) return;
+      if (!context) throw new Error("PDF canvas unavailable");
       renderTask = page.render({ canvas: target, canvasContext: context, viewport,
         transform: ratio === 1 ? undefined : [ratio, 0, 0, ratio, 0, 0] });
       text.current.replaceChildren();
@@ -177,7 +184,7 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
       textLayer = layer;
       await Promise.all([renderTask.promise, layer.render()]);
       if (present) setRendered((count) => count + 1);
-    })().catch(() => { /* A cancelled render is replaced by the next one; a failed page stays blank. */ });
+    })().catch(() => { if (present) setFailed(true); });
     return () => { present = false; renderTask?.cancel(); textLayer?.cancel(); };
   }, [document, pageNumber, runtime, scale, shouldRender]);
 
@@ -195,5 +202,6 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
     style={{ width: size.width * scale, height: size.height * scale, ["--total-scale-factor" as string]: scale }}>
     <canvas ref={canvas} aria-hidden="true" style={{ width: size.width * scale, height: size.height * scale }} />
     <div ref={text} className="textLayer" />
+    {failed && <p className="pdf-reader-unavailable" role="status">Page {pageNumber} could not be displayed. Use Download to open the original file.</p>}
   </div>;
 }

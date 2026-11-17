@@ -35,8 +35,10 @@ export function findQuoteInSegments(segments: readonly string[], quote: string):
   segments.forEach((segment, index) => {
     let offset = 0;
     for (const character of segment) {
-      for (const normalized of normalizedCharacters(character)) {
-        haystack += normalized;
+      const normalized = normalizedCharacters(character);
+      haystack += normalized;
+      // String#indexOf and DOM text offsets use UTF-16 code units, not code points.
+      for (let unit = 0; unit < normalized.length; unit++) {
         positions.push({ segment: index, offset });
       }
       offset += character.length;

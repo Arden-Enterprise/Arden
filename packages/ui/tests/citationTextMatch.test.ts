@@ -4,6 +4,12 @@ import { findQuoteInSegments } from "../src/knowledge/citationTextMatch";
 import { clearMarks, markQuote } from "../src/knowledge/citationHighlight";
 
 describe("cited quote matching", () => {
+  it("maps UTF-16 positions when supplementary characters occur before and inside a quote", () => {
+    expect(findQuoteInSegments(["📘 Policy: ", "Return the 🔑 key."], "Return the 🔑 key.")).toEqual({
+      start: { segment: 1, offset: 0 }, end: { segment: 1, offset: 18 }, complete: true,
+    });
+  });
+
   it("finds a quote split across PDF text runs regardless of line breaks and spacing", () => {
     const runs = ["3. Offboarding", "All company devices must be returned to IT on or before the", "last working day. Access is revoked."];
     const match = findQuoteInSegments(runs, "All company devices must be returned to IT on or before the last working day.");
