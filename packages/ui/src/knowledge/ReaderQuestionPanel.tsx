@@ -1,10 +1,11 @@
 import { useId, useState } from "react";
 import { askReaderQuestion, type ReaderAnswer } from "../shared/reader-question-api";
 import { useReaderOperation, type ReaderOperationOptions } from "./useReaderOperation";
+import type { ReaderAccessSession } from "./useReaderAccess";
 
-export function ReaderQuestionPanel({ options, onClose }: { options: ReaderOperationOptions; onClose: () => void }) {
+export function ReaderQuestionPanel({ options, access, onClose }: { options: ReaderOperationOptions; access: ReaderAccessSession; onClose: () => void }) {
   const id = useId(), [query, setQuery] = useState(""), [submitted, setSubmitted] = useState("");
-  const operation = useReaderOperation<ReaderAnswer, string>(options, {
+  const operation = useReaderOperation<ReaderAnswer, string>(options, access, {
     label: "Document Q&A", busyRetrySeconds: 10,
     run: (config, input, signal) => askReaderQuestion(config.platform, config.context, input, signal),
   });
@@ -25,7 +26,7 @@ export function ReaderQuestionPanel({ options, onClose }: { options: ReaderOpera
         onChange={event => setQuery(event.target.value)} disabled={waiting} />
       <button className="secondary-button" type="submit" disabled={!query.trim() || waiting}>Answer</button>
     </form>
-    {waiting && <p role="status" className="reader-ai-summary-wait">{state.status === "loading" ? "Finding an answer…" : "Checking access…"}</p>}
+    {waiting && <p role="status" className="reader-ai-summary-wait">{state.status === "loading" ? "Finding an answer…" : "Updating…"}</p>}
     {state.status === "error" && <div role="alert" className="reader-ai-summary-error"><p>{state.message}</p>
       {state.retry && <button className="secondary-button" type="button" disabled={operation.retryAfterSeconds > 0}
         onClick={() => void operation.retry()}>{operation.retryAfterSeconds > 0 ? `Retry in ${operation.retryAfterSeconds}s` : "Retry"}</button>}</div>}

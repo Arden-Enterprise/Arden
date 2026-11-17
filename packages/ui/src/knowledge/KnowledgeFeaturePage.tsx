@@ -24,7 +24,9 @@ export type KnowledgeFeaturePageProps = ContextControlProps & {
   onAssignedReviewCount?: (count: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
   citationTarget?: KnowledgeNavigationTarget | null;
-  onNavigate?: (view: KnowledgeFeatureView | "my-work") => void;
+  onNavigate?: (view: KnowledgeFeatureView) => void;
+  /** Signed-in member who is waiting for a department: Home explains the limited reading scope. */
+  awaitingAssignment?: boolean;
 };
 
 const labels: Record<KnowledgeFeatureView, string> = { knowledge: "Knowledge", "review-queue": "Review Queue", "knowledge-handover": "Knowledge Handover" };
@@ -35,7 +37,7 @@ export function KnowledgeFeaturePage(props: KnowledgeFeaturePageProps) {
       organizationName={props.organizationName ?? "Organization"} view={props.view} active={props.active ?? true}
       createdDraftId={props.createdDraft?.id ?? null} onAssignedReviewCount={props.onAssignedReviewCount}
       onDirtyChange={props.onDirtyChange}
-      citationTarget={props.citationTarget}
+      citationTarget={props.citationTarget} awaitingAssignment={props.awaitingAssignment}
       contextOpen={props.contextOpen} onToggleContext={props.onToggleContext} />;
   }
   return <SampleKnowledgeFeaturePage {...props} />;
@@ -84,7 +86,7 @@ function SampleKnowledgeFeaturePage({ view, active = true, organizationName = "F
       {effectiveView === "knowledge" && knowledgeScreen === "create" && <CreateKnowledge draft={state.draft} onSave={(draft) => { dispatch({ type: "edit", draft }); dispatch({ type: "save" }); }} onContinue={(draft) => { dispatch({ type: "edit", draft }); dispatch({ type: "save" }); setKnowledgeScreen("editor"); }} onBack={() => setKnowledgeScreen("library")} />}
       {effectiveView === "knowledge" && knowledgeScreen === "editor" && <KnowledgeEditor state={state} dispatch={dispatch} onBack={() => setKnowledgeScreen("library")} onSubmitted={() => goTo("review-queue")} />}
       {effectiveView === "review-queue" && <KnowledgeReview state={state} dispatch={dispatch} onOpenDraft={openDraft} />}
-      {effectiveView === "knowledge-handover" && <KnowledgeHandover onReturn={() => { if (onNavigate) onNavigate("my-work"); else goTo("knowledge"); }} />}
+      {effectiveView === "knowledge-handover" && <KnowledgeHandover onReturn={() => { if (onNavigate) onNavigate("knowledge"); else goTo("knowledge"); }} />}
       {state.message && (effectiveView === "knowledge" || effectiveView === "review-queue") && <p role="status" className="knowledge-action-message">{state.message}</p>}
     </div>
   </main>;

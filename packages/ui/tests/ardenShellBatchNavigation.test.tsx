@@ -68,7 +68,7 @@ describe("ArdenShell invitation batch navigation", () => {
   it("preserves an unsaved shared draft until workspace switching is confirmed", async () => {
     render(createElement(ArdenShell, { platform: "web" }));
     fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
-    fireEvent.click(screen.getAllByRole("button", { name: "Library", exact: true })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Home", exact: true })[0]);
     fireEvent.click(await screen.findByRole("button", { name: "Create from PDF" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved shared draft" } });
     const workspaceButton = screen.getByRole("button", { name: /Workspace: Test Org.*Switch or create workspace/i });
