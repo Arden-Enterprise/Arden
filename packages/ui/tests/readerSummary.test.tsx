@@ -117,7 +117,7 @@ describe("exact-version on-request Summary reader", () => {
     expect(h.options.onCitation).not.toHaveBeenCalled();
     await act(async () => pending.resolve());
     expect(h.options.onCitation).toHaveBeenCalledWith(expect.objectContaining({ versionId: readerContext.versionId, page: 2, excerpt: "Only approved readers" }));
-    fireEvent.click(screen.getByRole("button", { name: "Library" })); expect(h.props.onBack).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Home" })); expect(h.props.onBack).toHaveBeenCalled();
   });
   it("Close and Escape remain usable while loading and discard late output without regeneration", async () => {
     const h = fixture(), pending = deferred<ReturnType<typeof readerSummaryFixture>>(); h.generation.mockReturnValue(pending.promise);

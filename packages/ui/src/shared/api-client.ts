@@ -177,6 +177,8 @@ export type PublishedKnowledge = {
   versionLabel?: string;
   summary?: string;
   audienceIds: string[];
+  /** Approved readers without member identities; null for publications from before Target Readers. */
+  targetReaders?: { mode: TargetReaders["mode"]; departmentId: string | null } | null;
   contentHash: string;
   publishedAt: string;
   validFrom: string;

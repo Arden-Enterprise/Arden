@@ -261,6 +261,9 @@
 .knowledge-reader-status { border: 1px solid transparent; }
 .knowledge-reader-status.is-effective { color: var(--arden-success); border-color: color-mix(in srgb, var(--arden-success) 34%, transparent); background: color-mix(in srgb, var(--arden-success) 12%, transparent); }
 .knowledge-reader-status.is-upcoming { color: var(--arden-info); border-color: color-mix(in srgb, var(--arden-info) 34%, transparent); background: color-mix(in srgb, var(--arden-info) 12%, transparent); }
+.knowledge-reader-status.is-expiring { color: var(--arden-warning); border-color: color-mix(in srgb, var(--arden-warning) 34%, transparent); background: color-mix(in srgb, var(--arden-warning) 12%, transparent); }
+.knowledge-reader-unset { color: var(--arden-text-muted); }
+.knowledge-reader-version { font-variant-numeric: tabular-nums; }
 .knowledge-reader-status.is-expired { color: var(--arden-danger); border-color: color-mix(in srgb, var(--arden-danger) 34%, transparent); background: color-mix(in srgb, var(--arden-danger) 12%, transparent); }
 .knowledge-reader-expired { margin: 0; }
 .knowledge-citation-focus {
