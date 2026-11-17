@@ -666,7 +666,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
             {...contextControl}
           />
         ) : activeView === "organization-access" && serverOrganizationId && activeMembership && liveAdmin ? (
-          <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} onSendingInvitationsChange={(sending) => { setInvitationBatchSending(sending); if (!sending) setIslandToast(null); }} {...contextControl} />
+          <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} onOpenKnowledgeLibrary={() => navigate("knowledge")} onSendingInvitationsChange={(sending) => { setInvitationBatchSending(sending); if (!sending) setIslandToast(null); }} {...contextControl} />
         ) : activeView === "organization-access" && organization && previewRole === "admin" ? (
           <OrganizationAccessPage organization={organization} onChange={setOrganization} onDirtyChange={setOrganizationDirty} onOpenSetup={() => { if (organizationDirty) setPendingAction("setup"); else setEntryView("setup"); }} onPreviewInvitation={(id) => { setInvitationId(id); setEntryView("invitation"); }} onPreviewAccess={(id) => { setAccessMemberId(id); setEntryView("access"); }} {...contextControl} />
         ) : activeView === "personal-workspace" ? (

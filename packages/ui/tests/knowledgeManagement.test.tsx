@@ -19,6 +19,13 @@ const publication: api.PublishedKnowledge = { id: "readable", draftId: "draft", 
   management: { type: "Guide", topicId: topic.id, topicName: topic.name, version: "1.0", effectiveDate: "2027-01-01",
     expirationDate: null, changeNote: "", releaseKind: "NEW" } };
 describe("live Library management components", () => {
+  it("does not report an empty Topic catalog when loading the catalog failed", () => {
+    render(createElement(KnowledgeLibraryBrowse, { items: [], catalog: null,
+      catalogError: "Catalog is unavailable.", query: "", filters: emptyLibraryFilters(),
+      onFilters: vi.fn(), discover: true, onBrowse: vi.fn(), onOpen: vi.fn(), onManage: vi.fn() }));
+    expect(screen.getByText("Catalog is unavailable.")).toBeTruthy();
+    expect(screen.queryByText(/No topics yet/)).toBeNull();
+  });
   it("uses exact canonical fields, not title prefixes, and keeps sort/filter behavior deterministic", () => {
     // Decision 0021: there is no Document Code to search.
     expect(filterLibrary([publication], catalog, "ARD-123", emptyLibraryFilters())).toHaveLength(0);
@@ -86,6 +93,16 @@ describe("live Library management components", () => {
     expect(suggestion.textContent).toContain("colleague@example.test · HR");
     expect(api.findKnowledgeReaders).toHaveBeenLastCalledWith("web", "org", "colleague@example", []);
     fireEvent.click(suggestion); expect(onReaders).toHaveBeenLastCalledWith({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: ["reader"] });
+  });
+  it("distinguishes an empty Topic catalog from a catalog load failure", () => {
+    const props = { value: emptyKnowledgeMetadata(), readers: null, topics: [], departments: [],
+      busy: false, isUpdate: false, platform: "web" as const, organizationId: "org",
+      onChange: vi.fn(), onReaders: vi.fn() };
+    const view = render(createElement(KnowledgeMetadataFields, props));
+    expect(screen.getByText(/Ask an Org Admin to add a Topic/)).toBeTruthy();
+    view.rerender(createElement(KnowledgeMetadataFields, { ...props, catalogError: "Catalog is unavailable." }));
+    expect(screen.getByRole("alert").textContent).toContain("Topic catalog is unavailable");
+    expect(screen.queryByText(/Ask an Org Admin to add a Topic/)).toBeNull();
   });
   it("says when a pasted email is not a member of the organization (decision 0021)", async () => {
     vi.spyOn(api, "findKnowledgeReaders").mockResolvedValue([]);

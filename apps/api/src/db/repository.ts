@@ -5,6 +5,7 @@ import { PgConversationStore, type ConversationStore } from "../answers/conversa
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
 import type { VersionScope } from "../answers/governed-contracts.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
+import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
@@ -796,7 +797,7 @@ export class ArdenRepository implements ArdenDataRepository {
             audience_id, organization_id, kind, department_id, name, description, is_managed, legacy_role_id)
           VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
             'Every active member of the department', true, $1)`,
-        [departmentRoleId, organizationId, departmentId, `${baseDepartmentName} members`]);
+        [departmentRoleId, organizationId, departmentId, departmentAudienceName(baseDepartmentName)]);
 
         await client.query(`
           INSERT INTO role_permission (role_id, permission_id)
@@ -1057,7 +1058,7 @@ export class ArdenRepository implements ArdenDataRepository {
           created_by_membership_id)
         VALUES ($1, $2, 'DEPARTMENT_ALL', $3, $4,
           'Every active member of the department', true, $1, $5)`,
-      [roleId, organizationId, departmentId, `${name} members`, actorMembershipId]);
+      [roleId, organizationId, departmentId, departmentAudienceName(name), actorMembershipId]);
       await client.query(`
         INSERT INTO role_permission (role_id, permission_id)
         SELECT $1, permission_id FROM permission

@@ -70,7 +70,7 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
         {catalog?.canManage && <button className="km-text-button" type="button" onClick={onManage}>Manage catalog <Icon name="sliders" size={13} /></button>}</header>
         <div className="km-topics">{catalog?.topics.filter(topic => topic.status === "ACTIVE").map(topic => <button key={topic.id} type="button" onClick={() => browseWith({ topicId: topic.id })}>
           <span>{topic.name}</span><small>{items.filter(item => item.management?.topicId === topic.id).length}</small><Icon name="chevron" size={12} /></button>)}</div>
-        {!catalog?.topics.some(topic => topic.status === "ACTIVE") && <p className="km-empty-inline">No topics yet.{catalog?.canManage ? " Add one in Manage catalog." : ""}</p>}
+        {!catalogError && !catalog?.topics.some(topic => topic.status === "ACTIVE") && <p className="km-empty-inline">No topics yet.{catalog?.canManage ? " Add one in Manage catalog." : ""}</p>}
       </section>
       <section aria-labelledby="km-collections"><header className="km-section-heading"><div><h2 id="km-collections">Collections</h2><p>Curated documents, brought together.</p></div></header>
         <div className="km-collections">{collections.map(collection => <button className="km-collection" type="button" key={collection.id} onClick={() => browseWith({ collectionId: collection.id })}>
