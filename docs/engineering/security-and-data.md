@@ -85,7 +85,8 @@ contributor and agent, not to one named tool.
   - Authority comes from the current role and grant tables inside the reviewed routines of migration 0037, never from the app's `arden.org_admin` setting.
   - Record the audit event before serving content; if recording fails, refuse access.
   - Inspection and the responsible-reviewer view are never Library, search, Ask Arden or citation sources.
-  - Direct withdrawal by the responsible reviewer or an Organization Admin requires a reason and is shown to the author.
+  - Under [decision 0024](../decisions/0024-admin-only-direct-withdrawal.md) and forward operator 0038, only a current Organization Admin may withdraw directly; a matching reviewer grant or client Admin setting is insufficient. Reason/audit and author-visible Admin provenance remain mandatory. Responsible-reviewer read/report handling and approval of author withdrawal requests are unchanged.
+  - This release explicitly defers inspection notifications. Audit records are not automatic alerts; the deferral does not permanently remove the notification requirement.
 
 ## 4. Derived data, search, graph, and revocation
 

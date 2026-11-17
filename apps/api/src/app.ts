@@ -1460,7 +1460,7 @@ export function buildApp(dependencies: AppDependencies) {
       }
     });
 
-  // Decision 0023: direct withdrawal by the responsible reviewer or an Organization Admin, with a reason.
+  // Decision 0024: direct withdrawal only by a current Organization Admin, with a reason.
   app.post<{ Params: { organizationId: string; documentId: string }; Body: { reason: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/withdrawal", {
       schema: {

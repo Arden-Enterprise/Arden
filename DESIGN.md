@@ -94,11 +94,11 @@ The server-backed `Document text` field keeps one compact formatting toolbar (No
   - **Reviews.** The decision island adds Approve for: Proposed readers (default) or Fewer readers, narrowing only.
     - A checklist for selected members; a member search limited to the department; a department or members for Everyone.
     - Incomplete selections show a neutral status line and keep Approve disabled.
-  - **Reported problems in Reviews.** The island appears above the list only when the reviewer has reports, with View document, Withdraw and Dismiss.
+  - **Reported problems in Reviews.** The island appears above the list only when the reviewer has reports, with View document and Dismiss. Direct Withdraw belongs only to Administration → Documents, including its reports island (decision 0024).
   - **My Contributions.**
     - Change readers and Withdraw document open request dialogs with a required reason.
     - A failed approved version shows "Not published" with one plain explanation, and Try again only for a temporary failure.
-    - A directly withdrawn document shows who withdrew it (a reviewer or an administrator) and the reason.
+    - A directly withdrawn document shows the recorded actor role and reason. New direct withdrawals are Admin-only; existing reviewer provenance is historical, not rewritten.
   - **Reader.** The document reader offers Report a problem beside Download PDF.
 - **Invitation composer** — The Invite form island accepts one or up to 20 email addresses in a multiline field. It previews each normalized address with a text status before sending, shows the ready/skipped count and blocks over-limit batches. Send names the number of recipients, then reports every outcome in the same island; a saved invitation whose email failed points to Resend in the list. The admin may clear an unsent draft. During sending, navigation and sign-out wait for completion, and the client requests a browser exit warning. The field keeps its visible focus treatment and an announced result summary. The island remains usable when it stacks below the list on a narrow workspace.
 - **Home** — the first screen after sign-in ([decision 0022](docs/decisions/0022-home-start-page-and-reader-validity.md)); it replaced the sample My Work dashboard. Tabs: Discover, All documents, My Contributions and a disabled My reports ("Coming later", reserved for Flow 4). A member waiting for a department sees a note that only organization-wide documents are readable.

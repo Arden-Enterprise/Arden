@@ -1,11 +1,11 @@
 # 0023: Organization Admin governance catalog, audited inspection, direct withdrawal and problem reports
 
-Status: accepted
+Status: accepted; direct-withdrawal authority partially superseded by [0024](0024-admin-only-direct-withdrawal.md). The original reviewer-direct-withdrawal decision below is historical for that capability.
 Date: 2026-11-16
 Decision owner/approval: project maintainer. In an agent session on 2026-11-16 the maintainer was shown option C below, the comparison and its consequences, refined it, and answered "theo đề xuất" ("as proposed") to the explicit choice to approve this replacement, keep decision 0010 unchanged, or consult the team first.
 Brainstorm originator / record author: the project maintainer raised and refined the questions; record drafted by the coding agent. The original owner of decision 0010 is recorded there only as "task owner"; that person was not consulted, and the maintainer chose to proceed.
 Approval evidence and exact source/spec revision: maintainer approval in the session above, against `origin/staging` 7a133af with decisions 0010, 0011 and 0013–0015 and the Flow 2 workflow (T6.3) as the baseline.
-Implementation: published in PR #52, not merged or deployed. Migration `0037_publication_governance.sql`, API routes and screens have disposable-CI evidence below, not staging-copy rehearsal. Integration still requires explicit withdrawal/notification policy reconciliation and target-specific operator migration approval.
+Implementation: published in PR #52, not merged or deployed. Migration `0037_publication_governance.sql`, API routes and screens have disposable-CI evidence below, not staging-copy rehearsal. Decision 0024 resolves withdrawal/notification policy for this release; the follow-up and forward 0038 need exact-head verification and target-specific operator migration approval.
 Supersedes / superseded by: refines [0010](0010-audiences-and-system-administration.md) ("Org Admin … does not implicitly read content") and [0011](0011-permission-aware-publication-and-semantic-documents.md) (Organization Admin unpublish).
 
 ## Context and requirement

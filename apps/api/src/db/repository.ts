@@ -126,7 +126,7 @@ export type SharedKnowledgeSubmission = {
   requestReason: string | null;
   /** T6.3 retry: why preparation failed, only while `publicationState` is FAILED. TEMPORARY can be retried. */
   publicationFailure: PublicationFailureKind | null;
-  /** Decision 0023: a direct withdrawal by a responsible reviewer or an Organization Admin, with its reason. */
+  /** New direct withdrawals are Admin-only (0024); historical reviewer provenance remains readable. */
   withdrawal: { by: "REVIEWER" | "ORGANIZATION_ADMIN"; reason: string; at: Date } | null;
 };
 export type PublicationFailureKind = "TEMPORARY" | "CONTENT" | "SYSTEM";

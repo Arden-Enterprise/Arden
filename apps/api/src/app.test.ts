@@ -2006,7 +2006,7 @@ describe("API auth and private draft routes", () => {
       expect(opened.json().error.code).toBe("ALREADY_A_READER");
     });
 
-    it("lets only the responsible reviewer view and withdraw with a reason", async () => {
+    it("keeps the responsible reviewer view but reserves direct withdrawal for an Admin", async () => {
       const owner = await as("owner@example.test");
       const reviewer = await as("manager@example.test");
       const stored = await storage.write("Responsible body");
@@ -2021,11 +2021,14 @@ describe("API auth and private draft routes", () => {
       const withdraw = (headers: Record<string, string>, reason: string) => app.inject({ method: "POST",
         url: `${root}/documents/${sharedDraftId}/withdrawal`, headers, payload: { reason } });
       expect((await withdraw(owner, "Not mine")).statusCode).toBe(404);
-      expect((await withdraw(reviewer, " ")).json().error.code).toBe("INVALID_REASON");
-      const withdrawn = await withdraw(reviewer, "Wrong figures");
+      expect((await withdraw(reviewer, "Wrong figures")).statusCode).toBe(404);
+      expect(repository.withdrawnDocuments).toEqual([]);
+      repository.governanceAdmin = true;
+      expect((await withdraw(owner, " ")).json().error.code).toBe("INVALID_REASON");
+      const withdrawn = await withdraw(owner, "Wrong figures");
       expect(withdrawn.statusCode).toBe(200);
       expect(withdrawn.json()).toEqual({ status: "WITHDRAWN" });
-      expect((await withdraw(reviewer, "Wrong figures")).statusCode).toBe(404);
+      expect((await withdraw(owner, "Wrong figures")).statusCode).toBe(404);
     });
 
     it("lets a reader report a problem once, and the responsible reviewer list and dismiss it", async () => {
@@ -2689,7 +2692,7 @@ class MemoryRepository implements ArdenDataRepository {
   async withdrawPublicationDirectly(userId: string, requestedOrganization: string, documentId: string,
     reason: string): Promise<DirectWithdrawalResult> {
     if (!reason.trim()) return { kind: "invalid-reason" };
-    if (userId !== otherId || requestedOrganization !== organizationId || documentId !== sharedDraftId
+    if (!this.governanceAdmin || userId !== ownerId || requestedOrganization !== organizationId || documentId !== sharedDraftId
       || this.withdrawnDocuments.includes(documentId)) return { kind: "not-found" };
     this.withdrawnDocuments.push(documentId);
     return { kind: "withdrawn" };

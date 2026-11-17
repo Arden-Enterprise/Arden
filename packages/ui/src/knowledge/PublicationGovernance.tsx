@@ -88,10 +88,13 @@ function WithdrawPublicationDialog({ target, platform, organizationId, onDone, o
  * Open problem reports for the documents the viewer is responsible for (all of them for an Organization Admin).
  * Renders nothing when there are none, so the Reviews page stays unchanged for most reviewers.
  */
-export function PublicationReportsPanel({ platform, organizationId, departmentName, onInspect, refreshSignal = 0 }: {
+export function PublicationReportsPanel({ platform, organizationId, departmentName, onInspect, refreshSignal = 0,
+  allowDirectWithdrawal = false }: {
   platform: Platform; organizationId: string; departmentName: (id: string | null) => string;
   /** Organization Admin path for a document they are not responsible for as a reviewer. */
   onInspect?: (documentId: string, title: string) => void; refreshSignal?: number;
+  /** Admin surface only; the database independently rechecks current Admin authority. */
+  allowDirectWithdrawal?: boolean;
 }) {
   const [reports, setReports] = useState<PublicationReport[] | null>(null);
   const [error, setError] = useState("");
@@ -138,8 +141,8 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
             setViewing(await loadResponsiblePublication(platform, organizationId, report.documentId)); })}>View document</button>}
           {!report.canView && onInspect && <button type="button" className="secondary-button" disabled={busy}
             onClick={() => onInspect(report.documentId, report.title)}>Inspect</button>}
-          <button type="button" className="secondary-button governance-danger-text" disabled={busy}
-            onClick={() => setWithdrawing({ documentId: report.documentId, title: report.title })}>Withdraw</button>
+          {allowDirectWithdrawal && <button type="button" className="secondary-button governance-danger-text" disabled={busy}
+            onClick={() => setWithdrawing({ documentId: report.documentId, title: report.title })}>Withdraw</button>}
           <button type="button" className="secondary-button" disabled={busy} onClick={() => act(async () => {
             await dismissPublicationReport(platform, organizationId, report.id); setMessage("Report dismissed"); load(); })}>Dismiss</button>
         </div>
@@ -179,7 +182,7 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
       you can’t read requires a reason, is recorded, and lasts until 15 minutes of inactivity or 2 hours.</p>
     {error && <p role="alert" className="knowledge-live-error">{error}</p>}
     {message && <p role="status" className="island-meta">{message}</p>}
-    <PublicationReportsPanel platform={platform} organizationId={organizationId} departmentName={departmentName}
+    <PublicationReportsPanel platform={platform} organizationId={organizationId} departmentName={departmentName} allowDirectWithdrawal
       refreshSignal={refresh} onInspect={(documentId, title) => setInspectTarget({ documentId, title })} />
     <label className="island-field governance-search">Search documents
       <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title" /></label>

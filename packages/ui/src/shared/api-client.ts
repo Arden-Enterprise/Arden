@@ -130,7 +130,7 @@ export type KnowledgeSubmission = {
   requestReason?: string | null;
   /** T6.3: why preparation failed, only while publicationState is FAILED. Only TEMPORARY can be retried. */
   publicationFailure?: "TEMPORARY" | "CONTENT" | "SYSTEM" | null;
-  /** Decision 0023: withdrawn directly by a responsible reviewer or an Organization Admin. */
+  /** Historical provenance; new direct withdrawals require Organization Admin authority (0024). */
   withdrawal?: { by: "REVIEWER" | "ORGANIZATION_ADMIN"; reason: string; at: string } | null;
 };
 export type AssignedKnowledgeReview = {
@@ -431,7 +431,7 @@ export function loadResponsiblePublication(platform: Platform, organizationId: s
   return request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/responsible-view`);
 }
 
-/** Decision 0023: direct withdrawal by the responsible reviewer or an Organization Admin. */
+/** Decision 0024: direct withdrawal only by a current Organization Admin. */
 export async function withdrawPublication(platform: Platform, organizationId: string, documentId: string, reason: string): Promise<void> {
   await request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/withdrawal`,
     { method: "POST", body: JSON.stringify({ reason }) });

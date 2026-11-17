@@ -128,6 +128,7 @@ describe("decision 0023 reported problems", () => {
     const dismiss = vi.spyOn(api, "dismissPublicationReport").mockResolvedValue();
     render(createElement(PublicationReportsPanel, { platform: "web", organizationId: "org", departmentName }));
     expect(await screen.findByText("Wrong column")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Withdraw", exact: true })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "View document" }));
     const viewer = await screen.findByRole("dialog", { name: "Salary bands" });
     expect(await within(viewer).findByText("Confidential body")).toBeTruthy();
@@ -138,6 +139,22 @@ describe("decision 0023 reported problems", () => {
     // The outcome stays visible after the last report closes.
     expect(await screen.findByText("Report dismissed")).toBeTruthy();
     expect(screen.queryByText("Wrong column")).toBeNull();
+  });
+
+  it("lets an Admin withdraw from reports only after a reason and confirmation", async () => {
+    vi.spyOn(api, "listGovernancePublications").mockResolvedValue([]);
+    vi.spyOn(api, "listPublicationReports").mockResolvedValue([report]);
+    const withdraw = vi.spyOn(api, "withdrawPublication").mockResolvedValue();
+    render(createElement(GovernanceDocumentsPanel, { platform: "web", organizationId: "org", departmentName }));
+    fireEvent.click(await screen.findByRole("button", { name: "Withdraw", exact: true }));
+    const dialog = screen.getByRole("dialog", { name: "Withdraw publication" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Withdraw", exact: true }));
+    expect(within(dialog).getByText("Enter a reason.")).toBeTruthy();
+    expect(withdraw).not.toHaveBeenCalled();
+    fireEvent.change(within(dialog).getByRole("textbox", { name: /Reason/ }), { target: { value: "Legal hold" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Withdraw", exact: true }));
+    await waitFor(() => expect(withdraw).toHaveBeenCalledWith("web", "org", "doc", "Legal hold"));
+    expect(await screen.findByText("Publication withdrawn")).toBeTruthy();
   });
 
   it("offers an Admin an inspection instead of the responsible view", async () => {

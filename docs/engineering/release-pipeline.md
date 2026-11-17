@@ -72,7 +72,7 @@ the separate synthetic privilege probe is not a substitute for that workflow tes
 
 For the known ownership regression, an authorized operator may use
 `deploy/release/security-definer-owner-repair.sql` only after reviewing the exact
-database, fixed environment role, 32-function inventory (migrations 0001–0037), protected backup and
+database, fixed environment role, 32-function inventory (migrations 0001–0038; 0038 replaces an existing routine), protected backup and
 disposable rehearsal. It only restores function owners and is idempotent. Do not
 replay migration SQL, edit ledger checksums or disable RLS to recover. Existing
 restricted migration logins cannot replace these trusted functions; future body or

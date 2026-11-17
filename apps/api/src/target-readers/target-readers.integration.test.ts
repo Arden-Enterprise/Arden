@@ -1015,7 +1015,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(repository.useGovernanceInspection(ids.author, ids.orgA, second.inspectionId)).resolves.toBeNull();
     });
 
-    it("gives the responsible reviewer a view and direct withdrawal, recorded for the author", async () => {
+    it("keeps responsible review read-only and permits only Admin direct withdrawal", async () => {
       if (!repository) throw new Error("Test database is unavailable");
       const { draftId, submissionId } = await publishSelected("Responsible review");
       await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId)).resolves.toBeNull();
@@ -1027,15 +1027,30 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(repository.getResponsiblePublicationView(ids.engineer, ids.orgA, draftId)).resolves.toBeNull();
 
       await expect(repository.withdrawPublicationDirectly(ids.engineer, ids.orgA, draftId, "Wrong")).resolves.toEqual({ kind: "not-found" });
-      await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "")).resolves.toEqual({ kind: "invalid-reason" });
+      await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgA, draftId, "")).resolves.toEqual({ kind: "invalid-reason" });
       await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "Figures are wrong"))
+        .resolves.toEqual({ kind: "not-found" });
+      await expect(repository.withdrawPublicationDirectly(ids.foreign, ids.orgA, draftId, "Wrong organization"))
+        .resolves.toEqual({ kind: "not-found" });
+      await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgB, draftId, "Foreign document"))
+        .resolves.toEqual({ kind: "not-found" });
+      const spoofed = await asRuntime(ids.reviewer, ids.orgA, async (client) => {
+        await client.query("SELECT set_config('arden.org_admin', 'true', true)");
+        return client.query("SELECT withdraw_publication_directly($1, 'Spoofed Admin') AS outcome", [draftId]);
+      });
+      expect(spoofed.rows[0]?.outcome).toBe("NOT_FOUND");
+      await expect(audits("KNOWLEDGE_PUBLICATION_WITHDRAWN", draftId)).resolves.toBe("0");
+      expect((await asSuperuser(client => client.query(
+        "SELECT 1 FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId]))).rowCount).toBe(1);
+
+      await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgA, draftId, "Figures are wrong"))
         .resolves.toEqual({ kind: "withdrawn" });
-      await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "Again")).resolves.toEqual({ kind: "not-found" });
+      await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgA, draftId, "Again")).resolves.toEqual({ kind: "not-found" });
       const pointer = await asSuperuser((client) => client.query(
         "SELECT 1 FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId]));
       expect(pointer.rowCount).toBe(0);
       const authored = (await repository.listKnowledgeSubmissions(ids.author, ids.orgA))?.find((item) => item.id === submissionId);
-      expect(authored).toMatchObject({ publicationState: "WITHDRAWN", withdrawal: { by: "REVIEWER", reason: "Figures are wrong" } });
+      expect(authored).toMatchObject({ publicationState: "WITHDRAWN", withdrawal: { by: "ORGANIZATION_ADMIN", reason: "Figures are wrong" } });
       await expect(audits("KNOWLEDGE_PUBLICATION_WITHDRAWN", draftId)).resolves.toBe("1");
 
       // An Organization Admin may withdraw any current publication.
@@ -1044,6 +1059,27 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         .resolves.toEqual({ kind: "withdrawn" });
       expect((await repository.listKnowledgeSubmissions(ids.author, ids.orgA))?.find((item) => item.id === other.submissionId)
         ?.withdrawal).toMatchObject({ by: "ORGANIZATION_ADMIN", reason: "Legal hold" });
+    });
+
+    it("records Admin provenance when the actor also holds the responsible reviewer grant", async () => {
+      const { draftId, submissionId } = await publishSelected("Dual authority");
+      await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
+      // Both the temporary Admin role and withdrawal are rolled back, even if an assertion fails.
+      await asSuperuser(async (client) => {
+        await client.query(`INSERT INTO role_assignment (membership_id, role_id, access_scope_id)
+          SELECT $1, role_id, $2 FROM role WHERE code = 'ORG_ADMIN' AND is_system`, [ids.reviewerM, ids.scopeA]);
+        await client.query("SET LOCAL ROLE arden_runtime");
+        await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)",
+          [ids.reviewer, ids.orgA]);
+        const result = await client.query("SELECT withdraw_publication_directly($1, 'Admin decision') AS outcome", [draftId]);
+        expect(result.rows[0]?.outcome).toBe("WITHDRAWN");
+        await client.query("RESET ROLE");
+        const provenance = await client.query("SELECT withdrawn_by FROM shared_submission WHERE submission_id = $1", [submissionId]);
+        expect(provenance.rows[0]?.withdrawn_by).toBe("ORGANIZATION_ADMIN");
+        const audit = await client.query(`SELECT details_json->>'withdrawnBy' AS withdrawn_by FROM audit_event
+          WHERE event_type = 'KNOWLEDGE_PUBLICATION_WITHDRAWN' AND details_json->>'documentId' = $1`, [draftId]);
+        expect(audit.rows).toEqual([{ withdrawn_by: "ORGANIZATION_ADMIN" }]);
+      }, false);
     });
 
     it("uses Organization grants, not Department grants, for an organization-wide publication", async () => {
@@ -1063,6 +1099,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await grant(ids.reviewerM, "ORGANIZATION", null);
       await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId))
         .resolves.toMatchObject({ readerMode: "ORGANIZATION" });
+      await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "Organization reviewer"))
+        .resolves.toEqual({ kind: "not-found" });
     });
 
     it("lets only a reader report once, shows reports to responsible people and closes them on withdrawal", async () => {
@@ -1091,6 +1129,10 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(repository.reportPublicationProblem(ids.engineer, ids.orgA, draftId, versionId, "New issue"))
         .resolves.toMatchObject({ kind: "reported" });
       await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "Confirmed"))
+        .resolves.toEqual({ kind: "not-found" });
+      expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(1);
+      await expect(audits("KNOWLEDGE_PUBLICATION_WITHDRAWN", draftId)).resolves.toBe("0");
+      await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgA, draftId, "Confirmed"))
         .resolves.toEqual({ kind: "withdrawn" });
       expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(0);
     });

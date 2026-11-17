@@ -194,7 +194,7 @@ Approval hands the exact snapshot to the Mainflow 3 indexing pipeline (migration
 - A generation older than an already-published snapshot is `SUPERSEDED`.
 - There is no human publisher role.
 
-### Governance: catalog, inspection, withdrawal and reports (T6.3, decision 0023, migration 0037)
+### Governance: catalog, inspection, withdrawal and reports (T6.3, decisions 0023/0024, migrations 0037/0038)
 
 - **Catalog.** `GET /governance/publications` (Organization Admin only, 404 otherwise) lists each current publication with metadata only:
   - title, responsible department, sharing kind, version, publication date;
@@ -210,14 +210,14 @@ Approval hands the exact snapshot to the Mainflow 3 indexing pipeline (migration
   - `GET /documents/:documentId/responsible-view` serves the current publication, read-only and without reader names, to the reviewer with the current grant for its scope. That is an Organization grant for organization-wide readers, otherwise a Department grant for the responsible department.
   - The author is excluded.
 - **Direct withdrawal.**
-  - `POST /documents/:documentId/withdrawal` with `{reason}`, by the responsible reviewer or an Organization Admin. It removes the current pointer and marks the released submission `WITHDRAWN` with `withdrawal {by, reason, at}`.
+  - `POST /documents/:documentId/withdrawal` with `{reason}`, only by a current Organization Admin in this organization (0024). Matching reviewer grants do not authorize this endpoint. It removes the current pointer and marks the released submission `WITHDRAWN` with `withdrawal {by: ORGANIZATION_ADMIN, reason, at}`. Historical reviewer provenance remains readable.
   - It closes the document's open reports and writes `KNOWLEDGE_PUBLICATION_WITHDRAWN`.
   - It is refused with 409 `NEWER_VERSION_PREPARING` while a newer approved version is preparing; otherwise not found.
 - **Reports.**
   - `POST /published/:publishedVersionId/reports` with `{message}`, by a member who reads the current publication; the insert policy rechecks this. A second open report from the same member is 409 `ALREADY_REPORTED`.
   - `GET /reports` lists open reports to the responsible reviewers and all of them to Organization Admins.
   - `POST /reports/:reportId/dismiss` closes a report with an audit event.
-- **No notifications** are sent.
+- **No inspection notifications** are sent in this release, explicitly deferred by decision 0024. Audit is still mandatory and is not notification delivery. Existing report visibility/dismissal and author withdrawal-request review remain unchanged.
 
 ### Retrying a failed preparation (T6.3 retry, migration 0036)
 
@@ -319,6 +319,7 @@ The migration ledger is `apps/api/migrations`. Flow 2 relies on:
 | `0035_apply_publication_change_requests.sql` | Applies approved reader-change and withdrawal requests (`apply_publication_change`, 24 postgres-owned SECURITY DEFINER routines including Reader AI), `WITHDRAWN` release state, updated decision outcome check (operator-class, trusted superuser). |
 | `0037_publication_governance.sql` | Decision 0023: `governance_inspection`, `publication_report` (reader insert policy), withdrawal provenance on `shared_submission`, `governance_current_publication` view, seven routines (catalog, inspection open/use, responsible view, direct withdrawal, report list/dismiss; 32 postgres-owned SECURITY DEFINER routines) (operator-class, trusted superuser). |
 | `0036_publication_preparation_retry.sql` | Longer automatic backoff (6 attempts, new jobs; the approval insert policy follows), `publication_failure_code` with its trigger and backfill, `knowledge_publication_failure_kind`, author-only `retry_knowledge_publication` (25 postgres-owned SECURITY DEFINER routines), replaced `fail_knowledge_index_job` (operator-class, trusted superuser). |
+| `0038_admin_only_direct_withdrawal.sql` | Decision 0024: forward replacement of `withdraw_publication_directly`; only current Organization Admin may withdraw directly, with reason/audit and Admin provenance. Reviewer read/report handling and reviewed author requests are unchanged. No new trusted function (32 total); operator-class. |
 
 Run migrations before starting an API build that depends on them. The 0022 code reads `reviewer_grant.scope` and `shared_submission.review_rule`. The 0024 code reads `shared_draft.draft_selection_id`, the submission selection columns and `publication_reader_selection_id()`.
 
@@ -345,7 +346,16 @@ Run migrations before starting an API build that depends on them. The 0022 code 
 - **Run on 2026-11-16:** a clean 0001–0037 apply and the full API suite (445 passed, Supabase auth skipped, 30-second timeout) on a disposable local PostgreSQL 17. A synthetic browser preview of Administration → Documents passed at desktop and 375 px widths.
 - **CI follow-up, 2026-11-17:** at PR #52 head `bdfad94`, run [44090300677](https://github.com/Arden-Enterprise/Arden/actions/runs/44090300677) passes the disposable PostgreSQL job: schema recovery, full-chain apply/no-op repeat, actual ownership handoff and 445 API tests (one provider-gated skip). The governance view now uses caller execution context without direct runtime access or relaxed RLS. Reviewer-grant fixtures clean up even after failed assertions. This run's OS jobs fail the separate immutable-history comparison after a branch migration edit; it is not an all-green CI claim.
 - **Reports panel regression coverage:** requests settling after unmount are ignored, as are superseded refresh successes and failures. A stale response must not restore dismissed reports or erase a newer list. The related UI tests control promise completion rather than sleeping.
-- **Still not run:** the full local API with sign-in, Electron, and a staging-copy rehearsal. Integration also awaits withdrawal/notification policy reconciliation and target-specific operator migration approval.
+- **Still not run:** the full local API with sign-in, Electron, and a staging-copy rehearsal. The later 0024 refinement below resolves the policy; its exact-head verification and target-specific operator migration evidence remain separate.
+
+**Admin-only refinement (0024 / 0038):** the maintainer resolved withdrawal authority
+to Admin-only and accepted no inspection notification for this release on 17
+November. GWD-01–04 in ADR 0024 supersede the earlier direct-reviewer-withdrawal
+cases above. Real database tests now require Department/Organization reviewer and
+spoofed Admin-setting denial without changing pointer/reports/audit, Admin success,
+and Admin provenance for an actor who also has a reviewer grant. UI tests retain
+View/Dismiss for reviewers and require reason/confirmation for Admin Withdraw.
+Exact-head verification and target-specific operator apply remain separate gates.
 
 **Retry evidence (0036):** the route test in `src/app.test.ts`, the T6.3 cases in `packages/ui/tests/flow2ReaderChanges.test.tsx` and the desktop allowlist test run without a database. `src/target-readers/target-readers.integration.test.ts` covers the backoff (about 30 s after the first failure), the 6-attempt default, the failure kind for temporary, content and integrity codes, the lease-exhausted path, author-only retry (another member, a reviewer and another organization get not-found), state reset, one audit event, a no-op repeat, refusal of content/system failures, a pending submission and an already published snapshot, and that the runtime cannot write the failure code or the job. On 2026-11-16 a clean 0001–0036 apply and a repeated no-op apply passed on a disposable local PostgreSQL 17 (Docker, the CI image), and the full API suite passed (437, Supabase auth skipped) with a 30-second test timeout. With the default 5 seconds the Target Readers file timed out when run after the other files on this machine, while it passed alone; the CI ownership handoff and the schema-recovery rehearsal were not run locally. Not rehearsed on a staging copy.
 
