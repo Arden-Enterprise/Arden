@@ -1,0 +1,209 @@
+{
+  "organizationName": "Arden Flow Practice",
+  "departments": ["Practice", "Coverage"],
+  "audienceGroup": {
+    "name": "Flow practice readers",
+    "description": "A named audience group for the local flow practice organization."
+  },
+  "catalogTopic": {
+    "name": "Workplace practice",
+    "description": "Topic used by the local flow practice documents."
+  },
+  "catalogCollection": {
+    "name": "Flow practice handbook",
+    "description": "Collection used by the local flow practice documents.",
+    "cover": "handbook"
+  },
+  "accounts": [
+    {
+      "id": "F06-system-admin",
+      "email": "local-system-admin@example.test",
+      "role": "System Admin",
+      "can": "Read installation administrators. This account may also be an ordinary member."
+    },
+    {
+      "id": "F02-org-admin",
+      "email": "local-org-admin@example.test",
+      "role": "Organization Admin",
+      "can": "Create the practice organization, departments, invitations, audiences, and reviewer grants."
+    },
+    {
+      "id": "F02-member",
+      "email": "local-department-member@example.test",
+      "role": "Department member",
+      "can": "Keep a private note and author library drafts."
+    },
+    {
+      "id": "F05-department-reviewer",
+      "email": "local-department-reviewer@example.test",
+      "role": "Department reviewer",
+      "can": "Review submissions for the author's department."
+    },
+    {
+      "id": "F05-organization-reviewer",
+      "email": "local-organization-reviewer@example.test",
+      "role": "Organization reviewer",
+      "can": "Review submissions for the whole organization."
+    }
+  ],
+  "invitations": [
+    {
+      "id": "F02-invitation-pending",
+      "email": "local-pending-invite@example.test",
+      "revoke": false,
+      "summary": "A pending invitation when invitation email is configured."
+    },
+    {
+      "id": "F02-invitation-revoked",
+      "email": "local-revoked-invite@example.test",
+      "revoke": true,
+      "summary": "A revoked invitation when invitation email is configured."
+    }
+  ],
+  "notes": [
+    {
+      "id": "F03-member-private-note",
+      "owner": "F02-member",
+      "title": "Member private desk note",
+      "sentence": "Only the department member should see this note."
+    },
+    {
+      "id": "F03-admin-private-note",
+      "owner": "F02-org-admin",
+      "title": "Admin private desk note",
+      "sentence": "Only the organization admin should see this note."
+    }
+  ],
+  "documents": [
+    {
+      "id": "F02-draft-unprepared",
+      "title": "Desk draft without an audience",
+      "classification": "INTERNAL",
+      "keep": "UNPREPARED",
+      "sentence": "This draft is intentionally not ready to submit."
+    },
+    {
+      "id": "F02-draft-ready",
+      "title": "Ready workplace draft",
+      "classification": "INTERNAL",
+      "keep": "READY",
+      "type": "Guide",
+      "sentence": "This draft has its readers and document details, and it has not been submitted."
+    },
+    {
+      "id": "F02-submission-pending",
+      "title": "Pending workplace submission",
+      "classification": "INTERNAL",
+      "keep": "PENDING_REVIEW",
+      "type": "Procedure",
+      "sentence": "This submission is waiting for a reviewer."
+    },
+    {
+      "id": "F02-submission-rejected",
+      "title": "Rejected confidential submission",
+      "classification": "CONFIDENTIAL",
+      "keep": "REJECTED",
+      "type": "Policy & Standard",
+      "action": "REJECT",
+      "comment": "The fixture rejection asks the author to name who the policy covers.",
+      "sentence": "This confidential draft is rejected so the comment and closed review can be inspected."
+    },
+    {
+      "id": "F02-submission-withdrawn",
+      "title": "Withdrawn workplace submission",
+      "classification": "INTERNAL",
+      "keep": "WITHDRAWN",
+      "type": "Reference",
+      "sentence": "This submission is withdrawn by its author before review."
+    },
+    {
+      "id": "F02-publication-internal",
+      "title": "Current workplace policy",
+      "classification": "INTERNAL",
+      "keep": "APPROVED",
+      "type": "Policy & Standard",
+      "action": "APPROVE",
+      "sentence": "This policy is the current library version an ordinary member can open."
+    },
+    {
+      "id": "F02-publication-restricted",
+      "title": "Current restricted handling rule",
+      "classification": "RESTRICTED",
+      "keep": "APPROVED",
+      "type": "Guide",
+      "action": "APPROVE",
+      "sentence": "This restricted rule is current so audience limits can be checked against a real publication."
+    }
+  ],
+  "maintenance": [
+    {
+      "id": "F04-intake",
+      "origin": "READER_REPORT",
+      "keep": "Submitted",
+      "description": "Flow practice reader report left at intake.",
+      "idempotencyKey": "11111111-1111-4111-8111-111111111111"
+    },
+    {
+      "id": "F04-claim",
+      "origin": "READER_REPORT",
+      "keep": "In Progress",
+      "description": "Flow practice reader report claimed for review.",
+      "idempotencyKey": "22222222-2222-4222-8222-222222222222",
+      "commandKey": "22222222-2222-4222-8222-222222222223"
+    },
+    {
+      "id": "F04-reassign",
+      "origin": "REVIEWER_INTAKE",
+      "keep": "Reassigned",
+      "description": "Flow practice reviewer intake reassigned by an organization admin.",
+      "idempotencyKey": "33333333-3333-4333-8333-333333333333",
+      "commandKey": "33333333-3333-4333-8333-333333333334"
+    },
+    {
+      "id": "F04-resolved",
+      "origin": "READER_REPORT",
+      "keep": "Resolved",
+      "description": "Flow practice reader report resolved with no change.",
+      "idempotencyKey": "44444444-4444-4444-8444-444444444444",
+      "commandKey": "44444444-4444-4444-8444-444444444445",
+      "decideKey": "44444444-4444-4444-8444-444444444446"
+    }
+  ],
+  "cases": [
+    { "id": "F01-password-sign-in", "flow": 1, "seed": true, "summary": "Each fixture account signs in with email and password." },
+    { "id": "F01-google", "flow": 1, "seed": false, "summary": "Google sign-in and the consent screen stay a live browser check." },
+    { "id": "F01-recovery", "flow": 1, "seed": false, "summary": "Password recovery needs a delivered email and is not created as fixture data." },
+    { "id": "F02-organization", "flow": 2, "seed": true, "summary": "Arden Flow Practice exists beside any organization the admin already belongs to." },
+    { "id": "F02-departments", "flow": 2, "seed": true, "summary": "The practice organization has Practice and Coverage departments." },
+    { "id": "F02-fixture-members", "flow": 2, "seed": true, "summary": "The department member and both reviewers are active members." },
+    { "id": "F02-member-email", "flow": 2, "seed": true, "summary": "The account in ARDEN_SEED_MEMBER_EMAIL is an active member and can switch into this workspace." },
+    { "id": "F02-invitation-pending", "flow": 2, "seed": true, "summary": "A pending invitation for local-pending-invite@example.test." },
+    { "id": "F02-invitation-revoked", "flow": 2, "seed": true, "summary": "A revoked invitation for local-revoked-invite@example.test." },
+    { "id": "F02-reviewer-grants", "flow": 2, "seed": true, "summary": "One active department grant and one active organization grant." },
+    { "id": "F02-audience-group", "flow": 2, "seed": true, "summary": "One named audience group." },
+    { "id": "F02-catalog-topic", "flow": 2, "seed": true, "summary": "One active catalog topic." },
+    { "id": "F02-catalog-collection", "flow": 2, "seed": true, "summary": "One active catalog collection." },
+    { "id": "F03-member-private-note", "flow": 3, "seed": true, "summary": "A private note owned by the department member." },
+    { "id": "F03-admin-private-note", "flow": 3, "seed": true, "summary": "A private note owned by the organization admin." },
+    { "id": "F02-draft-unprepared", "flow": 2, "seed": true, "summary": "An internal library draft saved before readers are chosen." },
+    { "id": "F02-draft-ready", "flow": 2, "seed": true, "summary": "An internal library draft ready to submit and not submitted." },
+    { "id": "F02-submission-pending", "flow": 2, "seed": true, "summary": "An internal submission left awaiting review." },
+    { "id": "F02-submission-rejected", "flow": 2, "seed": true, "summary": "A confidential submission rejected with a comment." },
+    { "id": "F02-submission-withdrawn", "flow": 2, "seed": true, "summary": "An internal submission withdrawn by its author." },
+    { "id": "F02-publication-internal", "flow": 2, "seed": true, "summary": "An internal document approved. Publication may stay PREPARING until indexing finishes." },
+    { "id": "F02-publication-restricted", "flow": 2, "seed": true, "summary": "A restricted document approved. Publication may stay PREPARING until indexing finishes." },
+    { "id": "F02-change-request", "flow": 2, "seed": true, "summary": "A withdrawal change request on a current publication." },
+    { "id": "F02-publication-report", "flow": 2, "seed": true, "summary": "A reader problem report on a current publication." },
+    { "id": "F02-direct-withdrawal", "flow": 2, "seed": true, "summary": "An organization admin withdraws one current publication with a reason." },
+    { "id": "F02-publication-failed", "flow": 2, "seed": false, "summary": "A failed publication is stored only after the indexer reports a failure. This seed does not invent that failure." },
+    { "id": "F03-published-readable", "flow": 3, "seed": true, "summary": "A member can list the approved documents in the library." },
+    { "id": "F03-summary", "flow": 3, "seed": true, "summary": "Reader summary is attempted. An unavailable AI service is recorded, not invented." },
+    { "id": "F03-question", "flow": 3, "seed": true, "summary": "A reader question is attempted. An unavailable AI service is recorded, not invented." },
+    { "id": "F03-ask", "flow": 3, "seed": true, "summary": "Ask Arden is attempted. An unavailable AI service is recorded, not invented." },
+    { "id": "F04-intake", "flow": 4, "seed": true, "summary": "A maintenance case left at Submitted." },
+    { "id": "F04-claim", "flow": 4, "seed": true, "summary": "A maintenance case claimed and left In Progress." },
+    { "id": "F04-reassign", "flow": 4, "seed": true, "summary": "A maintenance case reassigned to another eligible reviewer." },
+    { "id": "F04-resolved", "flow": 4, "seed": true, "summary": "A maintenance case resolved as no change needed." },
+    { "id": "F06-system-admin-read", "flow": 1, "seed": true, "summary": "The system admin can read installation administrators. The organization admin cannot." }
+  ]
+}
