@@ -22,7 +22,8 @@ import { DepartmentDetailIsland, grantCoverageLabel, grantValidity, MemberDetail
 import { departmentDeletionSummary, filterOrganizationMembers, isOrganizationAdminMember, membersInDepartment } from "./memberAdministration";
 import { MAX_INVITATIONS_PER_BATCH, planInvitationBatch, sendInvitationBatch, type InvitationBatchPlan, type InvitationSendResult } from "./invitationBatch";
 
-type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void; onSendingInvitationsChange?: (sending: boolean) => void } & ContextControlProps;
+type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void;
+  onSendingInvitationsChange?: (sending: boolean) => void; onOpenKnowledgeLibrary?: () => void } & ContextControlProps;
 type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers";
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
 const tabNames: Record<AdminTab, string> = {
@@ -44,7 +45,8 @@ function invitationResultLabel(result: InvitationSendResult): string {
   }
 }
 
-export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext, onDirtyChange, onSendingInvitationsChange }: Props) {
+export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext,
+  onDirtyChange, onSendingInvitationsChange, onOpenKnowledgeLibrary }: Props) {
   const [data, setData] = useState<OrganizationAdministration | null>(null);
   const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
   const [tab, setTab] = useState<AdminTab>("members");
@@ -75,6 +77,11 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [pendingTab, setPendingTab] = useState<AdminTab | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (departmentError && !busy && tab === "departments") {
+      document.getElementById("admin-department-name")?.focus();
+    }
+  }, [departmentError, busy, tab]);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
@@ -123,14 +130,19 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     return () => { active = false; };
   }, [platform, organizationId, selectedMemberId]);
 
-  const perform = async (action: () => Promise<string | void>, successMessage: string) => {
+  const perform = async (action: () => Promise<string | void>, successMessage: string,
+    onError?: (message: string) => void) => {
     setBusy(true); setError(""); setMessage("");
     try {
       const actionMessage = await action();
       try { await reload(); } catch { setError("Change saved, but the list could not refresh. Use Refresh to load the latest data."); }
       setMessage(actionMessage ?? successMessage);
       return true;
-    } catch (cause) { setError(cause instanceof ApiError ? cause.message : "The change could not be saved. Refresh and try again."); return false; }
+    } catch (cause) {
+      const message = cause instanceof ApiError ? cause.message : "The change could not be saved. Refresh and try again.";
+      if (onError) onError(message); else setError(message);
+      return false;
+    }
     finally { setBusy(false); }
   };
   const selectTab = (next: AdminTab) => {
@@ -154,7 +166,10 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       setDepartmentError("A department with this name already exists."); document.getElementById("admin-department-name")?.focus(); return;
     }
     setDepartmentError("");
-    void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentNameInput(""); }, "Department created");
+    void perform(async () => { await createDepartment(platform, organizationId, name); setDepartmentNameInput(""); },
+      "Department created", (message) => {
+        setDepartmentError(message);
+      });
   };
   const handleDeleteDepartment = (department: OrganizationAdministration["departments"][number]) => {
     if (!data) return;
@@ -255,6 +270,11 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       {loading ? <div role="status" className="admin-loading island"><span className="sr-only">Loading organization data…</span>{[0, 1, 2].map((index) => <div key={index} className="admin-skeleton-row" aria-hidden="true"><span /><div><span /><span /></div></div>)}</div> : error && !data ? <div className="organization-notice is-danger" role="alert"><strong>Couldn’t load members.</strong><span>Try again.</span><button type="button" className="secondary-button" onClick={() => { setLoading(true); setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")).finally(() => setLoading(false)); }}>Try again</button></div> : data && <>
         {error && !selectedMember && <p className="admin-feedback is-error" role="alert">{error}</p>}
         {tab === "members" && <div role="tabpanel" aria-label="Members" className="admin-tabpanel">
+          {onOpenKnowledgeLibrary && <div className="organization-notice is-info">
+            <strong>Topics for contributions</strong>
+            <span>Org Admins add Topics in Knowledge Library → Discover → Manage catalog.</span>
+            <button type="button" className="secondary-button" onClick={onOpenKnowledgeLibrary}>Open Knowledge</button>
+          </div>}
           <div className="admin-filters">
             <label className="workspace-search admin-search"><Icon name="search" size={15} /><span className="sr-only">Search members</span><input type="search" placeholder="Filter by name or email" value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} /></label>
             <IslandFilterMenu label="Filter department" value={memberDepartment} onChange={setMemberDepartment}

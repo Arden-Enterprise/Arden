@@ -17,8 +17,8 @@ export function targetReadersLabel(readers: TargetReaders | null | undefined, de
   return `${readers.memberIds.length} selected members`;
 }
 
-export function KnowledgeMetadataFields({ value, readers, topics, departments, busy, isUpdate, platform, organizationId, onChange, onReaders }: {
-  value: KnowledgeMetadata; readers: TargetReaders | null; topics: KnowledgeCatalogEntry[];
+export function KnowledgeMetadataFields({ value, readers, topics, catalogError, departments, busy, isUpdate, platform, organizationId, onChange, onReaders }: {
+  value: KnowledgeMetadata; readers: TargetReaders | null; topics: KnowledgeCatalogEntry[]; catalogError?: string;
   departments: Array<{ id: string; name: string }>; busy: boolean; isUpdate: boolean; platform: Platform; organizationId: string;
   onChange: (value: KnowledgeMetadata) => void; onReaders: (value: TargetReaders) => void;
 }) {
@@ -49,7 +49,8 @@ export function KnowledgeMetadataFields({ value, readers, topics, departments, b
       <option value="">Choose type</option>{knowledgeTypes.map(type => <option key={type}>{type}</option>)}</select></label>
     <label className="island-field">Topic *<select disabled={busy} value={value.topicId ?? ""} onChange={event => onChange({ ...value, topicId: event.target.value || null })}>
       <option value="">Choose topic</option>{topics.filter(topic => topic.status === "ACTIVE" || topic.id === value.topicId).map(topic => <option key={topic.id} value={topic.id} disabled={topic.status !== "ACTIVE"}>{topic.name}{topic.status !== "ACTIVE" ? " (Inactive)" : ""}</option>)}</select>
-      {!topics.some(topic => topic.status === "ACTIVE") && <small>Ask an admin to add a topic.</small>}</label>
+      {catalogError ? <small className="field-error" role="alert">Topic catalog is unavailable. Refresh and try again.</small>
+        : !topics.some(topic => topic.status === "ACTIVE") && <small>Ask an Org Admin to add a Topic in Knowledge Library → Discover → Manage catalog.</small>}</label>
     <label className="island-field">Version *<input disabled={busy} maxLength={30} placeholder="e.g. 1.0" value={value.version} onChange={event => onChange({ ...value, version: event.target.value })} /></label>
     <label className="island-field">Effective Date *<input disabled={busy} type="date" value={value.effectiveDate ?? ""} onChange={event => onChange({ ...value, effectiveDate: event.target.value || null })} /></label>
     <label className="island-field">Expiration Date<input disabled={busy} type="date" min={value.effectiveDate ?? undefined} value={value.expirationDate ?? ""} onChange={event => onChange({ ...value, expirationDate: event.target.value || null })} /></label>

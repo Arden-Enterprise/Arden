@@ -622,7 +622,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             }}>
               <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             </>}
-            <KnowledgeMetadataFields value={editor.management} readers={editor.targetReaders} topics={catalog?.topics ?? []}
+            <KnowledgeMetadataFields value={editor.management} readers={editor.targetReaders} topics={catalog?.topics ?? []} catalogError={catalogError}
               departments={options?.departments ?? []} busy={busy} isUpdate={draft.hasPublishedVersion ?? false}
               platform={platform} organizationId={organizationId}
               onChange={management => setEditor({ ...editor, management })} onReaders={targetReaders => setEditor({ ...editor, targetReaders })} />
