@@ -43,6 +43,14 @@ while their input tables use FORCE RLS and runtime-only policies silently change
 validation and worker behavior. Never bulk-transfer routines as ordinary ownership
 housekeeping. The migration-role probe must reject that broken ownership split.
 
+Views have their own execution context: retaining a trusted function owner does
+not make an owner-context view read as that function. The private
+`governance_current_publication` view uses `security_invoker` so its guarded
+SECURITY DEFINER callers retain the intended execution identity after view
+ownership transfer. The runtime has no direct view privilege. `security_barrier`
+alone does not provide this property; keep table RLS and existing entry-point
+authorization intact.
+
 Do not change FORCE RLS, actor/organization transaction settings, internal function
 owners, reviewer/audience gates or indexing execution privileges independently.
 Review them together and run the real runtime/worker workflow suite after the full

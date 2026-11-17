@@ -101,12 +101,18 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
   const [busy, setBusy] = useState(false);
   // Requests may settle after the page (or a test environment) is gone; never update state then.
   const mounted = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const reportRequest = useRef(0);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; reportRequest.current += 1; };
+  }, []);
   // A secondary panel: when reports can't be loaded it stays hidden rather than adding an error to Reviews.
   const load = useCallback(() => {
+    const request = ++reportRequest.current;
+    const isCurrent = () => mounted.current && reportRequest.current === request;
     listPublicationReports(platform, organizationId)
-      .then((items) => { if (mounted.current) setReports(items); })
-      .catch(() => { if (mounted.current) setReports([]); });
+      .then((items) => { if (isCurrent()) setReports(items); })
+      .catch(() => { if (isCurrent()) setReports([]); });
   }, [platform, organizationId]);
   useEffect(() => { load(); }, [load, refreshSignal]);
   const act = (work: () => Promise<void>) => { setBusy(true); setError(""); void work()

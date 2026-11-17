@@ -5,7 +5,7 @@ Date: 2026-11-16
 Decision owner/approval: project maintainer. In an agent session on 2026-11-16 the maintainer was shown option C below, the comparison and its consequences, refined it, and answered "theo đề xuất" ("as proposed") to the explicit choice to approve this replacement, keep decision 0010 unchanged, or consult the team first.
 Brainstorm originator / record author: the project maintainer raised and refined the questions; record drafted by the coding agent. The original owner of decision 0010 is recorded there only as "task owner"; that person was not consulted, and the maintainer chose to proceed.
 Approval evidence and exact source/spec revision: maintainer approval in the session above, against `origin/staging` 7a133af with decisions 0010, 0011 and 0013–0015 and the Flow 2 workflow (T6.3) as the baseline.
-Implementation: implemented locally in migration `0037_publication_governance.sql`, API routes and screens; not published, rehearsed on a staging copy or deployed (see "Verification and rollout").
+Implementation: published in PR #52, not merged or deployed. Migration `0037_publication_governance.sql`, API routes and screens have disposable-CI evidence below, not staging-copy rehearsal. Integration still requires explicit withdrawal/notification policy reconciliation and target-specific operator migration approval.
 Supersedes / superseded by: refines [0010](0010-audiences-and-system-administration.md) ("Org Admin … does not implicitly read content") and [0011](0011-permission-aware-publication-and-semantic-documents.md) (Organization Admin unpublish).
 
 ## Context and requirement
@@ -171,8 +171,8 @@ in audit and in the report list, and the responsible people check them there.
   - Route, UI and desktop allowlist tests passed.
   - A synthetic browser preview showed the catalog, reason dialog and inspection view at desktop and
     375 px widths.
+- **CI follow-up (2026-11-17, `bdfad94`).** Run [44090300677](https://github.com/Arden-Enterprise/Arden/actions/runs/44090300677) passes schema recovery, full-chain apply/no-op repeat and the API suite after the real ownership handoff (445 tests, one provider-gated skip). The invoker-mode governance view preserves checked privileged execution without broadening runtime privileges. Grant fixtures now clean up after failed assertions. OS checks in that run still fail a separate immutable-history comparison; this is not a full-CI or release sign-off.
 - **Not done:**
-  - the CI ownership handoff and schema-recovery rehearsal;
   - a run against the full local API with real sign-in;
   - Electron;
   - staging-copy rehearsal, operator apply and deployment.
@@ -183,7 +183,7 @@ in audit and in the report list, and the responsible people check them there.
   - the status lines of 0010 and 0011;
   - `docs/engineering/mainflow-2-workflow.md`;
   - `docs/engineering/security-and-data.md`.
-- `DESIGN.md` screens remain to be documented.
+- `DESIGN.md` records the governance screens. Signed-in and native interaction acceptance remains open.
 
 ## References
 

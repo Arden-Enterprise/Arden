@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installTestDialogs } from "./dialogTestSupport";
 import * as api from "../src/shared/api-client";
@@ -87,16 +87,32 @@ describe("decision 0023 reported problems", () => {
   const report: api.PublicationReport = { id: "report", documentId: "doc", publishedVersionId: "version", title: "Salary bands",
     message: "Wrong column", reporterName: "Avery", createdAt: "2026-11-16T00:00:00Z", stillCurrent: true, canView: true };
 
-  it("ignores reports that arrive after the panel is gone", async () => {
-    let resolve: (items: api.PublicationReport[]) => void = () => undefined;
-    vi.spyOn(api, "listPublicationReports").mockReturnValue(new Promise((done) => { resolve = done; }));
+  it.each(["resolve", "reject"])("ignores a report request that %ss after the panel is gone", async (outcome) => {
+    let settle: () => void = () => undefined;
+    vi.spyOn(api, "listPublicationReports").mockReturnValue(new Promise((resolve, reject) => {
+      settle = () => outcome === "resolve" ? resolve([report]) : reject(new Error("Unavailable"));
+    }));
     const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { unmount, container } = render(createElement(PublicationReportsPanel, { platform: "web", organizationId: "org", departmentName }));
     unmount();
-    resolve([report]);
-    await new Promise((settle) => setTimeout(settle, 0));
+    await act(async () => settle());
     expect(container.innerHTML).toBe("");
     expect(errors).not.toHaveBeenCalled();
+  });
+
+  it.each(["resolve", "reject"])("ignores a superseded report request that %ss after refresh", async (outcome) => {
+    let settle: () => void = () => undefined;
+    const list = vi.spyOn(api, "listPublicationReports").mockReturnValueOnce(new Promise((resolve, reject) => {
+      settle = () => outcome === "resolve" ? resolve([{ ...report, message: "Stale problem" }]) : reject(new Error("Unavailable"));
+    })).mockResolvedValue([{ ...report, message: "Latest problem" }]);
+    const props = { platform: "web" as const, organizationId: "org", departmentName };
+    const { rerender } = render(createElement(PublicationReportsPanel, props));
+    rerender(createElement(PublicationReportsPanel, { ...props, refreshSignal: 1 }));
+    expect(await screen.findByText("Latest problem")).toBeTruthy();
+    await act(async () => settle());
+    expect(screen.getByText("Latest problem")).toBeTruthy();
+    expect(screen.queryByText("Stale problem")).toBeNull();
+    expect(list).toHaveBeenCalledTimes(2);
   });
 
   it("stays hidden when there is nothing to show", async () => {
