@@ -74,6 +74,49 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${path}?scope=all`, method: "POST" }), false);
     assert.equal(validateDesktopApiRequest({ path: path.replace("/submissions/", "/reviews/"), method: "POST" }), false);
   });
+  it("permits decision 0023 governance reads and reasoned actions only in their exact shapes", () => {
+    const knowledge = `/api/v1/organizations/${organizationId}/knowledge`;
+    const id = sourcePrivateVersionId;
+    const body = JSON.stringify({ reason: "Reported" });
+    for (const path of [`${knowledge}/governance/publications`, `${knowledge}/governance/inspections/${id}`,
+      `${knowledge}/documents/${id}/responsible-view`, `${knowledge}/reports`]) {
+      assert.equal(validateDesktopApiRequest({ path, method: "GET" }), true, path);
+      assert.equal(validateDesktopApiRequest({ path, method: "POST", body }), false, path);
+      assert.equal(validateDesktopApiRequest({ path: `${path}?all=1`, method: "GET" }), false, path);
+    }
+    for (const path of [`${knowledge}/governance/publications/${id}/inspections`, `${knowledge}/documents/${id}/withdrawal`,
+      `${knowledge}/published/${id}/reports`]) {
+      assert.equal(validateDesktopApiRequest({ path, method: "POST", body }), true, path);
+      assert.equal(validateDesktopApiRequest({ path, method: "POST" }), false, path);
+      assert.equal(validateDesktopApiRequest({ path, method: "POST", body, idempotencyKey }), false, path);
+      assert.equal(validateDesktopApiRequest({ path, method: "GET" }), false, path);
+    }
+    const dismiss = `${knowledge}/reports/${id}/dismiss`;
+    assert.equal(validateDesktopApiRequest({ path: dismiss, method: "POST" }), true);
+    assert.equal(validateDesktopApiRequest({ path: dismiss, method: "POST", body }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${knowledge}/governance/inspections/not-a-uuid`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${knowledge}/documents/${id}/withdrawal`, method: "POST", body, ifMatch: '"1"' }), false);
+  });
+  it("permits only the scoped bodyless publication retry action", () => {
+    const path = `/api/v1/organizations/${organizationId}/knowledge/submissions/${sourcePrivateVersionId}/publication-retry`;
+    assert.equal(validateDesktopApiRequest({ path, method: "POST" }), true);
+    assert.equal(validateDesktopApiRequest({ path, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path, method: "POST", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path, method: "POST", idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ path: path.replace("publication-retry", "retry"), method: "POST" }), false);
+    assert.equal(validateDesktopApiRequest({ path: path.replace(sourcePrivateVersionId, "not-a-uuid"), method: "POST" }), false);
+  });
+  it("permits an author's change request only with a body and an idempotency key", () => {
+    const path = `/api/v1/organizations/${organizationId}/knowledge/documents/${sourcePrivateVersionId}/change-requests`;
+    const body = JSON.stringify({ type: "WITHDRAWAL", reason: "Outdated" });
+    assert.equal(validateDesktopApiRequest({ path, method: "POST", body, idempotencyKey }), true);
+    assert.equal(validateDesktopApiRequest({ path, method: "POST", body }), false);
+    assert.equal(validateDesktopApiRequest({ path, method: "POST", idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ path, method: "POST", body, idempotencyKey, ifMatch: '"1"' }), false);
+    assert.equal(validateDesktopApiRequest({ path, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${path}?type=all`, method: "POST", body, idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ path: path.replace(sourcePrivateVersionId, "not-a-uuid"), method: "POST", body, idempotencyKey }), false);
+  });
   it("bounds audience-group routes and requires group-specific update preconditions", () => {
     const group = `/api/v1/organizations/${organizationId}/audience-groups/${sourcePrivateVersionId}`;
     assert.equal(validateDesktopApiRequest({ path: group, method: "GET" }), true);

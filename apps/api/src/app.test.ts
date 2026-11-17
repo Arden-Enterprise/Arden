@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult , type PublicationChangeInput, type RequestPublicationChangeResult } from "./db/repository.js";
+import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult, type RetryKnowledgePublicationResult, type GovernancePublication, type GovernanceInspectionView, type GovernanceDocumentView, type PublicationReport, type OpenGovernanceInspectionResult, type DirectWithdrawalResult, type ReportPublicationResult, type PublicationChangeInput, type RequestPublicationChangeResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -1502,7 +1502,7 @@ describe("API auth and private draft routes", () => {
       audienceRoleIds: [], proposedTargetReaders: null, approvedTargetReaders: null, contentHash: "a".repeat(64),
       status: "PENDING_REVIEW", publicationState: "NONE", submittedAt: new Date("2026-11-10T09:00:00.000Z"),
       requestType: "CONTENT", requestReason: null,
-      publishedVersionId: null, decisionComment: null };
+      publishedVersionId: null, decisionComment: null, publicationFailure: null, withdrawal: null };
     repository.reviewerGrant = { id: "bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc", reviewerMembershipId: otherId, scope: "DEPARTMENT",
       departmentId: salesDepartmentId, classifications: ["INTERNAL"], level: "STANDARD", teamTag: null, projectTag: null,
       status: "ACTIVE", validFrom: new Date("2026-11-01T00:00:00.000Z"), validUntil: null };
@@ -1867,6 +1867,142 @@ describe("API auth and private draft routes", () => {
       headers: { cookie: owner, origin: "http://localhost:5180" } })).statusCode).toBe(400);
   });
 
+  describe("decision 0023 governance routes", () => {
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const as = async (email: string) => ({ cookie: await desktopSession(app, email), origin: "http://localhost:5180" });
+
+    it("lists metadata only to an Organization Admin and opens an audited inspection with a reason", async () => {
+      const owner = await as("owner@example.test");
+      const stored = await storage.write("Inspected body");
+      repository.governanceSource = { sourceUri: stored.sourceUri, contentHash: stored.contentHash };
+      expect((await app.inject({ method: "GET", url: `${root}/governance/publications`, headers: owner })).statusCode).toBe(404);
+
+      repository.governanceAdmin = true;
+      const catalog = await app.inject({ method: "GET", url: `${root}/governance/publications`, headers: owner });
+      expect(catalog.statusCode).toBe(200);
+      expect(catalog.headers["cache-control"]).toBe("no-store");
+      const [item] = catalog.json().items;
+      expect(item).toMatchObject({ documentId: sharedDraftId, readerMode: "SELECTED_MEMBERS", openReports: 1, readable: false });
+      expect(Object.keys(item)).not.toEqual(expect.arrayContaining(["readerNames"]));
+      expect(JSON.stringify(item)).not.toContain("Avery");
+
+      const open = (reason: string) => app.inject({ method: "POST", url: `${root}/governance/publications/${sharedDraftId}/inspections`,
+        headers: owner, payload: { reason } });
+      expect((await open("  ")).statusCode).toBe(400);
+      const opened = await open("Reported salary data");
+      expect(opened.statusCode).toBe(201);
+      const inspection = await app.inject({ method: "GET", url: `${root}/governance/inspections/${opened.json().inspectionId}`, headers: owner });
+      expect(inspection.statusCode).toBe(200);
+      expect(inspection.json()).toMatchObject({ documentId: sharedDraftId, body: "Inspected body", reason: "Reported salary data",
+        readers: { mode: "SELECTED_MEMBERS", names: ["Avery Reader", "Blake Reader"] } });
+      const ended = await app.inject({ method: "GET", url: `${root}/governance/inspections/34343434-3434-4343-8343-343434343434`, headers: owner });
+      expect(ended.statusCode).toBe(404);
+      expect(ended.json().error.code).toBe("INSPECTION_ENDED");
+
+      repository.governanceAdmin = false;
+      expect((await open("Reported salary data")).statusCode).toBe(404);
+    });
+
+    it("sends an Admin who already reads the document to the Library instead of an inspection", async () => {
+      const owner = await as("owner@example.test");
+      repository.governanceAdmin = true;
+      const stored = await storage.write("Readable");
+      repository.publication = { id: versionId, draftId: sharedDraftId, title: "Readable", classification: "INTERNAL",
+        responsibleDepartmentId: salesDepartmentId, responsibleDepartmentName: "Sales", contentHash: stored.contentHash,
+        sourceUri: stored.sourceUri, audienceRoleIds: [], targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
+        publishedAt: new Date("2026-11-01T00:00:00.000Z"), validFrom: new Date("2026-11-01T00:00:00.000Z"), validUntil: null };
+      const catalog = await app.inject({ method: "GET", url: `${root}/governance/publications`, headers: owner });
+      expect(catalog.json().items[0].readable).toBe(true);
+      const opened = await app.inject({ method: "POST", url: `${root}/governance/publications/${sharedDraftId}/inspections`,
+        headers: owner, payload: { reason: "Check" } });
+      expect(opened.statusCode).toBe(409);
+      expect(opened.json().error.code).toBe("ALREADY_A_READER");
+    });
+
+    it("lets only the responsible reviewer view and withdraw with a reason", async () => {
+      const owner = await as("owner@example.test");
+      const reviewer = await as("manager@example.test");
+      const stored = await storage.write("Responsible body");
+      repository.governanceSource = { sourceUri: stored.sourceUri, contentHash: stored.contentHash };
+      const view = `${root}/documents/${sharedDraftId}/responsible-view`;
+      expect((await app.inject({ method: "GET", url: view, headers: owner })).statusCode).toBe(404);
+      const seen = await app.inject({ method: "GET", url: view, headers: reviewer });
+      expect(seen.statusCode).toBe(200);
+      expect(seen.json()).toMatchObject({ body: "Responsible body", readers: { mode: "SELECTED_MEMBERS" } });
+      expect(seen.json().readers.names).toBeUndefined();
+
+      const withdraw = (headers: Record<string, string>, reason: string) => app.inject({ method: "POST",
+        url: `${root}/documents/${sharedDraftId}/withdrawal`, headers, payload: { reason } });
+      expect((await withdraw(owner, "Not mine")).statusCode).toBe(404);
+      expect((await withdraw(reviewer, " ")).json().error.code).toBe("INVALID_REASON");
+      const withdrawn = await withdraw(reviewer, "Wrong figures");
+      expect(withdrawn.statusCode).toBe(200);
+      expect(withdrawn.json()).toEqual({ status: "WITHDRAWN" });
+      expect((await withdraw(reviewer, "Wrong figures")).statusCode).toBe(404);
+    });
+
+    it("lets a reader report a problem once, and the responsible reviewer list and dismiss it", async () => {
+      const owner = await as("owner@example.test");
+      const reviewer = await as("manager@example.test");
+      const stored = await storage.write("Reported");
+      repository.publication = { id: versionId, draftId: sharedDraftId, title: "Reported", classification: "INTERNAL",
+        responsibleDepartmentId: salesDepartmentId, responsibleDepartmentName: "Sales", contentHash: stored.contentHash,
+        sourceUri: stored.sourceUri, audienceRoleIds: [], targetReaders: { mode: "DEPARTMENT", departmentId: engineeringDepartmentId, memberIds: [] },
+        publishedAt: new Date("2026-11-01T00:00:00.000Z"), validFrom: new Date("2026-11-01T00:00:00.000Z"), validUntil: null };
+      const report = (message: string) => app.inject({ method: "POST", url: `${root}/published/${versionId}/reports`,
+        headers: owner, payload: { message } });
+      expect((await report("Wrong figures")).statusCode).toBe(404);
+
+      repository.publication = { ...repository.publication, targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] } };
+      expect((await report("   ")).json().error.code).toBe("INVALID_MESSAGE");
+      expect((await report("Wrong figures")).statusCode).toBe(201);
+      const again = await report("Still wrong");
+      expect(again.statusCode).toBe(409);
+      expect(again.json().error.code).toBe("ALREADY_REPORTED");
+
+      const listed = await app.inject({ method: "GET", url: `${root}/reports`, headers: reviewer });
+      expect(listed.statusCode).toBe(200);
+      const [item] = listed.json().items;
+      expect(item).toMatchObject({ documentId: sharedDraftId, message: "Wrong figures", canView: true });
+      const dismiss = () => app.inject({ method: "POST", url: `${root}/reports/${item.id}/dismiss`, headers: reviewer });
+      expect((await dismiss()).json()).toEqual({ status: "CLOSED" });
+      expect((await dismiss()).statusCode).toBe(404);
+    });
+  });
+
+  it("lets only the author retry a temporarily failed publication and explains other outcomes (T6.3 retry)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const reviewer = await desktopSession(app, "manager@example.test");
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const failed: SharedKnowledgeSubmission = { id: "abababab-abab-4aba-8aba-abababababab", draftId: sharedDraftId,
+      snapshotVersionId: sharedVersionId, title: "Runbook", classification: "INTERNAL",
+      responsibleDepartmentId: salesDepartmentId, targetScopeType: "ORGANIZATION", targetDepartmentId: null,
+      audienceRoleIds: [], proposedTargetReaders: null, approvedTargetReaders: null, contentHash: "a".repeat(64),
+      status: "APPROVED", publicationState: "FAILED", submittedAt: new Date("2026-11-10T09:00:00.000Z"),
+      publishedVersionId: null, decisionComment: null, requestType: "CONTENT", requestReason: null,
+      publicationFailure: "TEMPORARY", withdrawal: null };
+    const url = `${root}/submissions/${failed.id}/publication-retry`;
+    const post = (cookie: string, target = url) => app.inject({ method: "POST", url: target,
+      headers: { cookie, origin: "http://localhost:5180" } });
+
+    repository.sharedSubmission = { ...failed, publicationFailure: "CONTENT" };
+    const content = await post(owner);
+    expect(content.statusCode).toBe(409);
+    expect(content.json().error.code).toBe("PUBLICATION_NOT_RETRYABLE");
+
+    repository.sharedSubmission = failed;
+    expect((await post(reviewer)).statusCode).toBe(404);
+    const retried = await post(owner);
+    expect(retried.statusCode).toBe(200);
+    expect(retried.headers["cache-control"]).toBe("no-store");
+    expect(retried.json()).toMatchObject({ id: failed.id, publicationState: "PREPARING", publicationFailure: null });
+    expect((await post(owner)).statusCode).toBe(200);
+
+    repository.sharedSubmission = { ...failed, publicationState: "ACTIVE", publicationFailure: null, withdrawal: null };
+    expect((await post(owner)).json().error.code).toBe("PUBLICATION_NOT_FAILED");
+    expect((await post(owner, `${root}/submissions/not-a-uuid/publication-retry`)).statusCode).toBe(400);
+  });
+
   it("accepts reader-change and withdrawal requests only for a published document (T6.1)", async () => {
     const owner = await desktopSession(app, "owner@example.test");
     const url = `/api/v1/organizations/${organizationId}/knowledge/documents/${sharedDraftId}/change-requests`;
@@ -1886,7 +2022,7 @@ describe("API auth and private draft routes", () => {
       audienceRoleIds: [], proposedTargetReaders: null, approvedTargetReaders: null, contentHash: "a".repeat(64),
       status: "APPROVED", publicationState: "ACTIVE", submittedAt: new Date("2026-11-10T09:00:00.000Z"),
       publishedVersionId: "efefefef-efef-4efe-8efe-efefefefefef", decisionComment: null,
-      requestType: "CONTENT", requestReason: null };
+      requestType: "CONTENT", requestReason: null, publicationFailure: null, withdrawal: null };
     expect((await send({ type: "READER_CHANGE", reason: "Narrow it" })).statusCode).toBe(400);
     const requested = await send({ type: "WITHDRAWAL", reason: "The policy was replaced" });
     expect(requested.statusCode).toBe(201);
@@ -2405,7 +2541,7 @@ class MemoryRepository implements ArdenDataRepository {
       contentHash: draft.contentHash,
       status: "PENDING_REVIEW", submittedAt: new Date("2026-10-10T10:00:00.000Z"), publishedVersionId: null,
       publicationState: "NONE",
-      decisionComment: null, requestType: "CONTENT", requestReason: null,
+      decisionComment: null, requestType: "CONTENT", requestReason: null, publicationFailure: null, withdrawal: null,
     };
     this.sharedDraft = { ...draft, hasPendingSubmission: true };
     return { kind: "submitted", submission: this.sharedSubmission! };
@@ -2414,6 +2550,96 @@ class MemoryRepository implements ArdenDataRepository {
   async listKnowledgeSubmissions(userId: string, requestedOrganization: string): Promise<SharedKnowledgeSubmission[] | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId) return null;
     return this.sharedSubmission ? [this.sharedSubmission] : [];
+  }
+
+  governanceAdmin = false;
+  governanceInspections = new Map<string, string>();
+  publicationReports: PublicationReport[] = [];
+  withdrawnDocuments: string[] = [];
+
+  governanceSource = { sourceUri: "arden-private-object://governance", contentHash: "a".repeat(64) };
+
+  private governanceView(): GovernanceDocumentView {
+    return { documentId: sharedDraftId, publishedVersionId: "efefefef-efef-4efe-8efe-efefefefefef", title: "Runbook",
+      ...this.governanceSource, mimeType: "text/plain",
+      responsibleDepartmentId: salesDepartmentId, readerMode: "SELECTED_MEMBERS", readerDepartmentId: null };
+  }
+
+  async listGovernancePublications(userId: string, requestedOrganization: string): Promise<GovernancePublication[] | null> {
+    if (!this.governanceAdmin || userId !== ownerId || requestedOrganization !== organizationId) return null;
+    const view = this.governanceView();
+    return [{ documentId: view.documentId, publishedVersionId: view.publishedVersionId, title: view.title,
+      responsibleDepartmentId: view.responsibleDepartmentId, readerMode: view.readerMode, readerDepartmentId: null,
+      versionLabel: "1.0", snapshotVersionNo: 1, publishedAt: new Date("2026-11-10T09:00:00.000Z"), openReports: 1 }];
+  }
+
+  async openGovernanceInspection(userId: string, requestedOrganization: string, documentId: string,
+    reason: string): Promise<OpenGovernanceInspectionResult> {
+    if (!reason.trim()) return { kind: "invalid-reason" };
+    if (!this.governanceAdmin || userId !== ownerId || requestedOrganization !== organizationId) return { kind: "not-admin" };
+    if (documentId !== sharedDraftId) return { kind: "not-found" };
+    const id = "12121212-1212-4121-8121-121212121212";
+    this.governanceInspections.set(id, reason.trim());
+    return { kind: "opened", inspectionId: id };
+  }
+
+  async useGovernanceInspection(userId: string, requestedOrganization: string,
+    inspectionId: string): Promise<GovernanceInspectionView | null> {
+    const reason = this.governanceInspections.get(inspectionId);
+    if (!reason || !this.governanceAdmin || userId !== ownerId || requestedOrganization !== organizationId) return null;
+    return { ...this.governanceView(), readerNames: ["Avery Reader", "Blake Reader"], reason,
+      expiresAt: new Date("2026-11-16T10:15:00.000Z") };
+  }
+
+  async getResponsiblePublicationView(userId: string, requestedOrganization: string,
+    documentId: string): Promise<GovernanceDocumentView | null> {
+    return userId === otherId && requestedOrganization === organizationId && documentId === sharedDraftId
+      ? this.governanceView() : null;
+  }
+
+  async withdrawPublicationDirectly(userId: string, requestedOrganization: string, documentId: string,
+    reason: string): Promise<DirectWithdrawalResult> {
+    if (!reason.trim()) return { kind: "invalid-reason" };
+    if (userId !== otherId || requestedOrganization !== organizationId || documentId !== sharedDraftId
+      || this.withdrawnDocuments.includes(documentId)) return { kind: "not-found" };
+    this.withdrawnDocuments.push(documentId);
+    return { kind: "withdrawn" };
+  }
+
+  async reportPublicationProblem(userId: string, requestedOrganization: string, documentId: string,
+    publishedVersionId: string, message: string): Promise<ReportPublicationResult> {
+    if (requestedOrganization !== organizationId) return { kind: "not-found" };
+    if (this.publicationReports.some((report) => report.documentId === documentId && report.reporterName === userId)) {
+      return { kind: "duplicate" };
+    }
+    const id = `${String(this.publicationReports.length + 1).padStart(8, "3")}-3333-4333-8333-333333333333`;
+    this.publicationReports.push({ id, documentId, publishedVersionId, title: "Runbook", message, reporterName: userId,
+      createdAt: new Date("2026-11-16T09:00:00.000Z"), stillCurrent: true, canView: true });
+    return { kind: "reported", reportId: id };
+  }
+
+  async listPublicationReports(userId: string, requestedOrganization: string): Promise<PublicationReport[] | null> {
+    return requestedOrganization === organizationId && userId === otherId ? this.publicationReports : [];
+  }
+
+  async dismissPublicationReport(userId: string, requestedOrganization: string, reportId: string): Promise<boolean> {
+    const before = this.publicationReports.length;
+    if (userId !== otherId || requestedOrganization !== organizationId) return false;
+    this.publicationReports = this.publicationReports.filter((report) => report.id !== reportId);
+    return this.publicationReports.length !== before;
+  }
+
+  async retryKnowledgePublication(userId: string, requestedOrganization: string,
+    submissionId: string): Promise<RetryKnowledgePublicationResult> {
+    const submission = this.sharedSubmission;
+    if (userId !== ownerId || requestedOrganization !== organizationId || submission?.id !== submissionId) {
+      return { kind: "not-found" };
+    }
+    if (submission.publicationState === "PREPARING") return { kind: "preparing", submission };
+    if (submission.publicationState !== "FAILED") return { kind: "not-failed" };
+    if (submission.publicationFailure !== "TEMPORARY") return { kind: "not-retryable" };
+    this.sharedSubmission = { ...submission, publicationState: "PREPARING", publicationFailure: null, withdrawal: null };
+    return { kind: "preparing", submission: this.sharedSubmission };
   }
 
   async withdrawKnowledgeSubmission(userId: string, requestedOrganization: string,

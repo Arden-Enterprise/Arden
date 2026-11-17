@@ -71,6 +71,13 @@ contributor and agent, not to one named tool.
 - Final approval moves the exact approved snapshot to publication preparation. It does not change the current pointer. Only complete indexing followed by atomic activation makes that version visible to search/RAG. There is no manual publisher role. Keep review, preparation and activation separately auditable; a mutable draft cannot become visible through a generic update endpoint.
 - Enforce transitions transactionally and reject stale version/conflicting approvals. Archival, unpublishing, and revocation must have explicit visibility semantics and audit evidence.
 - Who may recover private content remains a separate decision; do not create an undocumented bypass while implementing convenience tools.
+- Organization Admin content access is governed by [decision 0023](../decisions/0023-organization-admin-governance-access.md):
+  - The catalog shows metadata only.
+  - Content outside the Admin's readership opens only through an audited inspection: a required reason, one published version, 15 minutes idle or 2 hours maximum, and the role rechecked on every request.
+  - Authority comes from the current role and grant tables inside the reviewed routines of migration 0037, never from the app's `arden.org_admin` setting.
+  - Record the audit event before serving content; if recording fails, refuse access.
+  - Inspection and the responsible-reviewer view are never Library, search, Ask Arden or citation sources.
+  - Direct withdrawal by the responsible reviewer or an Organization Admin requires a reason and is shown to the author.
 
 ## 4. Derived data, search, graph, and revocation
 

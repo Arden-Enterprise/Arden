@@ -134,7 +134,11 @@ Target Readers are the per-document reader model planned to replace audience gro
 - **Request (T6.1):** `POST /documents/:documentId/change-requests` with an `Idempotency-Key` and `{ type: "READER_CHANGE" | "WITHDRAWAL", reason, targetReaders? }` lets the author of a published document ask to change its readers or to withdraw it. The reason is required (1–1000 characters). `READER_CHANGE` requires `targetReaders` (validated like a draft save; 400 `INVALID_TARGET_READERS` with `error.field`); `WITHDRAWAL` refuses them (400 `INVALID_REQUEST`). A document without a current publication → 409 `DOCUMENT_NOT_PUBLISHED`; another pending request or submission for the document → 409 `SUBMISSION_CONFLICT`; another member or an unknown document → 404. The same key replays the request (200).
 - The request is a `shared_submission` with `request_type`, `request_reason` and `target_published_version_id`. It repeats the current publication's frozen snapshot and KM-v1 metadata (not the working draft's), so it routes to the same reviewers; new readers are its proposed readers. A trigger verifies the requester is the author and the snapshot is the current publication's. While it is pending, the current version and readers do not change. It appears in the review queue with `requestType`; submissions and reviews return `requestType` and `requestReason`. The author can withdraw it (T5.1).
 - **Approval (T6.2):** the same `POST /reviews/:id/decisions` route. A reader change is approved with its proposed readers kept or narrowed as in T2.1 (`approvedReaders`); the approved readers then become the readers of the current publication (same version and content) on the next request. An approved withdrawal deletes the current pointer, so the document leaves the library, document detail, search, Ask Arden sources and citation rechecks on the next request; the released submission's `publicationState` becomes `WITHDRAWN`; versions stay for history. There is no restore: publishing again is a new content submission, which the 0021 high-water mark still orders. The request itself ends `APPROVED` with `publicationState` `NONE`. Approval returns 409 `PUBLICATION_CHANGED` when the request no longer names the current publication or, for a withdrawal, while a newer approved version is still being prepared; the reviewer can still reject. The database applies the change in the decision transaction through the reviewed SECURITY DEFINER `apply_publication_change` (activation lock; a stale or repeated application is refused with 40001). The decision audit event adds `requestType` and `publishedVersionId`.
-- Provenance: Flow 2 task list T6.1/T6.2 and SDD S-16, requested by the maintainer on 2026-11-12 and 2026-11-14. Only the author can request in this slice; the SDD also names the responsible reviewer, and the Org Admin emergency path is T6.3. Screens are T2.2/T6.4.
+- Provenance: Flow 2 task list T6.1/T6.2 and SDD S-16, requested by the maintainer on 2026-11-12 and 2026-11-14. Only the author can request in this slice; the SDD also names the responsible reviewer, and the Org Admin and responsible-reviewer path is T6.3 (decision 0023 and the author retry, §7). Screens: T2.2 and T6.4 below.
+
+- **Reviewer narrowing screen (T2.2):** the review decision island shows **Approve for** under Submitted details whenever the snapshot has proposed Target Readers and the request is not a withdrawal. **Proposed readers** (default) approves them as they are and sends no `approvedReaders`. **Fewer readers** offers only narrowing: Everyone → one department or selected members (name/email search); a department → selected members of that department (search results limited to that primary department); selected members → a checklist of the proposed members, keeping at least two (hidden when only two were proposed). Approve stays disabled until the narrowed selection is complete, and the in-place confirmation names the approved readers. A retry reuses the decision's idempotency key only for the same action and the same readers. The server still decides every rule; `READERS_WIDENED`/`INVALID_READERS` messages appear in the confirmation. Legacy audience submissions show no reader choice.
+- **Author request screen (T6.4):** in My Contributions, a document with a current publication (`publicationState: ACTIVE`) and no open request offers **Change readers** and **Withdraw document**. Each opens a dialog that states the effect (nothing changes until a reviewer approves; an approved withdrawal removes the document from Library and AI answers, versions stay in history), requires a reason (≤ 1000 characters) and, for a reader change, new Target Readers. It sends `POST /documents/:documentId/change-requests` with one idempotency key per unchanged input, so a retry after an uncertain response does not create a second request. While the request is pending the detail island shows "Request: Reader change/Withdrawal · awaiting review", and **Withdraw request** (T5.1) cancels it with request-specific copy. The desktop main process allowlists this route only as POST with a body and an idempotency key.
+- Evidence: `packages/ui/tests/flow2ReaderChanges.test.tsx` (narrowing, incomplete selections, server refusal, withdrawal and legacy cases; request validation, idempotent retry, cancel and hidden states), `apiClient.test.ts` (request bodies/headers) and `apps/desktop/src/main/apiRequestPolicy.test.ts`. Not yet exercised against a running API and PostgreSQL or in Electron.
 
 Review UI safety: the pending queue labels reader-change/withdrawal requests. The decision pane
 shows their request type and reason, and confirmation/success copy describes the actual effect
@@ -190,6 +194,42 @@ Approval hands the exact snapshot to the Mainflow 3 indexing pipeline (migration
 - A generation older than an already-published snapshot is `SUPERSEDED`.
 - There is no human publisher role.
 
+### Governance: catalog, inspection, withdrawal and reports (T6.3, decision 0023, migration 0037)
+
+- **Catalog.** `GET /governance/publications` (Organization Admin only, 404 otherwise) lists each current publication with metadata only:
+  - title, responsible department, sharing kind, version, publication date;
+  - the number of open reports;
+  - `readable` when the Admin already reads it.
+
+  It shows no reader count, names or content.
+- **Inspection.**
+  - `POST /governance/publications/:documentId/inspections` with `{reason}` (1–1000 characters) records `KNOWLEDGE_GOVERNANCE_INSPECTION_OPENED` with the reason, then returns `inspectionId`.
+  - A reader Admin gets 409 `ALREADY_A_READER` and uses the Library.
+  - `GET /governance/inspections/:inspectionId` serves the content and reader names while the inspection is live: same Admin, still Organization Admin, under 15 minutes idle and 2 hours total, same current version. Otherwise it returns 404 `INSPECTION_ENDED`.
+- **Responsible view.**
+  - `GET /documents/:documentId/responsible-view` serves the current publication, read-only and without reader names, to the reviewer with the current grant for its scope. That is an Organization grant for organization-wide readers, otherwise a Department grant for the responsible department.
+  - The author is excluded.
+- **Direct withdrawal.**
+  - `POST /documents/:documentId/withdrawal` with `{reason}`, by the responsible reviewer or an Organization Admin. It removes the current pointer and marks the released submission `WITHDRAWN` with `withdrawal {by, reason, at}`.
+  - It closes the document's open reports and writes `KNOWLEDGE_PUBLICATION_WITHDRAWN`.
+  - It is refused with 409 `NEWER_VERSION_PREPARING` while a newer approved version is preparing; otherwise not found.
+- **Reports.**
+  - `POST /published/:publishedVersionId/reports` with `{message}`, by a member who reads the current publication; the insert policy rechecks this. A second open report from the same member is 409 `ALREADY_REPORTED`.
+  - `GET /reports` lists open reports to the responsible reviewers and all of them to Organization Admins.
+  - `POST /reports/:reportId/dismiss` closes a report with an audit event.
+- **No notifications** are sent.
+
+### Retrying a failed preparation (T6.3 retry, migration 0036)
+
+- **Automatic retries** cover about 15 minutes: 6 attempts with a backoff of 30 s doubling to 8 min (capped at 15 min). Before 0036 they covered about 15 seconds (3 attempts, 5 s and 10 s), so a short Arden-AI restart left approvals `FAILED`. Jobs created before 0036 keep their own budget of 3.
+- **Failure kind.** The terminal failure code is copied to `shared_submission.publication_failure_code` and shown to the author as one kind (`knowledge_publication_failure_kind`):
+  - `TEMPORARY`: `AI_SERVICE_UNAVAILABLE`, HTTP 408/429/5xx from Arden-AI, `INDEXING_UNEXPECTED_FAILURE`, `INDEXING_LEASE_EXHAUSTED`.
+  - `CONTENT`: HTTP 400/413/415/422 from Arden-AI, `AI_MANIFEST_TOO_LARGE`. The author fixes the file and submits again.
+  - `SYSTEM`: everything else, including invalid AI output and `SNAPSHOT_INTEGRITY_FAILURE`. Trying again cannot help.
+- **Author retry.** `POST /submissions/:submissionId/publication-retry` (no body, no idempotency key: idempotent by state) restarts preparation of the same immutable snapshot for its submitting author, as an active member, only after a `TEMPORARY` failure. It resets the generation and job (fresh budget of 6) and the submission to `PREPARING`, writes `KNOWLEDGE_PUBLICATION_RETRIED`, and needs no new review. A repeat while preparing is a no-op. Another member's or an unknown submission is 404; other outcomes are 409 `PUBLICATION_NOT_FAILED`, `PUBLICATION_NOT_RETRYABLE` or `PUBLICATION_SUPERSEDED` (this snapshot or a newer one of the document already has a published version, the 0021 high-water mark). Activation still goes through `complete_knowledge_index_job`.
+- **Screen.** My Contributions shows "Not published" with the kind's explanation for a `FAILED` approved version, and **Try again** only for `TEMPORARY`.
+- **Not included:** an operator bulk requeue after an outage and Organization Admin retry (Organization Admin cannot see another member's unpublished submission under decision 0010).
+
 ## 8. Reading published knowledge
 
 - `GET /published` and `GET /published/:id` return only the current active publication. The detail route rechecks authorization after reading protected content.
@@ -235,9 +275,9 @@ The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) i
 
 ## 11. Described by decisions, not yet implemented
 
-- **Organization Admin cancel of a pending submission.** The Mainflow 3 contract also lets an Organization Admin cancel; only the author's withdrawal (T5.1) is implemented.
-- **Unpublish.** Decision 0011 lets Organization Admin unpublish explicitly. The database keeps a monotonic publication high-water mark for it, but there is no API route or UI.
-- **Retry a `FAILED` preparation** from the product. The pipeline state machine allows `FAILED → PREPARING`; there is no Flow 2 control for it.
+- **Organization Admin cancel of a pending submission.** Out of scope by decision 0023: reviewers reject and authors withdraw (T5.1). Ownership transfer when an author leaves is future work.
+- **Notifications** for inspections, withdrawals and reports (decision 0023 records them in audit and the report list only), and an audit viewer screen.
+- **Operator retry of `FAILED` preparations.** The author can retry a temporary failure (§7, 0036); there is no operator bulk requeue after an outage.
 - **Notifications** to reviewers or authors. None are sent; queues and lists are pulled.
 - **Schema contraction.** The `classification` and grant `level` columns remain. The SQL reviewer-eligibility function is broader than the TypeScript policy until then (0015).
 
@@ -248,8 +288,10 @@ The [Mainflow 3 error taxonomy](mainflow-3-phase-0-contract.md#error-taxonomy) i
 | **Library → New shared draft** | Choose the content source (PDF or Arden editor) and the title. |
 | **Private Notes → Contribute a copy** | Copy one saved note version into a shared draft. It opens in the status island. |
 | **Draft editor → Before you submit** | Owner line, "Who can read it" picker, derived scope and reviewer, Advanced tags, readiness, Save version, Submit. |
-| **Library → My Contributions** | The author's drafts with status, reviewer note and history; "Withdraw request" with an in-place confirmation while a submission awaits review. |
-| **Reviews** | Queue, frozen document and decision island with a pinned Approve/Reject footer. Confirmation happens in place. |
+| **Library → My Contributions** | The author's drafts with status, reviewer note and history; "Withdraw request" with an in-place confirmation while a submission awaits review; "Change readers" / "Withdraw document" request dialogs for a document with a current publication (T6.4); "Not published" with the failure kind and "Try again" for a temporary failure (T6.3 retry). |
+| **Reviews** | Reported problems for documents in the reviewer's scope (view, withdraw with a reason, dismiss; hidden when there are none), then the queue, frozen document and decision island with Approve for (proposed or fewer readers, T2.2) and a pinned Approve/Reject footer. Confirmation happens in place. |
+| **Library → document reader** | "Report a problem" with a required description (decision 0023). |
+| **Administration → Documents** | Organization Admin catalog (metadata only), reported problems, Inspect with a reason, Withdraw with a reason (decision 0023). |
 | **Library** | Current publications the member may read, and the document reader. |
 | **Administration → Reviewer access** | Create a "One department" or "Whole organization" grant, list grants, revoke. |
 
@@ -275,16 +317,35 @@ The migration ledger is `apps/api/migrations`. Flow 2 relies on:
 | `0029_withdraw_pending_submission.sql` | Author withdrawal policy and the `PENDING_REVIEW → WITHDRAWN` (final) trigger (operator-class). |
 | `0034_publication_change_requests.sql` | `request_type`, `request_reason`, `target_published_version_id`; change requests copy the published version's KM-v1 metadata; replaces two reviewed SECURITY DEFINER validators (operator-class, trusted superuser). |
 | `0035_apply_publication_change_requests.sql` | Applies approved reader-change and withdrawal requests (`apply_publication_change`, 24 postgres-owned SECURITY DEFINER routines including Reader AI), `WITHDRAWN` release state, updated decision outcome check (operator-class, trusted superuser). |
+| `0037_publication_governance.sql` | Decision 0023: `governance_inspection`, `publication_report` (reader insert policy), withdrawal provenance on `shared_submission`, `governance_current_publication` view, seven routines (catalog, inspection open/use, responsible view, direct withdrawal, report list/dismiss; 32 postgres-owned SECURITY DEFINER routines) (operator-class, trusted superuser). |
+| `0036_publication_preparation_retry.sql` | Longer automatic backoff (6 attempts, new jobs; the approval insert policy follows), `publication_failure_code` with its trigger and backfill, `knowledge_publication_failure_kind`, author-only `retry_knowledge_publication` (25 postgres-owned SECURITY DEFINER routines), replaced `fail_knowledge_index_job` (operator-class, trusted superuser). |
 
 Run migrations before starting an API build that depends on them. The 0022 code reads `reviewer_grant.scope` and `shared_submission.review_rule`. The 0024 code reads `shared_draft.draft_selection_id`, the submission selection columns and `publication_reader_selection_id()`.
 
 **Target Readers evidence (0024):** `src/target-readers/policy.test.ts` and the T1.3/T1.4 request tests in `src/app.test.ts` run without a database. `src/target-readers/target-readers.integration.test.ts` and the Target Readers step in `src/db/repository.integration.test.ts` need `ARDEN_TEST_DATABASE_URL`. On 2026-11-11 they ran on a disposable local PostgreSQL 17 (Docker) after a clean apply of 0001–0025 and the CI ownership handoff: full API suite 234 passed (only the real-Supabase auth test skipped), five consecutive runs. Migration 0024 has not been rehearsed on a staging copy.
 
-**Approved readers evidence (0025):** `src/target-readers/narrowing.test.ts`, the T2.1 cases in `src/knowledge/review-decision.test.ts` and the T2.1 request tests in `src/app.test.ts` run without a database. The T2.1 scenario in `src/db/repository.integration.test.ts` (widening refused with no decision/audit rows, narrowing, as-proposed copy, replay, legacy path, immutability, reviewer directory, activation and RLS/API reading) needs `ARDEN_TEST_DATABASE_URL`; it passed in the 2026-11-11 local PostgreSQL run above, and an end-to-end smoke through the running API (draft readers → submit → narrowed approval) passed. Not rehearsed on a staging copy. 0024/0025 add postgres-owned `SECURITY DEFINER` functions (18 in total); the operator repair script `deploy/release/security-definer-owner-repair.sql` still lists the reviewed 12 and will refuse until an operator reviews the new inventory.
+**Approved readers evidence (0025):** `src/target-readers/narrowing.test.ts`, the T2.1 cases in `src/knowledge/review-decision.test.ts` and the T2.1 request tests in `src/app.test.ts` run without a database. The T2.1 scenario in `src/db/repository.integration.test.ts` (widening refused with no decision/audit rows, narrowing, as-proposed copy, replay, legacy path, immutability, reviewer directory, activation and RLS/API reading) needs `ARDEN_TEST_DATABASE_URL`; it passed in the 2026-11-11 local PostgreSQL run above, and an end-to-end smoke through the running API (draft readers → submit → narrowed approval) passed. Not rehearsed on a staging copy. 0024/0025 add postgres-owned `SECURITY DEFINER` functions (18 in total); the operator repair script `deploy/release/security-definer-owner-repair.sql` now lists the exact 32 routines of 0001–0037 (updated 2026-11-17); an operator still reviews it, the target and a rehearsal before use.
 
 **Categories, backfill and withdrawal evidence (0027–0029):** `src/target-readers/target-readers.integration.test.ts` covers T3.1 (five defaults for an organization created by the runtime role, no pre-0027 document without a category, member-only category reads, keyword rules, cross-organization category/link refusal, author-only links), T1.2 (dry run, apply and re-report of organization, department, partial-department, one-member group and empty audiences with zero wider readers; operator-only function) and T5.1 (author-only withdrawal, replay, audit, 409 for an approved submission, final state, no reviewer withdrawal). `src/app.test.ts` and `packages/ui/tests/withdrawSubmission.test.ts` cover the route and the My Contributions button. On 2026-11-11 the full API suite passed on the disposable local PostgreSQL 17 after applying 0027–0029 (244 passed, Supabase auth skipped; an earlier run hit the existing 5-second timeout once in the activation scenario under parallel load). 0027–0029 were also applied to the local anonymized staging sample (3 organizations → 15 categories, all 12 drafts categorized; it has no current publications, so 0028 mapped nothing there). Not rehearsed on a real staging copy; the repair script still lists 12 functions.
 
 **Change-request evidence (0034–0035):** the T6.1/T6.2 cases in `src/knowledge/review-decision.test.ts` and the change-request route test in `src/app.test.ts` run without a database. `src/target-readers/target-readers.integration.test.ts` covers requests (not published, another member, reason/readers rules, replay, conflict, unchanged pointer, queue type, rejection, integrity trigger) and approvals (withdrawal removes the pointer and hides the document, released submission `WITHDRAWN`, audit type, repeated application refused, republishing as a new submission; reader change applies new readers to the same version; stale request refused). Reconciled with staging Reader AI 0032, preserving applied history; new directory/change migrations are 0033–0035. Direct calls to `apply_publication_change` are refused outside the review trigger, including replay of an older approved selection after later narrowing. Full-chain CI and staging-copy rehearsal remain release gates, not inferred from unit tests.
+
+**Governance evidence (0037):**
+- **Without a database:**
+  - the decision 0023 route tests in `src/app.test.ts`;
+  - `packages/ui/tests/publicationGovernance.test.tsx`;
+  - the withdrawal notice cases in `flow2ReaderChanges.test.tsx`;
+  - the desktop allowlist test.
+- **On a real database,** the decision 0023 cases in `src/target-readers/target-readers.integration.test.ts` cover:
+  - the catalog only for Organization Admins;
+  - inspection reason, audit, other-user denial, idle and absolute expiry, and no direct table access;
+  - responsible scope: a wrong department, a Department grant against an organization-wide publication, and an Organization grant;
+  - withdrawal by reviewer and Admin, with provenance for the author and audit;
+  - reports: reader-only, one open report, hidden from members, dismissal, and closure on withdrawal.
+- **Run on 2026-11-16:** a clean 0001–0037 apply and the full API suite (445 passed, Supabase auth skipped, 30-second timeout) on a disposable local PostgreSQL 17. A synthetic browser preview of Administration → Documents passed at desktop and 375 px widths.
+- **Not run:** the CI ownership handoff, the schema-recovery rehearsal, the full local API with sign-in, Electron, and a staging copy.
+
+**Retry evidence (0036):** the route test in `src/app.test.ts`, the T6.3 cases in `packages/ui/tests/flow2ReaderChanges.test.tsx` and the desktop allowlist test run without a database. `src/target-readers/target-readers.integration.test.ts` covers the backoff (about 30 s after the first failure), the 6-attempt default, the failure kind for temporary, content and integrity codes, the lease-exhausted path, author-only retry (another member, a reviewer and another organization get not-found), state reset, one audit event, a no-op repeat, refusal of content/system failures, a pending submission and an already published snapshot, and that the runtime cannot write the failure code or the job. On 2026-11-16 a clean 0001–0036 apply and a repeated no-op apply passed on a disposable local PostgreSQL 17 (Docker, the CI image), and the full API suite passed (437, Supabase auth skipped) with a 30-second test timeout. With the default 5 seconds the Target Readers file timed out when run after the other files on this machine, while it passed alone; the CI ownership handoff and the schema-recovery rehearsal were not run locally. Not rehearsed on a staging copy.
 
 **Evidence obtained:**
 - API unit and request tests cover:

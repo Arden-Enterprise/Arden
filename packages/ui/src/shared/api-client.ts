@@ -128,6 +128,10 @@ export type KnowledgeSubmission = {
   /** T6.1/T6.2: CONTENT, or a READER_CHANGE / WITHDRAWAL request about the current publication. */
   requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
   requestReason?: string | null;
+  /** T6.3: why preparation failed, only while publicationState is FAILED. Only TEMPORARY can be retried. */
+  publicationFailure?: "TEMPORARY" | "CONTENT" | "SYSTEM" | null;
+  /** Decision 0023: withdrawn directly by a responsible reviewer or an Organization Admin. */
+  withdrawal?: { by: "REVIEWER" | "ORGANIZATION_ADMIN"; reason: string; at: string } | null;
 };
 export type AssignedKnowledgeReview = {
   submissionId: string;
@@ -157,7 +161,15 @@ export type DecidedKnowledgeReview = {
   publicationState: KnowledgeSubmission["publicationState"];
   authorName: string | null;
 };
+/** Proposed readers resolved for the reviewer (T2.1/T2.2); members are listed only for a selected-member proposal. */
+export type ProposedReadersDetail = {
+  mode: TargetReaders["mode"];
+  department: { id: string; name: string } | null;
+  members: Array<{ membershipId: string; displayName: string | null }>;
+};
 export type KnowledgeReviewDetail = KnowledgeSubmission & {
+  /** Absent from older servers and null for a legacy audience submission. */
+  proposedReaders?: ProposedReadersDetail | null;
   body: string;
   mimeType: "text/plain" | "application/pdf";
   pdfBase64?: string;
@@ -329,6 +341,12 @@ export function submitKnowledgeDraft(platform: Platform, organizationId: string,
 }
 
 /** T5.1: the author withdraws their own pending submission; it leaves the review queue. */
+/** T6.3: prepare an approved snapshot again after a temporary failure. Idempotent by state; no new review. */
+export function retryKnowledgePublication(platform: Platform, organizationId: string,
+  submissionId: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/submissions/${submissionId}/publication-retry`, { method: "POST" });
+}
+
 export function withdrawKnowledgeSubmission(platform: Platform, organizationId: string,
   submissionId: string): Promise<KnowledgeSubmission> {
   return request(platform, `${knowledgePath(organizationId)}/submissions/${submissionId}/withdraw`, { method: "POST" });
@@ -355,12 +373,91 @@ export function loadKnowledgeReview(platform: Platform, organizationId: string, 
   return request(platform, `${knowledgePath(organizationId)}/reviews/${submissionId}`);
 }
 
+/**
+ * `approvedReaders` (T2.1) keeps or narrows the proposed readers on approval; omit it to approve them as proposed.
+ * The server rejects widening (409 READERS_WIDENED) and invalid selections (400 INVALID_READERS).
+ */
 export function decideKnowledgeReview(platform: Platform, organizationId: string, detail: KnowledgeReviewDetail,
-  action: "APPROVE" | "REJECT", comment: string | null, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  action: "APPROVE" | "REJECT", comment: string | null, idempotencyKey: string,
+  approvedReaders?: TargetReaders): Promise<KnowledgeSubmission> {
   return request(platform, `${knowledgePath(organizationId)}/reviews/${detail.id}/decisions`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ action, expectedSnapshotVersionId: detail.snapshotVersionId,
-      expectedContentHash: detail.contentHash, comment }),
+      expectedContentHash: detail.contentHash, comment, ...(approvedReaders ? { approvedReaders } : {}) }),
+  });
+}
+
+export type GovernanceReaderMode = "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
+/** Decision 0023 catalog row: metadata only. */
+export type GovernancePublication = {
+  documentId: string; publishedVersionId: string; title: string; responsibleDepartmentId: string | null;
+  readerMode: GovernanceReaderMode; readerDepartmentId: string | null; versionLabel: string | null;
+  snapshotVersionNo: number | null; publishedAt: string; openReports: number;
+  /** The Admin already reads it in the Library, so no inspection is needed. */
+  readable: boolean;
+};
+export type GovernanceDocument = {
+  documentId: string; publishedVersionId: string; title: string; mimeType: string; contentHash: string;
+  body: string; pdfBase64?: string; responsibleDepartmentId: string | null;
+  readers: { mode: GovernanceReaderMode; departmentId: string | null; names?: string[] };
+};
+export type GovernanceInspection = GovernanceDocument & { inspectionId: string; reason: string; expiresAt: string };
+export type PublicationReport = {
+  id: string; documentId: string; publishedVersionId: string; title: string; message: string; reporterName: string;
+  createdAt: string; stillCurrent: boolean;
+  /** The actor is the responsible reviewer and can open the responsible view. */
+  canView: boolean;
+};
+
+export async function listGovernancePublications(platform: Platform, organizationId: string): Promise<GovernancePublication[]> {
+  return (await request<{ items: GovernancePublication[] }>(platform, `${knowledgePath(organizationId)}/governance/publications`)).items;
+}
+
+/** Opens an audited inspection; the reason is recorded before any content is served. */
+export async function openGovernanceInspection(platform: Platform, organizationId: string, documentId: string,
+  reason: string): Promise<string> {
+  return (await request<{ inspectionId: string }>(platform,
+    `${knowledgePath(organizationId)}/governance/publications/${documentId}/inspections`,
+    { method: "POST", body: JSON.stringify({ reason }) })).inspectionId;
+}
+
+export function loadGovernanceInspection(platform: Platform, organizationId: string, inspectionId: string): Promise<GovernanceInspection> {
+  return request(platform, `${knowledgePath(organizationId)}/governance/inspections/${inspectionId}`);
+}
+
+export function loadResponsiblePublication(platform: Platform, organizationId: string, documentId: string): Promise<GovernanceDocument> {
+  return request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/responsible-view`);
+}
+
+/** Decision 0023: direct withdrawal by the responsible reviewer or an Organization Admin. */
+export async function withdrawPublication(platform: Platform, organizationId: string, documentId: string, reason: string): Promise<void> {
+  await request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/withdrawal`,
+    { method: "POST", body: JSON.stringify({ reason }) });
+}
+
+export async function reportPublicationProblem(platform: Platform, organizationId: string, publishedVersionId: string,
+  message: string): Promise<void> {
+  await request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}/reports`,
+    { method: "POST", body: JSON.stringify({ message }) });
+}
+
+export async function listPublicationReports(platform: Platform, organizationId: string): Promise<PublicationReport[]> {
+  return (await request<{ items: PublicationReport[] }>(platform, `${knowledgePath(organizationId)}/reports`)).items;
+}
+
+export async function dismissPublicationReport(platform: Platform, organizationId: string, reportId: string): Promise<void> {
+  await request(platform, `${knowledgePath(organizationId)}/reports/${reportId}/dismiss`, { method: "POST" });
+}
+
+export type PublicationChangeRequest =
+  | { type: "READER_CHANGE"; reason: string; targetReaders: TargetReaders }
+  | { type: "WITHDRAWAL"; reason: string };
+
+/** T6.1: the author asks a reviewer to replace the readers of a published document, or to withdraw it. */
+export function requestPublicationChange(platform: Platform, organizationId: string, documentId: string,
+  input: PublicationChangeRequest, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/change-requests`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
   });
 }
 

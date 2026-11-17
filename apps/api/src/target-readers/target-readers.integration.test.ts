@@ -135,6 +135,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
           await client.query("SET LOCAL session_replication_role = replica");
           const orgs = [ids.orgA, ids.orgB];
           await client.query("DELETE FROM audit_event WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM publication_report WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM governance_inspection WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = ANY($1::uuid[])", [orgs]);
           // Change requests reference a published version; remove them before the publications.
           await client.query(`DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission
@@ -805,6 +807,289 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
                gen_random_uuid(), 'WITHDRAWAL', 'Not the author', (SELECT published_version_id FROM knowledge_current_publication
                  WHERE shared_draft_id = $3)
           FROM shared_submission WHERE submission_id = $1`, [submissionId, ids.reviewerM, draftId]))).resolves.toBe("23514");
+    });
+  });
+
+  describe("T6.3 retry a failed preparation (migration 0036)", () => {
+    /** An approved content submission with the generation and job the approval trigger creates (0019). */
+    const prepare = async (title: string) => {
+      const { draftId, submissionId } = await submitLegacyDraft(title);
+      return asSuperuser(async (client) => {
+        await client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'PREPARING',
+            approved_selection_id = proposed_selection_id WHERE submission_id = $1`, [submissionId]);
+        const generation = await client.query<{ generation_id: string }>(`INSERT INTO knowledge_index_generation
+            (organization_id, submission_id, shared_draft_id, snapshot_version_id, snapshot_content_hash)
+          SELECT organization_id, submission_id, shared_draft_id, shared_draft_version_id, content_hash
+            FROM shared_submission WHERE submission_id = $1 RETURNING generation_id`, [submissionId]);
+        const job = await client.query<{ job_id: string; max_attempts: number }>(`INSERT INTO knowledge_index_job
+            (generation_id) VALUES ($1) RETURNING job_id, max_attempts`, [generation.rows[0]?.generation_id]);
+        return { draftId, submissionId, jobId: job.rows[0]!.job_id, maxAttempts: job.rows[0]!.max_attempts };
+      });
+    };
+    /** What the worker does after an attempt fails: fail_knowledge_index_job under its own lease. */
+    const failAttempt = (jobId: string, attempt: number, code: string, retryable: boolean) => asSuperuser(async (client) => {
+      const worker = randomUUID();
+      await client.query(`UPDATE knowledge_index_job SET status = 'RUNNING', attempt_count = $2, lease_owner = $3,
+          lease_expires_at = now() + interval '5 minutes' WHERE job_id = $1`, [jobId, attempt, worker]);
+      return (await client.query<{ status: string }>("SELECT fail_knowledge_index_job($1, $2, $3, $4) AS status",
+        [jobId, worker, code, retryable])).rows[0]?.status;
+    });
+    const state = (submissionId: string) => asSuperuser(async (client) => (await client.query<{
+      publication_state: string; publication_failure_code: string | null; generation: string; job: string;
+      attempt_count: number; audits: string }>(`
+      SELECT s.publication_state, s.publication_failure_code, g.status AS generation, j.status AS job, j.attempt_count,
+             (SELECT count(*) FROM audit_event a WHERE a.event_type = 'KNOWLEDGE_PUBLICATION_RETRIED'
+                AND a.details_json->>'submissionId' = s.submission_id::text)::text AS audits
+        FROM shared_submission s JOIN knowledge_index_generation g USING (submission_id)
+        JOIN knowledge_index_job j USING (generation_id) WHERE s.submission_id = $1`, [submissionId])).rows[0]);
+    const failure = async (submissionId: string) => (await repository!.listKnowledgeSubmissions(ids.author, ids.orgA))
+      ?.find((submission) => submission.id === submissionId)?.publicationFailure;
+
+    it("retries automatically with a longer backoff, then lets only the author retry a temporary failure", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { submissionId, jobId, maxAttempts } = await prepare("Temporary failure");
+      expect(maxAttempts).toBe(6);
+      await expect(failAttempt(jobId, 1, "AI_SERVICE_UNAVAILABLE", true)).resolves.toBe("PENDING");
+      const delay = await asSuperuser(async (client) => (await client.query<{ seconds: number }>(
+        "SELECT extract(epoch FROM available_at - now())::float AS seconds FROM knowledge_index_job WHERE job_id = $1",
+        [jobId])).rows[0]?.seconds ?? 0);
+      expect(delay).toBeGreaterThan(20);
+      expect(delay).toBeLessThanOrEqual(30);
+      expect(await failure(submissionId)).toBeNull();
+
+      await expect(failAttempt(jobId, 6, "AI_SERVICE_HTTP_503", true)).resolves.toBe("FAILED");
+      await expect(state(submissionId)).resolves.toMatchObject({ publication_state: "FAILED",
+        publication_failure_code: "AI_SERVICE_HTTP_503", generation: "FAILED", job: "FAILED" });
+      expect(await failure(submissionId)).toBe("TEMPORARY");
+
+      await expect(repository.retryKnowledgePublication(ids.outsider, ids.orgA, submissionId)).resolves.toEqual({ kind: "not-found" });
+      await expect(repository.retryKnowledgePublication(ids.reviewer, ids.orgA, submissionId)).resolves.toEqual({ kind: "not-found" });
+      await expect(repository.retryKnowledgePublication(ids.foreign, ids.orgB, submissionId)).resolves.toEqual({ kind: "not-found" });
+      await expect(repository.retryKnowledgePublication(ids.author, ids.orgA, submissionId)).resolves.toMatchObject({
+        kind: "preparing", submission: { id: submissionId, status: "APPROVED", publicationState: "PREPARING", publicationFailure: null } });
+      await expect(state(submissionId)).resolves.toMatchObject({ publication_state: "PREPARING",
+        publication_failure_code: null, generation: "PENDING", job: "PENDING", attempt_count: 0, audits: "1" });
+      // A repeat while preparing again is a no-op with no second audit event.
+      await expect(repository.retryKnowledgePublication(ids.author, ids.orgA, submissionId)).resolves.toMatchObject({ kind: "preparing" });
+      await expect(state(submissionId)).resolves.toMatchObject({ audits: "1" });
+
+      // The runtime cannot write the failure code or restart preparation itself.
+      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query(
+        "UPDATE shared_submission SET publication_failure_code = 'AI_SERVICE_UNAVAILABLE' WHERE submission_id = $1",
+        [submissionId]))).rejects.toMatchObject({ code: "42501" });
+      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query(
+        "UPDATE knowledge_index_job SET status = 'PENDING' WHERE job_id = $1", [jobId]))).rejects.toMatchObject({ code: "42501" });
+    });
+
+    it("refuses content and system failures, a pending submission and an already published snapshot", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const content = await prepare("Content failure");
+      await expect(failAttempt(content.jobId, 1, "AI_SERVICE_HTTP_415", false)).resolves.toBe("FAILED");
+      expect(await failure(content.submissionId)).toBe("CONTENT");
+      await expect(repository.retryKnowledgePublication(ids.author, ids.orgA, content.submissionId))
+        .resolves.toEqual({ kind: "not-retryable" });
+
+      const integrity = await prepare("Integrity failure");
+      await expect(failAttempt(integrity.jobId, 1, "SNAPSHOT_INTEGRITY_FAILURE", false)).resolves.toBe("FAILED");
+      expect(await failure(integrity.submissionId)).toBe("SYSTEM");
+      await expect(repository.retryKnowledgePublication(ids.author, ids.orgA, integrity.submissionId))
+        .resolves.toEqual({ kind: "not-retryable" });
+      await expect(state(integrity.submissionId)).resolves.toMatchObject({ publication_state: "FAILED", audits: "0" });
+
+      const pending = await submitLegacyDraft("Still pending");
+      await expect(repository.retryKnowledgePublication(ids.author, ids.orgA, pending.submissionId))
+        .resolves.toEqual({ kind: "not-failed" });
+
+      // The 0021 high-water mark: once this snapshot (or a newer one) of the document has a published version,
+      // preparing it again could never make it current.
+      const stale = await prepare("Already published");
+      await expect(failAttempt(stale.jobId, 1, "AI_SERVICE_UNAVAILABLE", false)).resolves.toBe("FAILED");
+      await asSuperuser(async (client) => {
+        const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
+            (organization_id, name, scope_type) VALUES ($1, 'Retry fixture ' || $2, 'ORGANIZATION')
+          RETURNING knowledge_base_id`, [ids.orgA, stale.draftId]);
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
+            title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
+            audience_role_ids, valid_from, reader_selection_id)
+          SELECT gen_random_uuid(), s.submission_id, $2, s.title, 1, s.content_uri, s.content_hash, s.shared_draft_id,
+                 s.classification, s.responsible_department_id, s.audience_role_ids, now(), s.approved_selection_id
+            FROM shared_submission s WHERE s.submission_id = $1`, [stale.submissionId, knowledgeBase.rows[0]?.knowledge_base_id]);
+      });
+      await expect(repository.retryKnowledgePublication(ids.author, ids.orgA, stale.submissionId))
+        .resolves.toEqual({ kind: "superseded" });
+    });
+
+    it("records the failure code when the final lease expires without a worker", async () => {
+      const { submissionId, jobId } = await prepare("Lease exhausted");
+      await asSuperuser(async (client) => {
+        await client.query(`UPDATE knowledge_index_job SET status = 'RUNNING', attempt_count = max_attempts,
+            lease_owner = gen_random_uuid(), lease_expires_at = now() - interval '1 second' WHERE job_id = $1`, [jobId]);
+        await client.query("SELECT * FROM claim_knowledge_index_job(gen_random_uuid(), 60)");
+        const row = (await client.query<{ publication_state: string; publication_failure_code: string }>(
+          "SELECT publication_state, publication_failure_code FROM shared_submission WHERE submission_id = $1",
+          [submissionId])).rows[0];
+        expect(row).toEqual({ publication_state: "FAILED", publication_failure_code: "INDEXING_LEASE_EXHAUSTED" });
+      }, false);
+    });
+  });
+
+  describe("decision 0023 governance (migration 0037)", () => {
+    /** A current publication readable by the selected author and engineer, responsible department Sales. */
+    const publishSelected = async (title: string) => {
+      const { draftId, submissionId } = await submitLegacyDraft(title);
+      const versionId = id();
+      await asSuperuser(async (client) => {
+        await client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'ACTIVE',
+            approved_selection_id = proposed_selection_id WHERE submission_id = $1`, [submissionId]);
+        const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
+            (organization_id, name, scope_type) VALUES ($1, 'Governance ' || $2, 'ORGANIZATION') RETURNING knowledge_base_id`,
+        [ids.orgA, draftId]);
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
+            title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
+            audience_role_ids, valid_from, reader_selection_id)
+          SELECT $1, s.submission_id, $3, s.title, 1, s.content_uri, s.content_hash, s.shared_draft_id, s.classification,
+                 s.responsible_department_id, s.audience_role_ids, now(), s.approved_selection_id
+            FROM shared_submission s WHERE s.submission_id = $2`, [versionId, submissionId, knowledgeBase.rows[0]?.knowledge_base_id]);
+        await client.query(`INSERT INTO knowledge_current_publication (shared_draft_id, organization_id, published_version_id,
+            audience_role_ids, target_scope_type, valid_from, reader_selection_id)
+          SELECT pv.shared_draft_id, $2, pv.published_version_id, pv.audience_role_ids, 'ORGANIZATION', pv.valid_from,
+                 pv.reader_selection_id FROM published_knowledge_version pv WHERE pv.published_version_id = $1`, [versionId, ids.orgA]);
+      });
+      return { draftId, submissionId, versionId };
+    };
+    const grant = (membershipId: string, scope: "DEPARTMENT" | "ORGANIZATION", departmentId: string | null) =>
+      asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope,
+          department_id, granted_by_membership_id, classifications, level) VALUES ($1, $2, $3, $4, $5, ARRAY['INTERNAL'], 'STANDARD')
+        RETURNING reviewer_grant_id`, [ids.orgA, membershipId, scope, departmentId, ids.authorM]))
+        .then((result) => result.rows[0]!.reviewer_grant_id as string);
+    const revoke = (grantId: string) => asSuperuser((client) => client.query(
+      "UPDATE reviewer_grant SET status = 'INACTIVE' WHERE reviewer_grant_id = $1", [grantId]));
+    const audits = (eventType: string, documentId: string) => asSuperuser(async (client) => (await client.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM audit_event WHERE event_type = $1 AND details_json->>'documentId' = $2",
+      [eventType, documentId])).rows[0]?.count);
+
+    it("lists metadata only to an Organization Admin and serves a live, audited inspection", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { draftId, versionId } = await publishSelected("Governed salary sheet");
+      const catalog = await repository.listGovernancePublications(ids.author, ids.orgA);
+      expect(catalog?.find((item) => item.documentId === draftId)).toMatchObject({ publishedVersionId: versionId,
+        title: "Governed salary sheet", readerMode: "SELECTED_MEMBERS", responsibleDepartmentId: ids.sales, openReports: 0 });
+      await expect(repository.listGovernancePublications(ids.reviewer, ids.orgA)).resolves.toBeNull();
+      await expect(repository.listGovernancePublications(ids.foreign, ids.orgB)).resolves.toBeNull();
+
+      await expect(repository.openGovernanceInspection(ids.author, ids.orgA, draftId, " ")).resolves.toEqual({ kind: "invalid-reason" });
+      await expect(repository.openGovernanceInspection(ids.reviewer, ids.orgA, draftId, "Curious"))
+        .resolves.toEqual({ kind: "not-admin" });
+      await expect(repository.openGovernanceInspection(ids.author, ids.orgA, id(), "Reported")).resolves.toEqual({ kind: "not-found" });
+      const opened = await repository.openGovernanceInspection(ids.author, ids.orgA, draftId, "  Reported salary data  ");
+      if (opened.kind !== "opened") throw new Error(`Inspection was not opened: ${opened.kind}`);
+      await expect(audits("KNOWLEDGE_GOVERNANCE_INSPECTION_OPENED", draftId)).resolves.toBe("1");
+
+      const used = await repository.useGovernanceInspection(ids.author, ids.orgA, opened.inspectionId);
+      expect(used).toMatchObject({ documentId: draftId, publishedVersionId: versionId, readerMode: "SELECTED_MEMBERS",
+        reason: "Reported salary data" });
+      expect(used?.readerNames).toHaveLength(2);
+      await expect(repository.useGovernanceInspection(ids.reviewer, ids.orgA, opened.inspectionId)).resolves.toBeNull();
+      // Runtime has no direct access to inspections.
+      await expect(asRuntime(ids.author, ids.orgA, (client) => client.query("SELECT * FROM governance_inspection")))
+        .rejects.toMatchObject({ code: "42501" });
+
+      // 15 minutes idle, or 2 hours in total, ends the inspection.
+      await asSuperuser((client) => client.query(
+        "UPDATE governance_inspection SET last_used_at = now() - interval '16 minutes', opened_at = now() - interval '20 minutes', expires_at = now() + interval '100 minutes' WHERE inspection_id = $1",
+        [opened.inspectionId]));
+      await expect(repository.useGovernanceInspection(ids.author, ids.orgA, opened.inspectionId)).resolves.toBeNull();
+      const second = await repository.openGovernanceInspection(ids.author, ids.orgA, draftId, "Second look");
+      if (second.kind !== "opened") throw new Error("Second inspection was not opened");
+      await asSuperuser((client) => client.query(
+        "UPDATE governance_inspection SET opened_at = now() - interval '121 minutes', expires_at = now() - interval '1 minute', last_used_at = now() - interval '1 minute' WHERE inspection_id = $1",
+        [second.inspectionId]));
+      await expect(repository.useGovernanceInspection(ids.author, ids.orgA, second.inspectionId)).resolves.toBeNull();
+    });
+
+    it("gives the responsible reviewer a view and direct withdrawal, recorded for the author", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { draftId, submissionId } = await publishSelected("Responsible review");
+      await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId)).resolves.toBeNull();
+      const wrongDepartment = await grant(ids.reviewerM, "DEPARTMENT", ids.engineering);
+      await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId)).resolves.toBeNull();
+      const sales = await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
+      await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId))
+        .resolves.toMatchObject({ documentId: draftId, readerMode: "SELECTED_MEMBERS" });
+      await expect(repository.getResponsiblePublicationView(ids.engineer, ids.orgA, draftId)).resolves.toBeNull();
+
+      await expect(repository.withdrawPublicationDirectly(ids.engineer, ids.orgA, draftId, "Wrong")).resolves.toEqual({ kind: "not-found" });
+      await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "")).resolves.toEqual({ kind: "invalid-reason" });
+      await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "Figures are wrong"))
+        .resolves.toEqual({ kind: "withdrawn" });
+      await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "Again")).resolves.toEqual({ kind: "not-found" });
+      const pointer = await asSuperuser((client) => client.query(
+        "SELECT 1 FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId]));
+      expect(pointer.rowCount).toBe(0);
+      const authored = (await repository.listKnowledgeSubmissions(ids.author, ids.orgA))?.find((item) => item.id === submissionId);
+      expect(authored).toMatchObject({ publicationState: "WITHDRAWN", withdrawal: { by: "REVIEWER", reason: "Figures are wrong" } });
+      await expect(audits("KNOWLEDGE_PUBLICATION_WITHDRAWN", draftId)).resolves.toBe("1");
+
+      // An Organization Admin may withdraw any current publication.
+      const other = await publishSelected("Admin withdrawal");
+      await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgA, other.draftId, "Legal hold"))
+        .resolves.toEqual({ kind: "withdrawn" });
+      expect((await repository.listKnowledgeSubmissions(ids.author, ids.orgA))?.find((item) => item.id === other.submissionId)
+        ?.withdrawal).toMatchObject({ by: "ORGANIZATION_ADMIN", reason: "Legal hold" });
+      await revoke(wrongDepartment); await revoke(sales);
+    });
+
+    it("uses Organization grants, not Department grants, for an organization-wide publication", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { draftId, versionId } = await publishSelected("Organization-wide");
+      await asSuperuser(async (client) => {
+        const selection = await client.query<{ selection_id: string }>(`INSERT INTO reader_selection (organization_id, reader_mode)
+          VALUES ($1, 'ORGANIZATION') RETURNING selection_id`, [ids.orgA]);
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query("UPDATE published_knowledge_version SET reader_selection_id = $2 WHERE published_version_id = $1",
+          [versionId, selection.rows[0]!.selection_id]);
+        await client.query("UPDATE knowledge_current_publication SET reader_selection_id = $2 WHERE shared_draft_id = $1",
+          [draftId, selection.rows[0]!.selection_id]);
+      });
+      const department = await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
+      await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId)).resolves.toBeNull();
+      const organization = await grant(ids.reviewerM, "ORGANIZATION", null);
+      await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId))
+        .resolves.toMatchObject({ readerMode: "ORGANIZATION" });
+      await revoke(department); await revoke(organization);
+    });
+
+    it("lets only a reader report once, shows reports to responsible people and closes them on withdrawal", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { draftId, versionId } = await publishSelected("Reported document");
+      await expect(repository.reportPublicationProblem(ids.outsider, ids.orgA, draftId, versionId, "Leak"))
+        .resolves.toEqual({ kind: "not-found" });
+      await expect(repository.reportPublicationProblem(ids.engineer, ids.orgA, draftId, versionId, "Wrong salary column"))
+        .resolves.toMatchObject({ kind: "reported" });
+      await expect(repository.reportPublicationProblem(ids.engineer, ids.orgA, draftId, versionId, "Still wrong"))
+        .resolves.toEqual({ kind: "duplicate" });
+      await expect(asRuntime(ids.engineer, ids.orgA, (client) => client.query("SELECT * FROM publication_report")))
+        .rejects.toMatchObject({ code: "42501" });
+
+      const mine = (reports: Awaited<ReturnType<ArdenRepository["listPublicationReports"]>>) =>
+        reports?.filter((report) => report.documentId === draftId) ?? [];
+      expect(mine(await repository.listPublicationReports(ids.outsider, ids.orgA))).toHaveLength(0);
+      expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(1);
+      const sales = await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
+      const [report] = mine(await repository.listPublicationReports(ids.reviewer, ids.orgA));
+      expect(report).toMatchObject({ message: "Wrong salary column", stillCurrent: true, canView: true });
+      await expect(repository.dismissPublicationReport(ids.outsider, ids.orgA, report!.id)).resolves.toBe(false);
+      await expect(repository.dismissPublicationReport(ids.reviewer, ids.orgA, report!.id)).resolves.toBe(true);
+      expect(mine(await repository.listPublicationReports(ids.reviewer, ids.orgA))).toHaveLength(0);
+
+      await expect(repository.reportPublicationProblem(ids.engineer, ids.orgA, draftId, versionId, "New issue"))
+        .resolves.toMatchObject({ kind: "reported" });
+      await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "Confirmed"))
+        .resolves.toEqual({ kind: "withdrawn" });
+      expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(0);
+      await revoke(sales);
     });
   });
 });

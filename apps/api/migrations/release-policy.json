@@ -210,6 +210,18 @@
       "filename": "0035_apply_publication_change_requests.sql",
       "sha256": "85833b6576871a5316f29c9ccd604aa9474d2a7646e7132a614443d8e2291e37",
       "rollout": "operator"
+    },
+    {
+      "id": "0036",
+      "filename": "0036_publication_preparation_retry.sql",
+      "sha256": "0db4cda86cf440c014023c09c2efb7e346e765464127dd4438940dc1987417d8",
+      "rollout": "operator"
+    },
+    {
+      "id": "0037",
+      "filename": "0037_publication_governance.sql",
+      "sha256": "293dd9e22e58a9835c6fdf5dd0911fe11b6dd0254326a0e78ff6f1b99c30f6b6",
+      "rollout": "operator"
     }
   ]
 }

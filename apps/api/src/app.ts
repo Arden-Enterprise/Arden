@@ -4,7 +4,7 @@ import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meet
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
   type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
-  type SharedKnowledgeDraft, type SharedKnowledgeSubmission } from "./db/repository.js";
+  type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type GovernanceDocumentView } from "./db/repository.js";
 import { newSessionExpiry, readSessionExpiry, sealSession } from "./auth/session-timebox.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
@@ -1346,6 +1346,237 @@ export function buildApp(dependencies: AppDependencies) {
       }
     });
 
+  // Decision 0023: the Organization Admin governance catalog. Metadata only; `readable` marks documents the
+  // Admin already reads, which open in the Library instead of an inspection.
+  app.get<{ Params: { organizationId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/governance/publications", {
+      schema: { params: { type: "object", required: ["organizationId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId } = request.params;
+        const items = await dependencies.repository.listGovernancePublications(context.userId, organizationId);
+        if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+        const readable = new Set((await dependencies.repository.listPublishedKnowledge(context.userId, organizationId) ?? [])
+          .map((item) => item.draftId));
+        reply.header("Cache-Control", "no-store");
+        return { items: items.map((item) => ({ ...item, publishedAt: item.publishedAt.toISOString(),
+          readable: readable.has(item.documentId) })) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Governance catalog failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.post<{ Params: { organizationId: string; documentId: string }; Body: { reason: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/governance/publications/:documentId/inspections", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false, required: ["reason"],
+          properties: { reason: { type: "string", maxLength: 4000 } } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, documentId } = request.params;
+        const readable = (await dependencies.repository.listPublishedKnowledge(context.userId, organizationId) ?? [])
+          .some((item) => item.draftId === documentId);
+        if (readable) return reply.code(409).send(safeError("ALREADY_A_READER",
+          "You can already read this document in the Library.", request.id));
+        const result = await dependencies.repository.openGovernanceInspection(context.userId, organizationId, documentId,
+          request.body.reason);
+        if (result.kind === "invalid-reason") return reply.code(400).send(safeError("INVALID_REASON",
+          "Give a reason of 1 to 1000 characters.", request.id));
+        if (result.kind !== "opened") return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(201).send({ inspectionId: result.inspectionId });
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Governance inspection open failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string; inspectionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/governance/inspections/:inspectionId", {
+      schema: { params: { type: "object", required: ["organizationId", "inspectionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, inspectionId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, inspectionId } = request.params;
+        const ended = () => reply.code(404).send(safeError("INSPECTION_ENDED",
+          "This inspection has ended. Open the document again with a reason.", request.id));
+        const view = await dependencies.repository.useGovernanceInspection(context.userId, organizationId, inspectionId);
+        if (!view) return ended();
+        const content = await readKnowledgeContent(dependencies.storage, view.sourceUri, view.contentHash, view.mimeType);
+        const still = await dependencies.repository.useGovernanceInspection(context.userId, organizationId, inspectionId);
+        if (!still || still.contentHash !== view.contentHash) return ended();
+        reply.header("Cache-Control", "no-store");
+        return { ...representGovernanceView(view, content), inspectionId,
+          readers: { mode: view.readerMode, departmentId: view.readerDepartmentId, names: view.readerNames },
+          reason: view.reason, expiresAt: still.expiresAt.toISOString() };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Governance inspection read failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0023: the responsible reviewer's read-only view of a current publication (not a reader source).
+  app.get<{ Params: { organizationId: string; documentId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/responsible-view", {
+      schema: { params: { type: "object", required: ["organizationId", "documentId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, documentId } = request.params;
+        const view = await dependencies.repository.getResponsiblePublicationView(context.userId, organizationId, documentId);
+        if (!view) return reply.code(404).send(resourceNotAvailable(request.id));
+        const content = await readKnowledgeContent(dependencies.storage, view.sourceUri, view.contentHash, view.mimeType);
+        const still = await dependencies.repository.getResponsiblePublicationView(context.userId, organizationId, documentId);
+        if (!still || still.contentHash !== view.contentHash) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return representGovernanceView(view, content);
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Responsible publication view failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0023: direct withdrawal by the responsible reviewer or an Organization Admin, with a reason.
+  app.post<{ Params: { organizationId: string; documentId: string }; Body: { reason: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/withdrawal", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false, required: ["reason"],
+          properties: { reason: { type: "string", maxLength: 4000 } } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.withdrawPublicationDirectly(context.userId,
+          request.params.organizationId, request.params.documentId, request.body.reason);
+        if (result.kind === "invalid-reason") return reply.code(400).send(safeError("INVALID_REASON",
+          "Give a reason of 1 to 1000 characters.", request.id));
+        if (result.kind === "preparing") return reply.code(409).send(safeError("NEWER_VERSION_PREPARING",
+          "A newer version is being prepared. Withdraw it after it finishes.", request.id));
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { status: "WITHDRAWN" };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Direct withdrawal failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0023: a reader reports a problem with the current publication they can read.
+  app.post<{ Params: { organizationId: string; publishedVersionId: string }; Body: { message: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/published/:publishedVersionId/reports", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "publishedVersionId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, publishedVersionId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false, required: ["message"],
+          properties: { message: { type: "string", maxLength: 4000 } } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, publishedVersionId } = request.params;
+        const message = request.body.message.trim();
+        if (!message || [...message].length > 1000) return reply.code(400).send(safeError("INVALID_MESSAGE",
+          "Describe the problem in 1 to 1000 characters.", request.id));
+        const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
+        const publication = actor ? await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId) : null;
+        if (!actor || !publication || !canRead(actor, { organizationId, readers: publication.targetReaders })) {
+          return reply.code(404).send(resourceNotAvailable(request.id));
+        }
+        const result = await dependencies.repository.reportPublicationProblem(context.userId, organizationId,
+          publication.draftId, publishedVersionId, message);
+        if (result.kind === "duplicate") return reply.code(409).send(safeError("ALREADY_REPORTED",
+          "You already reported this document. The responsible reviewers can see it.", request.id));
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(201).send({ id: result.reportId });
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/reports", {
+      schema: { params: { type: "object", required: ["organizationId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const items = await dependencies.repository.listPublicationReports(context.userId, request.params.organizationId);
+        if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { items: items.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report list failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.post<{ Params: { organizationId: string; reportId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/reports/:reportId/dismiss", {
+      schema: { params: { type: "object", required: ["organizationId", "reportId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, reportId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const closed = await dependencies.repository.dismissPublicationReport(context.userId,
+          request.params.organizationId, request.params.reportId);
+        if (!closed) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { status: "CLOSED" };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report dismiss failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // T6.3 retry (decision 0011, FAILED -> PREPARING): the author prepares their approved snapshot again after a
+  // temporary failure. Idempotent by state, so it takes no Idempotency-Key; a repeat returns the same result.
+  app.post<{ Params: { organizationId: string; submissionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/submissions/:submissionId/publication-retry", {
+      schema: { params: { type: "object", required: ["organizationId", "submissionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, submissionId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.retryKnowledgePublication(context.userId,
+          request.params.organizationId, request.params.submissionId);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "not-failed") return reply.code(409).send(safeError("PUBLICATION_NOT_FAILED",
+          "Only a publication that failed to prepare can be tried again.", request.id));
+        if (result.kind === "not-retryable") return reply.code(409).send(safeError("PUBLICATION_NOT_RETRYABLE",
+          "This failure cannot be fixed by trying again.", request.id));
+        if (result.kind === "superseded") return reply.code(409).send(safeError("PUBLICATION_SUPERSEDED",
+          "A newer version of this document is already published.", request.id));
+        reply.header("Cache-Control", "no-store");
+        return representSubmission(result.submission);
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge publication retry failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
   // T6.1 (SDD S-16): the author asks to change the readers of a published document or to withdraw it.
   app.post<{ Params: { organizationId: string; documentId: string };
     Body: { type: "READER_CHANGE" | "WITHDRAWAL"; reason: string; targetReaders?: TargetReadersInput } }>(
@@ -2122,7 +2353,17 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     publishedVersionId: submission.publishedVersionId,
     requestType: submission.requestType,
     requestReason: submission.requestReason,
+    publicationFailure: submission.publicationFailure,
+    withdrawal: submission.withdrawal ? { by: submission.withdrawal.by, reason: submission.withdrawal.reason,
+      at: submission.withdrawal.at.toISOString() } : null,
   };
+}
+
+function representGovernanceView(view: GovernanceDocumentView, content: { body: string; pdfBase64?: string }) {
+  return { documentId: view.documentId, publishedVersionId: view.publishedVersionId, title: view.title,
+    mimeType: view.mimeType, contentHash: view.contentHash, ...content,
+    responsibleDepartmentId: view.responsibleDepartmentId,
+    readers: { mode: view.readerMode, departmentId: view.readerDepartmentId } };
 }
 
 /** Full selection for the author and reviewers of a draft or submission. */
