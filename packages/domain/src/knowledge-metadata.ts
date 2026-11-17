@@ -33,12 +33,23 @@ export function metadataSubmissionErrors(value: KnowledgeMetadata, isUpdate: boo
   if (!value.type) errors.push("Choose a type.");
   if (!value.topicId) errors.push("Choose a topic.");
   if (!value.version.trim()) errors.push("Enter a version.");
-  if (!value.effectiveDate) errors.push("Choose an effective date.");
   if (isUpdate && !value.changeNote.trim()) errors.push("Add a change note.");
   return errors;
 }
-export function applicabilityStatus(metadata: KnowledgeMetadata | null | undefined, today: string): "Upcoming" | "Effective" | "Expired" | null {
-  if (!metadata?.effectiveDate) return null;
-  if (metadata.expirationDate && today > metadata.expirationDate) return "Expired";
-  return today < metadata.effectiveDate ? "Upcoming" : "Effective";
+/** Days before the expiration date at which readers see "Expires in N days". */
+export const expiringSoonDays = 30;
+export type ValidityStatus = "Current" | "Expiring soon" | "Expired" | "Upcoming";
+/**
+ * Reader-facing validity (requested 15 Nov 2026): a publication is in force from approval and
+ * shows only its optional expiration date. "Upcoming" remains only for older drafts that still
+ * carry a future effective date, so their state is never misreported.
+ */
+export function validityStatus(metadata: KnowledgeMetadata | null | undefined, today: string):
+  { status: ValidityStatus; daysLeft: number | null } {
+  if (metadata?.effectiveDate && today < metadata.effectiveDate) return { status: "Upcoming", daysLeft: null };
+  const expiration = metadata?.expirationDate;
+  if (!expiration) return { status: "Current", daysLeft: null };
+  if (today > expiration) return { status: "Expired", daysLeft: 0 };
+  const daysLeft = Math.round((Date.parse(`${expiration}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+  return { status: daysLeft <= expiringSoonDays ? "Expiring soon" : "Current", daysLeft };
 }
