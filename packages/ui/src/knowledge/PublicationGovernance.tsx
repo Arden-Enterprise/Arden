@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, dismissPublicationReport, listGovernancePublications, listPublicationReports, loadGovernanceInspection,
   loadResponsiblePublication, openGovernanceInspection, reportPublicationProblem, withdrawPublication,
   type GovernanceDocument, type GovernanceInspection, type GovernancePublication, type GovernanceReaderMode,
@@ -99,13 +99,19 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
   const [viewing, setViewing] = useState<GovernanceDocument | null>(null);
   const [withdrawing, setWithdrawing] = useState<WithdrawTarget | null>(null);
   const [busy, setBusy] = useState(false);
+  // Requests may settle after the page (or a test environment) is gone; never update state then.
+  const mounted = useRef(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   // A secondary panel: when reports can't be loaded it stays hidden rather than adding an error to Reviews.
   const load = useCallback(() => {
-    listPublicationReports(platform, organizationId).then(setReports).catch(() => setReports([]));
+    listPublicationReports(platform, organizationId)
+      .then((items) => { if (mounted.current) setReports(items); })
+      .catch(() => { if (mounted.current) setReports([]); });
   }, [platform, organizationId]);
   useEffect(() => { load(); }, [load, refreshSignal]);
   const act = (work: () => Promise<void>) => { setBusy(true); setError(""); void work()
-    .catch((cause: unknown) => setError(failure(cause, "Couldn’t complete this action."))).finally(() => setBusy(false)); };
+    .catch((cause: unknown) => { if (mounted.current) setError(failure(cause, "Couldn’t complete this action.")); })
+    .finally(() => { if (mounted.current) setBusy(false); }); };
   // Stay visible while an outcome message is shown, even after the last report closes.
   if (!reports?.length && !error && !message) return null;
   return <section className="island governance-reports" aria-labelledby="governance-reports-title">

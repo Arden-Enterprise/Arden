@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Pool, type PoolClient } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository } from "../db/repository.js";
 import { prepareKnowledgeFixture } from "../db/knowledge-fixture.test-support.js";
 import { canRead } from "./policy.js";
@@ -959,13 +959,19 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       });
       return { draftId, submissionId, versionId };
     };
+    // Grants created by a test are revoked after it even when an assertion fails, so the next test can
+    // create the same grant without hitting uq_active_reviewer_grant_exact.
+    const createdGrants: string[] = [];
+    afterEach(async () => {
+      const pending = createdGrants.splice(0);
+      if (pending.length) await asSuperuser((client) => client.query(
+        "UPDATE reviewer_grant SET status = 'INACTIVE' WHERE reviewer_grant_id = ANY($1::uuid[])", [pending]));
+    });
     const grant = (membershipId: string, scope: "DEPARTMENT" | "ORGANIZATION", departmentId: string | null) =>
       asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope,
           department_id, granted_by_membership_id, classifications, level) VALUES ($1, $2, $3, $4, $5, ARRAY['INTERNAL'], 'STANDARD')
         RETURNING reviewer_grant_id`, [ids.orgA, membershipId, scope, departmentId, ids.authorM]))
-        .then((result) => result.rows[0]!.reviewer_grant_id as string);
-    const revoke = (grantId: string) => asSuperuser((client) => client.query(
-      "UPDATE reviewer_grant SET status = 'INACTIVE' WHERE reviewer_grant_id = $1", [grantId]));
+        .then((result) => { const grantId = result.rows[0]!.reviewer_grant_id as string; createdGrants.push(grantId); return grantId; });
     const audits = (eventType: string, documentId: string) => asSuperuser(async (client) => (await client.query<{ count: string }>(
       "SELECT count(*)::text AS count FROM audit_event WHERE event_type = $1 AND details_json->>'documentId' = $2",
       [eventType, documentId])).rows[0]?.count);
@@ -1013,9 +1019,9 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       if (!repository) throw new Error("Test database is unavailable");
       const { draftId, submissionId } = await publishSelected("Responsible review");
       await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId)).resolves.toBeNull();
-      const wrongDepartment = await grant(ids.reviewerM, "DEPARTMENT", ids.engineering);
+      await grant(ids.reviewerM, "DEPARTMENT", ids.engineering);
       await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId)).resolves.toBeNull();
-      const sales = await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
+      await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
       await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId))
         .resolves.toMatchObject({ documentId: draftId, readerMode: "SELECTED_MEMBERS" });
       await expect(repository.getResponsiblePublicationView(ids.engineer, ids.orgA, draftId)).resolves.toBeNull();
@@ -1038,7 +1044,6 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         .resolves.toEqual({ kind: "withdrawn" });
       expect((await repository.listKnowledgeSubmissions(ids.author, ids.orgA))?.find((item) => item.id === other.submissionId)
         ?.withdrawal).toMatchObject({ by: "ORGANIZATION_ADMIN", reason: "Legal hold" });
-      await revoke(wrongDepartment); await revoke(sales);
     });
 
     it("uses Organization grants, not Department grants, for an organization-wide publication", async () => {
@@ -1053,12 +1058,11 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         await client.query("UPDATE knowledge_current_publication SET reader_selection_id = $2 WHERE shared_draft_id = $1",
           [draftId, selection.rows[0]!.selection_id]);
       });
-      const department = await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
+      await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
       await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId)).resolves.toBeNull();
-      const organization = await grant(ids.reviewerM, "ORGANIZATION", null);
+      await grant(ids.reviewerM, "ORGANIZATION", null);
       await expect(repository.getResponsiblePublicationView(ids.reviewer, ids.orgA, draftId))
         .resolves.toMatchObject({ readerMode: "ORGANIZATION" });
-      await revoke(department); await revoke(organization);
     });
 
     it("lets only a reader report once, shows reports to responsible people and closes them on withdrawal", async () => {
@@ -1077,7 +1081,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         reports?.filter((report) => report.documentId === draftId) ?? [];
       expect(mine(await repository.listPublicationReports(ids.outsider, ids.orgA))).toHaveLength(0);
       expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(1);
-      const sales = await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
+      await grant(ids.reviewerM, "DEPARTMENT", ids.sales);
       const [report] = mine(await repository.listPublicationReports(ids.reviewer, ids.orgA));
       expect(report).toMatchObject({ message: "Wrong salary column", stillCurrent: true, canView: true });
       await expect(repository.dismissPublicationReport(ids.outsider, ids.orgA, report!.id)).resolves.toBe(false);
@@ -1089,7 +1093,6 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(repository.withdrawPublicationDirectly(ids.reviewer, ids.orgA, draftId, "Confirmed"))
         .resolves.toEqual({ kind: "withdrawn" });
       expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(0);
-      await revoke(sales);
     });
   });
 });

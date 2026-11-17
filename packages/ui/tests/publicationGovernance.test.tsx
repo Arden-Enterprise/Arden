@@ -87,6 +87,18 @@ describe("decision 0023 reported problems", () => {
   const report: api.PublicationReport = { id: "report", documentId: "doc", publishedVersionId: "version", title: "Salary bands",
     message: "Wrong column", reporterName: "Avery", createdAt: "2026-11-16T00:00:00Z", stillCurrent: true, canView: true };
 
+  it("ignores reports that arrive after the panel is gone", async () => {
+    let resolve: (items: api.PublicationReport[]) => void = () => undefined;
+    vi.spyOn(api, "listPublicationReports").mockReturnValue(new Promise((done) => { resolve = done; }));
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { unmount, container } = render(createElement(PublicationReportsPanel, { platform: "web", organizationId: "org", departmentName }));
+    unmount();
+    resolve([report]);
+    await new Promise((settle) => setTimeout(settle, 0));
+    expect(container.innerHTML).toBe("");
+    expect(errors).not.toHaveBeenCalled();
+  });
+
   it("stays hidden when there is nothing to show", async () => {
     const list = vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
     const { container } = render(createElement(PublicationReportsPanel, { platform: "web", organizationId: "org", departmentName }));

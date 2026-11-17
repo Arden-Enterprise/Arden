@@ -17,6 +17,7 @@ const departments = [{ id: "hr", name: "HR" }, { id: "ops", name: "Operations" }
 
 function commonApi() {
   vi.spyOn(api, "listPublishedKnowledge").mockResolvedValue([]);
+  vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
   vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({ departments, audiences: [], primaryDepartmentId: "hr" });
   vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
 }

@@ -220,7 +220,7 @@
     {
       "id": "0037",
       "filename": "0037_publication_governance.sql",
-      "sha256": "293dd9e22e58a9835c6fdf5dd0911fe11b6dd0254326a0e78ff6f1b99c30f6b6",
+      "sha256": "4b01de20db4376ae3bfbd08181629a7cac9d76a896371d9a417a486e0682d33f",
       "rollout": "operator"
     }
   ]

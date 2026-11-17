@@ -28,6 +28,7 @@ describe("publication request review presentation", () => {
     vi.spyOn(api, "listKnowledgeDrafts").mockResolvedValue([]);
     vi.spyOn(api, "listKnowledgeSubmissions").mockResolvedValue([]);
     vi.spyOn(api, "listPublishedKnowledge").mockResolvedValue([]);
+    vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
     vi.spyOn(api, "listKnowledgeReviewBoard").mockResolvedValue({ items: [board], decided: [] });
     vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({ departments: [{ id: "hr", name: "HR" }], audiences: [] });
     vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });

@@ -117,8 +117,11 @@ RETURNS boolean LANGUAGE sql STABLE SET search_path = arden, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION governance_is_responsible_reviewer(uuid, uuid, uuid, text) FROM PUBLIC;
 
--- The current publication of each document with the fields governance needs.
-CREATE VIEW governance_current_publication WITH (security_barrier) AS
+-- The current publication of each document with the fields governance needs. security_invoker: the release
+-- ownership handoff gives this view to the restricted migration role, and a view otherwise reads its FORCE RLS
+-- tables as its owner (no rows). Checked as the caller instead, which is only the postgres-owned routines below;
+-- the runtime has no privilege on the view.
+CREATE VIEW governance_current_publication WITH (security_barrier, security_invoker = true) AS
 SELECT cp.shared_draft_id, cp.organization_id, pv.published_version_id, pv.title, pv.content_uri,
        pv.content_hash, pv.published_at, s.submission_id, s.mime_type, s.snapshot_version_no,
        s.management ->> 'version' AS version_label, s.submitted_by_membership_id,
