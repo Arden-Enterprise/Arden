@@ -14,7 +14,6 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
   return { ...actual,
     loadOrganizationAdministration: vi.fn(), listReviewerGrants: vi.fn(),
     createDepartment: vi.fn(), deleteDepartment: vi.fn(), loadAudienceGroups: vi.fn(), saveAudienceGroup: vi.fn(),
-    loadKnowledgeCatalog: vi.fn(), listPublishedKnowledge: vi.fn(), saveKnowledgeCatalogEntry: vi.fn(),
   };
 });
 
@@ -30,24 +29,22 @@ const administration: OrganizationAdministration = {
 const group: AudienceGroupRecord = {
   id: "group", name: "Operations readers", description: "Original", status: "ACTIVE", version: 1, members: [],
 };
-let restoreDialogs: () => void;
 
+let restoreDialogs: () => void;
 beforeEach(() => {
   restoreDialogs = installTestDialogs();
   vi.clearAllMocks();
   vi.mocked(apiClient.loadOrganizationAdministration).mockResolvedValue(administration);
   vi.mocked(apiClient.listReviewerGrants).mockResolvedValue([]);
   vi.mocked(apiClient.loadAudienceGroups).mockResolvedValue([group]);
-  vi.mocked(apiClient.loadKnowledgeCatalog).mockResolvedValue({ canManage: true, topics: [], collections: [] });
-  vi.mocked(apiClient.listPublishedKnowledge).mockResolvedValue([]);
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
 });
 afterEach(() => { cleanup(); restoreDialogs(); Reflect.deleteProperty(HTMLElement.prototype, "scrollTo"); });
 
-function openAdmin() {
+function openAdmin(onOpenKnowledgeLibrary?: () => void) {
   render(createElement(OrganizationAdminPage, {
     platform: "web", organizationId: "org", organizationName: "Test Org",
-    contextOpen: false, onToggleContext: vi.fn(),
+    contextOpen: false, onToggleContext: vi.fn(), onOpenKnowledgeLibrary,
   }));
 }
 
@@ -114,37 +111,11 @@ describe("organization admin manual findings", () => {
     ));
   });
 
-  it("creates a Topic directly in Administration", async () => {
-    vi.mocked(apiClient.saveKnowledgeCatalogEntry).mockResolvedValue({
-      id: "topic-1", name: "Operations", description: "", status: "ACTIVE", version: 1,
-    });
-    openAdmin();
-    fireEvent.click(await screen.findByRole("tab", { name: "Topics" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Name *" }), { target: { value: "Operations" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
-    await waitFor(() => expect(apiClient.saveKnowledgeCatalogEntry).toHaveBeenCalledWith("web", "org", "topics", null,
-      { name: "Operations", description: "", status: "ACTIVE" }));
-    expect(screen.queryByRole("button", { name: "Open Knowledge" })).toBeNull();
-  });
-
-  it("guards unsaved Topic edits when leaving Administration's catalog tab", async () => {
-    openAdmin();
-    fireEvent.click(await screen.findByRole("tab", { name: "Topics" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Name *" }), { target: { value: "Draft topic" } });
-    fireEvent.click(screen.getByRole("tab", { name: /Members/i }));
-    expect(await screen.findByText(/Changes have not been saved/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(screen.getByRole("textbox", { name: "Name *" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: /Members/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Name *" })).toBeNull());
-  });
-
-  it("does not show the catalog editor when catalog management is denied", async () => {
-    vi.mocked(apiClient.loadKnowledgeCatalog).mockResolvedValue({ canManage: false, topics: [], collections: [] });
-    openAdmin();
-    fireEvent.click(await screen.findByRole("tab", { name: "Topics" }));
-    expect(await screen.findByText("Catalog management is unavailable for this account.")).toBeTruthy();
-    expect(screen.queryByRole("textbox", { name: "Name *" })).toBeNull();
+  it("points admins to Topic management from Administration", async () => {
+    const openLibrary = vi.fn();
+    openAdmin(openLibrary);
+    expect(await screen.findByText(/Org Admins add Topics in Knowledge Library/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open Knowledge" }));
+    expect(openLibrary).toHaveBeenCalledOnce();
   });
 });

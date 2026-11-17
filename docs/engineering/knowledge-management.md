@@ -3,15 +3,15 @@
 Contract: [F11 KM-v1](../product/graph-ai-and-work.md#knowledge-management-refinement-km-v1-accepted-12-november-2026).
 Decision: [ADR 0020](../decisions/0020-knowledge-management-catalog.md).
 Original implementation baseline: staging `0e25b71`, branch
-`feat/knowledge-management`. The Admin placement correction was inspected
-against fetched staging `8a1d8fa` and main `9fa3d34` on 17 November 2026;
-it does not establish a live migration or deployment of the correction.
+`feat/knowledge-management`. This admin navigation follow-up was inspected
+against fetched staging `7a133af` and main `9fa3d34` on 16 November 2026;
+it does not establish a live migration or deployment of the follow-up.
 
-In the shared web/desktop UI, an Org Admin creates the first Topic directly in
-Administration → Topics. The same screen manages Collections. Knowledge Library
-lists Topics for discovery but does not manage the catalog. Topics are organization data and
-are not seeded automatically; a PDF contribution's Topic selector stays empty
-until an active Topic exists.
+In the shared web/desktop UI, an Org Admin creates the first Topic through
+Knowledge Library → Discover → Manage catalog → New topic. Administration's
+Members screen links to Knowledge so this setup path is visible to
+admins. Topics are organization data and are not seeded automatically; a PDF
+contribution's Topic selector stays empty until an active Topic exists.
 
 ## API and data
 
