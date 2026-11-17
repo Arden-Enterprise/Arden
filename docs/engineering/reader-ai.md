@@ -341,6 +341,21 @@ Client wait is bounded at 300 seconds (source preparation plus generation); nati
 main derives that deadline from the fixed route, not renderer-selected arbitrary
 timeouts. Close invalidates local waiting and does not promise provider cancellation.
 
+#### Inline citation viewer refinement — 17 November 2026
+
+Published PDF sources now use the pinned PDF.js runtime and its same-build local worker.
+The viewer navigates to a cited page and marks matching text. Rich-text sources use
+source ranges. Display matching tolerates wrapping and typography and can mark only
+the quote opening when it spans pages. This is a best-effort navigation aid, not a
+replacement for server evidence validation or proof that an answer is supported.
+Sentence-to-citation placement without explicit markers is also heuristic.
+
+Review regression tests cover UTF-16 offset mapping, pending-load cleanup and visible
+page-render failure. The loading task is destroyed when its reader closes, including
+before parsing completes. Local synthetic in-app-browser inspection covers a two-page
+PDF, exact passage highlight, zoom and corrupt-file fallback. This does not certify
+genuine Electron, signed-in end-to-end access, scanned PDFs or image understanding.
+
 Acceptance RA-04-A: strict web/native adapters, closed request/response shapes and
 allow-list/method/query/body confusion tests. RA-04-B: user-triggered panel, all
 states, manual retry, Escape/focus, source navigation and safe text rendering tests.

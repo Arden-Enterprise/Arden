@@ -1,10 +1,13 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Icon } from "../shared/Icon";
 import type { KnowledgeCitationReference } from "./knowledgeCitation";
+import { clearHighlight, paintHighlight, quoteRanges } from "./citationHighlight";
 import { useReaderSummary, type ReaderSummaryOptions } from "./useReaderSummary";
 import { ReaderSummaryPanel } from "./ReaderSummaryPanel";
 import { ReaderQuestionPanel } from "./ReaderQuestionPanel";
 import { useReaderAccess } from "./useReaderAccess";
+
+const citationHighlightName = "arden-citation";
 
 export type ReaderDocumentStatus = "EFFECTIVE" | "EXPIRING" | "UPCOMING" | "EXPIRED";
 
@@ -106,24 +109,31 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
   const visibleFocus = focusTarget?.versionId === activeVersion?.id ? focusTarget : null;
 
   useEffect(() => {
-    const root = readerRef.current;
+    const root = readerRef.current?.querySelector<HTMLElement>(".knowledge-reader-content");
     const blockId = visibleFocus?.blockId;
-    if (!root || !blockId) return;
+    // PDF block ids never match rendered elements; the PDF reader highlights its own text layer.
+    if (!root || !visibleFocus || !blockId) return;
     let highlighted: HTMLElement | null = null;
     const reveal = () => {
       const candidates = root.querySelectorAll<HTMLElement>("[data-id], [data-source-block-id]");
       const match = Array.from(candidates).find((element) => element.dataset.id === blockId || element.dataset.sourceBlockId === blockId);
       if (!match) return false;
-      highlighted = match;
-      match.classList.add("is-citation-source");
-      match.scrollIntoView?.({ block: "center", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      // The rich-text view owns its DOM and reverts class or markup changes, so the quote is painted
+      // with the CSS Custom Highlight API instead. The block outline is the fallback without that API.
+      const ranges = quoteRanges(match, visibleFocus.excerpt);
+      if (!paintHighlight(citationHighlightName, ranges)) { highlighted = match; match.classList.add("is-citation-source"); }
+      const anchor = ranges[0]?.startContainer.parentElement ?? match;
+      anchor.scrollIntoView?.({ block: "center", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
       return true;
     };
-    if (reveal()) return () => highlighted?.classList.remove("is-citation-source");
+    const clear = () => { clearHighlight(citationHighlightName); highlighted?.classList.remove("is-citation-source"); };
+    if (reveal()) return clear;
     const observer = new MutationObserver(() => { if (reveal()) observer.disconnect(); });
     observer.observe(root, { childList: true, subtree: true });
-    return () => { observer.disconnect(); highlighted?.classList.remove("is-citation-source"); };
-  }, [visibleFocus?.blockId, visibleFocus?.versionId]);
+    const timeout = window.setTimeout(() => observer.disconnect(), 15_000);
+    return () => { observer.disconnect(); window.clearTimeout(timeout); clear(); };
+    // A new citation request (even for the same passage) has a new identity and highlights again.
+  }, [visibleFocus]);
 
   if (!activeVersion) return null;
 

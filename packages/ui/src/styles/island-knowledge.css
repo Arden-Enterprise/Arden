@@ -330,6 +330,38 @@
 .knowledge-reader-sample-page h3 { color: #202027; font-size: 16px !important; }
 .knowledge-reader-sample-page p { color: #4f4f59; font-size: 14px; line-height: 1.75; }
 .knowledge-reader-sample-page footer { max-width: 62ch; margin-top: 42px; padding-top: 16px; border-top: 1px solid #d7d5ce; color: #73717b; font-size: 11px; line-height: 1.55; }
+/* Governed PDF reader (pdf.js): pages on a dark desk, a transparent text layer, and the cited passage marked. */
+.knowledge-reader-content:has(> .pdf-reader) { padding: 0; }
+.pdf-reader { display: grid; grid-template-rows: auto minmax(0, 1fr); height: calc(var(--arden-shell-height) - 110px); min-height: 480px; }
+.pdf-reader-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 40px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--arden-border); background: var(--arden-surface-base); }
+.pdf-reader-zoom { display: flex; align-items: center; gap: 2px; }
+.pdf-reader-zoom-value { min-width: 52px; height: 28px; padding: 0 6px; border: 0; border-radius: 8px; color: var(--arden-text-secondary); background: transparent; font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
+.pdf-reader-zoom-value:hover:not(:disabled) { background: var(--arden-surface-raised); }
+.pdf-reader-zoom-value:disabled { cursor: default; }
+.pdf-reader-pages { display: grid; justify-content: center; align-content: start; gap: 16px; padding: 16px; overflow: auto; background: #2b2b31; overscroll-behavior: contain; }
+.pdf-reader-pages:focus-visible { outline: 2px solid var(--arden-focus-ring); outline-offset: -2px; }
+.pdf-reader-page { --scale-round-x: 1px; --scale-round-y: 1px; position: relative; background: #fff; box-shadow: 0 10px 28px rgb(0 0 0 / 35%); }
+.pdf-reader-page canvas { display: block; }
+.pdf-reader-page > .pdf-reader-unavailable { position: absolute; inset: 0; display: grid; align-content: center; background: #fff; color: #444; }
+.pdf-reader-page .textLayer {
+  position: absolute; inset: 0; overflow: clip; line-height: 1; text-align: initial; transform-origin: 0 0; z-index: 0;
+  --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.pdf-reader-page .textLayer :is(span, br) { position: absolute; color: transparent; white-space: pre; cursor: text; transform-origin: 0% 0%; }
+.pdf-reader-page .textLayer > :not(.markedContent), .pdf-reader-page .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.pdf-reader-page .textLayer .markedContent { display: contents; }
+.pdf-reader-page .textLayer ::selection { background: rgb(139 130 246 / 30%); }
+/* Marks sit inside a text run, so they flow with it instead of being positioned. */
+.pdf-reader-page .textLayer mark.pdf-citation-mark {
+  position: static; margin: -1px 0; padding: 1px 0; border-radius: 2px; color: transparent;
+  background: rgb(255 214 10 / 42%); box-shadow: 0 0 0 1px rgb(214 160 0 / 55%); animation: citation-mark-in .45s ease-out;
+}
+@keyframes citation-mark-in { from { background: transparent; box-shadow: none; } }
+.pdf-reader-unavailable { margin: 0; padding: 24px; color: var(--arden-text-secondary); font-size: 13px; }
+::highlight(arden-citation) { background-color: rgb(255 214 10 / 38%); color: inherit; }
 .knowledge-reader-content .is-citation-source {
   scroll-margin-block: 120px; outline: 2px solid color-mix(in srgb, var(--arden-violet-hover) 78%, transparent); outline-offset: 8px;
   border-radius: 4px; background: color-mix(in srgb, var(--arden-violet) 13%, transparent); animation: citation-source-in .38s ease-out;
@@ -348,7 +380,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .knowledge-reader-content .is-citation-source { animation: none; }
+  .knowledge-reader-content .is-citation-source, .pdf-reader-page .textLayer mark.pdf-citation-mark { animation: none; }
 }
 
 /* My Contributions keeps a wider detail island than administration (reviewer note and history). */

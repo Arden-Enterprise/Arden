@@ -19,6 +19,7 @@ import {
 } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { PdfDocument, PdfViewer, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
+import { PdfReader } from "./PdfReader";
 import { ReviewList, initialsOf } from "./ReviewList";
 import { reviewRequestPresentation } from "./reviewRequest";
 import { libraryDateLabel } from "./libraryDisplay";
@@ -688,7 +689,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           <button type="button" className="secondary-button" disabled aria-label="Report an issue — not available yet" title="Report an issue is not available yet">
             <Icon name="flag" size={13} />Report an issue</button></>}
         content={document.mimeType === "application/pdf" && document.pdfBase64
-          ? readerPdfUrl ? <PdfViewer url={readerPdfUrl} title={document.title} page={openedCitation?.page} readerChrome /> : <p role="status">Preparing PDF preview…</p>
+          ? <PdfReader base64={document.pdfBase64} title={document.title} focus={openedCitation} />
           : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
             key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
             instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>}
