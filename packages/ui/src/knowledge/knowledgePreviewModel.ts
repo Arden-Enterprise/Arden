@@ -40,8 +40,6 @@ export type KnowledgePreviewAction =
   | { type: "approve"; version: number }
   | { type: "activate"; version: number };
 
-export const sampleQuestion = "How should we respond to an API gateway outage?";
-
 export function createSampleDraft(): KnowledgeDraft {
   return {
     title: "API Gateway Runbook",

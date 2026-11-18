@@ -26,6 +26,8 @@ const maxTitleCodePoints = 200;
 const defaultListLimit = 50;
 const accountPasswordRequirementsMessage = "Password must have at least 8 characters, one uppercase letter, and one special character.";
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+// Decision 0013: legacy classification is optional input and no longer routes review.
+const classificationSchema = { type: "string", enum: [...allKnowledgeClassifications] } as const;
 /** Request shape for Target Readers (draft save) and approved readers (review decision). */
 const targetReadersSchema = { type: "object", additionalProperties: false, required: ["mode"], properties: {
   mode: { type: "string", enum: [...readerModes] },
@@ -876,7 +878,7 @@ export function buildApp(dependencies: AppDependencies) {
       } },
       body: { type: "object", additionalProperties: false, required: ["sourcePrivateVersionId"], properties: {
         sourcePrivateVersionId: { type: "string", pattern: uuidPattern },
-        classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+        classification: classificationSchema,
       } },
     },
   }, async (request, reply) => {
@@ -931,22 +933,8 @@ export function buildApp(dependencies: AppDependencies) {
         : await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
       reply.header("Cache-Control", "no-store");
       reply.header("ETag", etag(result.draft.currentVersion));
-      return reply.code(result.kind === "created" ? 201 : 200).send({
-        id: result.draft.id,
-        organizationId,
-        title: result.draft.title,
-        classification: result.draft.classification,
-        status: "ACTIVE",
-        body: responseBody,
-        currentVersion: {
-          id: result.draft.versionId,
-          version: result.draft.currentVersion,
-          mimeType: result.draft.mimeType,
-          contentHash: result.draft.contentHash,
-        },
-        createdAt: result.draft.createdAt.toISOString(),
-        updatedAt: result.draft.updatedAt.toISOString(),
-      });
+      // Same representation as the other draft-creation routes and the draft detail.
+      return reply.code(result.kind === "created" ? 201 : 200).send(representSharedDraft(result.draft, responseBody));
     } catch (error) {
       // A failed COMMIT acknowledgement is ambiguous: the database may already
       // reference this copy. Keep it until a reconciler can prove it is orphaned.
@@ -971,7 +959,7 @@ export function buildApp(dependencies: AppDependencies) {
         body: { type: "object", additionalProperties: false, required: ["title", "body"], properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           body: { type: "string", maxLength: maxBodyBytes },
-          classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+          classification: classificationSchema,
         } },
       },
     }, async (request, reply) => {
@@ -1031,7 +1019,7 @@ export function buildApp(dependencies: AppDependencies) {
         body: { type: "object", additionalProperties: false, required: ["title", "pdfBase64"], properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
-          classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+          classification: classificationSchema,
         } },
       },
     }, async (request, reply) => {
@@ -1042,12 +1030,8 @@ export function buildApp(dependencies: AppDependencies) {
       if (!title || !isValidText(title, 800, maxTitleCodePoints) || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
         return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file.", request.id));
       }
-      const bytes = Buffer.from(encoded, "base64");
-      if (bytes.length === 0 || bytes.length > maxPdfBytes || bytes.toString("base64") !== encoded
-        || !bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))
-        || !bytes.subarray(-1024).toString("latin1").includes("%%EOF")) {
-        return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
-      }
+      const bytes = decodePdfBase64(encoded);
+      if (!bytes) return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
       let stored: Awaited<ReturnType<PrivateContentStorage["writePdf"]>> | null = null;
       let creationAttempted = false;
       try {
@@ -1206,7 +1190,7 @@ export function buildApp(dependencies: AppDependencies) {
           title: { type: "string", minLength: 1, maxLength: 800 },
           body: { type: "string", maxLength: maxBodyBytes },
           pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
-          classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+          classification: classificationSchema,
           responsibleDepartmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
           targetScopeType: { enum: ["ORGANIZATION", "DEPARTMENT", null] },
           teamTag: { type: ["string", "null"], maxLength: 100 },
@@ -1246,11 +1230,8 @@ export function buildApp(dependencies: AppDependencies) {
           return reply.code(400).send(safeError("INVALID_REQUEST", "Replace a PDF with another PDF.", request.id));
         }
         if (pdfBase64 !== undefined) {
-          const bytes = Buffer.from(pdfBase64, "base64");
-          if (bytes.length === 0 || bytes.length > maxPdfBytes || bytes.toString("base64") !== pdfBase64
-            || !bytes.subarray(0, 5).equals(Buffer.from("%PDF-")) || !bytes.subarray(-1024).toString("latin1").includes("%%EOF")) {
-            return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
-          }
+          const bytes = decodePdfBase64(pdfBase64);
+          if (!bytes) return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
           stored = await dependencies.storage.writePdf(bytes);
         }
         const semanticBody = patch.body === undefined ? undefined : normalizeSharedDraftBody(patch.body);
@@ -1683,7 +1664,7 @@ export function buildApp(dependencies: AppDependencies) {
             scope: { type: "string", enum: ["DEPARTMENT", "ORGANIZATION"], default: "DEPARTMENT" },
             departmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
             classifications: { type: "array", minItems: 1, maxItems: 3, uniqueItems: true,
-              items: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] } },
+              items: classificationSchema },
             level: { type: "string", enum: ["STANDARD", "SPECIALIST", "SENIOR"] },
             teamTag: { anyOf: [{ type: "string", minLength: 1, maxLength: 100 }, { type: "null" }] },
             projectTag: { anyOf: [{ type: "string", minLength: 1, maxLength: 100 }, { type: "null" }] },
@@ -2277,6 +2258,14 @@ function normalizePatch(value: DraftPatch): DraftPatch | null {
   if (value.title !== undefined && !isValidText(value.title, 800, maxTitleCodePoints)) return null;
   if (value.body !== undefined && !isValidText(value.body, maxBodyBytes, maxBodyBytes)) return null;
   return { ...value, title: value.title === undefined ? undefined : value.title.trim() || "Untitled private note" };
+}
+
+/** Canonical base64 of a non-empty PDF within the size limit (header and trailer present), or null. */
+function decodePdfBase64(encoded: string): Buffer | null {
+  const bytes = Buffer.from(encoded, "base64");
+  return bytes.length === 0 || bytes.length > maxPdfBytes || bytes.toString("base64") !== encoded
+    || !bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))
+    || !bytes.subarray(-1024).toString("latin1").includes("%%EOF") ? null : bytes;
 }
 
 function isValidText(value: string, maxBytes: number, maxCodePoints: number): boolean {

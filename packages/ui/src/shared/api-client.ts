@@ -250,11 +250,10 @@ export function loadKnowledgeOptions(platform: Platform, organizationId: string)
 }
 
 export async function listKnowledgeDrafts(platform: Platform, organizationId: string): Promise<KnowledgeDraftSummary[]> {
-  // The list route returns the repository shape (`audienceRoleIds`), unlike the detail route (`audienceIds`).
-  // Normalize here so screens never receive an undefined audience list.
-  const result = await request<{ items: (Omit<KnowledgeDraftSummary, "audienceIds"> & { audienceIds?: string[] | null; audienceRoleIds?: string[] | null })[] }>(
+  const result = await request<{ items: (Omit<KnowledgeDraftSummary, "audienceIds"> & { audienceIds?: string[] | null })[] }>(
     platform, `${knowledgePath(organizationId)}/drafts`);
-  return result.items.map(({ audienceRoleIds, audienceIds, ...item }) => ({ ...item, audienceIds: audienceIds ?? audienceRoleIds ?? [] }));
+  // The server sends `audienceIds` (an empty array when unset); keep screens safe from a missing value.
+  return result.items.map(({ audienceIds, ...item }) => ({ ...item, audienceIds: audienceIds ?? [] }));
 }
 
 export function loadKnowledgeDraft(platform: Platform, organizationId: string, draftId: string): Promise<KnowledgeDraftRecord> {
@@ -357,10 +356,6 @@ export function withdrawKnowledgeSubmission(platform: Platform, organizationId: 
 export async function listKnowledgeSubmissions(platform: Platform, organizationId: string): Promise<KnowledgeSubmission[]> {
   const result = await request<{ items: KnowledgeSubmission[] }>(platform, `${knowledgePath(organizationId)}/submissions`);
   return result.items;
-}
-
-export async function listAssignedKnowledgeReviews(platform: Platform, organizationId: string): Promise<AssignedKnowledgeReview[]> {
-  return (await listKnowledgeReviewBoard(platform, organizationId)).items;
 }
 
 /** Pending queue plus the reviewer's decided submissions; servers before REV-02 return no history. */
