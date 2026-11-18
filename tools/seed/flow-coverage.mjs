@@ -3,7 +3,6 @@
 //
 // From the Arden checkout that contains this file:
 //   $env:ARDEN_SEED_PASSWORD = "<shared fixture password>"
-//   $env:ARDEN_SEED_MEMBER_EMAIL = "<signed-in account email>"
 //   node tools/seed/flow-coverage.mjs
 
 import { randomUUID } from "node:crypto";
@@ -12,7 +11,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const password = process.env.ARDEN_SEED_PASSWORD;
-const memberEmail = process.env.ARDEN_SEED_MEMBER_EMAIL?.trim().toLowerCase() || "";
 const catalog = JSON.parse(await readFile(join(dirname(fileURLToPath(import.meta.url)), "flow-cases.json"), "utf8"));
 const results = [];
 
@@ -593,16 +591,6 @@ try {
   const fixtureJoined = ["F02-member", "F05-department-reviewer", "F05-organization-reviewer"]
     .every((id) => inOrganization(actors[id === "F02-member" ? "member" : id === "F05-department-reviewer" ? "departmentReviewer" : "organizationReviewer"], organizationId));
   record("F02-fixture-members", fixtureJoined ? "ready" : "skipped", fixtureResults.join(" "));
-
-  if (!memberEmail) {
-    record("F02-member-email", "skipped", "ARDEN_SEED_MEMBER_EMAIL was not set.");
-  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(memberEmail)) {
-    record("F02-member-email", "skipped", "ARDEN_SEED_MEMBER_EMAIL is not a usable email address.");
-  } else {
-    const attached = await ensureMembership(memberEmail, false);
-    const joined = attached.state === "active";
-    record("F02-member-email", joined ? "ready" : "skipped", membershipDetail(memberEmail, attached));
-  }
 
   for (const spec of catalog.invitations) {
     const outcome = await trackedInvitation(spec);

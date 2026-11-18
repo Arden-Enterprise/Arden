@@ -6,11 +6,10 @@ Run it from this Arden checkout while the local API is reachable at `http://127.
 
 ```powershell
 $env:ARDEN_SEED_PASSWORD = "<shared fixture password>"
-$env:ARDEN_SEED_MEMBER_EMAIL = "<signed-in account email>"
 node tools/seed/flow-coverage.mjs
 ```
 
-The password and the signed-in account email are read only from those environment variables. They are not written into this repository. Run the script again and it keeps the existing records. A pending invitation is not sent a second time.
+The password is read only from that environment variable. It is not written into this repository. Run the script again and it keeps the existing records. A pending invitation is not sent a second time.
 
 The fixture accounts use one shared password:
 
@@ -24,7 +23,7 @@ The fixture accounts use one shared password:
 
 The organization admin creates **Arden Flow Practice** if that admin does not already belong to it. Local Role Practice, Zack, and any other existing organization are left in place.
 
-When `ARDEN_SEED_MEMBER_EMAIL` is already an active member, use the sidebar **Switch or create workspace** control and choose **Arden Flow Practice**. The same choice is on **Choose your workspace** after sign-in. If the invitation response does not include an accept token, the seed cannot accept it. Open the invitation from that account instead, or sign in as `local-org-admin@example.test` and choose the practice workspace.
+Sign in as `local-org-admin@example.test` and choose **Arden Flow Practice**. The same choice is on **Choose your workspace** after sign-in.
 
 Library examples:
 

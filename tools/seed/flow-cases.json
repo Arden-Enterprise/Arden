@@ -176,7 +176,6 @@
     { "id": "F02-organization", "flow": 2, "seed": true, "summary": "Arden Flow Practice exists beside any organization the admin already belongs to." },
     { "id": "F02-departments", "flow": 2, "seed": true, "summary": "The practice organization has Practice and Coverage departments." },
     { "id": "F02-fixture-members", "flow": 2, "seed": true, "summary": "The department member and both reviewers are active members." },
-    { "id": "F02-member-email", "flow": 2, "seed": true, "summary": "The account in ARDEN_SEED_MEMBER_EMAIL is an active member and can switch into this workspace." },
     { "id": "F02-invitation-pending", "flow": 2, "seed": true, "summary": "A pending invitation for local-pending-invite@example.test." },
     { "id": "F02-invitation-revoked", "flow": 2, "seed": true, "summary": "A revoked invitation for local-revoked-invite@example.test." },
     { "id": "F02-reviewer-grants", "flow": 2, "seed": true, "summary": "One active department grant and one active organization grant." },
