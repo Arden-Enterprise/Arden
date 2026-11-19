@@ -41,9 +41,8 @@ function ScopedNotificationProvider({ platform, organizationId, onOpenTarget, ch
   onOpenTarget: (target: NonNullable<NotificationItem["target"]>) => void;
   children: ReactNode;
 }) {
-  const [items, setItems] = useState<NotificationItem[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [inbox, setInbox] = useState<NotificationPage>({ items: [], unreadCount: 0, nextCursor: null });
+  const { items, unreadCount, nextCursor } = inbox;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [realtimeAvailable, setRealtimeAvailable] = useState<boolean | null>(null);
@@ -63,18 +62,16 @@ function ScopedNotificationProvider({ platform, organizationId, onOpenTarget, ch
         cursor, unreadOnly: selectedFilter === "unread", limit: 30,
       });
       if (requestId !== requestRef.current || orgRef.current !== organizationId) return;
-      setItems(current => {
-        const next = append ? [...current, ...page.items] : page.items;
+      setInbox(current => {
+        const next = append ? [...current.items, ...page.items] : page.items;
         const byId = new Map(next.map(item => [item.id, item]));
-        return [...byId.values()];
+        return { items: [...byId.values()], unreadCount: page.unreadCount, nextCursor: page.nextCursor };
       });
-      setUnreadCount(page.unreadCount);
-      setNextCursor(page.nextCursor);
     } catch (cause) {
       if (requestId === requestRef.current && orgRef.current === organizationId) {
         if (cause instanceof ApiError && (cause.status === 401 || cause.status === 404)) {
           requestRef.current++;
-          setItems([]); setUnreadCount(0); setNextCursor(null); setLoading(false);
+          setInbox({ items: [], unreadCount: 0, nextCursor: null }); setLoading(false);
           setRealtimeAvailable(false);
           setError("Notifications are no longer available.");
         } else {
@@ -101,20 +98,32 @@ function ScopedNotificationProvider({ platform, organizationId, onOpenTarget, ch
     if (!organizationId || !notificationIdPattern.test(id)) return;
     try {
       await markNotificationRead(platform, organizationId, id);
-      setItems(current => current.map(item => item.id === id ? { ...item, readAt: item.readAt ?? new Date().toISOString() } : item));
-      setUnreadCount(count => Math.max(0, count - (items.some(item => item.id === id && item.readAt === null) ? 1 : 0)));
+      const readAt = new Date().toISOString();
+      setInbox(current => {
+        const item = current.items.find(entry => entry.id === id);
+        if (!item || item.readAt !== null) return current;
+        return {
+          ...current,
+          items: current.items.map(entry => entry.id === id ? { ...entry, readAt: entry.readAt ?? readAt } : entry),
+          unreadCount: Math.max(0, current.unreadCount - 1),
+        };
+      });
       if (filter === "unread") await refresh();
     } catch {
       setError("The notification could not be marked as read.");
     }
-  }, [filter, items, organizationId, platform, refresh]);
+  }, [filter, organizationId, platform, refresh]);
 
   const markAllRead = useCallback(async () => {
     if (!organizationId) return;
     try {
       await markAllNotificationsRead(platform, organizationId);
-      setItems(current => current.map(item => ({ ...item, readAt: item.readAt ?? new Date().toISOString() })));
-      setUnreadCount(0);
+      const readAt = new Date().toISOString();
+      setInbox(current => ({
+        ...current,
+        items: current.items.map(item => ({ ...item, readAt: item.readAt ?? readAt })),
+        unreadCount: 0,
+      }));
       if (filter === "unread") await refresh();
     } catch {
       setError("Notifications could not be marked as read.");
@@ -123,10 +132,10 @@ function ScopedNotificationProvider({ platform, organizationId, onOpenTarget, ch
 
   useEffect(() => {
     requestRef.current++;
-    setItems([]); setUnreadCount(0); setNextCursor(null); setError("");
+    setInbox({ items: [], unreadCount: 0, nextCursor: null }); setError("");
     setFilterState("all");
     setRealtimeAvailable(organizationId ? null : false);
-    if (organizationId) void refreshPage(false);
+    if (organizationId) void refreshPage(false, "all");
     return () => { requestRef.current++; };
   }, [organizationId, platform]); // refreshPage intentionally follows the current filter through the refresh control.
 
@@ -140,7 +149,7 @@ function ScopedNotificationProvider({ platform, organizationId, onOpenTarget, ch
     const clearExpiredSession = () => {
       if (stopped) return;
       requestRef.current++;
-      setItems([]); setUnreadCount(0); setNextCursor(null); setLoading(false);
+      setInbox({ items: [], unreadCount: 0, nextCursor: null }); setLoading(false);
       setError("Notifications are no longer available.");
       setRealtimeAvailable(false);
       const expiredClient = client;
@@ -187,7 +196,7 @@ function ScopedNotificationProvider({ platform, organizationId, onOpenTarget, ch
             setRealtimeAvailable(false);
             if (status === "session-ended") {
               requestRef.current++;
-              setItems([]); setUnreadCount(0); setNextCursor(null); setLoading(false);
+              setInbox({ items: [], unreadCount: 0, nextCursor: null }); setLoading(false);
               setError("Notifications are no longer available.");
             }
           }

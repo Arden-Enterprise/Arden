@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/shared/api-client";
 import { NotificationBell } from "../src/notifications/NotificationBell";
-import { NotificationProvider } from "../src/notifications/NotificationProvider";
+import { NotificationProvider, useNotifications } from "../src/notifications/NotificationProvider";
 
 const realtimeHarness = vi.hoisted(() => ({
   broadcast: null as null | ((message: unknown) => void),
@@ -164,7 +164,7 @@ describe("F21 in-app notification inbox", () => {
   });
 
   it("clears old organization items when the active organization changes", async () => {
-    vi.spyOn(api, "listNotifications").mockImplementation(async (_platform, organizationId) =>
+    const list = vi.spyOn(api, "listNotifications").mockImplementation(async (_platform, organizationId) =>
       organizationId === organizationOne
         ? { items: [fixture], unreadCount: 1, nextCursor: null }
         : { items: [], unreadCount: 0, nextCursor: null });
@@ -179,10 +179,41 @@ describe("F21 in-app notification inbox", () => {
     render(createElement(OrganizationHarness));
     fireEvent.click(await screen.findByRole("button", { name: "Notifications, 1 unread" }));
     expect(await screen.findByRole("button", { name: /knowledge item is waiting for your review/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Unread" }));
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("web", organizationOne,
+      expect.objectContaining({ unreadOnly: true })));
     fireEvent.click(screen.getByRole("button", { name: "Switch organization" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Notifications" })).toBeTruthy());
+    await waitFor(() => expect(list).toHaveBeenLastCalledWith("web", organizationTwo,
+      expect.objectContaining({ unreadOnly: false })));
     fireEvent.click(screen.getByRole("button", { name: "Notifications" }));
+    expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
     expect(await screen.findByText("You don't have any notifications yet.")).toBeTruthy();
     expect(screen.queryByText(fixture.message)).toBeNull();
+  });
+
+  it("decrements the unread count only once when the same notification is marked twice", async () => {
+    const secondFixture = { ...fixture, id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", message: "Another notification." };
+    vi.spyOn(api, "listNotifications").mockResolvedValue({
+      items: [fixture, secondFixture], unreadCount: 2, nextCursor: null,
+    });
+    vi.spyOn(api, "getNotificationRealtimeCredential").mockRejectedValue(new Error("offline"));
+    const markRead = vi.spyOn(api, "markNotificationRead").mockResolvedValue(undefined);
+    function MarkReadHarness() {
+      const notifications = useNotifications();
+      return createElement("div", null,
+        createElement("button", { type: "button", onClick: () => {
+          void notifications?.markRead(notificationId);
+          void notifications?.markRead(notificationId);
+        } }, "Mark same notification twice"),
+        createElement("output", { "data-testid": "unread-count" }, String(notifications?.unreadCount ?? 0)));
+    }
+    render(createElement(NotificationProvider, { platform: "web", organizationId: organizationOne,
+      onOpenTarget: vi.fn(), children: createElement(MarkReadHarness) }));
+
+    await waitFor(() => expect(screen.getByTestId("unread-count").textContent).toBe("2"));
+    fireEvent.click(screen.getByRole("button", { name: "Mark same notification twice" }));
+    await waitFor(() => expect(screen.getByTestId("unread-count").textContent).toBe("1"));
+    expect(markRead).toHaveBeenCalledTimes(2);
   });
 });
