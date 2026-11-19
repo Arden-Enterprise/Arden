@@ -127,6 +127,7 @@ function ScopedNotificationProvider({ platform, organizationId, onOpenTarget, ch
     setFilterState("all");
     setRealtimeAvailable(organizationId ? null : false);
     if (organizationId) void refreshPage(false);
+    return () => { requestRef.current++; };
   }, [organizationId, platform]); // refreshPage intentionally follows the current filter through the refresh control.
 
   useEffect(() => {

@@ -143,6 +143,26 @@ describe("F21 in-app notification inbox", () => {
     expect(screen.queryByText(fixture.message)).toBeNull();
   });
 
+  it("ignores a pending inbox response after the provider unmounts", async () => {
+    let resolvePage!: (page: api.NotificationPage) => void;
+    const pendingPage = new Promise<api.NotificationPage>(resolve => { resolvePage = resolve; });
+    const list = vi.spyOn(api, "listNotifications").mockReturnValue(pendingPage);
+    vi.spyOn(api, "getNotificationRealtimeCredential").mockRejectedValue(new Error("offline"));
+    const view = renderInbox();
+    await waitFor(() => expect(list).toHaveBeenCalledTimes(1));
+
+    view.unmount();
+    await act(async () => {});
+    vi.stubGlobal("window", undefined);
+    try {
+      resolvePage({ items: [], unreadCount: 0, nextCursor: null });
+      await pendingPage;
+      await new Promise(resolve => setTimeout(resolve, 0));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("clears old organization items when the active organization changes", async () => {
     vi.spyOn(api, "listNotifications").mockImplementation(async (_platform, organizationId) =>
       organizationId === organizationOne
