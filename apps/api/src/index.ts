@@ -15,6 +15,8 @@ import { HttpAskArdenClient } from "./answers/ai-client.js";
 import { HttpArdenAiClient } from "./indexing/ai-client.js";
 import { PgIndexGenerationStore } from "./indexing/store.js";
 import { IndexingWorker, indexWorkerLeaseSeconds } from "./indexing/worker.js";
+import { NotificationOutboxWorker, notificationWorkerPollMilliseconds } from "./notifications/outbox.js";
+import { notificationRealtimeConfiguration } from "./notifications/realtime.js";
 
 const databaseUrl = process.env.DATABASE_URL ??
   (process.env.NODE_ENV === "production"
@@ -84,6 +86,13 @@ const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServi
 const indexPool = askArden && indexDatabaseUrl
   ? new Pool({ connectionString: indexDatabaseUrl, max: 2, connectionTimeoutMillis: 10_000 }) : null;
 const contentStorage = new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot);
+const notificationRealtime = notificationRealtimeConfiguration(process.env);
+const notificationDatabaseUrl = process.env.ARDEN_NOTIFICATION_DATABASE_URL?.trim();
+if (Boolean(notificationRealtime) !== Boolean(notificationDatabaseUrl)) {
+  throw new Error("Realtime notifications require both complete Realtime configuration and ARDEN_NOTIFICATION_DATABASE_URL");
+}
+const notificationPool = notificationDatabaseUrl
+  ? new Pool({ connectionString: notificationDatabaseUrl, max: 2, connectionTimeoutMillis: 10_000 }) : null;
 
 async function checkRuntimeDatabase(): Promise<void> {
   const client = await pool.connect();
@@ -102,11 +111,35 @@ async function checkRuntimeDatabase(): Promise<void> {
   }
 }
 
+async function checkNotificationDatabase(): Promise<void> {
+  if (!notificationPool) return;
+  const client = await notificationPool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL ROLE arden_notification_worker");
+    await client.query("SET LOCAL search_path TO arden, public");
+    await client.query("SELECT 1 FROM arden_notification_outbox LIMIT 0");
+    await client.query("SELECT 1 FROM arden_notification LIMIT 0");
+    await client.query("ROLLBACK");
+  } catch {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw new Error("Notification worker database role or schema is unavailable");
+  } finally { client.release(); }
+}
+
 try {
   await checkRuntimeDatabase();
 } catch {
   await pool.end();
+  await notificationPool?.end();
   throw new Error("Arden database schema or API runtime roles are unavailable; apply migrations and verify the configured database roles");
+}
+try {
+  await checkNotificationDatabase();
+} catch {
+  await pool.end();
+  await notificationPool?.end();
+  throw new Error("Notification worker database role or schema is unavailable; verify ARDEN_NOTIFICATION_DATABASE_URL and its arden_notification_worker membership");
 }
 
 const app = buildApp({
@@ -128,6 +161,7 @@ const app = buildApp({
   invitationMailer,
   askArden,
   readerAi: askArden,
+  notificationRealtime,
   invitationDeliveryMode: smtpConfiguration ? "email" : "local-test-no-email",
   publicWebOrigin: (() => {
     if (flow1TestMode) return "http://127.0.0.1:5180";
@@ -174,7 +208,15 @@ const indexWorker = aiUrl && aiServiceToken && indexPool
     },
   )
   : null;
+const notificationWorker = notificationRealtime
+  ? new NotificationOutboxWorker(randomUUID(), notificationPool!, notificationRealtime, {
+    info: (fields, message) => app.log.info(fields, message),
+    warn: (fields, message) => app.log.warn(fields, message),
+    error: (fields, message) => app.log.error(fields, message),
+  })
+  : null;
 let indexWorkerTimer: NodeJS.Timeout | undefined;
+let notificationWorkerTimer: NodeJS.Timeout | undefined;
 let stopping = false;
 
 function scheduleIndexWorker(delayMs: number): void {
@@ -190,13 +232,28 @@ function scheduleIndexWorker(delayMs: number): void {
   indexWorkerTimer.unref();
 }
 
+function scheduleNotificationWorker(delayMs: number): void {
+  if (!notificationWorker || stopping) return;
+  notificationWorkerTimer = setTimeout(() => {
+    void notificationWorker.runOnce()
+      .then((worked) => scheduleNotificationWorker(notificationWorkerPollMilliseconds(worked)))
+      .catch((error: unknown) => {
+        app.log.error({ errorType: error instanceof Error ? error.name : "UnknownError" }, "Notification outbox poll failed");
+        scheduleNotificationWorker(5_000);
+      });
+  }, delayMs);
+  notificationWorkerTimer.unref();
+}
+
 async function shutdown() {
   stopping = true;
   if (indexWorkerTimer) clearTimeout(indexWorkerTimer);
+  if (notificationWorkerTimer) clearTimeout(notificationWorkerTimer);
   await app.close();
   invitationMailer?.close();
   await pool.end();
   await indexPool?.end();
+  await notificationPool?.end();
 }
 
 process.once("SIGINT", () => void shutdown());
@@ -204,6 +261,7 @@ process.once("SIGTERM", () => void shutdown());
 
 await app.listen({ port, host });
 scheduleIndexWorker(250);
+scheduleNotificationWorker(250);
 
 function assertBooleanEnvironmentValue(name: string, value: string | undefined): void {
   if (value !== undefined && value !== "true" && value !== "false") throw new Error(`${name} must be true or false`);

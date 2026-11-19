@@ -2,7 +2,7 @@
 
 Owner: product/engineering maintainers; issue-level people remain in Linear. Prepared 2026-10-26 from Arden main `6d06292be349924fa84f3bfa84af802692ab7ad5`, Arden-AI main `405023927b0256122989da3339e89027934086e5` and the explicitly identified Arden branch snapshot `5e0def733da37a70268e340f879aff7379f19165`.
 
-This is an initial evidence-backed map of **20 feature groups**, not a claim that the product has only 20 individual features, that every historical conversation was imported, or that every path is finished. Its acceptance cases expose work to verify; they are not claims that new product decisions were approved. Add missing accepted scope using stable IDs and the [specification rule](../engineering/rules/specifications.md). Keep [PRODUCT.md](../../PRODUCT.md), the [blueprint](../../ARDEN_BLUEPRINT.md), [design](../../DESIGN.md), accepted ADRs and source as the owning contracts.
+This is an evidence-backed map of **21 feature groups**, not a claim that the product has only 21 individual features, that every historical conversation was imported, or that every path is finished. Its acceptance cases expose work to verify; they are not claims that new product decisions were approved. Add missing accepted scope using stable IDs and the [specification rule](../engineering/rules/specifications.md). Keep [PRODUCT.md](../../PRODUCT.md), the [blueprint](../../ARDEN_BLUEPRINT.md), [design](../../DESIGN.md), accepted ADRs and source as the owning contracts.
 
 ## Read and update a feature
 
@@ -32,6 +32,7 @@ Each group document distinguishes current main, branch-only alternatives, observ
 | F18 | Shared web/Windows behavior and offline boundaries | [Platform and delivery](platform-and-delivery.md#f18-web-and-desktop) | Shared source exists; installer/native/offline guarantees separate |
 | F19 | Developer environments and release promotion | [Platform and delivery](platform-and-delivery.md#f19-development-and-release-flow) | Tooling/runbooks exist; each target/version needs evidence |
 | F20 | Customer installation, recovery and support | [Platform and delivery](platform-and-delivery.md#f20-installation-and-recovery) | Release gates remain; no general production-readiness claim |
+| F21 | In-app notifications | [In-app notifications](in-app-notifications.md#f21-in-app-notifications) | Code and migration are in `feat/in-app-notifications`; Realtime policy, PostgreSQL rehearsal, staging and deployment remain unverified |
 
 ## Known reconciliation gaps
 

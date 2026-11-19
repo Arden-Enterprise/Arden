@@ -230,4 +230,19 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${sharedDraftPath}/${sourcePrivateVersionId}`, method: "PATCH", body: JSON.stringify({ pdfBase64: "a".repeat(160_000) }), ifMatch: '"2"' }), true);
     assert.equal(validateDesktopApiRequest({ path: `${sharedDraftPath}/${sourcePrivateVersionId}`, method: "PATCH", body: "a".repeat(7_100_001), ifMatch: '"2"' }), false);
   });
+
+  it("permits notification inbox actions without exposing the Realtime credential route to renderer IPC", () => {
+    const notifications = `/api/v1/organizations/${organizationId}/notifications`;
+    assert.equal(validateDesktopApiRequest({ path: notifications, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}?cursor=eyJpZCI6MX0&unreadOnly=true&limit=25`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}?unreadOnly=false`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}?cursor=bad%20cursor`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}?limit=51`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}?cursor=abc&cursor=def`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}?unexpected=1`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}/${sourcePrivateVersionId}/read`, method: "PATCH" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}/read-all`, method: "POST" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}/read-all`, method: "POST", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${notifications}/realtime-credential`, method: "GET" }), false);
+  });
 });

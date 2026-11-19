@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useWorkspaceNavigation } from "./WorkspaceNavigationContext";
 import { useStatusIsland } from "./StatusIslandContext";
 import { ToastContent } from "./ActionToast";
+import { NotificationBell } from "../notifications/NotificationBell";
 
 export type ContextControlProps = { contextOpen: boolean; onToggleContext: () => void };
 
@@ -123,6 +124,7 @@ export function WorkspaceTopbar({ breadcrumb, previewLabel, contextOpen, onToggl
       </div>
       {!reader && <div className="topbar-actions">
         {previewLabel && <span className="preview-state">{previewLabel}</span>}
+        <NotificationBell />
         <button type="button" className="context-toggle" onClick={onToggleContext} aria-expanded={contextOpen} aria-controls="arden-context-panel" aria-label="Context" title="Context">
           <img className="context-toggle-mark" src={ardenMark} alt="" />
         </button>

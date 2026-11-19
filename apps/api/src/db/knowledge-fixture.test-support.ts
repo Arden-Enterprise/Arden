@@ -33,12 +33,12 @@ export async function submitLegacyKnowledgeFixture(pool: Pool, organizationId: s
   const result = await pool.query<{ submission_id: string }>(`INSERT INTO arden.shared_submission
     (organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no, submitted_by_membership_id,
       target_scope_type, target_department_id, responsible_department_id, title, classification, team_tag,
-      project_tag, audience_role_ids, policy_version, content_uri, mime_type, content_hash, submit_request_id)
+        project_tag, audience_role_ids, policy_version, review_rule, content_uri, mime_type, content_hash, submit_request_id)
     SELECT d.organization_id, d.shared_draft_id, v.shared_draft_version_id, v.version_no, d.author_membership_id,
       d.target_scope_type, CASE WHEN d.target_scope_type = 'DEPARTMENT' THEN d.responsible_department_id END,
       d.responsible_department_id, d.title, d.classification, d.team_tag, d.project_tag,
       ARRAY(SELECT role_id FROM arden.shared_draft_audience a WHERE a.shared_draft_id = d.shared_draft_id),
-      1, v.content_uri, v.mime_type, v.content_hash, gen_random_uuid()
+        1, 'LEGACY', v.content_uri, v.mime_type, v.content_hash, gen_random_uuid()
     FROM arden.shared_draft d JOIN arden.shared_draft_version v ON v.shared_draft_id = d.shared_draft_id
       AND v.version_no = d.current_version_no WHERE d.organization_id = $1 AND d.shared_draft_id = $2
     RETURNING submission_id`, [organizationId, draftId]);
