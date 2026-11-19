@@ -260,10 +260,14 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await workerClient.query("BEGIN");
       await workerClient.query("SET LOCAL ROLE arden_notification_worker");
       await expect(workerClient.query("SELECT 1 FROM arden.arden_notification_outbox LIMIT 0")).resolves.toBeTruthy();
+      await workerClient.query("SAVEPOINT deny_private_content_read");
       await expect(workerClient.query("SELECT 1 FROM arden.shared_submission LIMIT 0"))
         .rejects.toMatchObject({ code: "42501" });
+      await workerClient.query("ROLLBACK TO SAVEPOINT deny_private_content_read");
+      await workerClient.query("SAVEPOINT deny_outbox_identity_update");
       await expect(workerClient.query("UPDATE arden.arden_notification_outbox SET organization_id = $1 WHERE false",
         [ids.organization])).rejects.toMatchObject({ code: "42501" });
+      await workerClient.query("ROLLBACK TO SAVEPOINT deny_outbox_identity_update");
     } finally {
       await workerClient.query("ROLLBACK").catch(() => undefined);
       workerClient.release();
@@ -516,37 +520,43 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
         AND event_type = 'REVIEWER_GRANT_REVOKED'`, [ids.organizationReviewerMembership, grant.id]);
     expect(committedRevocations.rows[0]?.count).toBe("0");
 
+    const targetNotificationId = grantNotification.rows[0]!.notification_id;
     const deliveredIds: string[] = [];
     let deliveryAttempts = 0;
     const worker = new NotificationOutboxWorker(randomUUID(), notificationPool, {
       endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
       signingKey: new TextEncoder().encode("ab".repeat(32)), namespace: "test-slot",
     }, { info: () => undefined, warn: () => undefined, error: () => undefined }, async (_configuration, event) => {
+      if (event.notificationId !== targetNotificationId) return;
       deliveredIds.push(event.notificationId);
       if (deliveryAttempts++ === 0) throw new Error("REALTIME_HTTP_503");
     });
     await pool.query(`UPDATE arden.arden_notification_outbox
       SET status = 'SENT', delivered_at = now()
       WHERE organization_id = $1 AND notification_id <> $2 AND status = 'PENDING'`,
-    [ids.organization, grantNotification.rows[0]!.notification_id]);
+    [ids.organization, targetNotificationId]);
+    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
+      WHERE notification_id = $1 AND status = 'PENDING'`, [targetNotificationId]);
     await expect(worker.runOnce()).resolves.toBe(true);
     const retrying = await pool.query<{ status: string; attempt_count: number; last_error_code: string }>(`
       SELECT status, attempt_count, last_error_code FROM arden.arden_notification_outbox
-       WHERE notification_id = $1`, [grantNotification.rows[0]!.notification_id]);
+       WHERE notification_id = $1`, [targetNotificationId]);
     expect(retrying.rows[0]).toMatchObject({ status: "PENDING", attempt_count: 1, last_error_code: "REALTIME_HTTP_503" });
-    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = now()
-      WHERE notification_id = $1`, [grantNotification.rows[0]!.notification_id]);
+    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
+      WHERE notification_id = $1`, [targetNotificationId]);
     await expect(worker.runOnce()).resolves.toBe(true);
     const delivered = await pool.query<{ status: string; attempt_count: number }>(`
       SELECT status, attempt_count FROM arden.arden_notification_outbox WHERE notification_id = $1`,
-    [grantNotification.rows[0]!.notification_id]);
+    [targetNotificationId]);
     expect(delivered.rows[0]).toEqual({ status: "SENT", attempt_count: 2 });
-    expect(deliveredIds).toEqual([grantNotification.rows[0]!.notification_id, grantNotification.rows[0]!.notification_id]);
+    expect(deliveredIds).toEqual([targetNotificationId, targetNotificationId]);
 
     await pool.query(`UPDATE arden.arden_notification_outbox
       SET status = 'PENDING', attempt_count = 7, available_at = now(), delivered_at = NULL,
           lease_owner = NULL, lease_expires_at = NULL, last_error_code = NULL
-      WHERE notification_id = $1`, [grantNotification.rows[0]!.notification_id]);
+      WHERE notification_id = $1`, [targetNotificationId]);
+    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
+      WHERE notification_id = $1`, [targetNotificationId]);
     const exhausted = new NotificationOutboxWorker(randomUUID(), notificationPool, {
       endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
       signingKey: new TextEncoder().encode("ab".repeat(32)), namespace: "test-slot",
@@ -556,7 +566,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(exhausted.runOnce()).resolves.toBe(true);
     const failed = await pool.query<{ status: string; attempt_count: number; last_error_code: string }>(`
       SELECT status, attempt_count, last_error_code FROM arden.arden_notification_outbox
-       WHERE notification_id = $1`, [grantNotification.rows[0]!.notification_id]);
+       WHERE notification_id = $1`, [targetNotificationId]);
     expect(failed.rows[0]).toEqual({ status: "FAILED", attempt_count: 8, last_error_code: "REALTIME_HTTP_503" });
 
     const reviewerInbox = await repository.notifications.list(ids.organizationReviewer, ids.organization, {
