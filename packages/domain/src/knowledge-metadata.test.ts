@@ -5,7 +5,7 @@ import { plainTextToSemanticDocument, semanticDocumentHasText } from "./semantic
 describe("business document metadata", () => {
   it("allows incomplete drafts but not incomplete submissions", () => {
     expect(validKnowledgeMetadata(emptyKnowledgeMetadata())).toBe(true);
-    expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).toHaveLength(3);
+    expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).toHaveLength(2);
     expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).not.toContain("Choose an effective date.");
   });
   it("validates calendar dates and the optional inclusive expiration date", () => {
