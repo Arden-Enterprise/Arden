@@ -18,6 +18,8 @@ import { registerReaderQuestionRoutes } from "./reader-ai/question-routes.js";
 import type { ReaderAiClient } from "./reader-ai/summary.js";
 import { canRead, readerModes, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
 import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
+import { registerNotificationRoutes } from "./notifications/routes.js";
+import type { NotificationRealtimeConfiguration } from "./notifications/realtime.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -49,6 +51,7 @@ type AppDependencies = {
   invitationDeliveryMode?: "email" | "local-test-no-email";
   askArden?: AskArdenClient | null;
   readerAi?: ReaderAiClient | null;
+  notificationRealtime?: NotificationRealtimeConfiguration | null;
   testActor?: SessionContext;
 };
 
@@ -102,6 +105,8 @@ export function buildApp(dependencies: AppDependencies) {
   registerReaderSummaryRoutes(app, dependencies.repository, dependencies.storage, dependencies.readerAi ?? null, requestActor, uuidPattern);
   registerReaderQuestionRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null, requestActor, uuidPattern);
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
+  registerNotificationRoutes(app, { repository: dependencies.repository,
+    store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
       const isEmailError = error.validation.some((v) =>

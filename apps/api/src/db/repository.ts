@@ -7,6 +7,7 @@ import type { VersionScope } from "../answers/governed-contracts.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
+import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
@@ -612,6 +613,7 @@ export type DeleteDepartmentResult =
   | { success: false; errorReason: "NOT_FOUND" | "BASE_DEPARTMENT" };
 
 export interface ArdenDataRepository {
+  readonly notifications?: NotificationStore;
   readonly readerSources?: ReaderSourceStore;
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
@@ -733,12 +735,14 @@ function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): strin
 }
 
 export class ArdenRepository implements ArdenDataRepository {
+  readonly notifications: NotificationStore;
   readonly readerSources: ReaderSourceStore;
   readonly conversations: ConversationStore;
   readonly knowledgeCatalog: KnowledgeCatalogStore;
   readonly audienceGroups: AudienceGroupStore;
   readonly systemAdministration: SystemAdministrationStore;
   constructor(private readonly pool: Pool) {
+    this.notifications = new PgNotificationStore((user, org, work) => this.withActorContext(user, org, work));
     this.readerSources = new PgReaderSourceStore((user, org, work) => this.withActorContext(user, org, work));
     this.conversations = new PgConversationStore((user, org, work) => this.withActorContext(user, org, work));
     this.knowledgeCatalog = new PgKnowledgeCatalogStore((user, org, work) => this.withActorContext(user, org, work),
@@ -2176,8 +2180,9 @@ export class ArdenRepository implements ArdenDataRepository {
   async deactivateReviewerGrant(userId: string, organizationId: string, grantId: string,
     requestId: string): Promise<boolean> {
     const result = await this.withOrganizationAdmin(userId, organizationId, async (client, adminMembershipId) => {
-      const updated = await client.query(`UPDATE reviewer_grant SET status = 'INACTIVE'
-        WHERE reviewer_grant_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [grantId, organizationId]);
+      const updated = await client.query<{ reviewer_membership_id: string }>(`UPDATE reviewer_grant SET status = 'INACTIVE'
+        WHERE reviewer_grant_id = $1 AND organization_id = $2 AND status = 'ACTIVE'
+        RETURNING reviewer_membership_id`, [grantId, organizationId]);
       if (updated.rowCount === 0) return false;
       await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id,
         event_type, outcome, details_json) VALUES ($1, $2, 'REVIEWER_GRANT_DEACTIVATED', 'SUCCESS', $3::jsonb)`, [

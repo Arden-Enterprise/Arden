@@ -3,6 +3,20 @@ import type { KnowledgeMetadata } from "@arden/domain";
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
   departmentId: string | null; memberIds: string[] };
+export type NotificationTarget = { view: "review-queue"; id: string } | { view: "knowledge" };
+export type NotificationItem = {
+  id: string;
+  type: "REVIEW_REQUESTED" | "REVIEW_APPROVED" | "REVIEW_REJECTED" | "PUBLICATION_ACTIVE"
+    | "PUBLICATION_FAILED" | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED";
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+  target?: NotificationTarget;
+};
+export type NotificationPage = { items: NotificationItem[]; unreadCount: number; nextCursor: string | null };
+export type NotificationRealtimeCredential = {
+  endpoint: string; apiKey: string; accessToken: string; topic: string; expiresAt: string;
+};
 export type KnowledgeCatalogEntry = { id: string; name: string; description: string; status: "ACTIVE" | "INACTIVE"; version: number };
 export type KnowledgeCollection = KnowledgeCatalogEntry & { cover: "handbook" | "production"; documentIds: string[] };
 export type KnowledgeCatalog = { canManage: boolean; topics: KnowledgeCatalogEntry[]; collections: KnowledgeCollection[] };
@@ -733,6 +747,29 @@ export async function createKnowledgeDraft(platform: Platform, organizationId: s
 
 export async function apiRequest<T>(platform: Platform, path: string, init: RequestInit = {}): Promise<T> {
   return request<T>(platform, path, init);
+}
+
+export async function listNotifications(platform: Platform, organizationId: string, input: {
+  cursor?: string | null; unreadOnly?: boolean; limit?: number;
+} = {}): Promise<NotificationPage> {
+  const query = new URLSearchParams();
+  if (input.cursor) query.set("cursor", input.cursor);
+  if (input.unreadOnly) query.set("unreadOnly", "true");
+  if (input.limit !== undefined) query.set("limit", String(input.limit));
+  const suffix = query.size ? `?${query}` : "";
+  return apiRequest<NotificationPage>(platform, `/api/v1/organizations/${organizationId}/notifications${suffix}`);
+}
+
+export async function markNotificationRead(platform: Platform, organizationId: string, notificationId: string): Promise<void> {
+  await apiRequest<void>(platform, `/api/v1/organizations/${organizationId}/notifications/${notificationId}/read`, { method: "PATCH" });
+}
+
+export async function markAllNotificationsRead(platform: Platform, organizationId: string): Promise<{ updated: number }> {
+  return apiRequest<{ updated: number }>(platform, `/api/v1/organizations/${organizationId}/notifications/read-all`, { method: "POST" });
+}
+
+export async function getNotificationRealtimeCredential(platform: Platform, organizationId: string): Promise<NotificationRealtimeCredential> {
+  return apiRequest<NotificationRealtimeCredential>(platform, `/api/v1/organizations/${organizationId}/notifications/realtime-credential`);
 }
 
 type ApiResponse = { status: number; body: string; etag?: string; location?: string };

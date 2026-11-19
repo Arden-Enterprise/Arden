@@ -68,6 +68,11 @@ Version-matched official docs, repository code/tests, and authorized decisions.
 Inspection notifications are explicitly deferred for this release; audit remains.
 Implementation is on PR #52 only until actual integration/release is verified.
 
+[0025: Durable in-app notifications with Realtime hints](0025-in-app-notifications.md)
+accepts the F21 implementation scope while retaining 0024's inspection-notification
+deferral. Code and migration are branch-only until full PostgreSQL, Realtime and
+staging evidence is obtained; no rollout is implied.
+
 The Home start page and reader validity rules are [0022: Home start page and reader
 validity](0022-home-start-page-and-reader-validity.md), accepted on 15 November 2026;
 implementation is on branch `feat/home-reader-information` only.
