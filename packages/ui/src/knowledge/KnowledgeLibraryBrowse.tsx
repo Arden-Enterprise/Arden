@@ -5,16 +5,15 @@ import type { KnowledgeCatalog, PublishedKnowledge } from "../shared/api-client"
 import { libraryDateLabel } from "./libraryDisplay";
 import { knowledgeCovers } from "./KnowledgeCatalogEditor";
 
-export type LibraryFilters = { type: string; topicId: string; ownerId: string; collectionId: string };
-export const emptyLibraryFilters = (): LibraryFilters => ({ type: "", topicId: "", ownerId: "", collectionId: "" });
+export type LibraryFilters = { type: string; ownerId: string; collectionId: string };
+export const emptyLibraryFilters = (): LibraryFilters => ({ type: "", ownerId: "", collectionId: "" });
 export function filterLibrary(items: PublishedKnowledge[], catalog: KnowledgeCatalog | null, query: string, filters: LibraryFilters) {
   const terms = query.trim().toLocaleLowerCase();
   const collection = filters.collectionId ? catalog?.collections.find(item => item.id === filters.collectionId) : null;
   return items.filter(item => (!filters.type || item.management?.type === filters.type)
-    && (!filters.topicId || item.management?.topicId === filters.topicId)
     && (!filters.ownerId || item.responsibleDepartmentId === filters.ownerId)
     && (!filters.collectionId || collection?.documentIds.includes(item.id))
-    && (!terms || [item.title, item.management?.type, item.management?.topicName,
+    && (!terms || [item.title, item.management?.type,
       item.responsibleDepartmentName].some(value => value?.toLocaleLowerCase().includes(terms))))
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id));
 }
@@ -36,7 +35,7 @@ function DocumentRegister({ items, onOpen, recent = false }: { items: PublishedK
         <IslandCell className="island-row-cell is-name"><button className="island-row-name library-row-name" type="button" aria-label={`Read ${item.title}`} onClick={() => onOpen(item.id)}>
           <span className="library-row-icon"><Icon name="document" size={17} /></span><span className="library-row-copy">
             <strong className="library-row-title">{item.title}</strong>
-            <span className="library-row-meta">{item.management?.topicName}{recent && release && <span className="km-release">{release === "UPDATED" ? "Updated" : "New"}</span>}</span>
+            <span className="library-row-meta">{recent && release && <span className="km-release">{release === "UPDATED" ? "Updated" : "New"}</span>}</span>
           </span></button></IslandCell>
         <IslandCell className="library-row-secondary">{item.management?.type ?? "—"}</IslandCell>
         <IslandCell className="library-row-secondary">{item.responsibleDepartmentName ?? "—"}</IslandCell>
@@ -61,18 +60,13 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
   return <div className="km-library">
     {catalogError && <p className="island-note is-warning" role="status">{catalogError}</p>}
     {discover && !query.trim() ? <>
-      <section aria-labelledby="km-types"><h2 id="km-types" className="km-section-label">Browse by type</h2><div className="km-types">
+      <section aria-labelledby="km-types"><header className="km-section-heading"><div><h2 id="km-types">Browse by type</h2><p>Find documents by what they are for.</p></div></header><div className="km-types">
         {knowledgeTypes.map(type => <button key={type} type="button" onClick={() => browseWith({ type })}>
           <Icon name={type === "Policy & Standard" ? "shield" : type === "Procedure" ? "layers" : type === "Guide" ? "knowledge" : type === "Reference" ? "document" : "chat"} size={20} />
           <strong>{type}</strong><span>{items.filter(item => item.management?.type === type).length}</span></button>)}
       </div></section>
-      <section aria-labelledby="km-topics"><header className="km-section-heading"><h2 id="km-topics">Topics</h2>
+      <section aria-labelledby="km-collections"><header className="km-section-heading"><div><h2 id="km-collections">Collections</h2><p>Curated documents, brought together.</p></div>
         {catalog?.canManage && <button className="km-text-button" type="button" onClick={onManage}>Manage catalog <Icon name="sliders" size={13} /></button>}</header>
-        <div className="km-topics">{catalog?.topics.filter(topic => topic.status === "ACTIVE").map(topic => <button key={topic.id} type="button" onClick={() => browseWith({ topicId: topic.id })}>
-          <span>{topic.name}</span><small>{items.filter(item => item.management?.topicId === topic.id).length}</small><Icon name="chevron" size={12} /></button>)}</div>
-        {!catalogError && !catalog?.topics.some(topic => topic.status === "ACTIVE") && <p className="km-empty-inline">No topics yet.{catalog?.canManage ? " Add one in Manage catalog." : ""}</p>}
-      </section>
-      <section aria-labelledby="km-collections"><header className="km-section-heading"><div><h2 id="km-collections">Collections</h2><p>Curated documents, brought together.</p></div></header>
         <div className="km-collections">{collections.map(collection => <button className="km-collection" type="button" key={collection.id} onClick={() => browseWith({ collectionId: collection.id })}>
           <img src={knowledgeCovers[collection.cover]} alt="" loading="lazy" /><span className="km-collection-copy"><small>{collection.documentIds.filter(id => items.some(source => source.id === id)).length} documents</small>
             <strong>{collection.name}</strong>{collection.description && <span>{collection.description}</span>}<Icon name="arrow" size={15} /></span></button>)}</div>
@@ -86,7 +80,6 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
     </> : <>
       <div className="km-register-bar"><div className="km-filters">
         <label><span className="sr-only">Type</span><select value={filters.type} onChange={event => onFilters({ ...filters, type: event.target.value })}><option value="">All types</option>{knowledgeTypes.map(type => <option key={type}>{type}</option>)}</select></label>
-        <label><span className="sr-only">Topic</span><select value={filters.topicId} onChange={event => onFilters({ ...filters, topicId: event.target.value })}><option value="">All topics</option>{catalog?.topics.map(topic => <option key={topic.id} value={topic.id}>{topic.name}</option>)}</select></label>
         <label><span className="sr-only">Owner department</span><select value={filters.ownerId} onChange={event => onFilters({ ...filters, ownerId: event.target.value })}><option value="">All departments</option>{owners.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
         {selectedCollection && <button type="button" className="km-filter-chip" onClick={() => onFilters({ ...filters, collectionId: "" })}>{selectedCollection.name}<Icon name="close" size={11} /></button>}
         {Object.values(filters).some(Boolean) && <button type="button" className="km-text-button" onClick={() => onFilters(emptyLibraryFilters())}>Clear filters</button>}

@@ -51,7 +51,7 @@ beforeEach(() => {
   vi.spyOn(apiClient, "listPublishedKnowledge").mockResolvedValue([]);
   vi.spyOn(apiClient, "listKnowledgeReviewBoard").mockResolvedValue({ items: [], decided: [] });
   vi.spyOn(apiClient, "loadKnowledgeOptions").mockResolvedValue({ departments: [], audiences: [] });
-  vi.spyOn(apiClient, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
+  vi.spyOn(apiClient, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, collections: [] });
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   vi.stubGlobal("scrollTo", vi.fn());
 });

@@ -5,7 +5,7 @@ export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_ME
   departmentId: string | null; memberIds: string[] };
 export type KnowledgeCatalogEntry = { id: string; name: string; description: string; status: "ACTIVE" | "INACTIVE"; version: number };
 export type KnowledgeCollection = KnowledgeCatalogEntry & { cover: "handbook" | "production"; documentIds: string[] };
-export type KnowledgeCatalog = { canManage: boolean; topics: KnowledgeCatalogEntry[]; collections: KnowledgeCollection[] };
+export type KnowledgeCatalog = { canManage: boolean; collections: KnowledgeCollection[] };
 export type KnowledgeCatalogWrite = { name: string; description: string; status: "ACTIVE" | "INACTIVE";
   cover?: "handbook" | "production"; documentIds?: string[] };
 import { parseAudienceGroup, parseAudienceGroupList, type AudienceGroupRecord,
@@ -107,7 +107,7 @@ export type KnowledgeDraftSummary = {
   updatedAt: string;
 };
 export type KnowledgeSubmission = {
-  management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
+  management?: (KnowledgeMetadata & { releaseKind?: "NEW" | "UPDATED" }) | null;
   proposedTargetReaders?: TargetReaders | null;
   approvedTargetReaders?: TargetReaders | null;
   id: string;
@@ -185,7 +185,7 @@ export type PublishedKnowledge = {
   responsibleDepartmentId: string;
   /** Display metadata, independent of the author's permitted department choices. */
   responsibleDepartmentName?: string | null;
-  management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
+  management?: (KnowledgeMetadata & { releaseKind?: "NEW" | "UPDATED" }) | null;
   versionLabel?: string;
   summary?: string;
   audienceIds: string[];
@@ -320,7 +320,7 @@ export function saveKnowledgeDraft(platform: Platform, organizationId: string, d
 export function loadKnowledgeCatalog(platform: Platform, organizationId: string): Promise<KnowledgeCatalog> {
   return request(platform, `${knowledgePath(organizationId)}/catalog`);
 }
-export function saveKnowledgeCatalogEntry(platform: Platform, organizationId: string, kind: "topics" | "collections",
+export function saveKnowledgeCatalogEntry(platform: Platform, organizationId: string, kind: "collections",
   entry: KnowledgeCatalogEntry | null, input: KnowledgeCatalogWrite): Promise<KnowledgeCatalogEntry> {
   return request(platform, `${knowledgePath(organizationId)}/catalog/${kind}${entry ? `/${entry.id}` : ""}`, {
     method: entry ? "PATCH" : "POST", body: JSON.stringify(input),

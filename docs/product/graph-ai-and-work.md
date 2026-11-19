@@ -23,12 +23,12 @@ open. This branch is a source handoff, not a staging release.
 
 Keep Arden's Island shell, typography, icons and violet/graphite palette. Library
 has Discover, All documents and My Contributions; Reviews remains separate.
-Discover contains search, business Topics, optional curated Collections and newly
-published documents. All documents is a searchable register with Type, Topic and
-Owner Department filters. Returning from a reader preserves the Library selection.
+Discover contains search, Type groups, optional curated Collections and newly
+published documents. All documents is a searchable register with Type and
+Owner Department filters. Topics were removed by [ADR 0025](../decisions/0025-remove-knowledge-topics.md) (18 November 2026). Returning from a reader preserves the Library selection.
 Use original Arden artwork for collection covers, not reference-company assets.
 
-Required **at submission**, not draft save: Title, Type, one primary Topic,
+Required **at submission**, not draft save: Title, Type,
 Content (editor or text-extractable PDF), business Version, Effective Date and
 explicit Target Readers. Types: Policy & Standard, Procedure, Guide, Reference,
 Lessons Learned. Expiration Date is optional and cannot precede Effective Date.
@@ -47,8 +47,7 @@ Remove Classification, Team/Project permission tags, redundant Category/Location
 Handbook Type, upload Summary, Keywords and Review Cycle from the standardized
 form. Preserve frozen review provenance and existing authorization behind the UI.
 Collections are optional reading bundles, not upload requirements or access grants.
-Org Admin alone creates/manages Topics and Collections; authors select existing
-active Topics. Curators may add only documents they can currently read. Every
+Org Admin alone creates/manages Collections. Curators may add only documents they can currently read. Every
 collection read, count, cover, title and document projection must be filtered by
 current reader authorization; the admin role is not a content-read bypass.
 

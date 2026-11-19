@@ -23,7 +23,7 @@ function setup(ownerName: string | null | undefined, ownerId = "hr") {
   vi.spyOn(api, "listKnowledgeReviewBoard").mockResolvedValue({ items: [], decided: [] });
   vi.spyOn(api, "listPublishedKnowledge").mockResolvedValue([publication]);
   vi.spyOn(api, "loadPublishedKnowledge").mockResolvedValue(publication);
-  vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
+  vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, collections: [] });
   // The reader may read the publication, but can only author in Engineering.
   vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({
     departments: [{ id: "engineering", name: "Engineering" }], primaryDepartmentId: "engineering",

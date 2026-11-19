@@ -157,7 +157,6 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
             (SELECT shared_draft_id FROM shared_draft WHERE organization_id = ANY($1::uuid[]))`, [orgs]);
           await client.query("DELETE FROM shared_draft_audience WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM shared_draft WHERE organization_id = ANY($1::uuid[])", [orgs]);
-          await client.query("DELETE FROM knowledge_topic WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM selected_reader WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM reader_selection WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM audience WHERE organization_id = ANY($1::uuid[])", [orgs]);

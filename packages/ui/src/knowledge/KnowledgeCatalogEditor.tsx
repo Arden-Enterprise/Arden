@@ -14,7 +14,7 @@ export function KnowledgeCatalogEditor({ platform, organizationId, catalog, publ
   platform: Platform; organizationId: string; catalog: KnowledgeCatalog; publications: PublishedKnowledge[];
   onSaved: () => Promise<void>; onClose: () => void;
 }) {
-  const [kind, setKind] = useState<"topics" | "collections">("topics");
+  const kind = "collections" as const;
   const [entry, setEntry] = useState<KnowledgeCatalogEntry | null>(null);
   const [value, setValue] = useState<KnowledgeCatalogWrite>(blank);
   const [baseline, setBaseline] = useState(() => JSON.stringify(blank()));
@@ -24,13 +24,12 @@ export function KnowledgeCatalogEditor({ platform, organizationId, catalog, publ
   const [discard, setDiscard] = useState<(() => void) | null>(null);
   const dirty = JSON.stringify(value) !== baseline;
   const guard = (action: () => void) => { if (dirty) setDiscard(() => action); else action(); };
-  const select = (nextKind: typeof kind, next: KnowledgeCatalogEntry | null) => guard(() => {
+  // Decision 0025: the catalog holds Collections only.
+  const select = (next: KnowledgeCatalogEntry | null) => guard(() => {
     const collection = next as KnowledgeCollection | null;
     const input: KnowledgeCatalogWrite = { name: next?.name ?? "", description: next?.description ?? "",
-      status: next?.status ?? "ACTIVE", ...(nextKind === "collections" ? {
-        cover: collection?.cover ?? "handbook", documentIds: collection?.documentIds ?? [],
-      } : {}) };
-    setKind(nextKind); setEntry(next); setValue(input); setBaseline(JSON.stringify(input)); setError(""); setSearch("");
+      status: next?.status ?? "ACTIVE", cover: collection?.cover ?? "handbook", documentIds: collection?.documentIds ?? [] };
+    setEntry(next); setValue(input); setBaseline(JSON.stringify(input)); setError(""); setSearch("");
   });
   const save = async () => {
     setBusy(true); setError("");
@@ -46,18 +45,18 @@ export function KnowledgeCatalogEditor({ platform, organizationId, catalog, publ
       <button className="secondary-button" type="button" disabled={busy} onClick={() => guard(onClose)}>Back to Library</button></header>
     <div className="km-catalog-layout">
       <nav className="km-catalog-nav" aria-label="Catalog items">
-        {(["topics", "collections"] as const).map(group => <section key={group}>
-          <div className="km-section-heading"><h3>{group === "topics" ? "Topics" : "Collections"}</h3>
-            <button type="button" className="island-icon-button" disabled={busy} aria-label={`New ${group === "topics" ? "topic" : "collection"}`}
-              onClick={() => select(group, null)}><Icon name="plus" size={14} /></button></div>
-          {catalog[group].length === 0 && <p className="island-meta">None yet</p>}
-          {catalog[group].map(item => <button type="button" key={item.id} disabled={busy}
-            className={item.id === entry?.id ? "is-selected" : ""} onClick={() => select(group, item)}>
+        <section>
+          <div className="km-section-heading"><h3>Collections</h3>
+            <button type="button" className="island-icon-button" disabled={busy} aria-label="New collection"
+              onClick={() => select(null)}><Icon name="plus" size={14} /></button></div>
+          {catalog.collections.length === 0 && <p className="island-meta">None yet</p>}
+          {catalog.collections.map(item => <button type="button" key={item.id} disabled={busy}
+            className={item.id === entry?.id ? "is-selected" : ""} onClick={() => select(item)}>
             <span>{item.name}</span>{item.status === "INACTIVE" && <small>Inactive</small>}</button>)}
-        </section>)}
+        </section>
       </nav>
       <form className="km-catalog-form knowledge-live-form" onSubmit={event => { event.preventDefault(); void save(); }}>
-        <h3>{entry ? "Edit" : "New"} {kind === "topics" ? "topic" : "collection"}</h3>
+        <h3>{entry ? "Edit" : "New"} collection</h3>
         {error && <p className="knowledge-live-error" role="alert">{error}</p>}
         <label className="island-field">Name *<input required maxLength={80} disabled={busy} value={value.name}
           onChange={event => setValue({ ...value, name: event.target.value })} /></label>

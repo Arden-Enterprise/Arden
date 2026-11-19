@@ -19,7 +19,7 @@ function commonApi() {
   vi.spyOn(api, "listPublishedKnowledge").mockResolvedValue([]);
   vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
   vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({ departments, audiences: [], primaryDepartmentId: "hr" });
-  vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
+  vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, collections: [] });
 }
 
 function render_(view: "knowledge" | "review-queue") {

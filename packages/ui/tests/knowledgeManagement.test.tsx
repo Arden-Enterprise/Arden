@@ -9,22 +9,24 @@ import { emptyKnowledgeMetadata } from "@arden/domain";
 import * as api from "../src/shared/api-client";
 import { installTestDialogs } from "./dialogTestSupport";
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
-const topic = { id: "topic", name: "People & work", description: "", status: "ACTIVE" as const, version: 1 };
 const collection = { id: "collection", name: "Employee handbook", description: "Start here", status: "ACTIVE" as const, version: 1,
   cover: "handbook" as const, documentIds: ["readable"] };
-const catalog: api.KnowledgeCatalog = { canManage: false, topics: [topic], collections: [collection] };
+const catalog: api.KnowledgeCatalog = { canManage: false, collections: [collection] };
 const publication: api.PublishedKnowledge = { id: "readable", draftId: "draft", title: "Working together", classification: "INTERNAL",
   responsibleDepartmentId: "hr", responsibleDepartmentName: "HR", audienceIds: [], contentHash: "hash",
   publishedAt: "2026-11-12T10:00:00Z", validFrom: "2026-11-12T10:00:00Z", validUntil: null,
-  management: { type: "Guide", topicId: topic.id, topicName: topic.name, version: "1.0", effectiveDate: "2027-01-01",
+  management: { type: "Guide", version: "1.0", effectiveDate: "2027-01-01",
     expirationDate: null, changeNote: "", releaseKind: "NEW" } };
 describe("live Library management components", () => {
-  it("does not report an empty Topic catalog when loading the catalog failed", () => {
-    render(createElement(KnowledgeLibraryBrowse, { items: [], catalog: null,
-      catalogError: "Catalog is unavailable.", query: "", filters: emptyLibraryFilters(),
-      onFilters: vi.fn(), discover: true, onBrowse: vi.fn(), onOpen: vi.fn(), onManage: vi.fn() }));
-    expect(screen.getByText("Catalog is unavailable.")).toBeTruthy();
-    expect(screen.queryByText(/No topics yet/)).toBeNull();
+  it("shows no Topics in Discover, and offers Manage catalog beside Collections only to managers (decision 0025)", () => {
+    const view = render(createElement(KnowledgeLibraryBrowse, { items: [publication], catalog, catalogError: "", query: "",
+      filters: emptyLibraryFilters(), onFilters: vi.fn(), discover: true, onBrowse: vi.fn(), onOpen: vi.fn(), onManage: vi.fn() }));
+    expect(screen.queryByRole("heading", { name: "Topics" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Browse by type" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Manage catalog/ })).toBeNull();
+    view.rerender(createElement(KnowledgeLibraryBrowse, { items: [publication], catalog: { ...catalog, canManage: true }, catalogError: "",
+      query: "", filters: emptyLibraryFilters(), onFilters: vi.fn(), discover: true, onBrowse: vi.fn(), onOpen: vi.fn(), onManage: vi.fn() }));
+    expect(screen.getByRole("button", { name: /Manage catalog/ })).toBeTruthy();
   });
   it("uses exact canonical fields, not title prefixes, and keeps sort/filter behavior deterministic", () => {
     // Decision 0021: there is no Document Code to search.
@@ -35,7 +37,7 @@ describe("live Library management components", () => {
     const legacy = { ...publication, id: "legacy", title: "Policy guide", management: null };
     expect(filterLibrary([legacy], catalog, "", { ...emptyLibraryFilters(), type: "Guide" })).toEqual([]);
   });
-  it("browses a real collection and topic, and does not expose admin controls to members", () => {
+  it("browses a real collection, filters without a Topic control, and does not expose admin controls to members", () => {
     const onOpen = vi.fn();
     function Browse() {
       const [filters, setFilters] = useState(emptyLibraryFilters), [discover, setDiscover] = useState(true);
@@ -47,6 +49,7 @@ describe("live Library management components", () => {
     expect(screen.getByRole("button", { name: /Employee handbook/ }).querySelector("img")?.getAttribute("src")).toContain("employee-handbook.png");
     fireEvent.click(screen.getByRole("button", { name: /Employee handbook/ }));
     expect(screen.getByRole("combobox", { name: "Type" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Topic" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Read Working together" })); expect(onOpen).toHaveBeenCalledWith("readable");
     fireEvent.change(screen.getByRole("combobox", { name: "Type" }), { target: { value: "Procedure" } });
     expect(screen.getByText("No results")).toBeTruthy();
@@ -79,14 +82,14 @@ describe("live Library management components", () => {
     vi.spyOn(api, "findKnowledgeReaders").mockResolvedValue([{ id: "reader", name: "Selected colleague",
       email: "colleague@example.test", department: "HR" }]);
     const onReaders = vi.fn();
-    const view = render(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: null, topics: [topic], departments: [],
+    const view = render(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: null, departments: [],
       busy: false, isUpdate: false, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders }));
     expect((screen.getByRole("combobox", { name: "Target Readers" }) as HTMLSelectElement).value).toBe("");
     expect(screen.getByLabelText(/^Valid until/)).toBeTruthy(); expect(screen.queryByLabelText(/Effective Date/)).toBeNull(); expect(screen.queryByLabelText("Change Note *")).toBeNull();
     fireEvent.change(screen.getByRole("combobox", { name: "Target Readers" }), { target: { value: "SELECTED_MEMBERS" } });
     expect(onReaders).toHaveBeenCalledWith({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] });
     view.rerender(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] },
-      topics: [topic], departments: [], busy: false, isUpdate: true, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders }));
+      departments: [], busy: false, isUpdate: true, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Add people by name or email" }), { target: { value: "colleague@example" } });
     // Decision 0021: suggestions show the name, full email and department, like sharing in Google Drive.
     const suggestion = await screen.findByRole("button", { name: "Add Selected colleague, colleague@example.test" });
@@ -94,20 +97,17 @@ describe("live Library management components", () => {
     expect(api.findKnowledgeReaders).toHaveBeenLastCalledWith("web", "org", "colleague@example", []);
     fireEvent.click(suggestion); expect(onReaders).toHaveBeenLastCalledWith({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: ["reader"] });
   });
-  it("distinguishes an empty Topic catalog from a catalog load failure", () => {
-    const props = { value: emptyKnowledgeMetadata(), readers: null, topics: [], departments: [],
-      busy: false, isUpdate: false, platform: "web" as const, organizationId: "org",
-      onChange: vi.fn(), onReaders: vi.fn() };
-    const view = render(createElement(KnowledgeMetadataFields, props));
-    expect(screen.getByText(/Ask an Org Admin to add a Topic/)).toBeTruthy();
-    view.rerender(createElement(KnowledgeMetadataFields, { ...props, catalogError: "Catalog is unavailable." }));
-    expect(screen.getByRole("alert").textContent).toContain("Topic catalog is unavailable");
-    expect(screen.queryByText(/Ask an Org Admin to add a Topic/)).toBeNull();
+  it("asks for Type, Version and readers but no Topic (decision 0025)", () => {
+    render(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: null, departments: [],
+      busy: false, isUpdate: false, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders: vi.fn() }));
+    expect(screen.getByRole("combobox", { name: /Type/ })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: /Topic/ })).toBeNull();
+    expect(screen.queryByText(/Topic/)).toBeNull();
   });
   it("says when a pasted email is not a member of the organization (decision 0021)", async () => {
     vi.spyOn(api, "findKnowledgeReaders").mockResolvedValue([]);
     render(createElement(KnowledgeMetadataFields, { value: emptyKnowledgeMetadata(), readers: { mode: "SELECTED_MEMBERS", departmentId: null, memberIds: [] },
-      topics: [topic], departments: [], busy: false, isUpdate: false, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders: vi.fn() }));
+      departments: [], busy: false, isUpdate: false, platform: "web", organizationId: "org", onChange: vi.fn(), onReaders: vi.fn() }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Add people by name or email" }), { target: { value: "outsider@other.test" } });
     expect(await screen.findByText("No member with this email in this organization.")).toBeTruthy();
   });

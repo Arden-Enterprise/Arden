@@ -424,7 +424,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const parsedEditor = editor ? parseSemanticDocument(editor.body) : null;
   const hasContent = Boolean(draft?.currentVersion.mimeType === "application/pdf" || (parsedEditor?.ok ? semanticDocumentHasText(parsedEditor.document) : editor?.body.trim()));
   const ready = Boolean(ownerDepartmentId && editor?.title.trim() && hasContent && readersReady && !metadataErrors.length && !versionAlreadyPublished
-    && catalog?.topics.some(topic => topic.id === editor.management.topicId && topic.status === "ACTIVE"));
+);
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
   const publicationDepartmentName = (item: PublishedKnowledge) =>
     item.responsibleDepartmentName?.trim() || departmentName(item.responsibleDepartmentId);
@@ -558,7 +558,6 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                   {review.requestType !== "WITHDRAWAL" && <div><dt>Readers</dt><dd>{review.proposedTargetReaders ? targetReadersLabel(review.proposedTargetReaders, departmentName) : audienceNames(review.audienceIds)}</dd></div>}
                   {review.management ? <>
                     <div><dt>Type</dt><dd>{review.management.type ?? "—"}</dd></div>
-                    <div><dt>Topic</dt><dd>{review.management.topicName ?? "—"}</dd></div>
                     <div><dt>Version</dt><dd>{review.management.version}</dd></div>
                     {review.management.effectiveDate && <div><dt>Effective Date</dt><dd>{review.management.effectiveDate}</dd></div>}
                     {review.management.expirationDate && <div><dt>Expiration Date</dt><dd>{review.management.expirationDate}</dd></div>}
@@ -676,7 +675,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             }}>
               <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             </>}
-            <KnowledgeMetadataFields value={editor.management} readers={editor.targetReaders} topics={catalog?.topics ?? []} catalogError={catalogError}
+            <KnowledgeMetadataFields value={editor.management} readers={editor.targetReaders}
               departments={options?.departments ?? []} busy={busy} isUpdate={draft.hasPublishedVersion ?? false}
               platform={platform} organizationId={organizationId}
               onChange={management => setEditor({ ...editor, management })} onReaders={targetReaders => setEditor({ ...editor, targetReaders })} />
@@ -710,7 +709,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           title: document.title,
           ownerDepartment: publicationDepartmentName(document),
           summary: document.summary ?? "",
-          type: document.management?.type ?? undefined, topic: document.management?.topicName,
+          type: document.management?.type ?? undefined,
           publishedDate: document.publishedAt, expirationDate: document.management?.expirationDate ?? undefined,
           readers: publishedReadersLabel(document),
           activeVersionId: document.id,
@@ -733,8 +732,10 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : "Home"}
           description={libraryTab === "drafts" ? ""
             : `${published.length} ${published.length === 1 ? "document" : "documents"} you can read in ${organizationName}`}
-          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
-            {catalog?.canManage && libraryTab !== "discover" && <button type="button" className="secondary-button" onClick={() => setManagingCatalog(true)}>Manage catalog</button>}
+          action={!managingCatalog && <div className="knowledge-live-actions">
+            {/* Manage catalog lives beside Collections in Discover only; Refresh stays a quiet icon. */}
+            <button type="button" className="island-icon-button knowledge-refresh" disabled={busy} aria-label="Refresh" title="Refresh"
+              onClick={() => void refresh()}><Icon name="refresh" size={15} /></button>
             <button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button>
             <button type="button" className="primary-button" onClick={() => openCreate("pdf")}><Icon name="plus" size={14} />Create from PDF</button></div>} />
         {!managingCatalog && <div className="island-seg knowledge-library-tabs" role="tablist" aria-label="Knowledge library">

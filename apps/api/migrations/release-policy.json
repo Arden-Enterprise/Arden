@@ -228,6 +228,12 @@
       "filename": "0038_admin_only_direct_withdrawal.sql",
       "sha256": "547b13a55172cfb9ac4a8abc6d33f166fc1f7a4fd584d38481c37f81ed684b83",
       "rollout": "operator"
+    },
+    {
+      "id": "0039",
+      "filename": "0039_remove_knowledge_topics.sql",
+      "sha256": "8e4c0c5d46e77a406949b064c42785f47a8b5ef3b46983beb0e88fd5c1e628e1",
+      "rollout": "operator"
     }
   ]
 }

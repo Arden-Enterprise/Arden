@@ -63,8 +63,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0029_withdraw_pending_submission', '0031_deduplicate_reviewer_grants',
           '0032_governed_ai_sources_and_conversations', '0033_reader_directory_email',
           '0034_publication_change_requests', '0035_apply_publication_change_requests',
-          '0036_publication_preparation_retry', '0037_publication_governance')`);
-    if (migration.rows[0]?.count !== "23") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0036_publication_preparation_retry', '0037_publication_governance',
+          '0039_remove_knowledge_topics')`);
+    if (migration.rows[0]?.count !== "24") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -184,7 +185,6 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM reviewer_grant WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM shared_draft_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE author_membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM shared_draft WHERE author_membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
-          await client.query("DELETE FROM knowledge_topic WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM selected_reader WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM reader_selection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
@@ -667,8 +667,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const revised = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
       created.draft.id, configured.draft.currentVersion, { title: "Replacement candidate",
-        management: { type: "Guide", topicId: configured.draft.management?.topicId ?? (await repository.getKnowledgeDraft(ids.owner, ids.organization, created.draft.id))!.management!.topicId,
-          version: "2.0", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "Updated guidance." } }, null,
+        management: { type: "Guide", version: "2.0", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "Updated guidance." } }, null,
       "integration-flow3-revise");
     expect(revised).toMatchObject({ kind: "updated", draft: { currentVersion: 3 } });
     if (revised.kind !== "updated") return;

@@ -42,7 +42,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         await client.query("DELETE FROM knowledge_index_job WHERE generation_id IN (SELECT generation_id FROM knowledge_index_generation WHERE organization_id = $1)", [org]);
         await client.query("DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)", [org]);
         for (const table of ["knowledge_ai_release", "knowledge_collection_document", "knowledge_collection", "knowledge_current_publication", "knowledge_index_generation",
-          "shared_submission", "shared_draft_audience", "shared_draft", "selected_reader", "reader_selection", "knowledge_topic", "knowledge_base",
+          "shared_submission", "shared_draft_audience", "shared_draft", "selected_reader", "reader_selection", "knowledge_base",
           "audit_event", "audience_group_membership", "audience", "reviewer_grant"]) {
           await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
         }
@@ -60,18 +60,20 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
 
   it("enforces catalog ownership, stale writes, submit fields, frozen snapshots and reader-only curation", async () => {
     const repo = repository!, catalog = repo.knowledgeCatalog;
-    await expect(catalog.write(member, org, "topics", null, null, { name: "Denied", description: "", status: "ACTIVE" }, "denied"))
+    await expect(catalog.write(member, org, "collections", null, null, { name: "Denied", description: "", status: "ACTIVE" }, "denied"))
       .rejects.toMatchObject({ code: "UNAVAILABLE" });
     await expect(catalog.list(foreign, org)).rejects.toBeInstanceOf(CatalogError);
-    const topic = await catalog.write(owner, org, "topics", null, null,
-      { name: "Engineering practice", description: "", status: "ACTIVE" }, "create-topic");
-    await expect(catalog.write(owner, org, "topics", null, null,
+    const shell = await catalog.write(owner, org, "collections", null, null,
+      { name: "Engineering practice", description: "", status: "ACTIVE" }, "create-collection");
+    await expect(catalog.write(owner, org, "collections", null, null,
       { name: " engineering PRACTICE ", description: "", status: "ACTIVE" }, "duplicate")).rejects.toMatchObject({ code: "DUPLICATE" });
-    const races = await Promise.allSettled(["A", "B"].map(suffix => catalog.write(owner, org, "topics", topic.id, topic.version,
+    const races = await Promise.allSettled(["A", "B"].map(suffix => catalog.write(owner, org, "collections", shell.id, shell.version,
       { name: `Engineering practice ${suffix}`, description: "", status: "ACTIVE" }, "race")));
     expect(races.filter(result => result.status === "fulfilled")).toHaveLength(1);
     expect(races.filter(result => result.status === "rejected").map(result => result.reason.code)).toEqual(["CONFLICT"]);
-    const activeTopic = (await catalog.list(member, org)).topics[0]!;
+    // Decision 0025: the catalog has no Topics; an empty Collection shell is visible only to its manager.
+    expect((await catalog.list(member, org)).collections).toEqual([]);
+    expect(Object.keys(await catalog.list(owner, org))).not.toContain("topics");
     expect((await catalog.list(member, org)).canManage).toBe(false);
     expect((await catalog.list(owner, org)).canManage).toBe(true);
     // Decision 0021: name or email search, returning the full email like sharing in Google Drive.
@@ -88,7 +90,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     if (draft.kind !== "created") throw new Error("Draft fixture failed");
     draftId = draft.draft.id;
     await expect(repo.submitKnowledgeDraft(owner, org, draftId, 1, randomUUID(), "incomplete")).resolves.toEqual({ kind: "not-ready" });
-    const metadata = { type: "Guide" as const, topicId: activeTopic.id, version: "1.0", effectiveDate: "2027-01-01", expirationDate: null, changeNote: "" };
+    const metadata = { type: "Guide" as const, version: "1.0", effectiveDate: "2027-01-01", expirationDate: null, changeNote: "" };
     await expect(repo.updateKnowledgeDraft(owner, org, draftId, 1, { management: { ...metadata, expirationDate: "2026-01-01" } }, null, "invalid-date"))
       .resolves.toEqual({ kind: "invalid-metadata" });
     const saved = await repo.updateKnowledgeDraft(owner, org, draftId, 1, { management: metadata, targetReaders: { mode: "ORGANIZATION" } }, null, "save");
@@ -97,11 +99,10 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
       targetScopeType: "DEPARTMENT", audienceRoleIds: [], teamTag: "misroute-review",
     }, null, "legacy-downgrade");
     expect(legacyDowngrade).toMatchObject({ kind: "updated", draft: { targetScopeType: "ORGANIZATION", teamTag: null } });
-    const renamedTopic = await catalog.write(owner, org, "topics", activeTopic.id, activeTopic.version,
-      { name: "Current topic name", description: "", status: "ACTIVE" }, "rename-before-submit");
     const submitted = await repo.submitKnowledgeDraft(owner, org, draftId, 3, randomUUID(), "submit");
     if (submitted.kind !== "submitted") throw new Error("Submission fixture failed");
-    expect(submitted.submission.management).toMatchObject({ ...metadata, topicName: renamedTopic.name, releaseKind: "NEW" });
+    expect(submitted.submission.management).toMatchObject({ ...metadata, releaseKind: "NEW" });
+    expect(submitted.submission.management).not.toHaveProperty("topicName");
     const changed = await repo.updateKnowledgeDraft(owner, org, draftId, 3, { management: { ...metadata, version: "9.0" } }, null, "edit-pending");
     expect(changed.kind).toBe("updated");
     expect((await repo.listKnowledgeSubmissions(owner, org))![0]!.management?.version).toBe("1.0");
@@ -152,7 +153,8 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     expect(await repo.getPublishedKnowledge(owner, org, restrictedId)).toBeNull();
     expect(await repo.getPublishedKnowledge(member, org, restrictedId)).not.toBeNull();
     expect((await catalog.list(owner, org)).canManage).toBe(true);
-    expect((await catalog.list(owner, org)).collections).toEqual([]);
+    // Only the empty shell created above is listed; no unreadable source leaks through a collection.
+    expect((await catalog.list(owner, org)).collections.flatMap(collection => collection.documentIds)).toEqual([]);
     await expect(catalog.write(owner, org, "collections", null, null, { name: "Denied real source", description: "",
       status: "ACTIVE", documentIds: [restrictedId] }, "denied-curation")).rejects.toMatchObject({ code: "UNAVAILABLE" });
     expect(department).toBeTruthy();

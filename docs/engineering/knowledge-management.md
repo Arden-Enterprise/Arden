@@ -1,25 +1,23 @@
 # Knowledge management implementation and rollout
 
 Contract: [F11 KM-v1](../product/graph-ai-and-work.md#knowledge-management-refinement-km-v1-accepted-12-november-2026).
-Decision: [ADR 0020](../decisions/0020-knowledge-management-catalog.md).
+Decision: [ADR 0020](../decisions/0020-knowledge-management-catalog.md); Topics removed by
+[ADR 0025](../decisions/0025-remove-knowledge-topics.md) (18 November 2026, migration 0039).
 Original implementation baseline: staging `0e25b71`, branch
 `feat/knowledge-management`. This admin navigation follow-up was inspected
 against fetched staging `7a133af` and main `9fa3d34` on 16 November 2026;
 it does not establish a live migration or deployment of the follow-up.
 
-In the shared web/desktop UI, an Org Admin creates the first Topic through
-Knowledge Library → Discover → Manage catalog → New topic. Administration's
-Members screen links to Knowledge so this setup path is visible to
-admins. Topics are organization data and are not seeded automatically; a PDF
-contribution's Topic selector stays empty until an active Topic exists.
+There is no Topic (ADR 0025). Discover groups documents by Type and shows optional Collections,
+which an Org Admin manages through Knowledge Library → Discover → Manage catalog.
 
 ## API and data
 
 Under `/api/v1/organizations/:organizationId/knowledge`:
 
-- `GET /catalog`: active Topics and currently readable collection projections;
-  admin configuration may also include inactive/empty catalog shells.
-- `POST /catalog/topics` or `/catalog/collections`: Org Admin only.
+- `GET /catalog`: currently readable collection projections; admin configuration
+  may also include inactive/empty collection shells.
+- `POST /catalog/collections`: Org Admin only.
 - `PATCH /catalog/:kind/:id`: complete name/description/status write, requiring
   `If-Match: "catalog-N"`. Collections accept a fixed cover key and ordered exact
   `documentIds`; input source IDs must be currently readable by the curator.
@@ -35,13 +33,13 @@ Under `/api/v1/organizations/:organizationId/knowledge`:
   under the same draft/code, with a new immutable content revision; no text/PDF
   mixing, other-author writes or stale replacement is accepted.
 
-`management` contains Type, Topic ID, business Version, Effective Date, optional
+`management` contains Type, business Version, Effective Date, optional
 Expiration Date and Change Note. Save permits missing values, not malformed dates
-or inverted date ranges. Submission requires complete metadata, active Topic,
+or inverted date ranges; a `topicId` is refused. Submission requires complete metadata,
 explicit readers, an owner department, a new business Version and a Change Note
 for previously published knowledge. Saving while pending does not alter a frozen
-submission. System snapshot metadata adds the frozen Topic name and New/Updated
-release kind. Activation copies metadata from that submission, not from the latest
+submission. System snapshot metadata adds the New/Updated release kind. Versions frozen
+before migration 0039 keep historical `topicId`/`topicName` keys, which Arden no longer reads. Activation copies metadata from that submission, not from the latest
 draft. Published/activation timestamps retain their existing meaning.
 
 The server marks current metadata objects with `schemaVersion: 1`. The client does
@@ -90,7 +88,7 @@ permission regression. Verify current runtime-authorized reader sets instead.
 5. Deploy through the existing pipeline only with release authority. Create the
    organization catalog through the API. Backfill existing publications only
    with a separately approved source-ID mapping/rehearsal; this migration does not
-   invent Topics or overwrite approved publication history.
+   overwrite approved publication history.
 
 Recovery: stop the feature rollout on a mismatch, retain DB/files and previous
 images, and use a reviewed forward repair or verified backup recovery. A previous

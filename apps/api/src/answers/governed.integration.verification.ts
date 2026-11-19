@@ -16,7 +16,7 @@ const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) :
 const repo = pool ? new ArdenRepository(pool) : null;
 const owner = randomUUID(), member = randomUUID(), other = randomUUID();
 const memberId = randomUUID(), otherId = randomUUID();
-let org = "", ownerMembership = "", draftId = "", version = 1, topicId = "";
+let org = "", ownerMembership = "", draftId = "", version = 1;
 const date = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 
 // All publication tests share the worker queue and are deliberately registered in
@@ -34,8 +34,6 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
       await pool!.query("INSERT INTO arden.user_account(user_id,email,full_name) VALUES ($1,$2,'AI reader')", [user, `${user}@example.test`]);
       await pool!.query("INSERT INTO arden.organization_membership(membership_id,organization_id,user_id) VALUES ($1,$2,$3)", [membership, org, user]);
     }
-    topicId = (await repo!.knowledgeCatalog.write(owner, org, "topics", null, null,
-      { name: "AI fixtures", description: "", status: "ACTIVE" }, "ai-topic")).id;
     const draft = await repo!.createNewKnowledgeDraft(owner, org, { actorMembershipId: ownerMembership, title: "Temporal guide",
       classification: "INTERNAL", idempotencyKey: randomUUID(), content: { sourceUri: "arden-private-object://ai-fixture",
         mimeType: "text/plain", contentHash: "a".repeat(64) }, requestId: "ai-create" });
@@ -60,7 +58,7 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
         await client.query("DELETE FROM published_knowledge_version WHERE shared_draft_id=$1", [draftId]);
         for (const table of ["knowledge_collection_document", "knowledge_collection", "knowledge_current_publication",
           "knowledge_index_generation", "shared_submission", "shared_draft_audience", "shared_draft",
-          "selected_reader", "reader_selection", "knowledge_topic", "knowledge_base", "audit_event", "audience_group_membership", "audience", "reviewer_grant"])
+          "selected_reader", "reader_selection", "knowledge_base", "audit_event", "audience_group_membership", "audience", "reviewer_grant"])
           await client.query(`DELETE FROM ${table} WHERE organization_id=$1`, [org]);
         for (const table of ["department_membership", "role_assignment"])
           await client.query(`DELETE FROM ${table} WHERE membership_id IN (SELECT membership_id FROM organization_membership WHERE organization_id=$1)`, [org]);
@@ -77,7 +75,7 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
 
   async function publish(effectiveDate: string, readers: TargetReadersInput = { mode: "ORGANIZATION" }, expirationDate: string | null = null) {
     const updated = await repo!.updateKnowledgeDraft(owner, org, draftId, version, {
-      management: { type: "Guide", topicId, version: `${version}.0`, effectiveDate, expirationDate,
+      management: { type: "Guide", version: `${version}.0`, effectiveDate, expirationDate,
         changeNote: version > 1 ? "Updated guidance." : "" }, targetReaders: readers,
     }, null, "ai-update");
     if (updated.kind !== "updated") throw new Error(`Update fixture failed: ${updated.kind}`);

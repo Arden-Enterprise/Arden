@@ -24,7 +24,7 @@ import { GovernanceDocumentsPanel } from "../knowledge/PublicationGovernance";
 import { MAX_INVITATIONS_PER_BATCH, planInvitationBatch, sendInvitationBatch, type InvitationBatchPlan, type InvitationSendResult } from "./invitationBatch";
 
 type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void;
-  onSendingInvitationsChange?: (sending: boolean) => void; onOpenKnowledgeLibrary?: () => void } & ContextControlProps;
+  onSendingInvitationsChange?: (sending: boolean) => void } & ContextControlProps;
 type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers" | "documents";
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
 const tabNames: Record<AdminTab, string> = {
@@ -48,7 +48,7 @@ function invitationResultLabel(result: InvitationSendResult): string {
 }
 
 export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext,
-  onDirtyChange, onSendingInvitationsChange, onOpenKnowledgeLibrary }: Props) {
+  onDirtyChange, onSendingInvitationsChange }: Props) {
   const [data, setData] = useState<OrganizationAdministration | null>(null);
   const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
   const [tab, setTab] = useState<AdminTab>("members");
@@ -275,11 +275,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       {loading ? <div role="status" className="admin-loading island"><span className="sr-only">Loading organization data…</span>{[0, 1, 2].map((index) => <div key={index} className="admin-skeleton-row" aria-hidden="true"><span /><div><span /><span /></div></div>)}</div> : error && !data ? <div className="organization-notice is-danger" role="alert"><strong>Couldn’t load members.</strong><span>Try again.</span><button type="button" className="secondary-button" onClick={() => { setLoading(true); setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")).finally(() => setLoading(false)); }}>Try again</button></div> : data && <>
         {error && !selectedMember && <p className="admin-feedback is-error" role="alert">{error}</p>}
         {tab === "members" && <div role="tabpanel" aria-label="Members" className="admin-tabpanel">
-          {onOpenKnowledgeLibrary && <div className="organization-notice is-info">
-            <strong>Topics for contributions</strong>
-            <span>Org Admins add Topics in Knowledge Library → Discover → Manage catalog.</span>
-            <button type="button" className="secondary-button" onClick={onOpenKnowledgeLibrary}>Open Knowledge</button>
-          </div>}
           <div className="admin-filters">
             <label className="workspace-search admin-search"><Icon name="search" size={15} /><span className="sr-only">Search members</span><input type="search" placeholder="Filter by name or email" value={memberQuery} onChange={(event) => setMemberQuery(event.target.value)} /></label>
             <IslandFilterMenu label="Filter department" value={memberDepartment} onChange={setMemberDepartment}

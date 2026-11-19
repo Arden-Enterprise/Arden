@@ -3,8 +3,8 @@ import { knowledgeTypes } from "@arden/domain";
 import { CatalogError, type CatalogKind, type CatalogWrite, type KnowledgeCatalogStore } from "./catalog-store.js";
 
 export const managementSchema = { type: "object", additionalProperties: false,
-  required: ["type", "topicId", "version", "effectiveDate", "expirationDate", "changeNote"], properties: {
-    type: { enum: [...knowledgeTypes, null] }, topicId: { type: ["string", "null"], pattern: "^[0-9a-fA-F-]{36}$" },
+  required: ["type", "version", "effectiveDate", "expirationDate", "changeNote"], properties: {
+    type: { enum: [...knowledgeTypes, null] },
     version: { type: "string", maxLength: 30 },
     effectiveDate: { type: ["string", "null"], maxLength: 10 },
     expirationDate: { type: ["string", "null"], maxLength: 10 }, changeNote: { type: "string", maxLength: 1000 },
@@ -16,7 +16,7 @@ export function registerKnowledgeCatalogRoutes(app: FastifyInstance, store: Know
   const base = "/api/v1/organizations/:organizationId/knowledge/catalog";
   const params = (write: boolean, edit = false) => ({ type: "object", additionalProperties: false,
     required: ["organizationId", ...(write ? ["kind"] : []), ...(edit ? ["id"] : [])], properties: {
-      organizationId: { type: "string", pattern: uuid }, ...(write ? { kind: { enum: ["topics", "collections"] } } : {}),
+      organizationId: { type: "string", pattern: uuid }, ...(write ? { kind: { enum: ["collections"] } } : {}),
       ...(edit ? { id: { type: "string", pattern: uuid } } : {}),
     } });
   const body = { type: "object", additionalProperties: false, required: ["name", "description", "status"], properties: {

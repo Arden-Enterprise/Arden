@@ -41,10 +41,10 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); restoreDialogs(); Reflect.deleteProperty(HTMLElement.prototype, "scrollTo"); });
 
-function openAdmin(onOpenKnowledgeLibrary?: () => void) {
+function openAdmin() {
   render(createElement(OrganizationAdminPage, {
     platform: "web", organizationId: "org", organizationName: "Test Org",
-    contextOpen: false, onToggleContext: vi.fn(), onOpenKnowledgeLibrary,
+    contextOpen: false, onToggleContext: vi.fn(),
   }));
 }
 
@@ -111,11 +111,9 @@ describe("organization admin manual findings", () => {
     ));
   });
 
-  it("points admins to Topic management from Administration", async () => {
-    const openLibrary = vi.fn();
-    openAdmin(openLibrary);
-    expect(await screen.findByText(/Org Admins add Topics in Knowledge Library/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open Knowledge" }));
-    expect(openLibrary).toHaveBeenCalledOnce();
+  it("no longer points admins to Topic management (decision 0025)", async () => {
+    openAdmin();
+    expect(await screen.findByRole("tab", { name: /Members/ })).toBeTruthy();
+    expect(screen.queryByText(/Topic/)).toBeNull();
   });
 });
