@@ -170,12 +170,19 @@ BEGIN
                       AND (NEW.classification <> 'RESTRICTED' OR g.level IN ('SPECIALIST', 'SENIOR'))
                       AND (g.team_tag IS NULL OR g.team_tag IS NOT DISTINCT FROM NEW.team_tag)
                       AND (g.project_tag IS NULL OR g.project_tag IS NOT DISTINCT FROM NEW.project_tag)
-                      AND ((has_organization_audience AND (g.scope = 'ORGANIZATION'
+                      AND (
+                        (has_organization_audience
+                          AND (g.scope = 'ORGANIZATION'
                             OR (NEW.review_rule = 'LEGACY' AND g.scope = 'DEPARTMENT'
-                                AND g.department_id = NEW.responsible_department_id
-                                AND g.level IN ('SPECIALIST', 'SENIOR')))
+                              AND g.department_id = NEW.responsible_department_id
+                              AND g.level IN ('SPECIALIST', 'SENIOR'))))
                         OR (NOT has_organization_audience AND g.scope = 'DEPARTMENT'
-                            AND g.department_id = NEW.responsible_department_id AND d.status = 'ACTIVE')))))
+                          AND g.department_id = NEW.responsible_department_id AND d.status = 'ACTIVE')
+                      )
+                    )
+                  )
+               )
+              )
         LOOP
             INSERT INTO arden_notification (organization_id, recipient_membership_id, event_key, event_type, resource_type, resource_id)
             VALUES (NEW.organization_id, recipient.membership_id,

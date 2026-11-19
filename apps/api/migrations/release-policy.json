@@ -232,7 +232,7 @@
     {
       "id": "0039",
       "filename": "0039_in_app_notifications.sql",
-      "sha256": "0668242e255c07424ad894d6c5296e6552ccfb0fd750cf32cbf3e7143711968f",
+      "sha256": "0017c75a74be1fcb8b8b8db09efd1a7e9f71d37d8318668ffa85c14265936053",
       "rollout": "operator"
     }
   ]
