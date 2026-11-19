@@ -37,7 +37,7 @@ until an Org Admin created one. The maintainer no longer needs the concept.
   - the `knowledge_topic` table and its policies;
   - the generated `shared_draft.management_topic_id` column and its foreign key;
   - Topic fields in mutable drafts.
-  
+
   Submission freezing no longer adds a Topic name.
 - Already submitted and published versions are immutable snapshots (decision 0011). Their frozen metadata JSON keeps the historical `topicId`/`topicName` keys. The immutability trigger is not relaxed to rewrite them. Arden no longer reads or shows those keys.
 
