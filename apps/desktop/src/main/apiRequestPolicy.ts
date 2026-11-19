@@ -50,6 +50,9 @@ const audienceGroupDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/a
 const systemAdministratorCollection = /^\/api\/v1\/system\/administrators$/;
 const systemAdministratorRevoke = new RegExp(`^/api/v1/system/administrators/${uuid}/revoke$`);
 const invitationPreview = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}$/;
+const notificationCollection = new RegExp(`^/api/v1/organizations/${uuid}/notifications$`);
+const notificationRead = new RegExp(`^/api/v1/organizations/${uuid}/notifications/${uuid}/read$`);
+const notificationReadAll = new RegExp(`^/api/v1/organizations/${uuid}/notifications/read-all$`);
 
 export function validateDesktopApiRequest(value: unknown): value is DesktopApiRequest {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -186,6 +189,12 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const invitationGet = invitationPreview.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const notificationsGet = notificationCollection.test(url.pathname) && request.method === "GET"
+    && !request.body && !request.ifMatch && !request.idempotencyKey && notificationQuery(url);
+  const notificationReadRequest = notificationRead.test(url.pathname) && request.method === "PATCH"
+    && !url.search && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const notificationReadAllRequest = notificationReadAll.test(url.pathname) && request.method === "POST"
+    && !url.search && !request.body && !request.ifMatch && !request.idempotencyKey;
   const otherRequest = (
     (url.pathname === "/api/v1/auth/sign-in" && request.method === "POST") ||
     (url.pathname === "/api/v1/auth/sign-out" && request.method === "POST") ||
@@ -205,5 +214,20 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
-    || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke) && (!url.search || queryAllowed || catalogQuery);
+    || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke
+    || notificationsGet || notificationReadRequest || notificationReadAllRequest)
+    && (!url.search || queryAllowed || catalogQuery || notificationsGet);
+}
+
+function notificationQuery(url: URL): boolean {
+  const allowed = new Set(["cursor", "unreadOnly", "limit"]);
+  const seen = new Set<string>();
+  for (const [key, value] of url.searchParams) {
+    if (!allowed.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    if (key === "cursor" && (!/^[A-Za-z0-9_-]{1,180}$/.test(value))) return false;
+    if (key === "unreadOnly" && value !== "true" && value !== "false") return false;
+    if (key === "limit" && (!/^[1-9][0-9]?$/.test(value) || Number(value) > 50)) return false;
+  }
+  return true;
 }

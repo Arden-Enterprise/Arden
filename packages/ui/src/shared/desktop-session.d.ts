@@ -11,6 +11,10 @@ declare global {
       }>;
       clearSession(): Promise<void>;
       startGoogleSignIn(): Promise<void>;
+      startNotificationStream?(organizationId: string): Promise<void>;
+      stopNotificationStream?(organizationId?: string): Promise<void>;
+      subscribeNotificationEvents?(listener: (notificationId: string) => void): () => void;
+      subscribeNotificationStatus?(listener: (status: "connected" | "reconnected" | "disconnected" | "session-ended") => void): () => void;
     };
   }
 }

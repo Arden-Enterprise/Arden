@@ -109,6 +109,10 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `ARDEN_MIGRATION_DATABASE_URL` | Unset | Optional locally; production migration connection when the API `DATABASE_URL` is restricted. Never expose it to the running API or client |
 | `SUPABASE_URL` | Unset locally | Supabase project Auth/API URL reachable from the API container |
 | `SUPABASE_PUBLISHABLE_KEY` | Unset locally | Project publishable/anon key used by the server-side Supabase Auth adapter; never substitute a service-role key |
+| `SUPABASE_REALTIME_PUBLIC_URL` | Unset | Public HTTPS Realtime endpoint ending in `/realtime/v1`; loopback HTTP is local-only |
+| `ARDEN_NOTIFICATION_JWT_SECRET` | Unset | API-only 64-character HS256 signing value; must exactly match the target Realtime verifier's accepted key. Never place it in client configuration |
+| `ARDEN_NOTIFICATION_CHANNEL_NAMESPACE` | Unset | Required with the Realtime endpoint/key; unique for each environment and development slot |
+| `ARDEN_NOTIFICATION_DATABASE_URL` | Unset | Dedicated API-side login that may `SET ROLE arden_notification_worker`; required with complete Realtime configuration and never given application-content grants |
 | `ARDEN_AUTH_TRUSTED_ORIGINS` | Local Vite origins | Comma-separated exact client origins allowed to use Arden's cookie-authenticated API; production requires HTTPS |
 | `ARDEN_SESSION_SIGNING_KEY` | Random per process for local development; required in production | API-only 32-byte key encoded as 64 hex characters; share across API replicas and preserve through restarts. Rotation invalidates existing Arden sessions and outstanding recovery proofs |
 | `ARDEN_PUBLIC_WEB_ORIGIN` | Unset | Exact public web origin for invitation links; required to send invitations |
@@ -127,7 +131,36 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 - Keep secret values out of tracked env/config files. Track sanitized examples with descriptions, defaults, required status, consumer, and restart/build implications. Treat `.env.production` as sensitive even if the current ignore patterns do not cover it.
 - Vite client env values are build-time public values. Future runtime public config must remain distinct from server secrets and support the same immutable artifact in staging/production.
 - Production startup must fail closed on missing/invalid critical configuration. No dev password, default administrator, disabled auth/TLS, or cloud fallback may become an implicit production setting.
-- Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice; connector credentials, model profiles, resource limits, and retention remain future configuration surfaces. Keep actual values out of tracked files.
+- Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice. Realtime notification configuration is all-or-none: if any of its endpoint, signing key or namespace is set, all must be valid. The API also uses the existing publishable key. Keep actual values in private API runtime configuration, not `VITE_*`, Electron renderer env, build arguments, URLs or logs.
+
+### In-app notifications and Supabase Realtime
+
+Migration `0039_in_app_notifications.sql` is operator-class. Rehearse the full 0001–0039 chain and owner handoff on a disposable PostgreSQL database first. For a shared target, use the separately authorized migration procedure, verify a protected backup/recovery plan, and run the exact `security-definer-owner-repair.sql` inventory after migration. Migration 0039 adds one trusted trigger executor; do not bulk-transfer other function owners or relax RLS. Organization/member hard deletion cascades inbox and outbox rows.
+
+Migration 0039 creates the `arden_notification_worker` role as `NOLOGIN`, with only notification-envelope reads and the outbox state columns needed for leasing/retry/delivery. Provision a separate `LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS` database role for the API dispatcher, grant it membership in `arden_notification_worker`, and put that login's secret only in `ARDEN_NOTIFICATION_DATABASE_URL` through the environment's secret manager. The dispatcher uses `SET LOCAL ROLE` inside each transaction; the login itself must fail direct reads, and after role switch it must still fail reads from submissions, drafts, and other Arden content. Never reuse `DATABASE_URL`, the migration login, or the indexing-worker login. If Realtime is absent, leave both the dispatcher URL and Realtime settings unset.
+
+The API checks this dedicated connection at startup and refuses complete Realtime configuration if the role/schema is unavailable. This connection is used only by the outbox dispatcher; authenticated inbox reads and read-state changes continue through the normal API pool under `arden_runtime` and actor/organization RLS context.
+
+Install [the scoped Realtime roles and policies](../../deploy/supabase/realtime-notifications.sql) against the exact database serving Realtime. Review existing `realtime.messages` grants and policies; the script changes only its named notification policies. Confirm Realtime uses private channels and public access is disabled, then verify reader SELECT for one exact Broadcast topic, rejection of another namespace/organization/membership, rejection of reader INSERT, sender Broadcast-only INSERT and sender SELECT denial. Neither role may query Arden tables. Test two-minute expiry and rejection after expiry.
+
+Core signs notification JWTs with HS256. `ARDEN_NOTIFICATION_JWT_SECRET` must be exactly the key that the configured Realtime service accepts. Check the deployed Realtime version's JWT verifier and role mapping rather than assuming its API-management secret is also the client JWT verifier. If the target uses asymmetric-only signing or does not accept Core-minted role claims, leave Realtime unconfigured and the feature disabled; do not replace a shared Supabase key set to make the test pass. Inbox list/read still use Core while Realtime is absent.
+
+Give each hosted development slot, staging, production and local instance its own `ARDEN_NOTIFICATION_CHANNEL_NAMESPACE`. The endpoint must be the public HTTPS `/realtime/v1` URL; configure the reverse proxy for WebSocket Upgrade on that path and TLS/WSS. On web, set the hosting proxy's CSP `connect-src` to the exact Realtime `wss://` origin in addition to Arden's own origins. Do not use a wildcard WSS source. Electron's renderer must not connect to Realtime; its main process owns the socket, and narrow IPC sends only validated notification IDs.
+
+The API starts the outbox dispatcher only when complete Realtime configuration is present. The PostgreSQL inbox remains canonical during an outage. Inspect queue health using aggregate state only:
+
+```sql
+SELECT status, count(*) AS rows, min(created_at) AS oldest_created_at,
+       min(available_at) FILTER (WHERE status = 'PENDING') AS next_pending_at,
+       count(*) FILTER (WHERE last_error_code IS NOT NULL) AS rows_with_errors
+  FROM arden.arden_notification_outbox
+ GROUP BY status
+ ORDER BY status;
+```
+
+Monitor pending age, leased rows past expiry, retry counts and terminal `FAILED` rows; keep alerts/logs free of notification content, JWTs and credentialed URLs. The dispatcher retries transient failures with bounded delay and stops after eight attempts, preserving the inbox row. After correcting the Realtime outage and validating one exact record, an authorized database operator may requeue only named terminal outbox rows; do not reset all attempts or edit/delete notification content. A repeated signal is safe because clients refetch by ID and source notifications are unique per recipient/event.
+
+During backup restore, preserve notification/outbox consistency and reconcile current membership and source permissions before opening access. A restored notification never grants access. No target environment has been configured, migrated, policy-probed or deployed by this code change; feature activation requires separate environment-specific evidence.
 
 ## 3. Isolated local development for every developer
 
