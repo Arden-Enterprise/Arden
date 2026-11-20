@@ -1,5 +1,39 @@
 # Knowledge management implementation and rollout
 
+## Current KM2 contract — 20 November 2026
+
+Use [F11 KM2](../product/graph-ai-and-work.md#knowledge-organization-restructuring-km2-19-november-2026),
+[ADR0025](../decisions/0026-flat-organization-collection-placement.md) and the
+[transition runbook](collection-legacy-transition.md). The KM-v1 text below is
+historical and must not be used to restore Topic requirements or exact-version
+Collection writers.
+
+Home separates Organization-wide common knowledge, Shared with me and My
+Contributions; existing owner-private notes remain separate. The common master
+register includes assigned and unassigned Organization publications. Only Org
+Admin configures flat Collections (required Name/Allowed types, optional
+Description) and adds/moves/removes one logical document after publication.
+Placement never changes readers or Type. Eligible replacements retain location;
+ineligible replacements or Archive detach it without withdrawal or deletion.
+
+Authors do not choose a Collection or Topic. New saves clear Topic references,
+while frozen provenance/storage remain. Existing immutable review, exact snapshot
+activation, Target Readers and AI/source authorization still govern. New config
+and placement operations are separate, audited and revision-conditional; the old
+bulk `documentIds` writer is refused. Follow the runbook for exact routes and
+safe stale/uncertain outcomes.
+
+Operator migrations0039/0040 require the authorized backed-up cutover. The
+bounded metadata exception preserves ARD identity, fills only verified missing
+metadata of exact-hash sources, and audits before/after; it is not runtime editing
+of review history. Legacy Collection destinations/archive and physical Topic
+contraction need their separate reviewed decisions. Local implementation, CI,
+restored-copy rehearsal, live SQL and deployment remain distinct evidence.
+
+## Historical KM-v1 implementation record
+
+The remaining original rollout record describes the superseded catalog model.
+
 Contract: [F11 KM-v1](../product/graph-ai-and-work.md#knowledge-management-refinement-km-v1-accepted-12-november-2026).
 Decision: [ADR 0020](../decisions/0020-knowledge-management-catalog.md).
 Original implementation baseline: staging `0e25b71`, branch

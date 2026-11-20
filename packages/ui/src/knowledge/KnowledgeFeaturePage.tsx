@@ -29,6 +29,8 @@ export type KnowledgeFeaturePageProps = ContextControlProps & {
   onNavigate?: (view: KnowledgeFeatureView) => void;
   /** Signed-in member who is waiting for a department: Home explains the limited reading scope. */
   awaitingAssignment?: boolean;
+  canUsePrivateWorkspace?: boolean;
+  onOpenPrivateNotes?: () => void;
 };
 
 const labels: Record<KnowledgeFeatureView, string> = { knowledge: "Knowledge", "review-queue": "Review Queue", "knowledge-handover": "Knowledge Handover" };
@@ -41,6 +43,7 @@ export function KnowledgeFeaturePage(props: KnowledgeFeaturePageProps) {
       onDirtyChange={props.onDirtyChange}
       citationTarget={props.citationTarget} requestedReviewId={props.requestedReviewId}
       onReviewTargetHandled={props.onReviewTargetHandled} awaitingAssignment={props.awaitingAssignment}
+      canUsePrivateWorkspace={props.canUsePrivateWorkspace} onOpenPrivateNotes={props.onOpenPrivateNotes}
       contextOpen={props.contextOpen} onToggleContext={props.onToggleContext} />;
   }
   return <SampleKnowledgeFeaturePage {...props} />;

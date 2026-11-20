@@ -1485,6 +1485,35 @@ describe("API auth and private draft routes", () => {
     expect(semanticDocumentText((await app.inject({ method: "GET", url, headers })).json().body)).toBe("v2");
   });
 
+  it.each([undefined, null, versionId])("accepts Topic-free metadata input (legacy Topic: %s)", async topicId => {
+    const session = await desktopSession(app, "owner@example.test");
+    const headers = { cookie: session, origin: "http://localhost:5180", "idempotency-key": createKey };
+    const root = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
+    expect((await app.inject({ method: "POST", url: `${root}/new`, headers,
+      payload: { title: "Topic-free", body: "Synthetic guidance" } })).statusCode).toBe(201);
+    const update = vi.spyOn(repository, "updateKnowledgeDraft");
+    const management = { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "",
+      ...(topicId === undefined ? {} : { topicId }) };
+    const response = await app.inject({ method: "PATCH", url: `${root}/${sharedDraftId}`,
+      headers: { ...headers, "if-match": '"1"' }, payload: { management } });
+    expect(response.statusCode).toBe(200);
+    expect(update.mock.calls[0]?.[4].management).toEqual(management);
+    // This checks the HTTP schema; real normalization/freezing is covered by PostgreSQL fixtures.
+    expect(askArden.lastRequest).toBeNull();
+  });
+
+  it.each([
+    { topicId: "malformed" }, { type: "Free text" }, { version: "x".repeat(31) },
+  ])("rejects malformed metadata at the request boundary: %j", async invalid => {
+    const session = await desktopSession(app, "owner@example.test");
+    const update = vi.spyOn(repository, "updateKnowledgeDraft");
+    const response = await app.inject({ method: "PATCH", url: `/api/v1/organizations/${organizationId}/knowledge/drafts/${sharedDraftId}`,
+      headers: { cookie: session, origin: "http://localhost:5180", "if-match": '"1"' },
+      payload: { management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "", ...invalid } } });
+    expect(response.statusCode).toBe(400);
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("replaces a PDF under the same draft identity and rejects stale, invalid and other-author writes", async () => {
     const owner = await desktopSession(app, "owner@example.test");
     const other = await desktopSession(app, "manager@example.test");
@@ -1760,6 +1789,100 @@ describe("API auth and private draft routes", () => {
     async function ownerHeaders() {
       return { cookie: await desktopSession(app, "owner@example.test"), origin: "http://localhost:5180" };
     }
+
+    describe("publication scope foundation (KM2-P1)", () => {
+      const organizationReaders = { mode: "ORGANIZATION" as const, departmentId: null, memberIds: [] };
+      const departmentReaders = { mode: "DEPARTMENT" as const, departmentId: salesDepartmentId, memberIds: [] };
+      const selectedReaders = { mode: "SELECTED_MEMBERS" as const, departmentId: null, memberIds: [otherId, ownerId] };
+
+      it.each([
+        { scope: "ORGANIZATION", readers: organizationReaders, expected: 1 },
+        { scope: "ORGANIZATION", readers: departmentReaders, expected: 0 },
+        { scope: "ORGANIZATION", readers: selectedReaders, expected: 0 },
+        { scope: "ORGANIZATION", readers: null, expected: 0 },
+        { scope: "SHARED", readers: organizationReaders, expected: 0 },
+        { scope: "SHARED", readers: departmentReaders, expected: 1 },
+        { scope: "SHARED", readers: selectedReaders, expected: 1 },
+        { scope: "SHARED", readers: null, expected: 0 },
+        { scope: "ALL_READABLE", readers: organizationReaders, expected: 1 },
+        { scope: "ALL_READABLE", readers: departmentReaders, expected: 1 },
+        { scope: "ALL_READABLE", readers: selectedReaders, expected: 1 },
+        { scope: "ALL_READABLE", readers: null, expected: 1 },
+      ])("filters $scope by approved readers $readers, not responsible department", async ({ scope, readers, expected }) => {
+        await publish(readers);
+        const before = structuredClone(repository.publication);
+        const response = await app.inject({ method: "GET", url: `${root}/knowledge/published?scope=${scope}`, headers: await ownerHeaders() });
+        expect(response.statusCode).toBe(200);
+        expect(response.headers["cache-control"]).toBe("no-store");
+        expect(response.json().items).toHaveLength(expected);
+        expect(repository.publication).toEqual(before);
+        expect(response.body).not.toContain(otherId);
+        expect(response.body).not.toContain("sourceUri");
+        if (expected) expect(response.json().items[0]).toMatchObject({ id: versionId, draftId: sharedDraftId,
+          responsibleDepartmentName: "Engineering" });
+        expect(askArden.lastRequest).toBeNull();
+      });
+
+      it("returns disjoint common/shared subsets from a mixed authorized corpus without rewriting metadata", async () => {
+        await publish(organizationReaders);
+        const base = repository.publication!;
+        const common = { ...base, management: null };
+        const shared = { ...base, id: missingVersionId, targetReaders: selectedReaders };
+        const legacy = { ...base, id: otherGenerationId, targetReaders: null };
+        const list = vi.spyOn(repository, "listPublishedKnowledge").mockResolvedValue([common, shared, legacy]);
+        const headers = await ownerHeaders();
+        const read = async (query: string) => (await app.inject({ method: "GET", url: `${root}/knowledge/published${query}`, headers })).json().items;
+        expect((await read("?scope=ORGANIZATION")).map((item: { id: string }) => item.id)).toEqual([versionId]);
+        expect((await read("?scope=SHARED")).map((item: { id: string }) => item.id)).toEqual([missingVersionId]);
+        expect(await read("")).toEqual(await read("?scope=ALL_READABLE"));
+        expect(await read("")).toHaveLength(3);
+        expect((await read("?scope=ORGANIZATION"))[0].management).toBeNull();
+        expect(list).toHaveBeenCalledWith(ownerId, organizationId);
+      });
+
+      it.each(["ALL_READABLE", "ORGANIZATION", "SHARED"])("does not let %s bypass current authorization", async scope => {
+        await publish({ mode: "DEPARTMENT", departmentId: engineeringDepartmentId, memberIds: [] });
+        const headers = await ownerHeaders();
+        const read = () => app.inject({ method: "GET", url: `${root}/knowledge/published?scope=${scope}`, headers });
+        expect((await read()).json().items).toEqual([]);
+        repository.readerActors.set(ownerId, { membershipId: ownerId, organizationId,
+          status: "SUSPENDED", departmentIds: [engineeringDepartmentId] });
+        expect((await read()).json().items).toEqual([]);
+        repository.readerActors.set(ownerId, { membershipId: ownerId, organizationId: otherOrganizationId,
+          status: "ACTIVE", departmentIds: [engineeringDepartmentId] });
+        expect((await read()).json().items).toEqual([]);
+      });
+
+      it.each(["PRIVATE", "organization", "", "ORGANIZATION&scope=SHARED"])("rejects invalid/duplicate scope %s", async scope => {
+        const read = vi.spyOn(repository, "listPublishedKnowledge");
+        const response = await app.inject({ method: "GET", url: `${root}/knowledge/published?scope=${scope}`, headers: await ownerHeaders() });
+        expect(response.statusCode).toBe(400);
+        expect(read).not.toHaveBeenCalled();
+      });
+
+      it("rechecks reader changes between requests instead of caching a scope grant", async () => {
+        await publish(selectedReaders);
+        const headers = await ownerHeaders();
+        const read = async () => (await app.inject({ method: "GET", url: `${root}/knowledge/published?scope=SHARED`, headers })).json().items;
+        expect(await read()).toHaveLength(1);
+        repository.publication = { ...repository.publication!, targetReaders: {
+          ...selectedReaders, memberIds: [otherId, activeMemberIds[0]] } };
+        expect(await read()).toEqual([]);
+        await publish(departmentReaders);
+        expect(await read()).toHaveLength(1);
+        repository.readerActors.set(ownerId, { membershipId: ownerId, organizationId,
+          status: "ACTIVE", departmentIds: [engineeringDepartmentId] });
+        expect(await read()).toEqual([]);
+      });
+
+      it("keeps scope requests behind sign-in and organization membership", async () => {
+        const anonymous = await app.inject({ method: "GET", url: `${root}/knowledge/published?scope=ORGANIZATION` });
+        expect(anonymous.statusCode).toBe(401);
+        const foreign = await app.inject({ method: "GET", url: `/api/v1/organizations/${otherOrganizationId}/knowledge/published?scope=SHARED`, headers: await ownerHeaders() });
+        expect(foreign.statusCode).toBe(404);
+        expect(foreign.json().error.code).toBe("RESOURCE_NOT_AVAILABLE");
+      });
+    });
 
     it.each([
       { name: "a member outside the Department", readers: { mode: "DEPARTMENT" as const,

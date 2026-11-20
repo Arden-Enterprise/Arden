@@ -4,6 +4,20 @@ These standards apply to application code and tests alongside [AGENTS.md](../../
 
 ## Current evidence and gaps
 
+KM2-P4A separates scoped acquisition (`useHomePublications`), Home navigation and
+browse composition from the existing register/reader. Tests cover source failures,
+late responses/context changes, scope mismatch, legacy compatibility, search/filter
+isolation, citation return, known-denied removal, private entry and keyboard use.
+The API remains authoritative; the client scope check detects incompatible server
+responses, not authorization. See [P4A evidence](../evidence/2026-11-19-knowledge-organization/README.md#km2-p4a--home-composition).
+
+KM2-P3B.3 separates Collection configuration from revisioned placement and the
+manager's list/navigation. Focused regressions cover stale/uncertain outcomes,
+late replies, privilege loss, cancellation, required Types and native-dialog focus
+timing. Shared UI/browser fixture evidence is in the [phase report](../evidence/2026-11-19-knowledge-organization/README.md#km2-p3b3--collection-management-ui).
+Numeric complexity/duplication/changed-line coverage are not measured by a newly
+configured analyzer in this slice. No complete native/authenticated E2E claim.
+
 Decision 0010 has replaced the Custom Role product model with published-content Audiences and separates Reviewer Grants, Organization Admin and Arden System Admin capabilities. Migration 0017 is an additive compatibility phase; legacy role-backed storage is intentionally retained until the verified Phase 5 contraction.
 
 The API has a testable `buildApp` factory, Fastify Supabase Auth, organization bootstrap/admin/invitation and private-note request tests, a Supabase SDK adapter, PostgreSQL repository, SMTP adapter and protected file storage. Organization and invitation HTTP tests use synthetic providers/repositories; they do not prove PostgreSQL/RLS, real Supabase or SMTP behavior. The gated `repository.integration.test.ts` targets an already-migrated disposable PostgreSQL database named `arden_test_*`; it was not executable in the current environment because Docker Desktop was unavailable. Shared UI lives in `packages/ui/src/`: `app/` owns orchestration/identity/navigation, `shared/` owns reusable controls/hooks/API transport, and features live in `sign-in/`, `my-work/`, `personal-workspace/`, `organization/` and `knowledge/`. Sample-mode drafts remain preview-only; authenticated owner notes load from and save to the API, and API failure never falls back to sample data. A first connected live organization administration screen exists; the adjacent preview remains synthetic. A saved owner-private note can now create a real shared draft through the API, but the sample knowledge editor/review/publication remains separate. The returned server draft is a session-scoped receipt until read/list routes exist. Pure preview models, API transport tests, and feature tests live in `packages/ui/tests/`; they do not implement server authorization. `useSearchShortcut` enables its keyboard listener only for the active search view. `useAutosizeTextarea` handles title content, font loading and width changes with observer cleanup, preventing clipped long titles in both editors. `styles.css` remains the stable public CSS entry point with foundation, shell, feature and responsive imports. Keep these responsibilities separate as real APIs replace samples.
@@ -53,6 +67,11 @@ The repository has strict TypeScript and typecheck/test/build scripts, plus API 
 - Log enough safe metadata to diagnose failure without leaking private payloads or secrets. Error swallowing and verbose private-content logging are both unacceptable shortcuts.
 
 ## Test design
+
+Publication tenant ownership is resolved through the existing `shared_draft`
+lineage/current-pointer relations. `published_knowledge_version` has no standalone
+`organization_id` column. Inspect actual schema joins in inventory/cleanup tools;
+real disposable DB tests must catch guessed-column SQL before any release.
 
 Keep package test discovery scoped to source tests. The API's `vitest run src` must not execute stale ignored JavaScript tests left in `dist/` by an earlier build; those artifacts can make a clean source change appear to fail for unrelated reasons.
 

@@ -5,8 +5,19 @@ import { plainTextToSemanticDocument, semanticDocumentHasText } from "./semantic
 describe("business document metadata", () => {
   it("allows incomplete drafts but not incomplete submissions", () => {
     expect(validKnowledgeMetadata(emptyKnowledgeMetadata())).toBe(true);
-    expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).toHaveLength(3);
+    expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).toEqual(["Choose a type.", "Enter a version."]);
     expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).not.toContain("Choose an effective date.");
+  });
+  it("does not require a Topic and accepts valid historical references without mutating them", () => {
+    const value = { ...emptyKnowledgeMetadata(), type: "Guide" as const, version: "1.0" };
+    expect(metadataSubmissionErrors(value, false)).toEqual([]);
+    const { topicId: _unused, ...withoutTopic } = value;
+    expect(metadataSubmissionErrors(withoutTopic, false)).toEqual([]);
+    const legacy = { ...value, topicId: "00000000-0000-0000-0000-000000000001" };
+    expect(metadataSubmissionErrors(legacy, false)).toEqual([]);
+    expect(legacy.topicId).toBe("00000000-0000-0000-0000-000000000001");
+    expect(validKnowledgeMetadata({ ...value, topicId: "malformed" })).toBe(false);
+    expect(metadataSubmissionErrors(value, true)).toEqual(["Add a change note."]);
   });
   it("validates calendar dates and the optional inclusive expiration date", () => {
     expect(isCalendarDate("2026-02-29")).toBe(false);

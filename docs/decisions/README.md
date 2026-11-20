@@ -63,6 +63,10 @@ Version-matched official docs, repository code/tests, and authorized decisions.
 
 ## Status and synchronization
 
+[0026: Flat Organization Collection placement](0026-flat-organization-collection-placement.md)
+records the accepted one-folder/Admin/Allowed types/version/Archive rules.
+P3B.1 is a local schema checkpoint only; new API/UI and legacy mapping remain.
+
 [0024: Admin-only direct withdrawal](0024-admin-only-direct-withdrawal.md) refines
 0023: reviewers keep scoped view/report handling but cannot withdraw directly.
 Inspection notifications are explicitly deferred for this release; audit remains.

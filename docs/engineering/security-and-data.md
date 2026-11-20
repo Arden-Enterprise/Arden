@@ -37,6 +37,15 @@ The organization, session-context, and owner-private note contract for the first
 
 ### Database ownership is an execution contract
 
+Local operator migration 0040 adds the trigger-only trusted
+`validate_collection_placement` routine, bringing the reviewed inventory to 34
+after migration0039's notification executor.
+It locks Collection/current-pointer eligibility without runtime UPDATE grants on
+publication tables. Preserve its postgres owner and lack of runtime/PUBLIC EXECUTE;
+the pure eligibility helper and reconciliation remain invoker-context. Real
+post-handoff tests cover this split; API/UI and live rollout are still pending.
+See [0026](../decisions/0026-flat-organization-collection-placement.md).
+
 The release migration login owns Arden DDL and its migration ledger; it is not the
 internal executor of reviewed `SECURITY DEFINER` functions. Preserve those functions'
 existing trusted `postgres` execution identity. Moving them to a non-bypass owner

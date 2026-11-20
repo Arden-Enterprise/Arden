@@ -703,7 +703,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         ) : null}
 
       <div className="knowledge-feature-slot" hidden={!isKnowledgeView}>
-        <KnowledgeFeaturePage key={serverOrganizationId ?? "sample"} view={knowledgeView} active={isKnowledgeView}
+        <KnowledgeFeaturePage key={`${serverSession?.actor.id ?? "sample"}:${serverOrganizationId ?? "sample"}`} view={knowledgeView} active={isKnowledgeView}
           platform={platform} organizationId={serverOrganizationId}
           organizationName={activeMembership?.organization.name ?? organization?.name}
           departmentName={activeMembership ? "Personal contribution" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
@@ -711,6 +711,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           citationTarget={knowledgeCitationTarget}
           requestedReviewId={requestedReviewId} onReviewTargetHandled={() => setRequestedReviewId(null)}
           onAssignedReviewCount={setAssignedReviewCount} awaitingAssignment={isUnassignedMember}
+          canUsePrivateWorkspace={activeMembership?.canUsePrivateWorkspace ?? false}
+          onOpenPrivateNotes={() => navigate("personal-workspace")}
           onDirtyChange={setKnowledgeDirty}
           onNavigate={navigate} {...contextControl} />
       </div>

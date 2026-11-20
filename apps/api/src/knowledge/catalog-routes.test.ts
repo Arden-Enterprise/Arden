@@ -11,7 +11,9 @@ afterEach(async () => { await Promise.all(applications.map(app => app.close()));
 function setup(authenticated = true, available = true) {
   const app = Fastify({ ajv: { customOptions: { removeAdditional: false } } }); applications.push(app);
   const store: KnowledgeCatalogStore = { list: vi.fn().mockResolvedValue({ canManage: true, topics: [], collections: [] }),
-    readers: vi.fn().mockResolvedValue([{ id, name: "Reader" }]), write: vi.fn().mockResolvedValue(entry) };
+    readers: vi.fn().mockResolvedValue([{ id, name: "Reader" }]), write: vi.fn().mockResolvedValue(entry),
+    getPlacement: vi.fn().mockResolvedValue({ documentId: id, collectionId: null, revision: 0 }),
+    place: vi.fn().mockResolvedValue({ documentId: id, collectionId: null, revision: 1 }) };
   registerKnowledgeCatalogRoutes(app, available ? store : undefined, async (_request, reply) => {
     if (!authenticated) { reply.code(401).send({ error: { code: "UNAUTHENTICATED" } }); return null; }
     return { userId: "actor" };
@@ -31,10 +33,42 @@ describe("knowledge catalog HTTP contract", () => {
     expect((await app.inject({ method: "PATCH", url: `${path}/topics/${id}`, headers: { "if-match": '"catalog-1"' }, payload: input })).statusCode).toBe(200);
     expect(store.write).toHaveBeenLastCalledWith("actor", org, "topics", id, 1, input, expect.any(String));
   });
-  it.each([["UNAVAILABLE", 404], ["INVALID", 400], ["CONFLICT", 412], ["DUPLICATE", 409]] as const)("maps %s without internal details", async (code, status) => {
+  it.each([["UNAVAILABLE", 404], ["INVALID", 400], ["CONFLICT", 412], ["DUPLICATE", 409], ["UPGRADE_REQUIRED", 409]] as const)("maps %s without internal details", async (code, status) => {
     const { app, path, store } = setup(); vi.mocked(store.write).mockRejectedValue(new CatalogError(code));
     const result = await app.inject({ method: "POST", url: `${path}/topics`, payload: input });
     expect(result.statusCode).toBe(status); expect(result.body).not.toMatch(/stack|SELECT|postgres/);
+  });
+  it("returns an uncached placement revision and accepts an explicit unassign", async () => {
+    const { app, path, store } = setup();
+    const read = await app.inject(`${path}/placements/${id}`);
+    expect((await app.inject(`${path}/placements/${id}?all=true`)).statusCode).toBe(400);
+    expect(read.headers["etag"]).toBe('"placement-0"');
+    expect(read.headers["cache-control"]).toBe("no-store");
+    const saved = await app.inject({ method: "PATCH", url: `${path}/placements/${id}`,
+      headers: { "if-match": '"placement-0"' }, payload: { collectionId: null } });
+    expect(saved.statusCode).toBe(200); expect(saved.headers["etag"]).toBe('"placement-1"');
+    expect(store.place).toHaveBeenCalledWith("actor", org, id, 0, null, expect.any(String));
+  });
+  it.each([undefined, '*', '"catalog-1"', '"placement-01"', '"placement-9007199254740992"'])(
+    "rejects invalid placement precondition %s without mutation", async match => {
+      const { app, path, store } = setup();
+      const result = await app.inject({ method: "PATCH", url: `${path}/placements/${id}`,
+        headers: match ? { "if-match": match } : {}, payload: { collectionId: id } });
+      expect(result.statusCode).toBe(428); expect(store.place).not.toHaveBeenCalled();
+    });
+  it.each([{}, { collectionId: "bad" }, { collectionId: null, actor: "forged" }])("rejects malformed placement payload %j", async payload => {
+    const { app, path, store } = setup();
+    expect((await app.inject({ method: "PATCH", url: `${path}/placements/${id}`,
+      headers: { "if-match": '"placement-0"' }, payload })).statusCode).toBe(400);
+    expect(store.place).not.toHaveBeenCalled();
+  });
+  it("maps unavailable and stale placement without SQL details", async () => {
+    const { app, path, store } = setup();
+    vi.mocked(store.getPlacement).mockRejectedValue(new CatalogError("UNAVAILABLE"));
+    expect((await app.inject(`${path}/placements/${id}`)).statusCode).toBe(404);
+    vi.mocked(store.place).mockRejectedValue(new CatalogError("CONFLICT"));
+    expect((await app.inject({ method: "PATCH", url: `${path}/placements/${id}`,
+      headers: { "if-match": '"placement-0"' }, payload: { collectionId: id } })).statusCode).toBe(412);
   });
   it("rejects unsupported keys, kinds and oversized/invalid member requests", async () => {
     const { app, path, store } = setup();

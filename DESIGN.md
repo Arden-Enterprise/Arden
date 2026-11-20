@@ -108,6 +108,33 @@ The server-backed `Document text` field keeps one compact formatting toolbar (No
 - **Ask Arden** — a Linear-style sparse agent canvas. It replaces the normal workspace top bar with a 42px conversation header; the empty state centres a compact composer over a nearly invisible Arden watermark, followed by an indexed-knowledge chip and three starter cards. The active thread keeps the same narrow reading column and docks the composer at the bottom. Prompts use the live permission-aware RAG endpoint. Sources appear inline as compact chips (document code, or title, plus "+n" for more documents) after the sentence they support — placed by `[n]` markers when the answer has them, otherwise by word overlap with the quote, and at the end of the answer when no sentence matches. Hovering or focusing a chip highlights that sentence and shows a card of the cited passages (title, version, page, scope, quote); ArrowDown moves into the card and Escape closes it. Each passage uses an exact publication-version reference; selecting a chip or passage opens the governed reader, shows the cited excerpt and highlights the exact quote — in the pdf.js text layer for PDFs, or with the CSS Custom Highlight API inside the stable source block for rich text (an outlined block where that API is unavailable). Opening the same citation again highlights it again. Insufficient evidence and service failures are shown honestly without fabricated citations.
 - **Phones (<640px)** — a compact status island and menu button at the top, and a bottom tab island (Home, Ask, Notes, Reviews). The menu drawer keeps Administration, every other destination and sign-out.
 
+## Local Collection refinement (KM2, 19 November 2026)
+
+The accepted [flat Organization folder decision](docs/decisions/0026-flat-organization-collection-placement.md)
+supersedes the older Topic/curated-bundle directions above. Home keeps its entry
+position. Shared Collection management separates a compact Name*/Allowed types*/
+Description form from one-document Move (including Unassigned), with compatible
+destination filtering. Only Org Admin manages it; Authors have no Collection picker.
+Archive explains that documents return to Unassigned and stay published. Legacy
+unconfigured folders say Setup needed; archived folders are read-only. Keep Island
+tokens/covers, visible exits, protected unsaved edits, announced errors and keyboard
+focus restoration. Browser checks and remaining native/live boundaries are in
+[P3B.3 evidence](docs/evidence/2026-11-19-knowledge-organization/README.md#km2-p3b3--collection-management-ui).
+Topic controls are removed from affected Home browse/filter/current-reader paths;
+frozen metadata is preserved.
+
+Local P4A Home composition supersedes the old Discover/All-documents tab grouping:
+Organization holds the common Overview, All documents and Unassigned; Shared with
+me holds permitted Department/Selected documents. Other documents is a conditional
+compatibility view for unclassified legacy sharing. My Contributions stays in the
+tab group; Private notes is a separate owner-only workspace entry. Each source has
+its own search/filter/loading/error state. Counts appear only after successful
+reads, never as fabricated zeroes during failure. Reader Back restores the source,
+filters and document focus. Tabs support arrow/Home/End navigation. Preserve Island
+tokens/covers and wrapping actions at narrow widths, not a second theme.
+[P4A evidence](docs/evidence/2026-11-19-knowledge-organization/README.md#km2-p4a--home-composition)
+is local synthetic-fixture evidence, not a deployed/signed-in/native acceptance.
+
 ## Private-note draft contract
 
 Keep drafts separately for each note in shell-owned session memory. Switching notes, creating another note or navigating to Home must preserve existing drafts. Saving applies only the selected draft; other drafts survive. Show unsaved state in both the editor and the list. Exiting with unsaved work opens an accessible discard confirmation; refreshing/closing gets the browser's unload warning. Switching the demo member identity also guards unsaved private drafts. Exiting resets notes, drafts and organization state.

@@ -21,7 +21,7 @@ function setup(ownerName: string | null | undefined, ownerId = "hr") {
   vi.spyOn(api, "listKnowledgeDrafts").mockResolvedValue([]);
   vi.spyOn(api, "listKnowledgeSubmissions").mockResolvedValue([]);
   vi.spyOn(api, "listKnowledgeReviewBoard").mockResolvedValue({ items: [], decided: [] });
-  vi.spyOn(api, "listPublishedKnowledge").mockResolvedValue([publication]);
+  vi.spyOn(api, "listPublishedKnowledge").mockImplementation(async (_platform, _org, scope) => scope === "ALL_READABLE" ? [publication] : []);
   vi.spyOn(api, "loadPublishedKnowledge").mockResolvedValue(publication);
   vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
   // The reader may read the publication, but can only author in Engineering.
@@ -40,8 +40,9 @@ describe("published owner department display", () => {
       platform, organizationId: "org", organizationName: "Example", view: "knowledge",
       active: true, createdDraftId: null, contextOpen: false, onToggleContext: vi.fn(),
     }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Other documents/ }));
     await screen.findByRole("button", { name: "Read Employee lifecycle guide" });
-    expect(screen.getByText(owner)).toBeTruthy();
+    expect(screen.getByRole("cell", { name: owner, exact: true })).toBeTruthy();
     expect(screen.queryByText("Unassigned")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Search (Ctrl K)" }));
     fireEvent.change(await screen.findByRole("searchbox"), { target: { value: owner } });
@@ -61,7 +62,8 @@ describe("published owner department display", () => {
       platform: "web", organizationId: "org", organizationName: "Example", view: "knowledge",
       active: true, createdDraftId: null, contextOpen: false, onToggleContext: vi.fn(),
     }));
+    fireEvent.click(await screen.findByRole("tab", { name: /Other documents/ }));
     await screen.findByRole("button", { name: "Read Employee lifecycle guide" });
-    expect(screen.getByText("Engineering")).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "Engineering", exact: true })).toBeTruthy();
   });
 });

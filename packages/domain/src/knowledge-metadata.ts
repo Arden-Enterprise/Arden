@@ -3,7 +3,8 @@ export const knowledgeTypes = ["Policy & Standard", "Procedure", "Guide", "Refer
 export type KnowledgeType = typeof knowledgeTypes[number];
 export type KnowledgeMetadata = {
   type: KnowledgeType | null;
-  topicId: string | null;
+  /** Legacy snapshot reference. Optional on input; new saves clear it. */
+  topicId?: string | null;
   version: string;
   effectiveDate: string | null;
   expirationDate: string | null;
@@ -20,7 +21,7 @@ export function isCalendarDate(value: string): boolean {
 /** Drafts may be incomplete, but never store malformed values. */
 export function validKnowledgeMetadata(value: KnowledgeMetadata): boolean {
   return (value.type === null || knowledgeTypes.includes(value.type))
-    && (value.topicId === null || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.topicId))
+    && (value.topicId == null || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.topicId))
     && value.version.length <= 30 && (!value.version || /^[\w][\w.\- ]{0,29}$/.test(value.version))
     && value.changeNote.length <= 1000
     && (value.effectiveDate === null || isCalendarDate(value.effectiveDate))
@@ -31,7 +32,6 @@ export function metadataSubmissionErrors(value: KnowledgeMetadata, isUpdate: boo
   const errors: string[] = [];
   if (!validKnowledgeMetadata(value)) errors.push("Check document details.");
   if (!value.type) errors.push("Choose a type.");
-  if (!value.topicId) errors.push("Choose a topic.");
   if (!value.version.trim()) errors.push("Enter a version.");
   if (isUpdate && !value.changeNote.trim()) errors.push("Add a change note.");
   return errors;

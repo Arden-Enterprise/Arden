@@ -5,16 +5,17 @@ import type { KnowledgeCatalog, PublishedKnowledge } from "../shared/api-client"
 import { libraryDateLabel } from "./libraryDisplay";
 import { knowledgeCovers } from "./KnowledgeCatalogEditor";
 
-export type LibraryFilters = { type: string; topicId: string; ownerId: string; collectionId: string };
-export const emptyLibraryFilters = (): LibraryFilters => ({ type: "", topicId: "", ownerId: "", collectionId: "" });
+export type LibraryFilters = { type: string; ownerId: string; collectionId: string };
+export const emptyLibraryFilters = (): LibraryFilters => ({ type: "", ownerId: "", collectionId: "" });
 export function filterLibrary(items: PublishedKnowledge[], catalog: KnowledgeCatalog | null, query: string, filters: LibraryFilters) {
   const terms = query.trim().toLocaleLowerCase();
   const collection = filters.collectionId ? catalog?.collections.find(item => item.id === filters.collectionId) : null;
+  const assigned = new Set(catalog?.collections.filter(item => item.status === "ACTIVE").flatMap(item => item.documentIds));
   return items.filter(item => (!filters.type || item.management?.type === filters.type)
-    && (!filters.topicId || item.management?.topicId === filters.topicId)
     && (!filters.ownerId || item.responsibleDepartmentId === filters.ownerId)
-    && (!filters.collectionId || collection?.documentIds.includes(item.id))
-    && (!terms || [item.title, item.management?.type, item.management?.topicName,
+    && (!filters.collectionId || (filters.collectionId === "unassigned" ? Boolean(catalog) && !assigned.has(item.id)
+      : collection?.status === "ACTIVE" && collection.documentIds.includes(item.id)))
+    && (!terms || [item.title, item.management?.type,
       item.responsibleDepartmentName].some(value => value?.toLocaleLowerCase().includes(terms))))
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id));
 }
@@ -25,7 +26,7 @@ export function validityLabel({ status, daysLeft }: ReturnType<typeof validitySt
   return status;
 }
 
-function DocumentRegister({ items, onOpen, recent = false }: { items: PublishedKnowledge[]; onOpen: (id: string) => void; recent?: boolean }) {
+function DocumentRegister({ items, onOpen, recent = false, showReaders = false }: { items: PublishedKnowledge[]; onOpen: (id: string) => void; recent?: boolean; showReaders?: boolean }) {
   return <IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={900}
     columns="minmax(270px, 2.8fr) minmax(120px, 1fr) minmax(130px, 1fr) 70px 115px 100px"
     headers={["DOCUMENT", "TYPE", "OWNER", "VERSION", recent ? "PUBLISHED" : "VALID UNTIL", "STATUS"]}>
@@ -33,10 +34,11 @@ function DocumentRegister({ items, onOpen, recent = false }: { items: PublishedK
       const validity = validityStatus(item.management, new Date().toLocaleDateString("en-CA"));
       const release = item.management?.releaseKind;
       return <IslandRow key={item.id} className="library-row">
-        <IslandCell className="island-row-cell is-name"><button className="island-row-name library-row-name" type="button" aria-label={`Read ${item.title}`} onClick={() => onOpen(item.id)}>
+        <IslandCell className="island-row-cell is-name"><button className="island-row-name library-row-name" type="button" data-publication-id={item.id} aria-label={`Read ${item.title}`} onClick={() => onOpen(item.id)}>
           <span className="library-row-icon"><Icon name="document" size={17} /></span><span className="library-row-copy">
             <strong className="library-row-title">{item.title}</strong>
-            <span className="library-row-meta">{item.management?.topicName}{recent && release && <span className="km-release">{release === "UPDATED" ? "Updated" : "New"}</span>}</span>
+            <span className="library-row-meta">{showReaders && (item.targetReaders?.mode === "DEPARTMENT" ? "Department readers" : "Selected readers")}
+              {recent && release && <span className="km-release">{release === "UPDATED" ? "Updated" : "New"}</span>}</span>
           </span></button></IslandCell>
         <IslandCell className="library-row-secondary">{item.management?.type ?? "—"}</IslandCell>
         <IslandCell className="library-row-secondary">{item.responsibleDepartmentName ?? "—"}</IslandCell>
@@ -48,16 +50,20 @@ function DocumentRegister({ items, onOpen, recent = false }: { items: PublishedK
   </IslandTable>;
 }
 
-export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, filters, onFilters, discover, onBrowse, onOpen, onManage }: {
+export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, filters, onFilters, discover, onBrowse, onOpen, onManage, allowCollections = true, showReaders = false }: {
   items: PublishedKnowledge[]; catalog: KnowledgeCatalog | null; catalogError: string; query: string; filters: LibraryFilters;
   onFilters: (filters: LibraryFilters) => void; discover: boolean; onBrowse: () => void; onOpen: (id: string) => void; onManage: () => void;
+  allowCollections?: boolean;
+  showReaders?: boolean;
 }) {
   const filtered = filterLibrary(items, catalog, query, filters);
   const owners = [...new Map(items.map(item => [item.responsibleDepartmentId, item.responsibleDepartmentName ?? "Unknown department"])).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
   const browseWith = (change: Partial<LibraryFilters>) => { onFilters({ ...emptyLibraryFilters(), ...change }); onBrowse(); };
   const selectedCollection = catalog?.collections.find(item => item.id === filters.collectionId);
-  const collections = catalog?.collections.filter(item => item.status === "ACTIVE" && item.documentIds.some(id => items.some(source => source.id === id))) ?? [];
+  const collections = catalog?.collections.filter(item => item.status === "ACTIVE"
+    && (item.id === filters.collectionId || item.documentIds.some(id => items.some(source => source.id === id)))) ?? [];
+  const unavailableCollection = Boolean(filters.collectionId && (!catalog || (filters.collectionId !== "unassigned" && selectedCollection?.status !== "ACTIVE")));
   return <div className="km-library">
     {catalogError && <p className="island-note is-warning" role="status">{catalogError}</p>}
     {discover && !query.trim() ? <>
@@ -66,13 +72,8 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
           <Icon name={type === "Policy & Standard" ? "shield" : type === "Procedure" ? "layers" : type === "Guide" ? "knowledge" : type === "Reference" ? "document" : "chat"} size={20} />
           <strong>{type}</strong><span>{items.filter(item => item.management?.type === type).length}</span></button>)}
       </div></section>
-      <section aria-labelledby="km-topics"><header className="km-section-heading"><h2 id="km-topics">Topics</h2>
-        {catalog?.canManage && <button className="km-text-button" type="button" onClick={onManage}>Manage catalog <Icon name="sliders" size={13} /></button>}</header>
-        <div className="km-topics">{catalog?.topics.filter(topic => topic.status === "ACTIVE").map(topic => <button key={topic.id} type="button" onClick={() => browseWith({ topicId: topic.id })}>
-          <span>{topic.name}</span><small>{items.filter(item => item.management?.topicId === topic.id).length}</small><Icon name="chevron" size={12} /></button>)}</div>
-        {!catalogError && !catalog?.topics.some(topic => topic.status === "ACTIVE") && <p className="km-empty-inline">No topics yet.{catalog?.canManage ? " Add one in Manage catalog." : ""}</p>}
-      </section>
-      <section aria-labelledby="km-collections"><header className="km-section-heading"><div><h2 id="km-collections">Collections</h2><p>Curated documents, brought together.</p></div></header>
+      <section aria-labelledby="km-collections"><header className="km-section-heading"><div><h2 id="km-collections">Collections</h2><p>Organization documents, organized by type.</p></div>
+        {catalog?.canManage && <button className="km-text-button" type="button" onClick={onManage}>Manage collections <Icon name="sliders" size={13} /></button>}</header>
         <div className="km-collections">{collections.map(collection => <button className="km-collection" type="button" key={collection.id} onClick={() => browseWith({ collectionId: collection.id })}>
           <img src={knowledgeCovers[collection.cover]} alt="" loading="lazy" /><span className="km-collection-copy"><small>{collection.documentIds.filter(id => items.some(source => source.id === id)).length} documents</small>
             <strong>{collection.name}</strong>{collection.description && <span>{collection.description}</span>}<Icon name="arrow" size={15} /></span></button>)}</div>
@@ -86,12 +87,16 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
     </> : <>
       <div className="km-register-bar"><div className="km-filters">
         <label><span className="sr-only">Type</span><select value={filters.type} onChange={event => onFilters({ ...filters, type: event.target.value })}><option value="">All types</option>{knowledgeTypes.map(type => <option key={type}>{type}</option>)}</select></label>
-        <label><span className="sr-only">Topic</span><select value={filters.topicId} onChange={event => onFilters({ ...filters, topicId: event.target.value })}><option value="">All topics</option>{catalog?.topics.map(topic => <option key={topic.id} value={topic.id}>{topic.name}</option>)}</select></label>
         <label><span className="sr-only">Owner department</span><select value={filters.ownerId} onChange={event => onFilters({ ...filters, ownerId: event.target.value })}><option value="">All departments</option>{owners.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
-        {selectedCollection && <button type="button" className="km-filter-chip" onClick={() => onFilters({ ...filters, collectionId: "" })}>{selectedCollection.name}<Icon name="close" size={11} /></button>}
+        {allowCollections && <label><span className="sr-only">Collection</span><select value={filters.collectionId} disabled={!catalog}
+          onChange={event => onFilters({ ...filters, collectionId: event.target.value })}>
+          <option value="">All collections</option><option value="unassigned">Unassigned</option>
+          {unavailableCollection && filters.collectionId !== "unassigned" && <option value={filters.collectionId} disabled>Unavailable collection</option>}
+          {collections.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
         {Object.values(filters).some(Boolean) && <button type="button" className="km-text-button" onClick={() => onFilters(emptyLibraryFilters())}>Clear filters</button>}
-      </div><span className="island-meta" role="status">{filtered.length} documents · newest first</span></div>
-      {filtered.length ? <DocumentRegister items={filtered} onOpen={onOpen} /> : <div className="island island-empty"><h3>{items.length ? "No results" : "No documents available"}</h3><p>{items.length ? "Try another search or filter." : "Published documents will appear here."}</p></div>}
+      </div>{!unavailableCollection && <span className="island-meta" role="status">{filtered.length} documents · newest first</span>}</div>
+      {unavailableCollection ? <p role="status" className="island-note is-warning">Collection unavailable. Clear filters to browse documents.</p>
+        : filtered.length ? <DocumentRegister items={filtered} onOpen={onOpen} showReaders={showReaders} /> : <div className="island island-empty"><h3>{items.length ? "No results" : "No documents available"}</h3><p>{items.length ? "Try another search or filter." : "Published documents will appear here."}</p></div>}
     </>}
   </div>;
 }

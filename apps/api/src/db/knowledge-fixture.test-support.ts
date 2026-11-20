@@ -1,6 +1,6 @@
 import type { Pool } from "pg";
 
-/** Upgrade old workflow fixtures to KM required business fields, without changing
+/** Upgrade old workflow fixtures to Topic-free KM business fields, without changing
  * their deliberately frozen legacy audience/reviewer projection. Production
  * authoring never uses this fixture helper. */
 export async function prepareKnowledgeFixture(pool: Pool, organizationId: string, draftId: string,
@@ -9,12 +9,9 @@ export async function prepareKnowledgeFixture(pool: Pool, organizationId: string
   try {
     await client.query("BEGIN");
     await client.query("SET LOCAL search_path TO arden, public");
-    const topic = await client.query<{ topic_id: string }>(`INSERT INTO knowledge_topic (organization_id, name)
-      VALUES ($1, 'Workflow fixtures') ON CONFLICT (organization_id, lower(btrim(name)))
-      DO UPDATE SET name = EXCLUDED.name RETURNING topic_id`, [organizationId]);
-    await client.query(`UPDATE shared_draft SET management = jsonb_build_object('type', 'Guide', 'topicId', $2::text,
-      'version', '1.0', 'effectiveDate', '2026-01-01', 'expirationDate', NULL, 'changeNote', '', 'topicName', 'Workflow fixtures')
-      WHERE shared_draft_id = $1`, [draftId, topic.rows[0]!.topic_id]);
+    await client.query(`UPDATE shared_draft SET management = jsonb_build_object('type', 'Guide', 'topicId', NULL,
+      'version', '1.0', 'effectiveDate', '2026-01-01', 'expirationDate', NULL, 'changeNote', '')
+      WHERE shared_draft_id = $1`, [draftId]);
     if (selectReaders) {
       const selection = await client.query<{ selection_id: string }>(`INSERT INTO reader_selection
         (organization_id, reader_mode) VALUES ($1, 'SELECTED_MEMBERS') RETURNING selection_id`, [organizationId]);

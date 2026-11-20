@@ -234,6 +234,18 @@
       "filename": "0039_in_app_notifications.sql",
       "sha256": "a982fe26f7723623c5dcef3ae66d83ab178e314526b5b6dc7119da2bb624bbb7",
       "rollout": "operator"
+    },
+    {
+      "id": "0040",
+      "filename": "0040_flat_collection_placement.sql",
+      "sha256": "dd12318cdb9ff0a1c3da3ad02c574a88a98e21487d2b6b806d37610876301645",
+      "rollout": "operator"
+    },
+    {
+      "id": "0041",
+      "filename": "0041_verified_legacy_metadata_repair.sql",
+      "sha256": "44686c735d8530a08fe57affb20c824303d75dc0a3e29cfe50ebc4ebf73c848f",
+      "rollout": "operator"
     }
   ]
 }
