@@ -604,7 +604,6 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                   {review.requestType !== "WITHDRAWAL" && <div><dt>Readers</dt><dd>{review.proposedTargetReaders ? targetReadersLabel(review.proposedTargetReaders, departmentName) : audienceNames(review.audienceIds)}</dd></div>}
                   {review.management ? <>
                     <div><dt>Type</dt><dd>{review.management.type ?? "—"}</dd></div>
-                    {review.management.topicName && <div><dt>Topic</dt><dd>{review.management.topicName}</dd></div>}
                     <div><dt>Version</dt><dd>{review.management.version}</dd></div>
                     {review.management.effectiveDate && <div><dt>Effective Date</dt><dd>{review.management.effectiveDate}</dd></div>}
                     {review.management.expirationDate && <div><dt>Expiration Date</dt><dd>{review.management.expirationDate}</dd></div>}
@@ -778,7 +777,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           Waiting for an admin to assign your department. You can read documents shared with the whole organization.</p>}
         <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : "Home"}
           description=""
-          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
+          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="island-icon-button" aria-label="Refresh" title="Refresh" disabled={busy} onClick={() => void refresh()}><Icon name="refresh" size={16} /></button>
             {catalog?.canManage && libraryTab === "organization" && (organizationView === "all" || query.trim() || home.views.organization.status !== "ready")
               && <button type="button" className="secondary-button" onClick={() => setManagingCatalog(true)}>Manage collections</button>}
             <button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button>

@@ -1,5 +1,10 @@
 # Lasting decisions and rules maintenance
 
+[0027: Remove knowledge Topics](0027-remove-knowledge-topics.md) retires Topic schema,
+authoring/API fields and source context after the flat Collection contract in0026.
+Frozen historical JSON remains untouched. Source integration and live operator
+approval/rehearsal are separate gates.
+
 Durable product, architecture, security, technology, and operational decisions belong in the repository, not only in chat. Read [AGENTS.md](../../AGENTS.md), especially its rules-maintenance section.
 
 ## What needs a decision record

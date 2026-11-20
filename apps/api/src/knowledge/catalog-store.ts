@@ -7,8 +7,8 @@ export type CollectionEntry = CatalogEntry & { cover: "handbook" | "production";
 export type CatalogWrite = { name: string; description?: string; status: "ACTIVE" | "INACTIVE";
   cover?: "handbook" | "production"; allowedTypes?: KnowledgeType[]; documentIds?: string[] };
 export type CollectionPlacement = { documentId: string; collectionId: string | null; revision: number };
-export type KnowledgeCatalog = { canManage: boolean; topics: CatalogEntry[]; collections: CollectionEntry[] };
-export type CatalogKind = "topics" | "collections";
+export type KnowledgeCatalog = { canManage: boolean; collections: CollectionEntry[] };
+export type CatalogKind = "collections";
 export class CatalogError extends Error {
   constructor(readonly code: "UNAVAILABLE" | "INVALID" | "CONFLICT" | "DUPLICATE" | "UPGRADE_REQUIRED") { super(code); }
 }
@@ -93,9 +93,6 @@ export class PgKnowledgeCatalogStore implements KnowledgeCatalogStore {
           AND r.code = 'ORG_ADMIN' AND r.is_system AND r.status = 'ACTIVE'
           AND scope.organization_id = $2 AND scope.scope_type = 'ORGANIZATION' AND scope.status = 'ACTIVE'`, [userId, organizationId]);
       const canManage = Boolean(admin.rowCount);
-      const topics = await client.query<CatalogEntry>(`SELECT topic_id AS id, name, description, status,
-        configuration_version AS version FROM knowledge_topic WHERE organization_id = $1
-        AND ($2 OR status = 'ACTIVE') ORDER BY name, topic_id`, [organizationId, canManage]);
       const collections = await client.query<CollectionEntry>(`SELECT c.collection_id AS id, c.name,
         c.description, c.status, c.configuration_version AS version, c.cover, c.allowed_types AS "allowedTypes",
         ARRAY(SELECT cp.published_version_id::text FROM knowledge_collection_placement p
@@ -105,7 +102,7 @@ export class PgKnowledgeCatalogStore implements KnowledgeCatalogStore {
           ORDER BY p.shared_draft_id) AS "documentIds"
         FROM knowledge_collection c WHERE c.organization_id = $1 AND ($2 OR c.status = 'ACTIVE')
         ORDER BY c.name, c.collection_id`, [organizationId, canManage]);
-      return { canManage, topics: topics.rows, collections: collections.rows.flatMap(collection => {
+      return { canManage, collections: collections.rows.flatMap(collection => {
         const documentIds = collection.documentIds.filter(id => eligible.has(id));
         // Admin can repair empty/unconfigured shells; members discover only
         // folders with currently eligible common sources, never legacy counts.
@@ -121,7 +118,7 @@ export class PgKnowledgeCatalogStore implements KnowledgeCatalogStore {
     if (input.documentIds !== undefined) throw new CatalogError("UPGRADE_REQUIRED");
     if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name) || description.length > 300
       || !["ACTIVE", "INACTIVE"].includes(input.status)
-      || (kind === "topics" && (input.allowedTypes !== undefined || input.cover !== undefined))
+      || kind !== "collections"
       || (kind === "collections" && (!input.allowedTypes?.length || input.allowedTypes.length > knowledgeTypes.length
         || new Set(input.allowedTypes).size !== input.allowedTypes.length
         || input.allowedTypes.some(type => !knowledgeTypes.includes(type))))) throw new CatalogError("INVALID");
@@ -129,8 +126,8 @@ export class PgKnowledgeCatalogStore implements KnowledgeCatalogStore {
       const result = await this.withAdmin(userId, organizationId, async (client, actor) => {
         // Shared with placement mutations; DB triggers also serialize worker eligibility changes.
         await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`arden:knowledge-catalog:${organizationId}`]);
-        const table = kind === "topics" ? "knowledge_topic" : "knowledge_collection";
-        const key = kind === "topics" ? "topic_id" : "collection_id";
+        const table = "knowledge_collection";
+        const key = "collection_id";
         if (id) {
           const previous = await client.query<{ version: number }>(`SELECT configuration_version AS version FROM ${table}
             WHERE organization_id = $1 AND ${key} = $2 FOR UPDATE`, [organizationId, id]);

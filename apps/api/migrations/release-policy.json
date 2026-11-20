@@ -246,6 +246,12 @@
       "filename": "0041_verified_legacy_metadata_repair.sql",
       "sha256": "44686c735d8530a08fe57affb20c824303d75dc0a3e29cfe50ebc4ebf73c848f",
       "rollout": "operator"
+    },
+    {
+      "id": "0042",
+      "filename": "0042_remove_knowledge_topics.sql",
+      "sha256": "9cb358fd62a25214c9c137e4c7fdd875d5dcead6aabae165557cf350c719ac7e",
+      "rollout": "operator"
     }
   ]
 }

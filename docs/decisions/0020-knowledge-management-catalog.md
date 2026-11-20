@@ -25,6 +25,9 @@ Legacy links remain stored but are excluded if ineligible. No new cardinality,
 version-following, Allowed types or Archive behavior is inferred from this guard.
 Partly superseded by [0021](0021-reader-email-search-and-no-document-code.md) (14 November 2026): Document Code
 is retired and the reader lookup searches by name or email; the rest of this decision stands.
+Partly superseded by [0027](0027-remove-knowledge-topics.md) (18 November 2026): Topic is removed (form,
+submission, Discover, catalog, schema and draft data); frozen snapshots keep historical keys unread.
+Type, Collections and the remaining metadata stand.
 
 ## Decision
 

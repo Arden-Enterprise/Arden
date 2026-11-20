@@ -8,15 +8,14 @@ import { KnowledgeMetadataFields, editableKnowledgeMetadata } from "../src/knowl
 import { emptyKnowledgeMetadata } from "@arden/domain";
 import * as api from "../src/shared/api-client";
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
-const topic = { id: "topic", name: "People & work", description: "", status: "ACTIVE" as const, version: 1 };
 const collection = { id: "collection", name: "Employee handbook", description: "Start here", status: "ACTIVE" as const, version: 1,
   cover: "handbook" as const, documentIds: ["readable"] };
-const catalog: api.KnowledgeCatalog = { canManage: false, topics: [topic], collections: [collection] };
+const catalog: api.KnowledgeCatalog = { canManage: false, collections: [collection] };
 const publication: api.PublishedKnowledge = { id: "readable", draftId: "draft", title: "Working together", classification: "INTERNAL",
   targetReaders: { mode: "ORGANIZATION", departmentId: null },
   responsibleDepartmentId: "hr", responsibleDepartmentName: "HR", audienceIds: [], contentHash: "hash",
   publishedAt: "2026-11-12T10:00:00Z", validFrom: "2026-11-12T10:00:00Z", validUntil: null,
-  management: { type: "Guide", topicId: topic.id, topicName: topic.name, version: "1.0", effectiveDate: "2027-01-01",
+  management: { type: "Guide", version: "1.0", effectiveDate: "2027-01-01",
     expirationDate: null, changeNote: "", releaseKind: "NEW" } };
 describe("live Library management components", () => {
   it("keeps a selected active Collection visible when its last document disappears", () => {
@@ -45,7 +44,7 @@ describe("live Library management components", () => {
     const legacy = { ...publication, id: "legacy", title: "Policy guide", management: null };
     expect(filterLibrary([legacy], catalog, "", { ...emptyLibraryFilters(), type: "Guide" })).toEqual([]);
   });
-  it("browses a real collection and topic, and does not expose admin controls to members", () => {
+  it("browses a real collection, filters without a Topic control, and does not expose admin controls to members", () => {
     const onOpen = vi.fn();
     function Browse() {
       const [filters, setFilters] = useState(emptyLibraryFilters), [discover, setDiscover] = useState(true);
@@ -58,6 +57,7 @@ describe("live Library management components", () => {
     expect(screen.getByRole("button", { name: /Employee handbook/ }).querySelector("img")?.getAttribute("src")).toContain("employee-handbook.png");
     fireEvent.click(screen.getByRole("button", { name: /Employee handbook/ }));
     expect(screen.getByRole("combobox", { name: "Type" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Topic" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Read Working together" })); expect(onOpen).toHaveBeenCalledWith("readable");
     fireEvent.change(screen.getByRole("combobox", { name: "Type" }), { target: { value: "Procedure" } });
     expect(screen.getByText("No results")).toBeTruthy();
@@ -120,11 +120,11 @@ describe("live Library management components", () => {
     expect(screen.queryByText(/Ask an Org Admin to add a Topic/)).toBeNull();
   });
   it("clears retired Topic input on new saves without modifying historical response metadata", () => {
-    const legacy = publication.management!;
-    expect(editableKnowledgeMetadata(legacy)).toEqual({ type: "Guide", topicId: null, version: "1.0",
+    const legacy = { ...publication.management!, topicId: "legacy-topic", topicName: "Legacy topic" };
+    expect(editableKnowledgeMetadata(legacy)).toEqual({ type: "Guide", version: "1.0",
       effectiveDate: null, expirationDate: null, changeNote: "" });
-    expect(legacy.topicId).toBe(topic.id);
-    expect(legacy.topicName).toBe(topic.name);
+    expect(legacy.topicId).toBe("legacy-topic");
+    expect(legacy.topicName).toBe("Legacy topic");
     expect(legacy.effectiveDate).toBe("2027-01-01");
   });
   it("says when a pasted email is not a member of the organization (decision 0021)", async () => {

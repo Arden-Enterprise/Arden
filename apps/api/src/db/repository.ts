@@ -102,7 +102,7 @@ export type UpdateSharedDraftResult =
   | { kind: "invalid-target-readers"; field: TargetReadersField; reason: string }
   | { kind: "updated"; draft: SharedKnowledgeDraft };
 export type SharedKnowledgeSubmission = {
-  management?: (KnowledgeMetadata & { topicName?: string }) | null;
+  management?: KnowledgeMetadata | null;
   id: string;
   draftId: string;
   snapshotVersionId: string;
@@ -249,7 +249,7 @@ export type DecideReviewResult =
   | { kind: "not-found" }
   | { kind: "conflict" };
 export type PublishedKnowledge = {
-  management?: (KnowledgeMetadata & { topicName?: string }) | null;
+  management?: KnowledgeMetadata | null;
   id: string;
   draftId: string;
   title: string;
@@ -267,7 +267,7 @@ export type PublishedKnowledge = {
 };
 export type AuthorizedAiSource = {
   documentCode?: string | null;
-  management?: (KnowledgeMetadata & { topicName?: string }) | null;
+  management?: KnowledgeMetadata | null;
   chunks: unknown;
   generationId: string;
   snapshotVersionId: string;
@@ -366,7 +366,7 @@ const sharedDraftSelect = `
 
 function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnowledgeDraft {
   return {
-    management: row.management, hasPublishedVersion: row.has_published_version,
+    management: withoutTopic(row.management), hasPublishedVersion: row.has_published_version,
     id: row.shared_draft_id,
     organizationId,
     title: row.title,
@@ -389,7 +389,7 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
   };
 }
 type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
-  management: (KnowledgeMetadata & { topicName?: string }) | null;
+  management: KnowledgeMetadata | null;
   submission_id: string;
   shared_draft_id: string;
   shared_draft_version_id: string;
@@ -451,6 +451,12 @@ type GovernanceViewRow = {
   mime_type: string; responsible_department_id: string | null; reader_mode: GovernanceReaderMode;
   reader_department_id: string | null;
 };
+/** Decision0027: versions frozen before migration0042 keep historical Topic keys; Arden never returns them. */
+function withoutTopic<T extends object>(management: T | null | undefined): T | null {
+  if (!management) return null;
+  const { topicId: _topicId, topicName: _topicName, ...rest } = management as T & { topicId?: unknown; topicName?: unknown };
+  return rest as T;
+}
 function mapGovernanceView(row: GovernanceViewRow): GovernanceDocumentView {
   return { documentId: row.document_id, publishedVersionId: row.published_version_id, title: row.title,
     sourceUri: row.content_uri, contentHash: row.content_hash, mimeType: row.mime_type,
@@ -462,7 +468,7 @@ function sqlStateOf(error: unknown): string | null {
 }
 function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmission {
   return {
-    management: row.management,
+    management: withoutTopic(row.management),
     id: row.submission_id,
     draftId: row.shared_draft_id,
     snapshotVersionId: row.shared_draft_version_id,
@@ -532,7 +538,7 @@ function reviewAuthorizationFromRow(row: SharedSubmissionRow, organizationId: st
   };
 }
 type PublishedKnowledgeRow = ReaderSelectionColumns & {
-  management: (KnowledgeMetadata & { topicName?: string }) | null;
+  management: KnowledgeMetadata | null;
   published_version_id: string;
   shared_draft_id: string;
   title: string;
@@ -548,7 +554,7 @@ type PublishedKnowledgeRow = ReaderSelectionColumns & {
 };
 type AuthorizedAiSourceRow = ReaderSelectionColumns & {
   document_code: string | null;
-  management: (KnowledgeMetadata & { topicName?: string }) | null;
+  management: KnowledgeMetadata | null;
   chunks: unknown;
   generation_id: string;
   snapshot_version_id: string;
@@ -574,7 +580,7 @@ const publishedKnowledgeSelect = `
       AND owner_department.organization_id = cp.organization_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
   return {
-    management: row.management,
+    management: withoutTopic(row.management),
     id: row.published_version_id,
     draftId: row.shared_draft_id,
     title: row.title,
@@ -1680,10 +1686,8 @@ export class ArdenRepository implements ArdenDataRepository {
       let management: (KnowledgeMetadata & { schemaVersion?: number }) | null = current.management ?? null;
       if (patch.management !== undefined) {
         if (!validKnowledgeMetadata(patch.management)) return { kind: "invalid-metadata" };
-        // Topic is retired from contribution. Accept old clients without retaining
-        // their Topic reference; never rewrite previously frozen snapshots.
         const value = patch.management;
-        management = { schemaVersion: 1, type: value.type, topicId: null, version: value.version.trim(),
+        management = { schemaVersion: 1, type: value.type, version: value.version.trim(),
           effectiveDate: value.effectiveDate, expirationDate: value.expirationDate, changeNote: value.changeNote.trim() };
       }
       // Decision 0014: the responsible department always follows the author's primary department.
@@ -2467,7 +2471,7 @@ export class ArdenRepository implements ArdenDataRepository {
          LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null, versionScope]);
       if (result.rows.length > 500) throw new Error("Authorized source count exceeds the request budget");
       return result.rows.map((row) => ({
-        documentCode: row.document_code, management: row.management,
+        documentCode: row.document_code, management: withoutTopic(row.management),
         generationId: row.generation_id,
         chunks: row.chunks,
         snapshotVersionId: row.snapshot_version_id,

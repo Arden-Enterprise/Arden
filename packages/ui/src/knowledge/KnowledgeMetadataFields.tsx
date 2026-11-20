@@ -5,9 +5,9 @@ import { TargetReadersField } from "./TargetReadersField";
 
 export function editableKnowledgeMetadata(value: KnowledgeMetadata): KnowledgeMetadata {
   // The response may carry server-owned snapshot labels; never send them as inputs.
-  // Topic is retained only for historical reads, not new contribution metadata.
+  // Historical Topic JSON stays in storage; response/input projections omit it.
   // A publication is in force from approval (requested 15 Nov 2026), so saving clears any older effective date.
-  return { type: value.type, topicId: null, version: value.version, effectiveDate: null,
+  return { type: value.type, version: value.version, effectiveDate: null,
     expirationDate: value.expirationDate, changeNote: value.changeNote };
 }
 

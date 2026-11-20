@@ -31,7 +31,7 @@ describe("publication request review presentation", () => {
     vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
     vi.spyOn(api, "listKnowledgeReviewBoard").mockResolvedValue({ items: [board], decided: [] });
     vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({ departments: [{ id: "hr", name: "HR" }], audiences: [] });
-    vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
+    vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, collections: [] });
     vi.spyOn(api, "loadKnowledgeReview").mockResolvedValue(detail);
     const decide = vi.spyOn(api, "decideKnowledgeReview").mockResolvedValue({ ...detail, status: "APPROVED" });
     render(createElement(ServerKnowledgeFeaturePage, { platform: "web", organizationId: "org", organizationName: "Test",

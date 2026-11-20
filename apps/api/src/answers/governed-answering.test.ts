@@ -18,7 +18,7 @@ function fixture() {
   const source: AuthorizedAiSource = { ...evidence, publishedVersionId: randomUUID(), draftId: randomUUID(),
     title: "Access guide", versionNo: 27, classification: "INTERNAL", targetScopeType: "ORGANIZATION",
     targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] }, documentCode: "NS-IT-001",
-    management: { type: "Guide", topicId: randomUUID(), version: "2.1", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "" },
+    management: { type: "Guide", version: "2.1", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "" },
     chunks: [{ ...evidence }] };
   const store = new MemoryConversationStore();
   let permitted = true;

@@ -1,5 +1,19 @@
 # Implementation status and rollout boundaries
 
+## Topic contraction integration —20 November2026
+
+PR58 follows PR60's flat Organization Collection contract and notifications0039.
+Unapplied Topic SQL is allocated0042; no merged notification/Collection SQL is
+rewritten. Authoring/domain/API/desktop/source labels no longer use Topic.
+Historical frozen JSON is retained in storage and omitted from response projections.
+An old client sending Topic metadata is rejected with400. Admin management,
+Allowed types, placement and reader permissions remain governed by ADR0026.
+See [ADR0027](../decisions/0027-remove-knowledge-topics.md). Local typecheck/build,
+focused UI44 and Python126/7 skips pass. Full final CI and real post-ownership
+PostgreSQL evidence are tracked in PR58. No live SQL/deployment is claimed.
+The new notification/Collection/repair/Topic chain needs fresh operator rehearsal
+and authority before live activation; shared Coolify helper recovery remains pending.
+
 ## Knowledge organization KM2-P4A — local Home composition, 19 November
 
 Home now separates Organization, Shared with me and a conditional Other documents

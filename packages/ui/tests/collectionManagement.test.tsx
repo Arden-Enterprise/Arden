@@ -10,7 +10,7 @@ import { installTestDialogs } from "./dialogTestSupport";
 
 const folder: api.KnowledgeCollection = { id: "folder", name: "Working guides", description: "", status: "ACTIVE", version: 3,
   cover: "handbook", allowedTypes: ["Guide"], documentIds: [] };
-const catalog: api.KnowledgeCatalog = { canManage: true, topics: [], collections: [folder] };
+const catalog: api.KnowledgeCatalog = { canManage: true, collections: [folder] };
 const source: api.PublishedKnowledge = { id: "exact-version", draftId: "logical-document", title: "Access request guide", classification: "INTERNAL",
   targetReaders: { mode: "ORGANIZATION", departmentId: null }, responsibleDepartmentId: "hr", audienceIds: [], contentHash: "hash",
   publishedAt: "2026-11-19T00:00:00Z", validFrom: "2026-11-19T00:00:00Z", validUntil: null,

@@ -75,9 +75,10 @@ describe("Topic-free contribution readiness", () => {
     expect(screen.getByRole("button", { name: "Submit for review", exact: true }).hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Save changes", exact: true }));
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
-    expect(save.mock.calls[0]![4]).toMatchObject({ management: { topicId: null, type: "Guide", version: "1.0" },
+    expect(save.mock.calls[0]![4]).toMatchObject({ management: { type: "Guide", version: "1.0" },
       targetReaders: value.targetReaders });
     expect(save.mock.calls[0]![4]).not.toHaveProperty("collectionId");
+    expect(save.mock.calls[0]![4]?.management).not.toHaveProperty("topicId");
     expect(value.management?.topicId).toBe("legacy-topic");
   });
 });

@@ -100,7 +100,7 @@ export function evidenceMatchesManifest(evidence: Evidence, source: Pick<Authori
 export function sourceLabel(source: AuthorizedAiSource): string {
   const metadata = source.management;
   return [source.documentCode, source.title, metadata?.version ? `Version ${metadata.version}` : null,
-    metadata?.type, metadata?.topicName, metadata?.effectiveDate ? `Effective ${metadata.effectiveDate}` : null,
+    metadata?.type, metadata?.effectiveDate ? `Effective ${metadata.effectiveDate}` : null,
     metadata?.expirationDate ? `Expires ${metadata.expirationDate}` : null].filter(Boolean).join(" · ").slice(0, 800);
 }
 
