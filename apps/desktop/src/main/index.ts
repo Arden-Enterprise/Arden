@@ -3,6 +3,7 @@ import { readFile, rename, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { RealtimeClient, type RealtimeChannel } from "@supabase/realtime-js";
 import { desktopApiResponseLimit, desktopApiTimeout, validateDesktopApiRequest, type DesktopApiRequest } from "./apiRequestPolicy";
 
 type DesktopApiResponse = { status: number; body: string; etag?: string; location?: string };
@@ -12,6 +13,18 @@ const outputDirectory = fileURLToPath(new URL(".", import.meta.url));
 const sessionFile = () => join(app.getPath("userData"), "auth-session.enc");
 let cookieJar: CookieJar | null = null;
 let requestQueue: Promise<void> = Promise.resolve();
+let notificationLifecycle: Promise<void> = Promise.resolve();
+let notificationClient: RealtimeClient | null = null;
+let notificationChannel: RealtimeChannel | null = null;
+let notificationWindow: BrowserWindow | null = null;
+let notificationOrganizationId: string | null = null;
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+type MainNotificationCredential = { endpoint: string; apiKey: string; accessToken: string; topic: string; expiresAt: string };
+
+class NotificationCredentialError extends Error {
+  constructor(readonly status: number) { super("Notification updates are unavailable"); }
+}
 
 function isTrustedRenderer(event: Electron.IpcMainInvokeEvent): boolean {
   const window = BrowserWindow.fromWebContents(event.sender);
@@ -117,6 +130,121 @@ async function doApiRequest(request: DesktopApiRequest): Promise<DesktopApiRespo
   }
 }
 
+function enqueueNotificationLifecycle(work: () => Promise<void>): Promise<void> {
+  const current = notificationLifecycle.then(work, work);
+  notificationLifecycle = current.catch(() => undefined);
+  return current;
+}
+
+async function requestNotificationCredential(organizationId: string): Promise<MainNotificationCredential> {
+  const request = requestQueue.then(() => doApiRequest({
+    path: `/api/v1/organizations/${organizationId}/notifications/realtime-credential`, method: "GET",
+  }));
+  requestQueue = request.then(() => undefined, () => undefined);
+  const response = await request;
+  if (response.status !== 200) throw new NotificationCredentialError(response.status);
+  let parsed: unknown;
+  try { parsed = JSON.parse(response.body); }
+  catch { throw new Error("Notification updates are unavailable"); }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("Notification updates are unavailable");
+  const value = parsed as Record<string, unknown>;
+  if (typeof value.endpoint !== "string" || typeof value.apiKey !== "string" || typeof value.accessToken !== "string"
+    || typeof value.topic !== "string" || typeof value.expiresAt !== "string") throw new Error("Notification updates are unavailable");
+  let endpoint: URL;
+  try { endpoint = new URL(value.endpoint); }
+  catch { throw new Error("Notification updates are unavailable"); }
+  const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname);
+  const expiry = Date.parse(value.expiresAt);
+  const topicParts = value.topic.split(":");
+  if ((endpoint.protocol !== "https:" && !(endpoint.protocol === "http:" && loopback))
+    || endpoint.username || endpoint.password || endpoint.search || endpoint.hash
+    || endpoint.pathname.replace(/\/$/, "") !== "/realtime/v1"
+    || value.apiKey.length < 16 || value.apiKey.length > 4096
+    || value.accessToken.length > 8192 || !/^[-A-Za-z0-9_.]+$/.test(value.accessToken)
+    || !Number.isFinite(expiry) || expiry <= Date.now() || expiry > Date.now() + 150_000
+    || topicParts.length !== 4 || topicParts[0] !== "arden-notifications"
+    || !/^[a-z0-9][a-z0-9_-]{1,39}$/.test(topicParts[1] ?? "")
+    || topicParts[2] !== organizationId || !uuidPattern.test(topicParts[3] ?? "")) {
+    throw new Error("Notification updates are unavailable");
+  }
+  return { endpoint: endpoint.toString().replace(/\/$/, ""), apiKey: value.apiKey,
+    accessToken: value.accessToken, topic: value.topic, expiresAt: value.expiresAt };
+}
+
+async function disposeNotificationStream(): Promise<void> {
+  const currentClient = notificationClient;
+  const currentChannel = notificationChannel;
+  notificationClient = null;
+  notificationChannel = null;
+  notificationWindow = null;
+  notificationOrganizationId = null;
+  if (currentClient && currentChannel) await currentClient.removeChannel(currentChannel).catch(() => undefined);
+  currentClient?.disconnect();
+}
+
+function startNotificationStream(parent: BrowserWindow, organizationId: string): Promise<void> {
+  return enqueueNotificationLifecycle(async () => {
+    if (notificationClient && notificationOrganizationId === organizationId && notificationWindow === parent) return;
+    await disposeNotificationStream();
+    if (parent.isDestroyed()) return;
+    let credential = await requestNotificationCredential(organizationId);
+    let refreshPromise: Promise<MainNotificationCredential> | null = null;
+    const refresh = async () => {
+      if (Date.parse(credential.expiresAt) > Date.now() + 45_000) return credential;
+      refreshPromise ??= requestNotificationCredential(organizationId).finally(() => { refreshPromise = null; });
+      try {
+        const next = await refreshPromise;
+        if (next.endpoint !== credential.endpoint || next.apiKey !== credential.apiKey || next.topic !== credential.topic) {
+          throw new Error("Notification channel scope changed");
+        }
+        credential = next;
+        return credential;
+      } catch (error) {
+        if (error instanceof NotificationCredentialError && (error.status === 401 || error.status === 404)) {
+          if (!parent.isDestroyed()) parent.webContents.send("arden:notification-status", "session-ended");
+          void stopNotificationStream();
+        }
+        throw error;
+      }
+    };
+    const client = new RealtimeClient(credential.endpoint, {
+      params: { apikey: credential.apiKey },
+      accessToken: async () => (await refresh()).accessToken,
+    });
+    const channel = client.channel(credential.topic, { config: { private: true } });
+    let subscribed = false;
+    channel.on("broadcast", { event: "notification" }, (message) => {
+      const payload = typeof message === "object" && message !== null && "payload" in message
+        ? (message as { payload?: unknown }).payload : null;
+      const notificationId = typeof payload === "object" && payload !== null && "notificationId" in payload
+        ? (payload as { notificationId?: unknown }).notificationId : null;
+      if (typeof notificationId === "string" && uuidPattern.test(notificationId)
+        && !parent.isDestroyed() && notificationWindow === parent) {
+        parent.webContents.send("arden:notification-event", notificationId);
+      }
+    });
+    channel.subscribe((status) => {
+      if (status === "SUBSCRIBED") {
+        if (!parent.isDestroyed() && notificationWindow === parent) {
+          parent.webContents.send("arden:notification-status", subscribed ? "reconnected" : "connected");
+        }
+        subscribed = true;
+      } else if ((status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED")
+        && !parent.isDestroyed() && notificationWindow === parent) {
+        parent.webContents.send("arden:notification-status", "disconnected");
+      }
+    });
+    notificationClient = client;
+    notificationChannel = channel;
+    notificationWindow = parent;
+    notificationOrganizationId = organizationId;
+  });
+}
+
+function stopNotificationStream(): Promise<void> {
+  return enqueueNotificationLifecycle(disposeNotificationStream);
+}
+
 ipcMain.handle("arden:api-request", async (event, value: unknown) => {
   if (!isTrustedRenderer(event)) throw new Error("Untrusted IPC sender");
   if (!validateDesktopApiRequest(value)) throw new Error("Invalid desktop API request");
@@ -126,8 +254,34 @@ ipcMain.handle("arden:api-request", async (event, value: unknown) => {
   return current;
 });
 
+ipcMain.handle("arden:notifications:start", async (event, organizationId: unknown) => {
+  if (!isTrustedRenderer(event)) throw new Error("Untrusted IPC sender");
+  const parent = BrowserWindow.fromWebContents(event.sender);
+  if (!parent || typeof organizationId !== "string" || !uuidPattern.test(organizationId)) {
+    throw new Error("Invalid notification stream request");
+  }
+  try { await startNotificationStream(parent, organizationId); }
+  catch (error) {
+    if (error instanceof NotificationCredentialError && (error.status === 401 || error.status === 404)) {
+      parent.webContents.send("arden:notification-status", "session-ended");
+    }
+    await stopNotificationStream();
+    throw new Error("Notification updates are unavailable");
+  }
+});
+
+ipcMain.handle("arden:notifications:stop", async (event, organizationId: unknown) => {
+  if (!isTrustedRenderer(event)) throw new Error("Untrusted IPC sender");
+  if (organizationId !== undefined && (typeof organizationId !== "string" || !uuidPattern.test(organizationId))) {
+    throw new Error("Invalid notification stream request");
+  }
+  if (typeof organizationId === "string" && notificationOrganizationId !== organizationId) return;
+  await stopNotificationStream();
+});
+
 ipcMain.handle("arden:session:clear", async (event) => {
   if (!isTrustedRenderer(event)) throw new Error("Untrusted IPC sender");
+  await stopNotificationStream();
   cookieJar = new Map();
   await rm(sessionFile(), { force: true });
 });
@@ -225,6 +379,9 @@ function createWindow() {
       sandbox: true,
       webSecurity: true
     }
+  });
+  window.once("closed", () => {
+    if (notificationWindow === window) void stopNotificationStream();
   });
 
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));

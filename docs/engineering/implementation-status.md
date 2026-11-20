@@ -1,5 +1,20 @@
 # Implementation status and rollout boundaries
 
+## In-app notifications — feature checkout, 19 November 2026
+
+The [F21 specification](../product/in-app-notifications.md) and [decision 0025](../decisions/0025-in-app-notifications.md)
+record a shared PostgreSQL inbox, transactional outbox and Supabase Realtime ID-only
+signals for web and Windows desktop. Feature code, migration 0039, operator policy,
+and client UI are in `feat/in-app-notifications`, based on staging `af289152` after
+inspection of main `9fa3d34a`. Typecheck, workspace tests, remote workflow tests, build
+and migration inventory checks pass. PostgreSQL integration files are skipped because
+no disposable database is configured and Docker Engine is unavailable; no migration or
+RLS rehearsal, Realtime policy/token probe, staging end-to-end, publication, merge or
+deployment is claimed. Linear tracking was unavailable because no connector was configured.
+Do not enable Realtime until its exact JWT verifier, roles, policies, TLS/WSS proxy,
+namespace and CSP are verified for the target environment. Decision 0024's inspection
+notification deferral remains in force.
+
 ## Minimal reader lifecycle refinement — review preparation, 15 November 2026
 
 After the focus/panel diagnosis, the maintainer approved the
@@ -75,6 +90,6 @@ The repository has the shared React frontend for web/Electron: the Island worksp
 - The `feat/identity-invitation-review` bundle includes the invitation email logo, batch invitations, account password guidance and link-only recovery, 24-hour sessions, reviewer-grant deduplication/history, and shared-draft version history. Source branches report focused checks for their individual changes; tests and builds have not been rerun on the combined branch. Live SMTP/mail-client rendering, Supabase acceptance, Electron interaction, and deployment remain unverified.
 - Current tooling: Node.js 24 in CI, pnpm 11.19.0, strict TypeScript, React/Vite, Electron/electron-vite, Fastify with `pg`, PostgreSQL 17 via a pgvector image, and Vitest. Exact versions come from manifests and lockfile.
 - Manual local Mainflow 1 browser testing before Supabase setup may use the fenced auth/mail-sink mode documented in `docs/engineering/operations.md`; it requires an isolated loopback `arden_test_*` database and synthetic accounts. It must never use a tunnel or Coolify target. The historical Kiet hosted no-login adapter requires its exact earlier PostgreSQL host/database, development mode, absent Supabase configuration, and SSH-only API exposure; it is inactive in the current four Supabase-authenticated slots. Do not remove Auth settings or change database targets to enable it. Neither test mode may run in production or staging. Treat historical rehearsals as evidence only for their recorded targets; consult the current hosted layout before onboarding or operating a slot.
-- Planned: React Router, TanStack Query, Sigma.js/Graphology, Drizzle migrations for future schema authoring, pg-boss worker, an Ollama/private-endpoint model gateway, Supabase Realtime notifications, and Playwright coverage.
+- Planned: React Router, TanStack Query, Sigma.js/Graphology, Drizzle migrations for future schema authoring, pg-boss worker, an Ollama/private-endpoint model gateway, live Realtime authorization and Playwright coverage.
 - Planned does not mean installed, configured, secure, licensed for every use, or tested. Add only the part needed for the authorized feature, with compatibility/license review and tests.
 - Supabase is the accepted identity direction; this slice uses Supabase Auth behind Fastify while Arden's organization and content authorization remains server-owned. Web sessions use HttpOnly cookies and desktop uses OS-secure cookie storage. Supabase service-role keys stay server-only; do not run Better Auth or another parallel auth system. The [hybrid development guide](remote-development.md) covers four hosted API/database slots with local frontends. Do not add a graph database, Redis, Elasticsearch, Kubernetes, or a separate vector database without a documented need and accepted architecture decision.

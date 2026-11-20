@@ -8,6 +8,7 @@ import { registerGovernedAnsweringVerification } from "../answers/governed.integ
 import { PgIndexGenerationStore } from "../indexing/store.js";
 import type { IndexGenerationManifest } from "../indexing/contracts.js";
 import { canRead, type TargetReadersInput } from "../target-readers/policy.js";
+import { NotificationOutboxWorker } from "../notifications/outbox.js";
 
 const databaseUrl = process.env.ARDEN_TEST_DATABASE_URL;
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null;
@@ -39,6 +40,9 @@ let fixtureReady = false;
 let indexPool: Pool | null = null;
 const indexLogin = `arden_test_indexer_${ids.owner.replaceAll("-", "")}`;
 const indexPassword = randomUUID();
+let notificationPool: Pool | null = null;
+const notificationLogin = `arden_test_notifier_${ids.owner.replaceAll("-", "")}`;
+const notificationPassword = randomUUID();
 
 describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => {
   beforeAll(async () => {
@@ -63,8 +67,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0029_withdraw_pending_submission', '0031_deduplicate_reviewer_grants',
           '0032_governed_ai_sources_and_conversations', '0033_reader_directory_email',
           '0034_publication_change_requests', '0035_apply_publication_change_requests',
-          '0036_publication_preparation_retry', '0037_publication_governance')`);
-    if (migration.rows[0]?.count !== "23") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0036_publication_preparation_retry', '0037_publication_governance',
+          '0038_admin_only_direct_withdrawal', '0039_in_app_notifications')`);
+    if (migration.rows[0]?.count !== "25") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -131,12 +136,18 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       // belongs only to this already verified disposable test target.
       await client.query(`CREATE ROLE ${indexLogin} LOGIN PASSWORD '${indexPassword}' NOSUPERUSER NOBYPASSRLS NOINHERIT`);
       await client.query(`GRANT arden_indexer TO ${indexLogin}`);
+      await client.query(`CREATE ROLE ${notificationLogin} LOGIN PASSWORD '${notificationPassword}' NOSUPERUSER NOBYPASSRLS NOINHERIT`);
+      await client.query(`GRANT arden_notification_worker TO ${notificationLogin}`);
       await client.query("COMMIT");
       fixtureReady = true;
       const workerUrl = new URL(databaseUrl!);
       workerUrl.username = indexLogin;
       workerUrl.password = indexPassword;
       indexPool = new Pool({ connectionString: workerUrl.href, max: 2, connectionTimeoutMillis: 5000 });
+      const notificationUrl = new URL(databaseUrl!);
+      notificationUrl.username = notificationLogin;
+      notificationUrl.password = notificationPassword;
+      notificationPool = new Pool({ connectionString: notificationUrl.href, max: 2, connectionTimeoutMillis: 5000 });
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -151,6 +162,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     if (!pool) return;
     try {
       await indexPool?.end();
+      await notificationPool?.end();
       if (fixtureReady) {
         const client = await pool.connect();
         try {
@@ -204,6 +216,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
             [[ids.owner, ids.manager, ids.organizationReviewer, ...readerFixtures.map((reader) => reader.userId)]]);
           await client.query("DELETE FROM organization WHERE organization_id = $1", [ids.organization]);
           await client.query(`DROP ROLE ${indexLogin}`);
+          await client.query(`DROP ROLE ${notificationLogin}`);
           await client.query("ALTER TABLE draft_version ENABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_draft_version ENABLE TRIGGER USER");
           await client.query("ALTER TABLE shared_submission ENABLE TRIGGER USER");
@@ -232,6 +245,44 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(identity.rows).toEqual([{ rolsuper: false, rolbypassrls: false }]);
     await expect(indexPool.query("SELECT * FROM arden.draft_document LIMIT 1")).rejects.toMatchObject({ code: "42501" });
     await expect(new PgIndexGenerationStore(indexPool).claim(randomUUID(), 300)).resolves.toBeNull();
+  });
+
+  it("isolates notification outbox access to its dedicated non-bypass worker login", async () => {
+    if (!notificationPool || !pool) throw new Error("Notification worker fixture is unavailable");
+    const identity = await notificationPool.query<{ rolsuper: boolean; rolbypassrls: boolean }>(`
+      SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`);
+    expect(identity.rows).toEqual([{ rolsuper: false, rolbypassrls: false }]);
+    await expect(notificationPool.query("SELECT 1 FROM arden.arden_notification_outbox LIMIT 0"))
+      .rejects.toMatchObject({ code: "42501" });
+
+    const workerClient = await notificationPool.connect();
+    try {
+      await workerClient.query("BEGIN");
+      await workerClient.query("SET LOCAL ROLE arden_notification_worker");
+      await expect(workerClient.query("SELECT 1 FROM arden.arden_notification_outbox LIMIT 0")).resolves.toBeTruthy();
+      await workerClient.query("SAVEPOINT deny_private_content_read");
+      await expect(workerClient.query("SELECT 1 FROM arden.shared_submission LIMIT 0"))
+        .rejects.toMatchObject({ code: "42501" });
+      await workerClient.query("ROLLBACK TO SAVEPOINT deny_private_content_read");
+      await workerClient.query("SAVEPOINT deny_outbox_identity_update");
+      await expect(workerClient.query("UPDATE arden.arden_notification_outbox SET organization_id = $1 WHERE false",
+        [ids.organization])).rejects.toMatchObject({ code: "42501" });
+      await workerClient.query("ROLLBACK TO SAVEPOINT deny_outbox_identity_update");
+    } finally {
+      await workerClient.query("ROLLBACK").catch(() => undefined);
+      workerClient.release();
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE arden_runtime");
+      await expect(client.query("SELECT 1 FROM arden.arden_notification_outbox LIMIT 0"))
+        .rejects.toMatchObject({ code: "42501" });
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
   });
 
   it("enforces owner-only drafts, member creation, conflicts, and audit records through RLS", async () => {
@@ -437,6 +488,99 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       level: "STANDARD",
       status: "ACTIVE",
     });
+    if (!grant) throw new Error("Reviewer grant was not created");
+    if (!pool || !notificationPool || !repository.notifications) throw new Error("Notification store or worker is unavailable");
+    const grantNotification = await pool.query<{ notification_id: string; event_type: string }>(`
+      SELECT notification_id, event_type FROM arden.arden_notification
+      WHERE organization_id = $1 AND recipient_membership_id = $2 AND resource_id = $3
+        AND event_type = 'REVIEWER_GRANT_CREATED'`, [ids.organization, ids.organizationReviewerMembership, grant.id]);
+    expect(grantNotification.rows).toHaveLength(1);
+
+    const rollbackClient = await pool.connect();
+    try {
+      await rollbackClient.query("BEGIN");
+      await rollbackClient.query("SET LOCAL ROLE arden_runtime");
+      await rollbackClient.query("SET LOCAL search_path TO arden, public");
+      await rollbackClient.query(`SELECT set_config('arden.actor_id', $1, true),
+        set_config('arden.organization_id', $2, true), set_config('arden.org_admin', 'true', true)`,
+      [ids.owner, ids.organization]);
+      await rollbackClient.query("UPDATE reviewer_grant SET status = 'INACTIVE' WHERE reviewer_grant_id = $1", [grant.id]);
+      await rollbackClient.query("RESET ROLE");
+      const rolledBackEvent = await rollbackClient.query<{ count: string }>(`SELECT count(*)::text AS count
+        FROM arden.arden_notification WHERE recipient_membership_id = $1 AND resource_id = $2
+          AND event_type = 'REVIEWER_GRANT_REVOKED'`, [ids.organizationReviewerMembership, grant.id]);
+      expect(rolledBackEvent.rows[0]?.count).toBe("1");
+      await rollbackClient.query("ROLLBACK");
+    } finally {
+      await rollbackClient.query("ROLLBACK").catch(() => undefined);
+      rollbackClient.release();
+    }
+    const committedRevocations = await pool.query<{ count: string }>(`SELECT count(*)::text AS count
+      FROM arden.arden_notification WHERE recipient_membership_id = $1 AND resource_id = $2
+        AND event_type = 'REVIEWER_GRANT_REVOKED'`, [ids.organizationReviewerMembership, grant.id]);
+    expect(committedRevocations.rows[0]?.count).toBe("0");
+
+    const targetNotificationId = grantNotification.rows[0]!.notification_id;
+    const deliveredIds: string[] = [];
+    let deliveryAttempts = 0;
+    const worker = new NotificationOutboxWorker(randomUUID(), notificationPool, {
+      endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
+      signingKey: new TextEncoder().encode("ab".repeat(32)), namespace: "test-slot",
+    }, { info: () => undefined, warn: () => undefined, error: () => undefined }, async (_configuration, event) => {
+      if (event.notificationId !== targetNotificationId) return;
+      deliveredIds.push(event.notificationId);
+      if (deliveryAttempts++ === 0) throw new Error("REALTIME_HTTP_503");
+    });
+    await pool.query(`UPDATE arden.arden_notification_outbox
+      SET status = 'SENT', delivered_at = now()
+      WHERE organization_id = $1 AND notification_id <> $2 AND status = 'PENDING'`,
+    [ids.organization, targetNotificationId]);
+    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
+      WHERE notification_id = $1 AND status = 'PENDING'`, [targetNotificationId]);
+    await expect(worker.runOnce()).resolves.toBe(true);
+    const retrying = await pool.query<{ status: string; attempt_count: number; last_error_code: string }>(`
+      SELECT status, attempt_count, last_error_code FROM arden.arden_notification_outbox
+       WHERE notification_id = $1`, [targetNotificationId]);
+    expect(retrying.rows[0]).toMatchObject({ status: "PENDING", attempt_count: 1, last_error_code: "REALTIME_HTTP_503" });
+    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
+      WHERE notification_id = $1`, [targetNotificationId]);
+    await expect(worker.runOnce()).resolves.toBe(true);
+    const delivered = await pool.query<{ status: string; attempt_count: number }>(`
+      SELECT status, attempt_count FROM arden.arden_notification_outbox WHERE notification_id = $1`,
+    [targetNotificationId]);
+    expect(delivered.rows[0]).toEqual({ status: "SENT", attempt_count: 2 });
+    expect(deliveredIds).toEqual([targetNotificationId, targetNotificationId]);
+
+    await pool.query(`UPDATE arden.arden_notification_outbox
+      SET status = 'PENDING', attempt_count = 7, available_at = now(), delivered_at = NULL,
+          lease_owner = NULL, lease_expires_at = NULL, last_error_code = NULL
+      WHERE notification_id = $1`, [targetNotificationId]);
+    await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
+      WHERE notification_id = $1`, [targetNotificationId]);
+    const exhausted = new NotificationOutboxWorker(randomUUID(), notificationPool, {
+      endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
+      signingKey: new TextEncoder().encode("ab".repeat(32)), namespace: "test-slot",
+    }, { info: () => undefined, warn: () => undefined, error: () => undefined }, async () => {
+      throw new Error("REALTIME_HTTP_503");
+    });
+    await expect(exhausted.runOnce()).resolves.toBe(true);
+    const failed = await pool.query<{ status: string; attempt_count: number; last_error_code: string }>(`
+      SELECT status, attempt_count, last_error_code FROM arden.arden_notification_outbox
+       WHERE notification_id = $1`, [targetNotificationId]);
+    expect(failed.rows[0]).toEqual({ status: "FAILED", attempt_count: 8, last_error_code: "REALTIME_HTTP_503" });
+
+    const reviewerInbox = await repository.notifications.list(ids.organizationReviewer, ids.organization, {
+      cursor: null, unreadOnly: false, limit: 50, visibleReviewIds: [],
+    });
+    expect(reviewerInbox?.items).toContainEqual(expect.objectContaining({ type: "REVIEWER_GRANT_CREATED",
+      resourceId: grant.id, readAt: null }));
+    const ownerInbox = await repository.notifications.list(ids.owner, ids.organization, {
+      cursor: null, unreadOnly: false, limit: 50, visibleReviewIds: [],
+    });
+    expect(ownerInbox?.items).not.toContainEqual(expect.objectContaining({ resourceId: grant.id }));
+    await expect(repository.notifications.list(ids.owner, randomUUID(), {
+      cursor: null, unreadOnly: false, limit: 50, visibleReviewIds: [],
+    })).resolves.toBeNull();
     await expect(repository.getKnowledgeOptions(ids.owner, ids.organization))
       .resolves.toMatchObject({ organizationReviewerAvailable: true });
 
@@ -474,6 +618,16 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const limited = await submit("limited-scope", ids.readerAudience);
     const organizationWide = await submit("organization-scope", ids.organizationAudience);
+    const reviewResourceIds = await repository.notifications.listReviewRequestResourceIds(
+      ids.organizationReviewer, ids.organization, false);
+    expect(reviewResourceIds).not.toBeNull();
+    expect(reviewResourceIds).toContain(organizationWide.id);
+    expect(reviewResourceIds).not.toContain(limited.id);
+    const targetedReviewCandidates = [...Array.from({ length: 100 }, () => randomUUID()), ...(reviewResourceIds ?? [])];
+    const notificationReviews = await repository.listAssignedReviewsForSubmissions(
+      ids.organizationReviewer, ids.organization, targetedReviewCandidates);
+    expect(notificationReviews?.map(item => item.submissionId)).toContain(organizationWide.id);
+    expect(notificationReviews?.map(item => item.submissionId)).not.toContain(limited.id);
     const assigned = await repository.listAssignedReviews(ids.organizationReviewer,
       ids.organization);
     expect(assigned).not.toBeNull();
@@ -535,6 +689,11 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const legacyQueue = await repository.listAssignedReviews(ids.manager, ids.organization);
     expect(legacyQueue).not.toBeNull();
     expect(legacyQueue?.map(item => item.submissionId) ?? []).toContain(legacy.id);
+    const olderOwnedSubmissions = [...Array.from({ length: 100 }, () => randomUUID()), legacy.id];
+    await expect(repository.listOwnedKnowledgeSubmissionIds(ids.owner, ids.organization, olderOwnedSubmissions))
+      .resolves.toContain(legacy.id);
+    await expect(repository.listOwnedKnowledgeSubmissionIds(ids.manager, ids.organization, [legacy.id]))
+      .resolves.toEqual([]);
     await expect(pool.query<{ review_rule: string }>(
       "SELECT review_rule FROM arden.shared_submission WHERE submission_id = $1", [legacy.id]))
       .resolves.toMatchObject({ rows: [{ review_rule: "LEGACY" }] });
@@ -791,6 +950,10 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       reviewerMembershipId: ids.organizationReviewerMembership, scope: "ORGANIZATION", departmentId: null,
       classifications: ["INTERNAL"], teamTag: null, projectTag: null, validUntil: null,
     }, "t21-organization-grant")).not.toBeNull();
+    expect(await repository.createReviewerGrant(ids.owner, ids.organization, {
+      reviewerMembershipId: ids.managerMembership, scope: "DEPARTMENT", departmentId: ids.department,
+      classifications: ["INTERNAL"], level: "SENIOR", teamTag: null, projectTag: null, validUntil: null,
+    }, "t21-department-grant")).not.toBeNull();
 
     const submit = async (title: string, targetReaders: TargetReadersInput | null) => {
       const created = await repository.createNewKnowledgeDraft(ids.owner, ids.organization, {
@@ -811,6 +974,13 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           randomUUID(), `t21-${title}-submit`);
       if (submitted.kind !== "submitted") throw new Error("Draft was not submitted");
       const submission = submitted.submission;
+      const requestRecipients = await pool.query<{ recipient_membership_id: string }>(`
+        SELECT recipient_membership_id FROM arden.arden_notification
+         WHERE organization_id = $1 AND resource_id = $2 AND event_type = 'REVIEW_REQUESTED'`,
+      [ids.organization, submission.id]);
+      expect(requestRecipients.rows.map(row => row.recipient_membership_id)).toContain(ids.organizationReviewerMembership);
+      const legacyDepartmentRequest = requestRecipients.rows.some(row => row.recipient_membership_id === ids.managerMembership);
+      expect(legacyDepartmentRequest).toBe(legacyId !== null);
       const decide = (approvedReaders?: TargetReadersInput, key = randomUUID(), action: "APPROVE" | "REJECT" = "APPROVE") =>
         repository.decideReview(ids.organizationReviewer, ids.organization, submission.id, action,
           submission.snapshotVersionId, submission.contentHash, action === "REJECT" ? "Clarify" : null, key,

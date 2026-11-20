@@ -62,6 +62,8 @@ type Props = ContextControlProps & {
   active: boolean;
   createdDraftId: string | null;
   citationTarget?: KnowledgeNavigationTarget | null;
+  requestedReviewId?: string | null;
+  onReviewTargetHandled?: () => void;
   onAssignedReviewCount?: (count: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
   awaitingAssignment?: boolean;
@@ -85,7 +87,8 @@ function errorMessage(error: unknown): string {
 }
 
 export function ServerKnowledgeFeaturePage({ platform, organizationId, organizationName,
-  view, active, createdDraftId, citationTarget, onAssignedReviewCount, onDirtyChange, awaitingAssignment = false, contextOpen, onToggleContext }: Props) {
+  view, active, createdDraftId, citationTarget, requestedReviewId, onReviewTargetHandled,
+  onAssignedReviewCount, onDirtyChange, awaitingAssignment = false, contextOpen, onToggleContext }: Props) {
   const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
   const [submissions, setSubmissions] = useState<KnowledgeSubmission[]>([]);
   const [published, setPublished] = useState<PublishedKnowledge[]>([]);
@@ -139,6 +142,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const decisionRequest = useRef<{ action: "APPROVE" | "REJECT"; readers: string; key: string } | null>(null);
   const openedCreatedDraftId = useRef<string | null>(null);
   const openedCitationId = useRef<string | null>(null);
+  const requestedReviewHandled = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const chooseFileButton = useRef<HTMLButtonElement>(null);
   const decisionReason = useRef<HTMLTextAreaElement>(null);
@@ -311,6 +315,14 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
     const loaded = await loadKnowledgeReview(platform, organizationId, id);
     setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
   }); });
+
+  useEffect(() => {
+    if (!requestedReviewId) { requestedReviewHandled.current = null; return; }
+    if (!active || view !== "review-queue" || requestedReviewHandled.current === requestedReviewId) return;
+    requestedReviewHandled.current = requestedReviewId;
+    onReviewTargetHandled?.();
+    openReview(requestedReviewId);
+  }, [active, view, requestedReviewId, onReviewTargetHandled]);
 
   const requireDecisionReason = () => {
     setCommentSubmitted(true);

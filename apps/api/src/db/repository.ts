@@ -7,6 +7,7 @@ import type { VersionScope } from "../answers/governed-contracts.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
+import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
@@ -612,6 +613,7 @@ export type DeleteDepartmentResult =
   | { success: false; errorReason: "NOT_FOUND" | "BASE_DEPARTMENT" };
 
 export interface ArdenDataRepository {
+  readonly notifications?: NotificationStore;
   readonly readerSources?: ReaderSourceStore;
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
@@ -662,6 +664,8 @@ export interface ArdenDataRepository {
   submitKnowledgeDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number,
     idempotencyKey: string, requestId: string): Promise<SubmitKnowledgeDraftResult>;
   listKnowledgeSubmissions(userId: string, organizationId: string): Promise<SharedKnowledgeSubmission[] | null>;
+  listOwnedKnowledgeSubmissionIds(userId: string, organizationId: string,
+    submissionIds: readonly string[]): Promise<string[] | null>;
   retryKnowledgePublication(userId: string, organizationId: string, submissionId: string):
     Promise<RetryKnowledgePublicationResult>;
   listGovernancePublications(userId: string, organizationId: string): Promise<GovernancePublication[] | null>;
@@ -683,6 +687,8 @@ export interface ArdenDataRepository {
   createReviewerGrant(userId: string, organizationId: string, input: ReviewerGrantInput, requestId: string): Promise<ReviewerGrantRecord | null>;
   deactivateReviewerGrant(userId: string, organizationId: string, grantId: string, requestId: string): Promise<boolean>;
   listAssignedReviews(userId: string, organizationId: string): Promise<AssignedReview[] | null>;
+  listAssignedReviewsForSubmissions(userId: string, organizationId: string,
+    submissionIds: readonly string[]): Promise<AssignedReview[] | null>;
   /** Submissions this reviewer already decided (REV-02 Approved / Rejected groups), newest first. */
   listDecidedReviews(userId: string, organizationId: string): Promise<DecidedReview[] | null>;
   getAssignedReview(userId: string, organizationId: string, submissionId: string): Promise<ReviewDetail | null>;
@@ -733,12 +739,14 @@ function membershipPermissionSql(permissionParameter: "$2" | "$3" | "$4"): strin
 }
 
 export class ArdenRepository implements ArdenDataRepository {
+  readonly notifications: NotificationStore;
   readonly readerSources: ReaderSourceStore;
   readonly conversations: ConversationStore;
   readonly knowledgeCatalog: KnowledgeCatalogStore;
   readonly audienceGroups: AudienceGroupStore;
   readonly systemAdministration: SystemAdministrationStore;
   constructor(private readonly pool: Pool) {
+    this.notifications = new PgNotificationStore((user, org, work) => this.withActorContext(user, org, work));
     this.readerSources = new PgReaderSourceStore((user, org, work) => this.withActorContext(user, org, work));
     this.conversations = new PgConversationStore((user, org, work) => this.withActorContext(user, org, work));
     this.knowledgeCatalog = new PgKnowledgeCatalogStore((user, org, work) => this.withActorContext(user, org, work),
@@ -1866,6 +1874,22 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
+  /** Recheck authorship for specific notification resources without consulting the submissions page. */
+  async listOwnedKnowledgeSubmissionIds(userId: string, organizationId: string,
+    submissionIds: readonly string[]): Promise<string[] | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const membership = await this.activeActorMembership(client, userId, organizationId);
+      if (!membership) return null;
+      const uniqueSubmissionIds = [...new Set(submissionIds)];
+      if (uniqueSubmissionIds.length === 0) return [];
+      const result = await client.query<{ submission_id: string }>(`
+        SELECT s.submission_id FROM shared_submission s
+         WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2
+           AND s.submission_id = ANY($3::uuid[])`, [organizationId, membership, uniqueSubmissionIds]);
+      return result.rows.map(row => row.submission_id);
+    });
+  }
+
   /** Decision 0023 catalog. Null when the actor is not a current Organization Admin (0037 re-checks it). */
   async listGovernancePublications(userId: string, organizationId: string): Promise<GovernancePublication[] | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
@@ -2176,8 +2200,9 @@ export class ArdenRepository implements ArdenDataRepository {
   async deactivateReviewerGrant(userId: string, organizationId: string, grantId: string,
     requestId: string): Promise<boolean> {
     const result = await this.withOrganizationAdmin(userId, organizationId, async (client, adminMembershipId) => {
-      const updated = await client.query(`UPDATE reviewer_grant SET status = 'INACTIVE'
-        WHERE reviewer_grant_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [grantId, organizationId]);
+      const updated = await client.query<{ reviewer_membership_id: string }>(`UPDATE reviewer_grant SET status = 'INACTIVE'
+        WHERE reviewer_grant_id = $1 AND organization_id = $2 AND status = 'ACTIVE'
+        RETURNING reviewer_membership_id`, [grantId, organizationId]);
       if (updated.rowCount === 0) return false;
       await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id,
         event_type, outcome, details_json) VALUES ($1, $2, 'REVIEWER_GRANT_DEACTIVATED', 'SUCCESS', $3::jsonb)`, [
@@ -2189,16 +2214,34 @@ export class ArdenRepository implements ArdenDataRepository {
   }
 
   async listAssignedReviews(userId: string, organizationId: string): Promise<AssignedReview[] | null> {
+    return this.listAssignedReviewsForResources(userId, organizationId, null);
+  }
+
+  /** Apply the same review policy as the queue, limited to notification resources rather than its first page. */
+  async listAssignedReviewsForSubmissions(userId: string, organizationId: string,
+    submissionIds: readonly string[]): Promise<AssignedReview[] | null> {
+    return this.listAssignedReviewsForResources(userId, organizationId, [...new Set(submissionIds)]);
+  }
+
+  private async listAssignedReviewsForResources(userId: string, organizationId: string,
+    submissionIds: string[] | null): Promise<AssignedReview[] | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const actor = await this.activeActorReviewContext(client, userId, organizationId);
       if (!actor) return null;
       const { membershipId } = actor;
       const grants = await this.loadActorReviewerGrants(client, membershipId, organizationId);
       if (!actor.isOrganizationAdmin && grants.length === 0) return [];
+      if (submissionIds !== null && submissionIds.length === 0) return [];
+      const resourceFilter = submissionIds === null ? "" : "AND s.submission_id = ANY($4::uuid[])";
+      const listLimit = submissionIds === null ? "LIMIT 100" : "";
+      const values = submissionIds === null
+        ? [organizationId, membershipId, actor.isOrganizationAdmin]
+        : [organizationId, membershipId, actor.isOrganizationAdmin, submissionIds];
       const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
         WHERE s.organization_id = $1 AND s.status = 'PENDING_REVIEW'
           AND ($3::boolean OR s.submitted_by_membership_id <> $2)
-        ORDER BY s.submitted_at DESC, s.submission_id DESC LIMIT 100`, [organizationId, membershipId, actor.isOrganizationAdmin]);
+          ${resourceFilter}
+        ORDER BY s.submitted_at DESC, s.submission_id DESC ${listLimit}`, values);
       const now = new Date();
       const candidates = await Promise.all(result.rows.map(async (row) => ({
         submissionId: row.submission_id,
@@ -2214,6 +2257,7 @@ export class ArdenRepository implements ArdenDataRepository {
         requestType: row.request_type,
       })));
       const assigned = listAssignedReviews({ actor, now, candidates });
+      if (submissionIds !== null) return assigned;
       // Names are resolved only for submissions the policy above already authorized.
       const names = await this.reviewAuthorNames(client, assigned.map((item) => item.submissionId));
       return assigned.map((item) => ({ ...item, authorName: names.get(item.submissionId) ?? null }));

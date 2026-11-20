@@ -12,6 +12,7 @@
     "tests/readerSummaryApi.test.ts",
     "tests/readerQuestion.test.tsx",
     "tests/citationTextMatch.test.ts",
-    "tests/inlineCitations.test.tsx"
+    "tests/inlineCitations.test.tsx",
+    "tests/notifications.test.tsx"
   ]
 }
