@@ -74,7 +74,7 @@ describe("knowledge catalog HTTP contract", () => {
     const { app, path, store } = setup();
     expect((await app.inject({ method: "POST", url: `${path}/roles`, payload: input })).statusCode).toBe(400);
     expect((await app.inject({ method: "POST", url: `${path}/collections`, payload: { ...input, permission: "read-all" } })).statusCode).toBe(400);
-    // Decision 0025: Topics are gone from the catalog API.
+    // Decision0027: Topics are gone from the catalog API.
     expect((await app.inject({ method: "POST", url: `${path}/topics`, payload: input })).statusCode).toBe(400);
     expect((await app.inject(`${path}/readers?ids=abc`)).statusCode).toBe(400);
     expect((await app.inject(`${path}/readers?q=Re&ids=${id}`)).statusCode).toBe(200);

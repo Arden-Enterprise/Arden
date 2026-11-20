@@ -130,7 +130,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
       { name: `Engineering practice ${suffix}`, description: "", status: "ACTIVE", allowedTypes: ["Guide"] }, "race")));
     expect(races.filter(result => result.status === "fulfilled")).toHaveLength(1);
     expect(races.filter(result => result.status === "rejected").map(result => result.reason.code)).toEqual(["CONFLICT"]);
-    // Decision 0025: the catalog has no Topics; an empty Collection shell is visible only to its manager.
+    // Decision0027: the catalog has no Topics; an empty Collection shell is visible only to its manager.
     expect((await catalog.list(member, org)).collections).toEqual([]);
     expect(Object.keys(await catalog.list(owner, org))).not.toContain("topics");
     expect((await catalog.list(member, org)).canManage).toBe(false);

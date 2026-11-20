@@ -83,7 +83,7 @@ Keep Arden's Island shell, typography, icons and violet/graphite palette. Librar
 has Discover, All documents and My Contributions; Reviews remains separate.
 Discover contains search, Type groups, optional curated Collections and newly
 published documents. All documents is a searchable register with Type and
-Owner Department filters. Topics were removed by [ADR 0025](../decisions/0027-remove-knowledge-topics.md) (18 November 2026). Returning from a reader preserves the Library selection.
+Owner Department filters. Topics were removed by [ADR0027](../decisions/0027-remove-knowledge-topics.md) (18 November 2026). Returning from a reader preserves the Library selection.
 Use original Arden artwork for collection covers, not reference-company assets.
 
 Required **at submission**, not draft save: Title, Type,

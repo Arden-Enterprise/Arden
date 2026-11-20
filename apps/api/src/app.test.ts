@@ -1397,7 +1397,7 @@ describe("API auth and private draft routes", () => {
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
       payload: { teamTag: "   ", projectTag: null } });
     expect(invalidTag.statusCode).toBe(400);
-    // Decision 0025: an older client that still sends a Topic is refused rather than silently dropped.
+    // Decision0027: an older client that still sends a Topic is refused rather than silently dropped.
     const withTopic = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
       payload: { management: { type: "Guide", topicId: "11111111-1111-4111-8111-111111111111", version: "1.0",
