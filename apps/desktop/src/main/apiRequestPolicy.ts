@@ -34,6 +34,7 @@ const readerQuestionPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/
 const knowledgeCatalogRead = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog(?:/readers)?$`);
 const knowledgeCatalogCreate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/(topics|collections)$`);
 const knowledgeCatalogItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/(topics|collections)/${uuid}$`);
+const knowledgePlacement = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/placements/${uuid}$`);
 const aiAnswerPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/answers$`);
 const aiConversationPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations(?:/${uuid})?$`);
 const reviewerGrantDeactivate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants/${uuid}/deactivate$`);
@@ -195,15 +196,24 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
   const catalogGet = knowledgeCatalogRead.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const placementGet = knowledgePlacement.test(url.pathname) && request.method === "GET"
+    && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const placementPatch = knowledgePlacement.test(url.pathname) && request.method === "PATCH"
+    && Boolean(request.body) && typeof request.ifMatch === "string" && /^"placement-(0|[1-9][0-9]*)"$/.test(request.ifMatch)
+    && Number.isSafeInteger(Number(request.ifMatch.slice(11, -1))) && !request.idempotencyKey;
   const catalogPost = knowledgeCatalogCreate.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const catalogPatch = knowledgeCatalogItem.test(url.pathname) && request.method === "PATCH"
     && Boolean(request.body) && typeof request.ifMatch === "string" && /^"catalog-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
   const catalogQuery = catalogGet && url.pathname.endsWith("/readers")
     && [...url.searchParams.keys()].every(key => key === "q" || key === "ids");
-  return (catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
+  const publicationScopeQuery = knowledgeGet && url.pathname.endsWith("/knowledge/published")
+    && [...url.searchParams.keys()].every(key => key === "scope")
+    && url.searchParams.getAll("scope").length === 1
+    && ["ALL_READABLE", "ORGANIZATION", "SHARED"].includes(url.searchParams.get("scope") ?? "");
+  return (placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
     || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
-    || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke) && (!url.search || queryAllowed || catalogQuery);
+    || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke) && (!url.search || queryAllowed || catalogQuery || publicationScopeQuery);
 }

@@ -1,5 +1,117 @@
 # Implementation status and rollout boundaries
 
+## Knowledge organization KM2-P4A — local Home composition, 19 November
+
+Home now separates Organization, Shared with me and a conditional Other documents
+compatibility view. Organization alone supplies the common register, Collections
+and Unassigned. Shared uses approved Department/Selected readers; unknown legacy
+sharing is not silently classified. Private notes opens the existing owner-only
+workspace; My Contributions remains the contribution path. No new Library route.
+
+Independent scoped requests distinguish loading/error from empty, discard stale
+responses and clear failed/known-denied sources. Per-source search/filters and
+reader-return focus survive navigation. Home filtering does not select AI context
+or bypass server authorization. Existing Island styling/artwork is retained.
+
+Root1007 tests pass with isolated PostgreSQL enabled (domain22/API526/UI441/
+desktop18, one provider-gated skip); remote16 pass. Production-component browser
+checks use a labelled synthetic HTTP fixture, not signed-in DB/native E2E.
+See [P4A evidence](../evidence/2026-11-19-knowledge-organization/README.md#km2-p4a--home-composition).
+Reviewed live mapping/backfill, protected restore/cutover, schema contraction and
+release acceptance remain pending. This slice is local/unpublished, not a rollout.
+
+## Knowledge organization KM2-P3B.3 — local management UI, 19 November
+
+Shared Admin UI now separates Name/Allowed types/Description configuration from
+revisioned logical-document placement. It shows Unassigned and folder contents,
+filters explicit Organization publications and compatible destinations, confirms
+Archive, and supports Cancel/dirty discard/read loading/conflict/uncertain outcomes.
+Background refresh cannot upgrade an edit's precondition. Topic browsing/filter
+controls and old bulk picker are removed; source/history/schema remain intact.
+The native confirmation fallback now restores focus after closing its top layer.
+
+Final root986 tests pass: domain22/API526/UI420/desktop18 (real isolated PostgreSQL
+enabled, one provider skip). Final workspace typecheck/build pass. Local browser interaction checks exercise production UI and
+client against synthetic volatile HTTP fixtures; screenshots are labelled. This
+does not establish authenticated combined app/DB E2E or genuine Electron behavior.
+See [evidence](../evidence/2026-11-19-knowledge-organization/README.md#km2-p3b3--collection-management-ui).
+
+The P4A checkpoint above supersedes the Home-composition-pending status. Still pending: reviewed live legacy
+mapping/backfill, protected backup/restore/cutover, physical schema contraction and
+authorized release. No commit/push/PR/merge, staging mutation, provider call or deploy.
+
+## Knowledge organization KM2-P3B.2 — local backend / legacy rehearsal, 19 November
+
+Configuration and logical placement API now use 0039 storage, controlled Allowed
+types, revision/ETag, transactional audit and current eligible publication
+projection. Old bulk link payloads receive409; obsolete runtime Collection link
+writes are removed. Shared adapters and exact Electron allowlist are updated,
+not the management UI. A local-only explicit-plan conversion module is tested
+with actual deletion of converted synthetic legacy associations and full rollback
+on audit failure, preserving readers, publications and Topic history.
+
+Final workspace968 passed/one provider skip; focused backend61 passed; workspace
+typecheck/build, remote16, unchanged migration39 and Python119 pass/seven skips.
+[Evidence](../evidence/2026-11-19-knowledge-organization/README.md#km2-p3b2--collection-api-and-explicit-legacy-rehearsal).
+UI, real legacy inventory/mapping, live backup/restore/cutover and physical Topic/
+legacy-table contraction remain. No staging data, provider or release operation.
+The [runbook](collection-legacy-transition.md) owns compatibility and removal gates.
+
+## Knowledge organization KM2-P3B.1 — local schema checkpoint, 19 November 2026
+
+The maintainer approves one optional Collection, Admin-only placement, controlled
+Allowed types and version-following/Archive-to-Unassigned. Forward operator 0039
+adds logical placement, same-organization/Type/readership constraints, retained
+revision tombstones and reconciliation. Legacy links stay untouched. API/UI still
+use old storage: Add/Move/Remove/Archive management is **not connected** yet.
+
+Real isolated post-ownership tests pass: workspace 938 passed/one provider skip;
+focused final repository file 30 passed, including ten new schema cases. Build,
+workspace typecheck, 16 remote-tool tests and 39-migration inventory pass. Release
+Python tests: 119 passed/seven platform skips. API typecheck repeated after the
+final fixture refinement. No full restore, staging/native/provider acceptance or
+release is claimed. [Evidence](../evidence/2026-11-19-knowledge-organization/README.md#km2-p3b1--flat-folder-database-foundation).
+
+Next: P3B.2 management API/compatibility and explicit legacy inventory, then P3B.3
+UI/E2E. No new rule approval needed for those accepted choices; target-specific
+staging migration/backfill/deployment authority remains separate.
+
+## Knowledge organization KM2-P3A — partial local checkpoint, 19 November 2026
+
+Collection list/write eligibility and the existing picker now require approved
+Organization readership, independently of what the Admin can otherwise read.
+Later restriction hides existing links/counts without changing ordinary document
+access or deleting legacy placement. Two UI regressions and three real PostgreSQL
+cases cover the new boundary; a small checkbox-width correction keeps labels
+together. Existing styles/assets and Cancel/Discard controls remain.
+
+Workspace checks pass: 928 tests, one provider-gated skip; typecheck/build,
+16 remote-tool tests and unchanged 38-entry migration inventory. The real database
+tests reuse the isolated post-ownership schema; native/authenticated staging and
+provider acceptance are not established. [Evidence](../evidence/2026-11-19-knowledge-organization/README.md#km2-p3a--organization-only-collection-boundary)
+includes the actual component in a synthetic local harness, not a deployed app.
+
+At this earlier P3A checkpoint those P3B decisions were pending; the P3B.1 entry
+above supersedes that status. No P3A schema migration, backfill/reset,
+reindex, Git publication or deployment. Do not mark the entire Phase 3 complete.
+
+## Knowledge organization KM2-P1/P2 — local checkpoint, 19 November 2026
+
+From staging `af28915`, the local `feat/knowledge-scope-foundation` checkout adds
+optional authorized publication-list scopes and Topic-free contribution. New
+metadata saves clear Topic, submit no longer depends on its catalog, and old
+frozen snapshots remain intact. Home/catalog composition, flat Collection detail
+rules and legacy metadata repair remain open; no current staging behavior is
+changed by this uncommitted checkout. See the [phased contract](knowledge-organization-phases.md)
+and [actual evidence](../evidence/2026-11-19-knowledge-organization/README.md).
+
+Root checks: 923 passed/1 provider-gated skip with isolated PostgreSQL enabled;
+typecheck/build, 16 remote-tool tests and the unchanged 38-migration inventory pass.
+Real runtime/RLS/worker-contract tests run after full DDL ownership transfer;
+activation uses synthetic manifests, not real embeddings or provider calls.
+Component screenshots do not certify authenticated web/native E2E. No staging
+migration/backfill, reindex, commit/push/PR, merge or deployment in this checkpoint.
+
 ## Minimal reader lifecycle refinement — review preparation, 15 November 2026
 
 After the focus/panel diagnosis, the maintainer approved the

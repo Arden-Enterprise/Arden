@@ -1,13 +1,14 @@
 import type { Platform } from "./types";
-import type { KnowledgeMetadata } from "@arden/domain";
+import type { KnowledgeMetadata, PublicationScope, KnowledgeType } from "@arden/domain";
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
   departmentId: string | null; memberIds: string[] };
 export type KnowledgeCatalogEntry = { id: string; name: string; description: string; status: "ACTIVE" | "INACTIVE"; version: number };
-export type KnowledgeCollection = KnowledgeCatalogEntry & { cover: "handbook" | "production"; documentIds: string[] };
+export type KnowledgeCollection = KnowledgeCatalogEntry & { cover: "handbook" | "production"; documentIds: string[]; allowedTypes?: KnowledgeType[] | null };
 export type KnowledgeCatalog = { canManage: boolean; topics: KnowledgeCatalogEntry[]; collections: KnowledgeCollection[] };
 export type KnowledgeCatalogWrite = { name: string; description: string; status: "ACTIVE" | "INACTIVE";
-  cover?: "handbook" | "production"; documentIds?: string[] };
+  cover?: "handbook" | "production"; documentIds?: string[]; allowedTypes?: KnowledgeType[] };
+export type CollectionPlacement = { documentId: string; collectionId: string | null; revision: number };
 import { parseAudienceGroup, parseAudienceGroupList, type AudienceGroupRecord,
   type AudienceGroupWrite } from "./audience-group-contracts";
 import type {} from "./desktop-session";
@@ -320,6 +321,26 @@ export function saveKnowledgeDraft(platform: Platform, organizationId: string, d
 export function loadKnowledgeCatalog(platform: Platform, organizationId: string): Promise<KnowledgeCatalog> {
   return request(platform, `${knowledgePath(organizationId)}/catalog`);
 }
+function parseCollectionPlacement(value: unknown): CollectionPlacement {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid document placement response.");
+  const row = value as Record<string, unknown>;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (typeof row.documentId !== "string" || !uuid.test(row.documentId)
+    || !(row.collectionId === null || (typeof row.collectionId === "string" && uuid.test(row.collectionId)))
+    || typeof row.revision !== "number" || !Number.isSafeInteger(row.revision) || row.revision < 0) throw new Error("Invalid document placement response.");
+  return { documentId: row.documentId, collectionId: row.collectionId, revision: row.revision };
+}
+export async function loadCollectionPlacement(platform: Platform, organizationId: string, documentId: string): Promise<CollectionPlacement> {
+  return parseCollectionPlacement(await request(platform, `${knowledgePath(organizationId)}/catalog/placements/${documentId}`));
+}
+export async function saveCollectionPlacement(platform: Platform, organizationId: string, current: CollectionPlacement,
+  collectionId: string | null): Promise<CollectionPlacement> {
+  return parseCollectionPlacement(await request(platform, `${knowledgePath(organizationId)}/catalog/placements/${current.documentId}`, {
+    method: "PATCH", headers: { "If-Match": `"placement-${current.revision}"` }, body: JSON.stringify({ collectionId }),
+  }));
+}
+// Catalog configuration no longer changes document placement. Older picker payloads
+// receive CATALOG_UPGRADE_REQUIRED until the management UI adopts this contract.
 export function saveKnowledgeCatalogEntry(platform: Platform, organizationId: string, kind: "topics" | "collections",
   entry: KnowledgeCatalogEntry | null, input: KnowledgeCatalogWrite): Promise<KnowledgeCatalogEntry> {
   return request(platform, `${knowledgePath(organizationId)}/catalog/${kind}${entry ? `/${entry.id}` : ""}`, {
@@ -458,8 +479,10 @@ export function requestPublicationChange(platform: Platform, organizationId: str
   });
 }
 
-export async function listPublishedKnowledge(platform: Platform, organizationId: string): Promise<PublishedKnowledge[]> {
-  const result = await request<{ items: PublishedKnowledge[] }>(platform, `${knowledgePath(organizationId)}/published`);
+export async function listPublishedKnowledge(platform: Platform, organizationId: string,
+  scope?: PublicationScope): Promise<PublishedKnowledge[]> {
+  const path = `${knowledgePath(organizationId)}/published${scope ? `?scope=${encodeURIComponent(scope)}` : ""}`;
+  const result = await request<{ items: PublishedKnowledge[] }>(platform, path);
   return result.items;
 }
 

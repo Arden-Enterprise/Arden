@@ -6,6 +6,64 @@ Provenance: ARD-50 records the project lead's graph/chat request and UI ownershi
 
 ## F11 Library and search
 
+### Knowledge organization restructuring (KM2, 19 November 2026)
+
+At the requesting maintainer's explicit direction, keep Home, defer naming and
+implement in independently tested/evidenced phases. The accepted target removes
+Topic from the new contribution flow; Collections are single-level folders,
+created only by Org Admin, containing only Organization-wide published knowledge.
+Authors do not choose a Collection during contribution. The common register is
+all Organization-wide knowledge, including unassigned documents, not all documents
+the current actor can read. Private originals and Department/Selected readership
+remain separate. These target rules supersede the corresponding Topic/curated
+mixed-readership directions in KM-v1/ADR 0020, not legacy frozen snapshots.
+
+Phase 1 adds an optional authorized publication-list scope with default
+compatibility. Phase 2 locally retires Topic from contribution fields, readiness
+and API/repository requirements: new saves clear the legacy reference, while
+untouched old drafts and frozen snapshots remain compatible. Required Type,
+Version, explicit readers and update Change Note remain; Valid until stays
+optional under the current form contract. Home/catalog browsing, Collection
+storage and AI paths are not restructured yet. Phase 3A locally restricts
+Collection list/write/picker contents to explicit Organization publications even
+when an Admin can read narrower sources; existing restricted links are hidden,
+not silently migrated/deleted. The maintainer subsequently explicitly accepts
+zero/one Collection per logical document, Admin-only post-publication placement,
+required Name/Allowed types and optional Description. Eligible new versions keep
+placement; narrower readership/incompatible Type detaches it. Archive returns
+documents to Unassigned without deletion or withdrawal. See [0025](../decisions/0025-flat-organization-collection-placement.md)
+and the [phased contract](../engineering/knowledge-organization-phases.md).
+P3B.1 adds local schema/constraints/reconciliation only; management API/UI and
+legacy mapping are not delivered yet. Naming/layout and release remain separate.
+Legacy data is not reclassified or deleted.
+
+P3B.2 now locally implements the separate configuration/placement API and explicit
+legacy conversion rehearsal; see [the owning contract](../engineering/collection-legacy-transition.md).
+Only converted synthetic associations are removed in tests. Management UI,
+approved live mapping and physical Topic/schema contraction remain unfinished.
+Old bulk-picker requests are refused, not silently adapted. No live rollout.
+
+P3B.3 supersedes that UI-pending checkpoint locally. F11-KM2/KM3/KM6 now have
+separate controlled-Type configuration and one-document conditional placement UI,
+Unassigned/folder views, Archive/Cancel/dirty discard and stale/uncertain-result
+recovery. Topic browse/filter controls are retired without rewriting provenance.
+Production component/client browser checks use labelled synthetic HTTP fixtures;
+real DB and HTTP authorization checks remain separately verified layers, not a
+combined authenticated or native E2E claim. [Evidence](../evidence/2026-11-19-knowledge-organization/README.md#km2-p3b3--collection-management-ui).
+
+P4A locally connects Home to independent Organization/Shared scopes. Organization
+includes assigned and unassigned common documents; Collections never organize
+restricted sources. Shared distinguishes Department and Selected readers without
+disclosing selected identities. Readable legacy sources without recorded sharing
+remain under Other documents until reviewed mapping. Private notes opens the
+existing owner-only workspace, not a new private-file upload surface. Contributions
+stay separate. Source failure is not an empty result; stale/denied sources and late
+responses are handled without new content authorization or AI retrieval rules.
+Per-source filters/search, reader return/focus and keyboard navigation are covered.
+See [P4A evidence](../evidence/2026-11-19-knowledge-organization/README.md#km2-p4a--home-composition).
+Live mapping, physical contraction and signed-in/native release acceptance remain
+unfinished. These local checkpoints are not deployment receipts.
+
 ### Knowledge management refinement (KM-v1, accepted 12 November 2026)
 
 Decision owner: requesting project maintainer. Origin: maintainer's QMS-informed

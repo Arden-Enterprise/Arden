@@ -1672,19 +1672,11 @@ export class ArdenRepository implements ArdenDataRepository {
       let management: (KnowledgeMetadata & { schemaVersion?: number }) | null = current.management ?? null;
       if (patch.management !== undefined) {
         if (!validKnowledgeMetadata(patch.management)) return { kind: "invalid-metadata" };
-        // Snapshot display labels come from the catalog, never arbitrary client text.
+        // Topic is retired from contribution. Accept old clients without retaining
+        // their Topic reference; never rewrite previously frozen snapshots.
         const value = patch.management;
-        let topicName: string | null = null;
-        if (value.topicId) {
-          await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`arden:knowledge-catalog:${organizationId}`]);
-          const topic = await client.query<{ name: string }>(`SELECT name FROM knowledge_topic
-            WHERE topic_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [value.topicId, organizationId]);
-          if (!topic.rows[0]) return { kind: "invalid-metadata" };
-          topicName = topic.rows[0].name;
-        }
-        management = { schemaVersion: 1, type: value.type, topicId: value.topicId, version: value.version.trim(),
-          effectiveDate: value.effectiveDate, expirationDate: value.expirationDate, changeNote: value.changeNote.trim(),
-          ...(topicName ? { topicName } : {}) };
+        management = { schemaVersion: 1, type: value.type, topicId: null, version: value.version.trim(),
+          effectiveDate: value.effectiveDate, expirationDate: value.expirationDate, changeNote: value.changeNote.trim() };
       }
       // Decision 0014: the responsible department always follows the author's primary department.
       const responsible = resolveResponsibleDepartment(patch.responsibleDepartmentId,
@@ -1788,10 +1780,6 @@ export class ArdenRepository implements ArdenDataRepository {
       if (row.current_version_no !== expectedVersion) return { kind: "conflict" };
       if (!row.management || metadataSubmissionErrors(row.management, row.has_published_version).length
         || !row.readers_selection_id) return { kind: "not-ready" };
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [`arden:knowledge-catalog:${organizationId}`]);
-      const selectedTopic = await client.query(`SELECT 1 FROM knowledge_topic
-        WHERE topic_id = $1 AND organization_id = $2 AND status = 'ACTIVE'`, [row.management.topicId, organizationId]);
-      if (!selectedTopic.rowCount) return { kind: "not-ready" };
       const reusedVersion = await client.query(`SELECT 1 FROM shared_submission WHERE shared_draft_id = $1
         AND publication_state IN ('ACTIVE', 'SUPERSEDED') AND management->>'version' = $2`, [draftId, row.management.version]);
       if (reusedVersion.rowCount) return { kind: "not-ready" };

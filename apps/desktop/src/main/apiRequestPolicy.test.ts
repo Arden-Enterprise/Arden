@@ -8,6 +8,17 @@ const idempotencyKey = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const sharedDraftPath = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
 
 describe("desktop API request allowlist", () => {
+  it("allows only versioned placement reads and mutations", () => {
+    const path = `/api/v1/organizations/${organizationId}/knowledge/catalog/placements/${sourcePrivateVersionId}`;
+    assert.equal(validateDesktopApiRequest({ path, method: "GET" }), true);
+    const request = { path, method: "PATCH", body: JSON.stringify({ collectionId: null }), ifMatch: '"placement-0"' };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(validateDesktopApiRequest({ ...request, ifMatch: '"placement-123"' }), true);
+    for (const extra of [{ ifMatch: undefined }, { ifMatch: '"catalog-1"' }, { ifMatch: '"placement-01"' },
+      { ifMatch: '"placement-9007199254740992"' }, { method: "POST" }, { path: `${path}?all=true` }, { idempotencyKey }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...extra }), false);
+    }
+  });
   it("preserves bounded non-reader deadlines while keeping reader deadlines main-owned", () => {
     const session = { path: "/api/v1/me", method: "GET" as const, timeoutMs: 15_000 };
     assert.equal(validateDesktopApiRequest(session), true);
@@ -206,6 +217,19 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/administrators", method: "POST", body: JSON.stringify({ userId: sourcePrivateVersionId }) }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}/revoke`, method: "POST", body: "{}" }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}/revoke`, method: "GET" }), false);
+  });
+
+  it("allows only a single explicit publication scope on the published list", () => {
+    const path = `/api/v1/organizations/${organizationId}/knowledge/published`;
+    for (const scope of ["ALL_READABLE", "ORGANIZATION", "SHARED"]) {
+      assert.equal(validateDesktopApiRequest({ path: `${path}?scope=${scope}`, method: "GET" }), true);
+    }
+    for (const query of ["scope=PRIVATE", "scope=", "scope=ORGANIZATION&scope=SHARED", "scope=SHARED&admin=true", "scope=organization"]) {
+      assert.equal(validateDesktopApiRequest({ path: `${path}?${query}`, method: "GET" }), false);
+    }
+    assert.equal(validateDesktopApiRequest({ path: `${path}/${sourcePrivateVersionId}?scope=SHARED`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${sharedDraftPath}?scope=SHARED`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${path}?scope=SHARED`, method: "POST", body: "{}" }), false);
   });
 
   it("rejects method, precondition and route confusion across knowledge endpoints", () => {

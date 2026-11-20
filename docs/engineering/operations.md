@@ -1,5 +1,10 @@
 # Development, deployment, and operations rules
 
+Local Collection transition tooling and the separate live cutover/backup/mapping
+gates are owned by [the P3B.2 runbook](collection-legacy-transition.md). Its CLI
+refuses non-loopback/non-disposable targets; passing rehearsal does not authorize
+staging cleanup or a physical legacy-schema drop.
+
 Read [AGENTS.md](../../AGENTS.md), [the technology guide](technology-guide.md), and [security/data rules](security-and-data.md). This is the operational policy for the intended product. The repository includes reviewed SQL migration/local database tooling and the [branch-based app release implementation](release-pipeline.md). Its [approved design and delivery status](release-pipeline-design.md) distinguish implementation from live activation. Worker, installer and backup automation remain separate work.
 
 ### Reader AI diagnostic retention

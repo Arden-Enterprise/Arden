@@ -9,7 +9,7 @@ SELECT pg_advisory_xact_lock(hashtext('arden:migrations'));
 DO $repair_internal_execution$
 DECLARE
     item record;
-    -- Exact inventory after migrations 0001-0037 (32 routines). Any other count or name refuses.
+    -- Exact inventory after migrations 0001-0039 (33 routines). Any other count or name refuses.
     expected_names text[] := ARRAY[
         -- Reviewed baseline (0001-0022).
         'audience_snapshot_enforceable', 'claim_knowledge_index_job',
@@ -30,7 +30,9 @@ DECLARE
         -- 0037 governance (decision 0023).
         'list_governance_publications', 'open_governance_inspection', 'use_governance_inspection',
         'responsible_publication_view', 'withdraw_publication_directly', 'list_publication_reports',
-        'close_publication_report'];
+        'close_publication_report',
+        -- 0039: trigger-only validator; locks pointers, does not return content.
+        'validate_collection_placement'];
 BEGIN
     IF current_database() <> '__EXPECTED_DATABASE__'
        OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper)

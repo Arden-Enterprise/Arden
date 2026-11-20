@@ -8,7 +8,7 @@ import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import {
   ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listKnowledgeReviewBoard,
-  listKnowledgeDrafts, listKnowledgeSubmissions, listPublishedKnowledge, loadKnowledgeDraft,
+  listKnowledgeDrafts, listKnowledgeSubmissions, loadKnowledgeDraft,
   withdrawKnowledgeSubmission, retryKnowledgePublication,
   loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, saveKnowledgeDraft, loadKnowledgeCatalog, replaceKnowledgePdf,
   submitKnowledgeDraft, type AssignedKnowledgeReview, type DecidedKnowledgeReview, type KnowledgeDraftRecord,
@@ -25,7 +25,10 @@ import { reviewRequestPresentation } from "./reviewRequest";
 import { libraryDateLabel } from "./libraryDisplay";
 import { ownerDepartment } from "./readerSelection";
 import { KnowledgeCatalogEditor } from "./KnowledgeCatalogEditor";
-import { KnowledgeLibraryBrowse, emptyLibraryFilters } from "./KnowledgeLibraryBrowse";
+import { emptyLibraryFilters, type LibraryFilters } from "./KnowledgeLibraryBrowse";
+import { KnowledgeHomeBrowse } from "./KnowledgeHomeBrowse";
+import { useHomePublications, type HomeSource } from "./useHomePublications";
+import { KnowledgeHomeNavigation, type HomeTab } from "./KnowledgeHomeNavigation";
 import { KnowledgeMetadataFields, editableKnowledgeMetadata, targetReadersLabel } from "./KnowledgeMetadataFields";
 import { targetReadersComplete } from "./TargetReadersField";
 import { ActionToast } from "../shared/ActionToast";
@@ -65,6 +68,8 @@ type Props = ContextControlProps & {
   onAssignedReviewCount?: (count: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
   awaitingAssignment?: boolean;
+  onOpenPrivateNotes?: () => void;
+  canUsePrivateWorkspace?: boolean;
 };
 
 type EditorValues = Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" |
@@ -84,18 +89,23 @@ function errorMessage(error: unknown): string {
   return error instanceof ApiError ? error.message : "Couldn’t complete this action.";
 }
 
-export function ServerKnowledgeFeaturePage({ platform, organizationId, organizationName,
-  view, active, createdDraftId, citationTarget, onAssignedReviewCount, onDirtyChange, awaitingAssignment = false, contextOpen, onToggleContext }: Props) {
+export function ServerKnowledgeFeaturePage(props: Props) {
+  return <ConnectedKnowledgePage key={`${props.platform}:${props.organizationId}`} {...props} />;
+}
+function ConnectedKnowledgePage({ platform, organizationId, organizationName,
+  view, active, createdDraftId, citationTarget, onAssignedReviewCount, onDirtyChange, awaitingAssignment = false,
+  onOpenPrivateNotes, canUsePrivateWorkspace = false, contextOpen, onToggleContext }: Props) {
   const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
   const [submissions, setSubmissions] = useState<KnowledgeSubmission[]>([]);
-  const [published, setPublished] = useState<PublishedKnowledge[]>([]);
+  const home = useHomePublications(platform, organizationId);
   const [reviews, setReviews] = useState<AssignedKnowledgeReview[]>([]);
   const [decidedReviews, setDecidedReviews] = useState<DecidedKnowledgeReview[]>([]);
   const [options, setOptions] = useState<KnowledgeOptions | null>(null);
   const [catalog, setCatalog] = useState<KnowledgeCatalog | null>(null);
   const [catalogError, setCatalogError] = useState("");
   const [managingCatalog, setManagingCatalog] = useState(false);
-  const [libraryFilters, setLibraryFilters] = useState(emptyLibraryFilters);
+  const [filtersBySource, setFiltersBySource] = useState<Record<HomeSource, LibraryFilters>>(() => ({
+    organization: emptyLibraryFilters(), shared: emptyLibraryFilters(), other: emptyLibraryFilters() }));
   const [draft, setDraft] = useState<KnowledgeDraftRecord | null>(null);
   const [editor, setEditor] = useState<EditorValues | null>(null);
   const [replacementPdf, setReplacementPdf] = useState<File | null>(null);
@@ -112,14 +122,20 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const [dragActive, setDragActive] = useState(false);
   const [createMode, setCreateMode] = useState<"text" | "pdf">("text");
   const [screen, setScreen] = useState<"library" | "create" | "editor" | "document">("library");
-  const [libraryTab, setLibraryTab] = useState<"drafts" | "published" | "discover">("discover");
+  const [libraryTab, setLibraryTab] = useState<HomeTab>("organization");
+  const [organizationView, setOrganizationView] = useState<"overview" | "all">("overview");
   const [selectedContributionId, setSelectedContributionId] = useState<string | null>(null);
   const [historyVersions, setHistoryVersions] = useState<{ draftId: string; items: KnowledgeDraftVersionSummary[] } | null>(null);
   const [historyError, setHistoryError] = useState("");
   const [historyRetry, setHistoryRetry] = useState(0);
   const [viewedVersion, setViewedVersion] = useState<KnowledgeDraftVersionRecord | null>(null);
   const viewedVersionRequest = useRef(0);
-  const [query, setQuery] = useState("");
+  const [queries, setQueries] = useState<Record<HomeTab, string>>({ organization: "", shared: "", other: "", drafts: "" });
+  const query = queries[libraryTab];
+  const setQuery = (value: string) => setQueries(previous => ({ ...previous, [libraryTab]: value }));
+  const source: HomeSource = libraryTab === "drafts" ? "organization" : libraryTab;
+  const libraryFilters = filtersBySource[source];
+  const setLibraryFilters = (value: LibraryFilters) => setFiltersBySource(previous => ({ ...previous, [source]: value }));
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -144,21 +160,32 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const decisionReason = useRef<HTMLTextAreaElement>(null);
   const reviewBodyRef = useRef<HTMLDivElement>(null);
   const pendingNextReview = useRef<string | null>(null);
+  const readerReturnId = useRef<string | null>(null);
+  useEffect(() => {
+    if (screen !== "library" || !readerReturnId.current) return;
+    const id = readerReturnId.current;
+    readerReturnId.current = null;
+    const opener = [...window.document.querySelectorAll<HTMLButtonElement>("button[data-publication-id]")]
+      .find(button => button.dataset.publicationId === id);
+    (opener ?? window.document.getElementById("arden-main"))?.focus();
+  }, [screen]);
 
   const reload = useCallback(async () => {
-    const [nextDrafts, nextSubmissions, nextPublished, nextBoard, nextOptions, nextCatalog] = await Promise.all([
+    // Each reading view owns its wait/error state; one slow source must not hide the other tabs.
+    void home.refresh();
+    const [nextDrafts, nextSubmissions, nextBoard, nextOptions, nextCatalog] = await Promise.all([
       listKnowledgeDrafts(platform, organizationId), listKnowledgeSubmissions(platform, organizationId),
-      listPublishedKnowledge(platform, organizationId), listKnowledgeReviewBoard(platform, organizationId),
+      listKnowledgeReviewBoard(platform, organizationId),
       loadKnowledgeOptions(platform, organizationId),
       loadKnowledgeCatalog(platform, organizationId).then(value => { setCatalogError(""); return value; })
         .catch(() => { setCatalogError("Catalog is unavailable. You can still browse documents."); return null; }),
     ]);
     const nextReviews = nextBoard.items;
-    setDrafts(nextDrafts); setSubmissions(nextSubmissions); setPublished(nextPublished);
+    setDrafts(nextDrafts); setSubmissions(nextSubmissions);
     setReviews(nextReviews); setDecidedReviews(nextBoard.decided); setOptions(nextOptions);
     setCatalog(nextCatalog);
     onAssignedReviewCount?.(nextReviews.length);
-  }, [platform, organizationId, onAssignedReviewCount]);
+  }, [platform, organizationId, onAssignedReviewCount, home.refresh]);
 
   useEffect(() => {
     let present = true;
@@ -355,8 +382,13 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   }, [busy, review, reviews, platform, organizationId]);
 
   const openPublished = (id: string) => void run(async () => {
-    const loaded = await loadPublishedKnowledge(platform, organizationId, id);
-    setOpenedCitation(null); setDocument(loaded); setScreen("document");
+    try {
+      const loaded = await loadPublishedKnowledge(platform, organizationId, id);
+      setOpenedCitation(null); setDocument(loaded); setScreen("document");
+    } catch (cause) {
+      if (cause instanceof ApiError && [401, 403, 404].includes(cause.status)) { home.forget(id); void home.refresh(); }
+      throw cause;
+    }
   });
 
   useEffect(() => {
@@ -369,7 +401,9 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
       .then((loaded) => {
         if (!present) return;
         if (loaded.id !== citationTarget.versionId) throw new Error("citation-version-mismatch");
-        setLibraryTab("published"); setOpenedCitation(citationTarget); setDocument(loaded); setScreen("document");
+        setLibraryTab(loaded.targetReaders?.mode === "ORGANIZATION" ? "organization"
+          : loaded.targetReaders == null ? "other" : "shared");
+        setOrganizationView("all"); setOpenedCitation(citationTarget); setDocument(loaded); setScreen("document");
       })
       .catch(() => {
         if (!present) return;
@@ -423,8 +457,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const readersReady = targetReadersComplete(editor?.targetReaders);
   const parsedEditor = editor ? parseSemanticDocument(editor.body) : null;
   const hasContent = Boolean(draft?.currentVersion.mimeType === "application/pdf" || (parsedEditor?.ok ? semanticDocumentHasText(parsedEditor.document) : editor?.body.trim()));
-  const ready = Boolean(ownerDepartmentId && editor?.title.trim() && hasContent && readersReady && !metadataErrors.length && !versionAlreadyPublished
-    && catalog?.topics.some(topic => topic.id === editor.management.topicId && topic.status === "ACTIVE"));
+  const ready = Boolean(ownerDepartmentId && editor?.title.trim() && hasContent && readersReady && !metadataErrors.length && !versionAlreadyPublished);
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
   const publicationDepartmentName = (item: PublishedKnowledge) =>
     item.responsibleDepartmentName?.trim() || departmentName(item.responsibleDepartmentId);
@@ -474,7 +507,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
   const backToAllReviews = () => guardDiscard(Boolean(comment.trim()), () => {
     setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
   });
-  const librarySearch = view === "knowledge" && screen === "library"
+  const librarySearch = view === "knowledge" && screen === "library" && !managingCatalog
     ? <SearchField value={query} onChange={setQuery} placeholder={libraryTab === "drafts" ? "Filter my contributions…" : "Search documents…"} /> : undefined;
   const breadcrumb = view === "review-queue" ? `${organizationName} / Knowledge / Reviews`
     : screen === "library" ? `${organizationName} / Home${libraryTab === "drafts" ? " / My Contributions" : ""}`
@@ -558,7 +591,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
                   {review.requestType !== "WITHDRAWAL" && <div><dt>Readers</dt><dd>{review.proposedTargetReaders ? targetReadersLabel(review.proposedTargetReaders, departmentName) : audienceNames(review.audienceIds)}</dd></div>}
                   {review.management ? <>
                     <div><dt>Type</dt><dd>{review.management.type ?? "—"}</dd></div>
-                    <div><dt>Topic</dt><dd>{review.management.topicName ?? "—"}</dd></div>
+                    {review.management.topicName && <div><dt>Topic</dt><dd>{review.management.topicName}</dd></div>}
                     <div><dt>Version</dt><dd>{review.management.version}</dd></div>
                     {review.management.effectiveDate && <div><dt>Effective Date</dt><dd>{review.management.effectiveDate}</dd></div>}
                     {review.management.expirationDate && <div><dt>Expiration Date</dt><dd>{review.management.expirationDate}</dd></div>}
@@ -676,7 +709,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
             }}>
               <option value="">Choose department</option>{options?.departments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             </>}
-            <KnowledgeMetadataFields value={editor.management} readers={editor.targetReaders} topics={catalog?.topics ?? []} catalogError={catalogError}
+            <KnowledgeMetadataFields value={editor.management} readers={editor.targetReaders}
               departments={options?.departments ?? []} busy={busy} isUpdate={draft.hasPublishedVersion ?? false}
               platform={platform} organizationId={organizationId}
               onChange={management => setEditor({ ...editor, management })} onReaders={targetReaders => setEditor({ ...editor, targetReaders })} />
@@ -705,19 +738,19 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
           documentId: document.draftId, versionId: document.id, contentHash: document.contentHash },
           onCitation: citation => setOpenedCitation(previous => citation ? { ...citation, navigationId: `reader-summary:${crypto.randomUUID()}` }
             : previous?.navigationId.startsWith("reader-summary:") ? null : previous),
-          onAccessLost: () => { setOpenedCitation(null); setDocument(null); setScreen("library"); setError("This document is unavailable."); } }}
+          onAccessLost: () => { home.forget(document.id); void home.refresh(); setOpenedCitation(null); setDocument(null); setScreen("library"); setError("This document is unavailable."); } }}
         metadata={{
           title: document.title,
           ownerDepartment: publicationDepartmentName(document),
           summary: document.summary ?? "",
-          type: document.management?.type ?? undefined, topic: document.management?.topicName,
+          type: document.management?.type ?? undefined,
           publishedDate: document.publishedAt, expirationDate: document.management?.expirationDate ?? undefined,
           readers: publishedReadersLabel(document),
           activeVersionId: document.id,
           versions: [{ id: document.id, label: document.management?.version || document.versionLabel || "",
             ...readerValidity(document) }],
         }}
-        onBack={() => { setOpenedCitation(null); setScreen("library"); }}
+        onBack={() => { readerReturnId.current = document.id; setOpenedCitation(null); setScreen("library"); }}
         surfaceActions={<>
           {readerPdfUrl && <a className="secondary-button" href={readerPdfUrl} download={pdfFileName(document.title)}><Icon name="download" size={13} />Download</a>}
           <ReportProblemButton platform={platform} organizationId={organizationId} publishedVersionId={document.id}
@@ -731,25 +764,23 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
         {awaitingAssignment && <p className="island-note knowledge-awaiting-assignment" role="status">
           Waiting for an admin to assign your department. You can read documents shared with the whole organization.</p>}
         <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : "Home"}
-          description={libraryTab === "drafts" ? ""
-            : `${published.length} ${published.length === 1 ? "document" : "documents"} you can read in ${organizationName}`}
+          description=""
           action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="secondary-button" disabled={busy} onClick={() => void refresh()}>Refresh</button>
-            {catalog?.canManage && libraryTab !== "discover" && <button type="button" className="secondary-button" onClick={() => setManagingCatalog(true)}>Manage catalog</button>}
+            {catalog?.canManage && libraryTab === "organization" && (organizationView === "all" || query.trim() || home.views.organization.status !== "ready")
+              && <button type="button" className="secondary-button" onClick={() => setManagingCatalog(true)}>Manage collections</button>}
             <button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button>
             <button type="button" className="primary-button" onClick={() => openCreate("pdf")}><Icon name="plus" size={14} />Create from PDF</button></div>} />
-        {!managingCatalog && <div className="island-seg knowledge-library-tabs" role="tablist" aria-label="Knowledge library">
-          <button type="button" role="tab" aria-selected={libraryTab === "discover"} onClick={() => setLibraryTab("discover")}>Discover</button>
-          <button type="button" role="tab" aria-selected={libraryTab === "published"} onClick={() => setLibraryTab("published")}>All documents<span className="island-badge">{published.length}</span></button>
-          <button type="button" role="tab" aria-selected={libraryTab === "drafts"} onClick={() => setLibraryTab("drafts")}>My Contributions<span className="island-badge">{drafts.length}</span></button>
-          {/* Reserved for the Flow 4 issue reports a member has sent. */}
-          <button type="button" role="tab" aria-selected={false} disabled title="My reports is not available yet">My reports<small className="sidebar-planned">Coming later</small></button>
-        </div>}
+        {!managingCatalog && <KnowledgeHomeNavigation tab={libraryTab} onTab={setLibraryTab} views={home.views} draftCount={drafts.length}
+          onPrivateNotes={onOpenPrivateNotes} canUsePrivateWorkspace={canUsePrivateWorkspace} />}
         {managingCatalog && catalog?.canManage ? <KnowledgeCatalogEditor platform={platform} organizationId={organizationId}
-          catalog={catalog} publications={published} onSaved={reload} onClose={() => setManagingCatalog(false)} />
-          : libraryTab !== "drafts" && <KnowledgeLibraryBrowse items={published.map(item => ({ ...item, responsibleDepartmentName: publicationDepartmentName(item) }))} catalog={catalog} catalogError={catalogError}
-            query={query} filters={libraryFilters} onFilters={setLibraryFilters} discover={libraryTab === "discover"}
-            onBrowse={() => setLibraryTab("published")} onOpen={openPublished} onManage={() => setManagingCatalog(true)} />}
-        {!managingCatalog && libraryTab === "drafts" && (filteredDrafts.length ? <div className="island-split">
+          catalog={catalog} publications={home.views.organization.items} publicationsUnavailable={home.views.organization.status === "error"}
+          onSaved={reload} onClose={() => setManagingCatalog(false)} />
+          : libraryTab !== "drafts" && <KnowledgeHomeBrowse source={source} state={{ ...home.views[source],
+              items: home.views[source].items.map(item => ({ ...item, responsibleDepartmentName: publicationDepartmentName(item) })) }}
+            catalog={catalog} catalogError={catalogError} query={query} filters={libraryFilters} onFilters={setLibraryFilters}
+            organizationView={organizationView} onOrganizationView={value => { setOrganizationView(value); if (value === "overview") setQuery(""); }} onOpen={openPublished}
+            onManage={() => setManagingCatalog(true)} onRetry={() => void home.refresh()} />}
+        {!managingCatalog && libraryTab === "drafts" && <section role="tabpanel" aria-labelledby="home-tab-drafts">{filteredDrafts.length ? <div className="island-split">
           <div className="island-main"><IslandTable label="My contributions" minWidth={620} columns="minmax(240px, 1.8fr) minmax(110px, 1fr) 110px minmax(150px, auto)"
             headers={["DOCUMENT", "DEPARTMENT", "UPDATED", "STATUS"]}>
             {filteredDrafts.map((item) => {
@@ -812,7 +843,7 @@ export function ServerKnowledgeFeaturePage({ platform, organizationId, organizat
               </>}
               </div>
           </aside>}
-        </div> : <div className="island island-empty"><h3>{drafts.length ? "No matching drafts" : "No contributions yet"}</h3>{drafts.length > 0 && <p>Try another title.</p>}<button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button></div>)}
+        </div> : <div className="island island-empty"><h3>{drafts.length ? "No matching drafts" : "No contributions yet"}</h3>{drafts.length > 0 && <p>Try another title.</p>}<button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button></div>}</section>}
       </>}
     </div>
     <ActionToast message={message} onDismiss={() => setMessage("")} />

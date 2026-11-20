@@ -5,6 +5,24 @@ or data migration is established by this record. Decision owner: requesting
 project maintainer. Recorded by Codex from the approved Library reference,
 standardized field discussion and explicit catalog-ownership confirmation.
 Owning requirements: [F11 KM-v1](../product/graph-ai-and-work.md#knowledge-management-refinement-km-v1-accepted-12-november-2026), ARD-77.
+Target-direction update, 19 November 2026: [F11 KM2](../product/graph-ai-and-work.md#knowledge-organization-restructuring-km2-19-november-2026)
+supersedes required Topic and mixed-reader curated Collections for the new flow:
+no Topic, flat Organization-only folders, Admin creation and no Author Collection
+picker. Placement cardinality/Type/version/archive details were subsequently
+accepted on 19 November in [0025](0025-flat-organization-collection-placement.md).
+That record supersedes the exact-publication/re-curation model below. Local
+schema foundation is implemented; API/UI and legacy mapping remain pending.
+Phase 1 implements optional reading scopes only; existing Topic/catalog/schema
+and frozen snapshots are not changed by that first slice. See the
+[phased contract](../engineering/knowledge-organization-phases.md).
+Phase 2 locally removes Topic from contribution form/readiness/server validation.
+New metadata saves clear its reference; untouched legacy drafts and frozen
+snapshots remain compatible. Catalog/Home removal and Organization-only folder
+management are later slices, not completed by this change. No SQL migration is added.
+Phase 3A locally enforces Organization-only contents on existing Collection reads,
+writes and the placement picker; this supersedes mixed-readership curation below.
+Legacy links remain stored but are excluded if ineligible. No new cardinality,
+version-following, Allowed types or Archive behavior is inferred from this guard.
 Partly superseded by [0021](0021-reader-email-search-and-no-document-code.md) (14 November 2026): Document Code
 is retired and the reader lookup searches by name or email; the rest of this decision stands.
 

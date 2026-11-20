@@ -228,6 +228,18 @@
       "filename": "0038_admin_only_direct_withdrawal.sql",
       "sha256": "547b13a55172cfb9ac4a8abc6d33f166fc1f7a4fd584d38481c37f81ed684b83",
       "rollout": "operator"
+    },
+    {
+      "id": "0039",
+      "filename": "0039_flat_collection_placement.sql",
+      "sha256": "dd12318cdb9ff0a1c3da3ad02c574a88a98e21487d2b6b806d37610876301645",
+      "rollout": "operator"
+    },
+    {
+      "id": "0040",
+      "filename": "0040_verified_legacy_metadata_repair.sql",
+      "sha256": "ccaf17b45e52906e195b4bf25e0d1064b9f4643ca79f07c09f95fa24a20c70cf",
+      "rollout": "operator"
     }
   ]
 }

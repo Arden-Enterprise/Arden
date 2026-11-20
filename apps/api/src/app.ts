@@ -1,6 +1,6 @@
 import Fastify, { LogController, type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText } from "@arden/domain";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText, matchesPublicationScope, publicationScopes, type PublicationScope } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
   type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
@@ -1849,9 +1849,11 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/published", {
+  app.get<{ Params: { organizationId: string }; Querystring: { scope?: PublicationScope } }>("/api/v1/organizations/:organizationId/knowledge/published", {
     schema: { params: { type: "object", required: ["organizationId"], properties: {
       organizationId: { type: "string", pattern: uuidPattern },
+    } }, querystring: { type: "object", additionalProperties: false, properties: {
+      scope: { type: "string", enum: [...publicationScopes] },
     } } },
   }, async (request, reply) => {
     const context = await requestActor(request, reply);
@@ -1863,7 +1865,9 @@ export function buildApp(dependencies: AppDependencies) {
       if (!actor || !items) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
       // T1.3: the API applies TargetReaderPolicy itself; publication RLS is defence in depth.
-      const readable = items.filter((item) => canRead(actor, { organizationId, readers: item.targetReaders }));
+      const scope = request.query.scope ?? "ALL_READABLE";
+      const readable = items.filter((item) => canRead(actor, { organizationId, readers: item.targetReaders })
+        && matchesPublicationScope(item.targetReaders?.mode, scope));
       return { items: readable.map(({ sourceUri: _sourceUri, audienceRoleIds, targetReaders, ...item }) => ({ ...item,
         audienceIds: audienceRoleIds ?? [], targetReaders: representReaderMode(targetReaders),
         publishedAt: item.publishedAt.toISOString(), validFrom: item.validFrom.toISOString(),
