@@ -204,6 +204,18 @@ describe("connected Home composition", () => {
     expect(screen.getByText("Collection unavailable. Clear filters to browse documents.")).toBeTruthy(); expect(screen.queryByText("No results")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" })); expect(read(common.title)).toBeTruthy();
   });
+  it("restores Home navigation if catalog refresh fails while management is open", async () => {
+    setup(); render(createElement(ServerKnowledgeFeaturePage, props));
+    await screen.findByRole("button", { name: /Manage collections/ });
+    fireEvent.click(screen.getByRole("button", { name: /Manage collections/ }));
+    expect(await screen.findByRole("heading", { name: "Manage collections" })).toBeTruthy();
+    vi.mocked(api.loadKnowledgeCatalog).mockRejectedValue(new Error("catalog outage"));
+    fireEvent.focus(window);
+    await screen.findByRole("tab", { name: /Organization/ });
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();
+    fireEvent.click(tab(/Shared with me/));
+    expect(await screen.findByRole("button", { name: `Read ${department.title}` })).toBeTruthy();
+  });
   it("Overview exits search and returns to common discovery without changing Shared filters", async () => {
     setup(); render(createElement(ServerKnowledgeFeaturePage, props)); await screen.findByRole("button", { name: `Read ${common.title}` });
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "missing" } }); expect(screen.getByText("No results")).toBeTruthy();
