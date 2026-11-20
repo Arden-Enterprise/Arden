@@ -188,6 +188,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     setDrafts(nextDrafts); setSubmissions(nextSubmissions);
     setReviews(nextReviews); setDecidedReviews(nextBoard.decided); setOptions(nextOptions);
     setCatalog(nextCatalog);
+    if (!nextCatalog?.canManage) setManagingCatalog(false);
     onAssignedReviewCount?.(nextReviews.length);
   }, [platform, organizationId, onAssignedReviewCount, home.refresh]);
 
