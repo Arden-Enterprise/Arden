@@ -276,8 +276,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         {error && !selectedMember && <p className="admin-feedback is-error" role="alert">{error}</p>}
         {tab === "members" && <div role="tabpanel" aria-label="Members" className="admin-tabpanel">
           {onOpenKnowledgeLibrary && <div className="organization-notice is-info">
-            <strong>Topics for contributions</strong>
-            <span>Org Admins add Topics in Knowledge Library → Discover → Manage catalog.</span>
+            <strong>Collections for common knowledge</strong>
+            <span>Manage organization-wide documents in Home → Manage collections.</span>
             <button type="button" className="secondary-button" onClick={onOpenKnowledgeLibrary}>Open Knowledge</button>
           </div>}
           <div className="admin-filters">

@@ -114,7 +114,8 @@ describe("organization admin manual findings", () => {
   it("points admins to Topic management from Administration", async () => {
     const openLibrary = vi.fn();
     openAdmin(openLibrary);
-    expect(await screen.findByText(/Org Admins add Topics in Knowledge Library/)).toBeTruthy();
+    expect(await screen.findByText(/Manage organization-wide documents in Home/)).toBeTruthy();
+    expect(screen.queryByText("Topics for contributions")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Open Knowledge" }));
     expect(openLibrary).toHaveBeenCalledOnce();
   });
