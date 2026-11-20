@@ -39,15 +39,24 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
       let cursor;
       try { cursor = decodeNotificationCursor(request.query.cursor); }
       catch { return reply.code(400).send({ error: { code: "INVALID_CURSOR", message: "The notification page cursor is invalid." } }); }
-      const visibleReviews = await repository.listAssignedReviews(actor.userId, request.params.organizationId);
+      const unreadOnly = request.query.unreadOnly === true;
+      const reviewResourceIds = await store.listReviewRequestResourceIds(actor.userId,
+        request.params.organizationId, unreadOnly);
+      if (reviewResourceIds === null) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "The organization is unavailable." } });
+      const visibleReviews = await repository.listAssignedReviewsForSubmissions(actor.userId,
+        request.params.organizationId, reviewResourceIds);
       if (visibleReviews === null) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "The organization is unavailable." } });
       const visibleReviewIds = visibleReviews.map(item => item.submissionId);
       const page = await store.list(actor.userId, request.params.organizationId, {
-        cursor, unreadOnly: request.query.unreadOnly === true, limit: request.query.limit ?? 30, visibleReviewIds,
+        cursor, unreadOnly, limit: request.query.limit ?? 30, visibleReviewIds,
       });
       if (!page) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "The organization is unavailable." } });
-      const ownedSubmissions = await repository.listKnowledgeSubmissions(actor.userId, request.params.organizationId);
-      const ownedIds = new Set((ownedSubmissions ?? []).map(item => item.id));
+      const outcomeSubmissionIds = [...new Set(page.items
+        .filter(item => ["REVIEW_APPROVED", "REVIEW_REJECTED", "PUBLICATION_ACTIVE", "PUBLICATION_FAILED"].includes(item.type))
+        .map(item => item.resourceId))];
+      const ownedSubmissionIds = await repository.listOwnedKnowledgeSubmissionIds(actor.userId,
+        request.params.organizationId, outcomeSubmissionIds);
+      const ownedIds = new Set(ownedSubmissionIds ?? []);
       return reply.header("cache-control", "no-store").send({
         ...page,
         items: page.items.map(item => {

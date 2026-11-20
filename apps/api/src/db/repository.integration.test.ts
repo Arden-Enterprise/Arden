@@ -618,6 +618,16 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const limited = await submit("limited-scope", ids.readerAudience);
     const organizationWide = await submit("organization-scope", ids.organizationAudience);
+    const reviewResourceIds = await repository.notifications.listReviewRequestResourceIds(
+      ids.organizationReviewer, ids.organization, false);
+    expect(reviewResourceIds).not.toBeNull();
+    expect(reviewResourceIds).toContain(organizationWide.id);
+    expect(reviewResourceIds).not.toContain(limited.id);
+    const targetedReviewCandidates = [...Array.from({ length: 100 }, () => randomUUID()), ...(reviewResourceIds ?? [])];
+    const notificationReviews = await repository.listAssignedReviewsForSubmissions(
+      ids.organizationReviewer, ids.organization, targetedReviewCandidates);
+    expect(notificationReviews?.map(item => item.submissionId)).toContain(organizationWide.id);
+    expect(notificationReviews?.map(item => item.submissionId)).not.toContain(limited.id);
     const assigned = await repository.listAssignedReviews(ids.organizationReviewer,
       ids.organization);
     expect(assigned).not.toBeNull();
@@ -679,6 +689,11 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const legacyQueue = await repository.listAssignedReviews(ids.manager, ids.organization);
     expect(legacyQueue).not.toBeNull();
     expect(legacyQueue?.map(item => item.submissionId) ?? []).toContain(legacy.id);
+    const olderOwnedSubmissions = [...Array.from({ length: 100 }, () => randomUUID()), legacy.id];
+    await expect(repository.listOwnedKnowledgeSubmissionIds(ids.owner, ids.organization, olderOwnedSubmissions))
+      .resolves.toContain(legacy.id);
+    await expect(repository.listOwnedKnowledgeSubmissionIds(ids.manager, ids.organization, [legacy.id]))
+      .resolves.toEqual([]);
     await expect(pool.query<{ review_rule: string }>(
       "SELECT review_rule FROM arden.shared_submission WHERE submission_id = $1", [legacy.id]))
       .resolves.toMatchObject({ rows: [{ review_rule: "LEGACY" }] });

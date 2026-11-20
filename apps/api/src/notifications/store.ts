@@ -15,6 +15,8 @@ type NotificationRow = {
 };
 
 export interface NotificationStore {
+  /** Resource candidates from this member's inbox; authorization is checked by Core for these IDs. */
+  listReviewRequestResourceIds(userId: string, organizationId: string, unreadOnly: boolean): Promise<string[] | null>;
   list(userId: string, organizationId: string, input: {
     cursor: NotificationCursor | null; unreadOnly: boolean; limit: number; visibleReviewIds: string[];
   }): Promise<NotificationPage | null>;
@@ -25,15 +27,22 @@ export interface NotificationStore {
 export class PgNotificationStore implements NotificationStore {
   constructor(private readonly withActor: ActorTransaction) {}
 
+  async listReviewRequestResourceIds(userId: string, organizationId: string, unreadOnly: boolean): Promise<string[] | null> {
+    return this.withActor(userId, organizationId, async (client) => {
+      if (!await this.hasActiveMembership(client, userId, organizationId)) return null;
+      const result = await client.query<{ resource_id: string }>(`SELECT DISTINCT n.resource_id
+        FROM arden_notification n
+        WHERE n.organization_id = $1 AND n.event_type = 'REVIEW_REQUESTED'
+          AND ($2::boolean = false OR n.read_at IS NULL)`, [organizationId, unreadOnly]);
+      return result.rows.map(row => row.resource_id);
+    });
+  }
+
   async list(userId: string, organizationId: string, input: {
     cursor: NotificationCursor | null; unreadOnly: boolean; limit: number; visibleReviewIds: string[];
   }): Promise<NotificationPage | null> {
     return this.withActor(userId, organizationId, async (client) => {
-      const membership = await client.query(`SELECT 1 FROM organization_membership om
-        JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
-        JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
-        WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
-      if (!membership.rowCount) return null;
+      if (!await this.hasActiveMembership(client, userId, organizationId)) return null;
       const visibleReviewIds = input.visibleReviewIds;
       const count = await client.query<{ unread_count: string }>(`SELECT count(*)::text AS unread_count
         FROM arden_notification n
@@ -82,5 +91,13 @@ export class PgNotificationStore implements NotificationStore {
         WHERE organization_id = $1 AND read_at IS NULL`, [organizationId]);
       return result.rowCount ?? 0;
     });
+  }
+
+  private async hasActiveMembership(client: PoolClient, userId: string, organizationId: string): Promise<boolean> {
+    const result = await client.query(`SELECT 1 FROM organization_membership om
+      JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
+      JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
+      WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
+    return Boolean(result.rowCount);
   }
 }
