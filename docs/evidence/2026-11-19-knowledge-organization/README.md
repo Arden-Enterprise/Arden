@@ -218,7 +218,7 @@ Knowledge and the code remain local/unpublished. ARD-77 is still In Progress.
 19 November 2026, same local baseline. The maintainer explicitly approves the
 three pending choices: one optional Collection/Admin-only placement, required
 controlled Allowed types, and eligible-version following/Archive-to-Unassigned.
-[ADR 0025](../../decisions/0025-flat-organization-collection-placement.md)
+[ADR 0025](../../decisions/0026-flat-organization-collection-placement.md)
 records approval and the compatibility boundary.
 
 ### Delivered
@@ -365,7 +365,7 @@ mapping, backup/restore rehearsal, compatible UI and operator cutover are separa
 ## KM2-P3B.3 — Collection management UI
 
 19 November continuation on the same uncommitted staging-based checkout. Accepted
-rules: [0025](../../decisions/0025-flat-organization-collection-placement.md).
+rules: [0025](../../decisions/0026-flat-organization-collection-placement.md).
 This supersedes the UI-pending checkpoint above, not live cutover requirements.
 
 Delivered shared UI:
@@ -554,3 +554,19 @@ jobs passed. The image gate correctly refused the old pinned Nginx runtime with
 six HIGH/CRITICAL findings. Refresh only the official `nginx:1.30.7-alpine` digest,
 verified against Docker Hub/Registry and its linux/amd64 config; do not suppress
 findings or remove the gate. Rebuilt image/security results remain pending.
+
+## Integration after notification merge — 20 November
+
+Staging d2321ce adds notification migration0039/ADR0025. Preserve their exact
+merged bytes. Unapplied Collection and metadata migrations are now0040/0041;
+the Collection decision is0026. Old restored-copy receipts describe the previous
+candidate only, not this combined chain. New live operator scope/rehearsal remains
+required; no migration or production mutation occurred during source integration.
+
+Preserve both notification review navigation and scoped Home/placement IPC.
+CodeRabbit's reviewed1522972 findings are checked and addressed: active filters
+keep the register after clearing search, an empty selected active folder remains
+in its selector, unsupported memberIds are removed from typed publication
+fixtures, the affected tests join test typechecking, and stale runbook/table
+formatting is corrected. New functional regressions pass. This does not claim
+that review of the old revision covers the final integration diff.

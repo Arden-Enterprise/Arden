@@ -12,7 +12,7 @@ const folder: api.KnowledgeCollection = { id: "folder", name: "Working guides", 
   cover: "handbook", allowedTypes: ["Guide"], documentIds: [] };
 const catalog: api.KnowledgeCatalog = { canManage: true, topics: [], collections: [folder] };
 const source: api.PublishedKnowledge = { id: "exact-version", draftId: "logical-document", title: "Access request guide", classification: "INTERNAL",
-  targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] }, responsibleDepartmentId: "hr", audienceIds: [], contentHash: "hash",
+  targetReaders: { mode: "ORGANIZATION", departmentId: null }, responsibleDepartmentId: "hr", audienceIds: [], contentHash: "hash",
   publishedAt: "2026-11-19T00:00:00Z", validFrom: "2026-11-19T00:00:00Z", validUntil: null,
   management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" } };
 let restore: () => void;
@@ -117,7 +117,7 @@ describe("one-document placement", () => {
     expect(api.loadCollectionPlacement).toHaveBeenCalledWith(platform, "org", source.draftId);
     expect(screen.queryByRole("option", { name: /Policies|Archived|Legacy/ })).toBeNull();
     fireEvent.change(screen.getByRole("combobox", { name: "Collection" }), { target: { value: folder.id } });
-    fireEvent.click(screen.getByRole("button", { name: "Move", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Move" }));
     await waitFor(() => expect(props.onSaved).toHaveBeenCalledOnce());
     expect(save).toHaveBeenCalledWith(platform, "org", { documentId: source.draftId, collectionId: null, revision: 7 }, folder.id);
   });
@@ -126,7 +126,7 @@ describe("one-document placement", () => {
     const save = vi.spyOn(api, "saveCollectionPlacement").mockResolvedValue({ documentId: source.draftId, collectionId: null, revision: 3 });
     render(createElement(CollectionPlacementEditor, moveProps()));
     await screen.findByRole("combobox", { name: "Collection" });
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "" } }); fireEvent.click(screen.getByRole("button", { name: "Move", exact: true }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "" } }); fireEvent.click(screen.getByRole("button", { name: "Move" }));
     await waitFor(() => expect(save).toHaveBeenCalledOnce()); expect(save.mock.calls[0]![3]).toBeNull();
   });
   it.each([new api.ApiError(412, "raw"), new Error("network")])("forces a fresh read after conflict/uncertainty, never auto-retries", async cause => {
@@ -134,9 +134,9 @@ describe("one-document placement", () => {
       .mockResolvedValueOnce({ documentId: source.draftId, collectionId: folder.id, revision: 1 });
     const save = vi.spyOn(api, "saveCollectionPlacement").mockRejectedValue(cause);
     render(createElement(CollectionPlacementEditor, moveProps())); await screen.findByRole("combobox");
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: folder.id } }); fireEvent.click(screen.getByRole("button", { name: "Move", exact: true }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: folder.id } }); fireEvent.click(screen.getByRole("button", { name: "Move" }));
     await screen.findByRole("button", { name: "Reload location" }); expect(save).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "Move", exact: true })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Move" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Reload location" }));
     await waitFor(() => expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe(folder.id));
     expect(load).toHaveBeenCalledTimes(2); expect(save).toHaveBeenCalledOnce();
@@ -187,7 +187,7 @@ describe("manager integration", () => {
     await screen.findByRole("combobox"); fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("button", { name: `Move ${source.title}` })).toBe(document.activeElement);
     fireEvent.click(screen.getByRole("button", { name: `Move ${source.title}` })); await screen.findByRole("combobox");
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: folder.id } }); fireEvent.click(screen.getByRole("button", { name: "Move", exact: true }));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: folder.id } }); fireEvent.click(screen.getByRole("button", { name: "Move" }));
     await screen.findByText("Updated."); expect(screen.queryByText(source.title)).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: folder.name })); expect(screen.getByText(source.title)).toBeTruthy();
   });

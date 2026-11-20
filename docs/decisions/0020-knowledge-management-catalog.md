@@ -9,7 +9,7 @@ Target-direction update, 19 November 2026: [F11 KM2](../product/graph-ai-and-wor
 supersedes required Topic and mixed-reader curated Collections for the new flow:
 no Topic, flat Organization-only folders, Admin creation and no Author Collection
 picker. Placement cardinality/Type/version/archive details were subsequently
-accepted on 19 November in [0025](0025-flat-organization-collection-placement.md).
+accepted on 19 November in [0025](0026-flat-organization-collection-placement.md).
 That record supersedes the exact-publication/re-curation model below. Local
 schema foundation is implemented; API/UI and legacy mapping remain pending.
 Phase 1 implements optional reading scopes only; existing Topic/catalog/schema

@@ -63,7 +63,7 @@ Version-matched official docs, repository code/tests, and authorized decisions.
 
 ## Status and synchronization
 
-[0025: Flat Organization Collection placement](0025-flat-organization-collection-placement.md)
+[0026: Flat Organization Collection placement](0026-flat-organization-collection-placement.md)
 records the accepted one-folder/Admin/Allowed types/version/Archive rules.
 P3B.1 is a local schema checkpoint only; new API/UI and legacy mapping remain.
 
@@ -71,6 +71,11 @@ P3B.1 is a local schema checkpoint only; new API/UI and legacy mapping remain.
 0023: reviewers keep scoped view/report handling but cannot withdraw directly.
 Inspection notifications are explicitly deferred for this release; audit remains.
 Implementation is on PR #52 only until actual integration/release is verified.
+
+[0025: Durable in-app notifications with Realtime hints](0025-in-app-notifications.md)
+accepts the F21 implementation scope while retaining 0024's inspection-notification
+deferral. Code and migration are branch-only until full PostgreSQL, Realtime and
+staging evidence is obtained; no rollout is implied.
 
 The Home start page and reader validity rules are [0022: Home start page and reader
 validity](0022-home-start-page-and-reader-validity.md), accepted on 15 November 2026;

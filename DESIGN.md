@@ -110,7 +110,7 @@ The server-backed `Document text` field keeps one compact formatting toolbar (No
 
 ## Local Collection refinement (KM2, 19 November 2026)
 
-The accepted [flat Organization folder decision](docs/decisions/0025-flat-organization-collection-placement.md)
+The accepted [flat Organization folder decision](docs/decisions/0026-flat-organization-collection-placement.md)
 supersedes the older Topic/curated-bundle directions above. Home keeps its entry
 position. Shared Collection management separates a compact Name*/Allowed types*/
 Description form from one-document Move (including Unassigned), with compatible

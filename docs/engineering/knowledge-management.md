@@ -3,7 +3,7 @@
 ## Current KM2 contract — 20 November 2026
 
 Use [F11 KM2](../product/graph-ai-and-work.md#knowledge-organization-restructuring-km2-19-november-2026),
-[ADR0025](../decisions/0025-flat-organization-collection-placement.md) and the
+[ADR0025](../decisions/0026-flat-organization-collection-placement.md) and the
 [transition runbook](collection-legacy-transition.md). The KM-v1 text below is
 historical and must not be used to restore Topic requirements or exact-version
 Collection writers.

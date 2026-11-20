@@ -10,7 +10,7 @@ export function registerLegacyMetadataVerification(context: () => Context) {
   describe("verified legacy metadata repair", () => {
     let source: { id: string; draftId: string }, migration: string;
     beforeAll(async () => {
-      migration = await readFile(new URL("../../migrations/0040_verified_legacy_metadata_repair.sql", import.meta.url), "utf8");
+      migration = await readFile(new URL("../../migrations/0041_verified_legacy_metadata_repair.sql", import.meta.url), "utf8");
       source = await context().publish();
     });
     async function fixture(work: (client: PoolClient, manifest: Manifest) => Promise<void>) {

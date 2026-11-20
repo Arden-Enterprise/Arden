@@ -61,7 +61,8 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
     .sort((a, b) => a[1].localeCompare(b[1]));
   const browseWith = (change: Partial<LibraryFilters>) => { onFilters({ ...emptyLibraryFilters(), ...change }); onBrowse(); };
   const selectedCollection = catalog?.collections.find(item => item.id === filters.collectionId);
-  const collections = catalog?.collections.filter(item => item.status === "ACTIVE" && item.documentIds.some(id => items.some(source => source.id === id))) ?? [];
+  const collections = catalog?.collections.filter(item => item.status === "ACTIVE"
+    && (item.id === filters.collectionId || item.documentIds.some(id => items.some(source => source.id === id)))) ?? [];
   const unavailableCollection = Boolean(filters.collectionId && (!catalog || (filters.collectionId !== "unassigned" && selectedCollection?.status !== "ACTIVE")));
   return <div className="km-library">
     {catalogError && <p className="island-note is-warning" role="status">{catalogError}</p>}

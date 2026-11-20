@@ -20,6 +20,7 @@ import { OrganizationAccessPage } from "../organization/OrganizationAccessPage";
 import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
 import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { SettingsDialog } from "../settings";
+import { NotificationProvider } from "../notifications/NotificationProvider";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
@@ -227,7 +228,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [createdKnowledgeDraft, setCreatedKnowledgeDraft] = useState<CreatedKnowledgeDraft | null>(null);
   const [contributionAttempt, setContributionAttempt] = useState<ContributionAttempt | null>(null);
   const [knowledgeCitationTarget, setKnowledgeCitationTarget] = useState<KnowledgeNavigationTarget | null>(null);
+  const [requestedReviewId, setRequestedReviewId] = useState<string | null>(null);
   const restoreStarted = useRef(false);
+
+  useEffect(() => { setRequestedReviewId(null); }, [serverOrganizationId, serverSession?.actor.id]);
 
   /**
    * Activates the selected organization workspace for the signed-in member.
@@ -240,6 +244,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       try { window.history.replaceState(null, "", "/"); } catch {}
     }
     setServerOrganizationId(membership.organization.id);
+    setRequestedReviewId(null);
     setCreatedKnowledgeDraft(null);
     setAssignedReviewCount(undefined);
     setContributionAttempt(null);
@@ -382,6 +387,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (serverSession) void apiSignOut(platform).catch(() => undefined);
     setServerSession(null);
     setServerOrganizationId(null);
+    setRequestedReviewId(null);
     setCreatedKnowledgeDraft(null);
     setAssignedReviewCount(undefined);
     setContributionAttempt(null);
@@ -552,6 +558,16 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setActiveView(view);
   };
 
+  const openNotificationTarget = (target: { view: "review-queue"; id: string } | { view: "knowledge" }) => {
+    if (target.view === "review-queue") {
+      setRequestedReviewId(target.id);
+      navigate("review-queue");
+    } else {
+      setRequestedReviewId(null);
+      navigate("knowledge");
+    }
+  };
+
   /**
    * Opens knowledge feature view focused on a specific citation reference.
    *
@@ -625,6 +641,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           : paneContent[activeView];
 
   return (
+    <NotificationProvider platform={platform} organizationId={serverSession ? serverOrganizationId : null}
+      onOpenTarget={openNotificationTarget}>
     <WorkspaceNavigationContext.Provider value={{ open: navOpen, setOpen: setNavOpen }}>
     <StatusIslandContext.Provider value={{ toast: islandToast, setToast: setIslandToast, confirm: islandConfirm, setConfirm: setIslandConfirm }}>
     <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${navCollapsed ? " is-nav-collapsed" : ""}`}>
@@ -691,6 +709,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           departmentName={activeMembership ? "Personal contribution" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
           createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
           citationTarget={knowledgeCitationTarget}
+          requestedReviewId={requestedReviewId} onReviewTargetHandled={() => setRequestedReviewId(null)}
           onAssignedReviewCount={setAssignedReviewCount} awaitingAssignment={isUnassignedMember}
           canUsePrivateWorkspace={activeMembership?.canUsePrivateWorkspace ?? false}
           onOpenPrivateNotes={() => navigate("personal-workspace")}
@@ -740,5 +759,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     </div>
     </StatusIslandContext.Provider>
     </WorkspaceNavigationContext.Provider>
+    </NotificationProvider>
   );
 }

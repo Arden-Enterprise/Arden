@@ -21,7 +21,11 @@ function sha256(bytes) {
 }
 
 export function migrationSqlChecksum(content) {
-  return sha256(Buffer.from(content));
+  // Git checkouts can use CRLF on Windows while the committed migration uses
+  // LF. Hash canonical SQL text so the same immutable migration has one
+  // checksum on every platform; SQL edits still change the digest.
+  const sql = Buffer.from(content).toString("utf8").replace(/\r\n/g, "\n");
+  return sha256(Buffer.from(sql, "utf8"));
 }
 
 function validateEntry(entry, index) {

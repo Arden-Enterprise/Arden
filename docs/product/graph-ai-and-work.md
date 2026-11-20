@@ -31,7 +31,7 @@ not silently migrated/deleted. The maintainer subsequently explicitly accepts
 zero/one Collection per logical document, Admin-only post-publication placement,
 required Name/Allowed types and optional Description. Eligible new versions keep
 placement; narrower readership/incompatible Type detaches it. Archive returns
-documents to Unassigned without deletion or withdrawal. See [0025](../decisions/0025-flat-organization-collection-placement.md)
+documents to Unassigned without deletion or withdrawal. See [0025](../decisions/0026-flat-organization-collection-placement.md)
 and the [phased contract](../engineering/knowledge-organization-phases.md).
 P3B.1 adds local schema/constraints/reconciliation only; management API/UI and
 legacy mapping are not delivered yet. Naming/layout and release remain separate.

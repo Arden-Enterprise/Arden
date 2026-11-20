@@ -4,7 +4,7 @@ Owner: product/engineering maintainers. Tracking: ARD-77.
 Accepted scope: 19 November 2026, requesting maintainer approves API first,
 explicit legacy conversion second and safe cleanup third. Recorded by Codex.
 Source: local `feat/knowledge-scope-foundation` from staging `af28915`, main
-`9fa3d34`; [0025](../decisions/0025-flat-organization-collection-placement.md).
+`9fa3d34`; [0026](../decisions/0026-flat-organization-collection-placement.md).
 Status: compatible local API/UI/Home implemented and staging inventory/protected
 restore verified. Reviewed live mapping, operator cutover and release pending.
 
@@ -33,7 +33,7 @@ Base: `/api/v1/organizations/:organizationId/knowledge/catalog`.
 | POST `/collections` | Name, status and nonempty controlled `allowedTypes`; optional description/cover. No content placement. Existing name uniqueness and transaction/audit retained. |
 | PATCH `/collections/:id` | Same configuration payload and `If-Match: "catalog-N"`. `INACTIVE` is Archive: triggers detach contents to Unassigned, never withdraw/delete documents. |
 | GET `/placements/:documentId` | Current Org Admin only, current eligible common source, logical `shared_draft_id` identity. Returns `{documentId, collectionId, revision}` and `ETag: "placement-N"`; absent placement has null/0. |
-| PATCH `/placements/:documentId` | `{collectionId: UUID|null}` plus `If-Match: "placement-N"`. One atomic add/move/remove; audit in the same transaction. Retained Unassigned rows never reset revision. |
+| PATCH `/placements/:documentId` | `{collectionId: UUID\|null}` plus `If-Match: "placement-N"`. One atomic add/move/remove; audit in the same transaction. Retained Unassigned rows never reset revision. |
 
 All successful/authenticated catalog replies use no-store. Invalid input is 400,
 missing/malformed revision 428, stale/deadlock/serialization conflict 412,
@@ -48,11 +48,11 @@ does not mean all Types. The shared web/desktop client adds placement adapters;
 Electron permits only exact GET/PATCH placement routes/preconditions and no query
 or unrelated capability. No public general SQL/operator endpoint is introduced.
 
-**UI compatibility gate:** the current management editor still sends the old
-bulk-picker payload. Its save will deliberately fail on the new API until the
-next UI slice uses separate configuration/placement. Do not deploy this backend
-alone as a completed management feature or silently drop the old payload. Home
-composition and Topic management removal remain separately unfinished.
+**Release compatibility gate:** the management editor now uses separate
+configuration/placement and Home uses the scoped projections. Ship the matching
+API/UI together, after the operator migration and target-specific rehearsal.
+Legacy mapping, native acceptance and separately approved physical contraction
+remain distinct gates; obsolete clients still receive the explicit upgrade error.
 
 ## Explicit legacy mapping
 
@@ -92,8 +92,8 @@ Do not invent those values from PDF filenames or mutate immutable publications.
 An unknown-Type source cannot be placed until a governed repair/republication
 makes it eligible; explicit Unassigned does not hide it from the common register.
 
-The maintainer approved the bounded staging exception in ADR 0025: operator
-migration 0040 accepts a private, hash-verified manifest in the same transaction
+The maintainer approved the bounded staging exception in ADR 0026: operator
+migration 0041 accepts a private, hash-verified manifest in the same transaction
 through `arden.metadata_repair_manifest`. No input means no repair, never guessed
 metadata. The operator separately requires exactly 30 matches and 30 audit rows.
 Existing draft ARD codes are retained and copied to missing submission/publication
@@ -156,7 +156,7 @@ cleanup. This phase is not a complete physical schema contraction.
 
 Before a live transition: explicit target authority, protected backup and real
 restore rehearsal, exact live inventory/owner-approved mapping, maintenance and
-single-writer/cutover plan, compatible UI, migration 0039 applied through its
+single-writer/cutover plan, compatible UI, migration 0040 applied through its
 operator gate, paired runtime/native acceptance and recovery plan. The local CLI
 must not be made remote-capable by changing its environment or bypassing guards.
 Authorize/review a proper operator entry point separately. Data converted to the

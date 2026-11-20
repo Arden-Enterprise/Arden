@@ -4,6 +4,8 @@
     "types": ["react", "vitest/globals"]
   },
   "include": [
+    "src/assets.d.ts",
+    "src/asset-modules.d.ts",
     "tests/departmentConfirmation.test.ts",
     "tests/invitationFeedback.test.ts",
     "tests/memberAdministration.test.ts",
@@ -12,6 +14,10 @@
     "tests/readerSummaryApi.test.ts",
     "tests/readerQuestion.test.tsx",
     "tests/citationTextMatch.test.ts",
-    "tests/inlineCitations.test.tsx"
+    "tests/inlineCitations.test.tsx",
+    "tests/notifications.test.tsx",
+    "tests/knowledgeHome.test.tsx",
+    "tests/knowledgeManagement.test.tsx",
+    "tests/collectionManagement.test.tsx"
   ]
 }

@@ -2750,6 +2750,12 @@ class MemoryRepository implements ArdenDataRepository {
     return this.sharedSubmission ? [this.sharedSubmission] : [];
   }
 
+  async listOwnedKnowledgeSubmissionIds(userId: string, requestedOrganization: string,
+    submissionIds: readonly string[]): Promise<string[] | null> {
+    const submissions = await this.listKnowledgeSubmissions(userId, requestedOrganization);
+    return submissions?.filter(submission => submissionIds.includes(submission.id)).map(submission => submission.id) ?? null;
+  }
+
   governanceAdmin = false;
   governanceInspections = new Map<string, string>();
   publicationReports: PublicationReport[] = [];
@@ -2902,6 +2908,12 @@ class MemoryRepository implements ArdenDataRepository {
       title: submission.title, departmentId: submission.responsibleDepartmentId,
       classification: submission.classification, submittedAt: submission.submittedAt, approvalBlocked: false,
       versionNo: 2, requestType: submission.requestType, authorName: "Owner" }];
+  }
+
+  async listAssignedReviewsForSubmissions(userId: string, requestedOrganization: string,
+    submissionIds: readonly string[]): Promise<AssignedReview[] | null> {
+    const reviews = await this.listAssignedReviews(userId, requestedOrganization);
+    return reviews?.filter(review => submissionIds.includes(review.submissionId)) ?? null;
   }
 
   decidedReviews: DecidedReview[] = [];

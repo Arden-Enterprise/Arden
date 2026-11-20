@@ -12,7 +12,7 @@ vi.mock("../src/shared/WorkspaceTopbar", () => ({ WorkspaceTopbar: ({ search }: 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const common: api.PublishedKnowledge = { id: "common-version", draftId: "common-doc", title: "Common working guide", classification: "INTERNAL",
-  targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] }, responsibleDepartmentId: "finance", responsibleDepartmentName: "Finance",
+  targetReaders: { mode: "ORGANIZATION", departmentId: null }, responsibleDepartmentId: "finance", responsibleDepartmentName: "Finance",
   audienceIds: [], contentHash: "hash", body: "Exact document content", mimeType: "text/plain", publishedAt: "2026-11-19T00:00:00Z",
   validFrom: "2026-11-19T00:00:00Z", validUntil: null, management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" } };
 const assigned = { ...common, id: "assigned-version", draftId: "assigned-doc", title: "Common reference", management: { ...common.management!, type: "Reference" as const } };
@@ -114,7 +114,7 @@ describe("connected Home composition", () => {
       navigationId: "citation-1", documentId: department.draftId, versionId: department.id, excerpt: "Exact document content" } }));
     await screen.findByRole("heading", { name: "Document information" });
     expect(api.loadPublishedKnowledge).toHaveBeenCalledWith("web", "org", department.id);
-    fireEvent.click(screen.getByRole("button", { name: "Home", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Home" }));
     expect(tab(/Shared with me/).getAttribute("aria-selected")).toBe("true"); expect(read(department.title)).toBeTruthy(); expect(read(common.title)).toBeNull();
   });
   it("removes a publication from discovery when opening it confirms access is lost", async () => {
@@ -143,13 +143,13 @@ describe("connected Home composition", () => {
     setup(); render(createElement(ServerKnowledgeFeaturePage, props));
     fireEvent.click(await screen.findByRole("button", { name: /Company handbook/ }));
     expect(read(assigned.title)).toBeTruthy(); expect(read(common.title)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "All documents", exact: true })); expect(read(common.title)).toBeTruthy(); expect(read(assigned.title)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Unassigned", exact: true })); expect(read(common.title)).toBeTruthy(); expect(read(assigned.title)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "All documents" })); expect(read(common.title)).toBeTruthy(); expect(read(assigned.title)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Unassigned" })); expect(read(common.title)).toBeTruthy(); expect(read(assigned.title)).toBeNull();
   });
   it("retains each scope's search/filter state and reader Back restores the origin and focus", async () => {
     setup(); render(createElement(ServerKnowledgeFeaturePage, props));
     await screen.findByRole("button", { name: `Read ${common.title}` });
-    fireEvent.click(screen.getByRole("button", { name: "Unassigned", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Unassigned" }));
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "working" } });
     fireEvent.change(screen.getByRole("combobox", { name: "Type" }), { target: { value: "Guide" } });
     fireEvent.click(tab(/Shared with me/)); expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
@@ -167,7 +167,7 @@ describe("connected Home composition", () => {
     render(createElement(ServerKnowledgeFeaturePage, props));
     await screen.findByText("No documents available"); expect(read(legacy.title)).toBeNull();
     fireEvent.click(tab(/Other documents/)); expect(read(legacy.title)).toBeTruthy();
-    expect(screen.getByRole("cell", { name: "Finance", exact: true })).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "Finance" })).toBeTruthy();
   });
   it("shows outage, not empty or cached content; a deliberate retry can recover", async () => {
     const lists = setup().mockImplementation(async (_platform, _org, scope) => { if (scope === "ORGANIZATION") throw new Error("internal detail"); return scope === "SHARED" ? [department] : []; });
@@ -181,10 +181,10 @@ describe("connected Home composition", () => {
   });
   it("keeps private originals as a capability-gated route, never a published source", async () => {
     const lists = setup(), open = vi.fn(); const view = render(createElement(ServerKnowledgeFeaturePage, { ...props, onOpenPrivateNotes: open }));
-    fireEvent.click(await screen.findByRole("button", { name: "Private notes", exact: true })); expect(open).toHaveBeenCalledOnce();
+    fireEvent.click(await screen.findByRole("button", { name: "Private notes" })); expect(open).toHaveBeenCalledOnce();
     expect(screen.getByText("Only you")).toBeTruthy(); expect(lists.mock.calls).toHaveLength(3);
     view.rerender(createElement(ServerKnowledgeFeaturePage, { ...props, onOpenPrivateNotes: open, canUsePrivateWorkspace: false }));
-    expect((screen.getByRole("button", { name: "Private notes", exact: true }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Private notes" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Unavailable in this workspace")).toBeTruthy();
   });
   it("keeps Contributions separate and keyboard arrows skip disabled planned tabs", async () => {
@@ -199,17 +199,29 @@ describe("connected Home composition", () => {
   it("keeps All usable when catalog fails and never reports Unassigned as empty", async () => {
     setup(); vi.mocked(api.loadKnowledgeCatalog).mockRejectedValue(new Error("catalog outage"));
     render(createElement(ServerKnowledgeFeaturePage, props)); await screen.findByRole("button", { name: `Read ${common.title}` });
-    fireEvent.click(screen.getByRole("button", { name: "All documents", exact: true })); expect(read(common.title)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Unassigned", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "All documents" })); expect(read(common.title)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Unassigned" }));
     expect(screen.getByText("Collection unavailable. Clear filters to browse documents.")).toBeTruthy(); expect(screen.queryByText("No results")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" })); expect(read(common.title)).toBeTruthy();
   });
   it("Overview exits search and returns to common discovery without changing Shared filters", async () => {
     setup(); render(createElement(ServerKnowledgeFeaturePage, props)); await screen.findByRole("button", { name: `Read ${common.title}` });
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "missing" } }); expect(screen.getByText("No results")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "All documents", exact: true }).getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: "Overview", exact: true }));
+    expect(screen.getByRole("button", { name: "All documents" }).getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(""); expect(screen.getByRole("heading", { name: "Collections" })).toBeTruthy();
+  });
+  it("keeps a selected type active after clearing an Overview search", async () => {
+    setup(); render(createElement(ServerKnowledgeFeaturePage, props));
+    await screen.findByRole("button", { name: `Read ${common.title}` });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "common" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Type" }), { target: { value: "Guide" } });
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } });
+    expect((screen.getByRole("combobox", { name: "Type" }) as HTMLSelectElement).value).toBe("Guide");
+    expect(read(common.title)).toBeTruthy(); expect(read(assigned.title)).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Collections" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Overview" }));
+    expect(screen.getByRole("heading", { name: "Collections" })).toBeTruthy();
   });
   it("cannot treat an older server ignoring scope as the Organization register", async () => {
     setup().mockResolvedValue([common, department, legacy]); render(createElement(ServerKnowledgeFeaturePage, props));

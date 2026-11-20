@@ -24,6 +24,7 @@ Manual local Mainflow 1 testing may use the dedicated local adapter in `apps/api
 - Published Arden content may use `ORGANIZATION_ALL`, a matching `DEPARTMENT_ALL`, or an explicit `GROUP`. A verified active member with any one matching audience may view, search, and submit a separate contribution copy. Org Admin, ReviewerGrant, and System Admin are not implicit content grants.
 - Test grants, membership removal, role changes, revoked/expired sessions, multiple organization memberships, and attempted cross-organization references. Unknown policy/source audience fails closed.
 - Privileged workers/migration accounts do not replace end-user authorization. Use narrow service capabilities and explicitly trace the initiating actor where a task acts for someone.
+- The notification dispatcher uses a separate non-bypass login that can `SET ROLE arden_notification_worker`; that role sees only notification envelopes and can update only outbox delivery-state columns. It has no grants on submissions, drafts, user content, or API session tables. Inbox reads and mark-read operations use `arden_runtime` with the current actor and organization context. Keep this boundary in the real-database worker test.
 - RLS is defense in depth, not the sole policy layer. Test real runtime roles and pooled tenant context; development DB superuser success proves neither production denial nor RLS correctness.
 - Cross-actor `SECURITY INVOKER` triggers and write policies must derive tenant ownership from an explicit organization column on the protected resource or from the currently authorized actor. Do not validate a reviewer action by joining the submitter's RLS-hidden membership, and do not create circular policy dependencies such as current-publication write -> published-version read -> current-publication read. Exercise the complete write under `arden_runtime`, including deferred constraints, because isolated statement or owner-role checks miss these failures.
 - An Org Admin directory or reviewer-target lookup that joins `organization_membership` to `user_account` needs a separately scoped profile-read policy: the self-read policy alone silently drops other members. Migration 0015 allows profile reads only while the API's verified Org Admin transaction context is active and only for profiles with a membership in that transaction's organization. Keep ordinary member reads self-only, and test both tenant isolation and the actual reviewer-grant path under `arden_runtime`; do not disable RLS or expose a cross-organization directory.
@@ -36,13 +37,14 @@ The organization, session-context, and owner-private note contract for the first
 
 ### Database ownership is an execution contract
 
-Local operator migration 0039 adds the trigger-only trusted
-`validate_collection_placement` routine, bringing the reviewed inventory to 33.
+Local operator migration 0040 adds the trigger-only trusted
+`validate_collection_placement` routine, bringing the reviewed inventory to 34
+after migration0039's notification executor.
 It locks Collection/current-pointer eligibility without runtime UPDATE grants on
 publication tables. Preserve its postgres owner and lack of runtime/PUBLIC EXECUTE;
 the pure eligibility helper and reconciliation remain invoker-context. Real
 post-handoff tests cover this split; API/UI and live rollout are still pending.
-See [0025](../decisions/0025-flat-organization-collection-placement.md).
+See [0026](../decisions/0026-flat-organization-collection-placement.md).
 
 The release migration login owns Arden DDL and its migration ledger; it is not the
 internal executor of reviewed `SECURITY DEFINER` functions. Preserve those functions'
@@ -95,6 +97,14 @@ contributor and agent, not to one named tool.
   - Inspection and the responsible-reviewer view are never Library, search, Ask Arden or citation sources.
   - Under [decision 0024](../decisions/0024-admin-only-direct-withdrawal.md) and forward operator 0038, only a current Organization Admin may withdraw directly; a matching reviewer grant or client Admin setting is insufficient. Reason/audit and author-visible Admin provenance remain mandatory. Responsible-reviewer read/report handling and approval of author withdrawal requests are unchanged.
   - This release explicitly defers inspection notifications. Audit records are not automatic alerts; the deferral does not permanently remove the notification requirement.
+
+## In-app notification boundary (decision 0025)
+
+- PostgreSQL is the inbox/read-state source of truth. Trigger-written notifications and outbox rows commit with the corresponding submission, decision, activation/failure, primary-department or reviewer-grant event. The dispatcher sends only `{ notificationId }` over private Realtime Broadcast; clients fetch message and target data through Core.
+- Review-request fan-out follows current Organization Admin, disjoint Department/Organization grant, classification/tag/level, active membership and frozen legacy rules. A notification does not preserve reviewer access. Core checks current authorization when listing and opening the item; inaccessible items have no title/body/target disclosure.
+- Reader credentials are Core-issued, kept in memory, scoped to an exact environment/organization/membership topic and expire after 120 seconds. The notification reader role has Realtime SELECT for Broadcast only; it cannot insert, read `arden` tables or use another topic. The separate outbox sender role can insert Broadcast only and cannot select. Neither role receives direct Arden database grants.
+- Realtime authorization may be cached on an already connected socket until its short JWT expires. Such messages contain only opaque IDs; Core denies subsequent inbox data and target reads after permission loss. On organization change, sign-out, expired session or desktop window shutdown, close the channel and clear scoped UI state.
+- Notification rows cascade with hard deletion of the organization or recipient membership. Preserve notification/outbox consistency in backups and restore, then enforce current membership state; an older backup must not recreate active access. No inspection alert is added, consistent with decision 0024.
 
 ## 4. Derived data, search, graph, and revocation
 

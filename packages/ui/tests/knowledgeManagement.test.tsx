@@ -13,12 +13,22 @@ const collection = { id: "collection", name: "Employee handbook", description: "
   cover: "handbook" as const, documentIds: ["readable"] };
 const catalog: api.KnowledgeCatalog = { canManage: false, topics: [topic], collections: [collection] };
 const publication: api.PublishedKnowledge = { id: "readable", draftId: "draft", title: "Working together", classification: "INTERNAL",
-  targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
+  targetReaders: { mode: "ORGANIZATION", departmentId: null },
   responsibleDepartmentId: "hr", responsibleDepartmentName: "HR", audienceIds: [], contentHash: "hash",
   publishedAt: "2026-11-12T10:00:00Z", validFrom: "2026-11-12T10:00:00Z", validUntil: null,
   management: { type: "Guide", topicId: topic.id, topicName: topic.name, version: "1.0", effectiveDate: "2027-01-01",
     expirationDate: null, changeNote: "", releaseKind: "NEW" } };
 describe("live Library management components", () => {
+  it("keeps a selected active Collection visible when its last document disappears", () => {
+    const current = { ...catalog, collections: [{ ...collection, documentIds: [] }] };
+    render(createElement(KnowledgeLibraryBrowse, { items: [], catalog: current, catalogError: "", query: "",
+      filters: { ...emptyLibraryFilters(), collectionId: collection.id }, onFilters: vi.fn(), discover: false,
+      onBrowse: vi.fn(), onOpen: vi.fn(), onManage: vi.fn() }));
+    const select = screen.getByRole("combobox", { name: "Collection" }) as HTMLSelectElement;
+    expect(select.value).toBe(collection.id);
+    expect(select.selectedOptions[0]?.textContent).toBe(collection.name);
+    expect(screen.getByText("No documents available")).toBeTruthy();
+  });
   it("does not report an empty Topic catalog when loading the catalog failed", () => {
     render(createElement(KnowledgeLibraryBrowse, { items: [], catalog: null,
       catalogError: "Catalog is unavailable.", query: "", filters: emptyLibraryFilters(),
@@ -77,7 +87,7 @@ describe("live Library management components", () => {
   });
   it("shows a truthful empty Collection picker when only restricted publications are supplied", () => {
     render(createElement(KnowledgeCatalogEditor, { platform: "web", organizationId: "org", catalog: { ...catalog, canManage: true },
-      publications: [{ ...publication, targetReaders: { mode: "DEPARTMENT", departmentId: "hr", memberIds: [] } }],
+      publications: [{ ...publication, targetReaders: { mode: "DEPARTMENT", departmentId: "hr" } }],
       onSaved: vi.fn(), onClose: vi.fn() }));
     expect(screen.getByText("No documents here.")).toBeTruthy();
     expect(screen.queryByRole("checkbox")).toBeNull();

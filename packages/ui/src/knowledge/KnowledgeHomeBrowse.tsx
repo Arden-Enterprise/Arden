@@ -10,7 +10,7 @@ export function KnowledgeHomeBrowse({ source, state, catalog, catalogError, quer
   onOpen: (id: string) => void; onManage: () => void; onRetry: () => void;
 }) {
   const organization = source === "organization";
-  const register = organizationView === "all" || Boolean(query.trim());
+  const register = organizationView === "all" || Boolean(query.trim() || filters.type || filters.ownerId || filters.collectionId);
   return <section className="km-home-source" role="tabpanel" aria-labelledby={`home-tab-${source}`}>
     <header className="km-section-heading"><p className="island-meta">{organization ? "Shared with everyone in this organization."
       : source === "shared" ? "Shared with your department or with you." : "Readable documents with sharing details not recorded."}</p>
@@ -24,6 +24,6 @@ export function KnowledgeHomeBrowse({ source, state, catalog, catalogError, quer
       : state.status === "loading" ? <div className="island island-empty" role="status">Loading documents…</div>
       : <KnowledgeLibraryBrowse items={state.items} catalog={organization ? catalog : null} catalogError={organization ? catalogError : ""}
         allowCollections={organization} showReaders={source === "shared"} query={query} filters={filters} onFilters={onFilters}
-        discover={organization && organizationView === "overview"} onBrowse={() => onOrganizationView("all")} onOpen={onOpen} onManage={onManage} />}
+        discover={organization && !register} onBrowse={() => onOrganizationView("all")} onOpen={onOpen} onManage={onManage} />}
   </section>;
 }

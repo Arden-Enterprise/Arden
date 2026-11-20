@@ -16,7 +16,7 @@ DECLARE
     after_publication jsonb;
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper) THEN
-        RAISE EXCEPTION '0040 requires the trusted operator' USING ERRCODE = '42501';
+        RAISE EXCEPTION '0041 requires the trusted operator' USING ERRCODE = '42501';
     END IF;
     IF NULLIF(current_setting('arden.metadata_repair_manifest', true), '') IS NULL THEN
         RETURN;
@@ -115,7 +115,7 @@ BEGIN
         END IF;
         INSERT INTO audit_event (organization_id, event_type, outcome, details_json)
         VALUES (item."organizationId", 'KNOWLEDGE_LEGACY_METADATA_REPAIRED', 'SUCCESS',
-            jsonb_build_object('migration','0040_verified_legacy_metadata_repair',
+            jsonb_build_object('migration','0041_verified_legacy_metadata_repair',
                 'sourceManifestSha256',manifest->>'sourceManifestSha256',
                 'documentId',item."documentId",'publicationId',item."publicationId",
                 'submissionId',item."submissionId",'contentHash',item."contentHash",
