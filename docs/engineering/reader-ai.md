@@ -4,7 +4,9 @@ PDF serving regression,20 November2026: the release web proxy must serve the
 bundled pdf.js `.mjs` worker as JavaScript. The default `application/octet-stream`
 response caused worker/fallback imports to fail, leaving the reader's Download
 fallback even though the file and authorization were valid. The explicit Nginx
-mapping retains `nosniff`. Built-image HTTP smoke now checks the real compiled
+mapping retains `nosniff`. A stable versioned worker URL avoids reusing a previously
+cached immutable octet-stream response, including for the fallback import.
+Built-image HTTP smoke now checks the real compiled
 worker's MIME/security header and missing-worker404; signed-in post-release PDF
 verification is separate from AI generation and does not require a paid model call.
 

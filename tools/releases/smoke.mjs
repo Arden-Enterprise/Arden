@@ -120,7 +120,7 @@ try {
   // Test the compiled asset through real nginx: a 200 octet-stream worker still fails in browsers.
   const workers = docker("exec", names.web, "find", "/usr/share/nginx/html/assets", "-maxdepth", "1", "-type", "f", "-name", "pdf.worker*.mjs").split("\n");
   if (workers.length !== 1 || !/^\/usr\/share\/nginx\/html\/assets\/pdf\.worker[^/]+\.mjs$/.test(workers[0])) throw new Error("Expected one bundled PDF module worker");
-  const worker = await fetch(`${origin}/assets/${workers[0].split("/").at(-1)}`);
+  const worker = await fetch(`${origin}/assets/${workers[0].split("/").at(-1)}?module-worker=1`);
   if (worker.status !== 200 || !/^(application|text)\/javascript(?:;|$)/i.test(worker.headers.get("content-type") ?? "")
     || worker.headers.get("x-content-type-options") !== "nosniff") throw new Error("PDF module worker must be served as JavaScript with nosniff");
   await worker.body?.cancel();
