@@ -1,5 +1,13 @@
 # Reader AI — next implementation slice
 
+PDF serving regression,20 November2026: the release web proxy must serve the
+bundled pdf.js `.mjs` worker as JavaScript. The default `application/octet-stream`
+response caused worker/fallback imports to fail, leaving the reader's Download
+fallback even though the file and authorization were valid. The explicit Nginx
+mapping retains `nosniff`. Built-image HTTP smoke now checks the real compiled
+worker's MIME/security header and missing-worker404; signed-in post-release PDF
+verification is separate from AI generation and does not require a paid model call.
+
 Status: RA-02/RA-03 backend, RA-04 Summary reader UI/adapters and RA-05 stateless
 Ask this document are implemented locally; RA-05 verification is recorded below.
 RA-04 browser, boundary and regression checks pass; genuine Electron interaction
