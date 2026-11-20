@@ -548,3 +548,9 @@ No new repair function/table or runtime grant persists. Live schema remains 38
 until the separately recorded operator apply. Final local Docker is unavailable;
 the latest no-DB workspace run passed 943 tests with 75 API/provider/DB skips.
 CI must run the final candidate against disposable PostgreSQL after handoff.
+
+PR60 initial CI source/Windows/Ubuntu and post-ownership disposable PostgreSQL
+jobs passed. The image gate correctly refused the old pinned Nginx runtime with
+six HIGH/CRITICAL findings. Refresh only the official `nginx:1.30.7-alpine` digest,
+verified against Docker Hub/Registry and its linux/amd64 config; do not suppress
+findings or remove the gate. Rebuilt image/security results remain pending.

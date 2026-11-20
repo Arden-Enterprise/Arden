@@ -31,7 +31,7 @@ EXPOSE 3001
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 CMD node -e "fetch('http://127.0.0.1:3001/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 CMD ["node", "dist/index.js"]
 
-FROM nginx:stable-alpine@sha256:47928bf67eb62a1863cb08d9ecb52d3e704304ba614eaee17884204677702951 AS web
+FROM nginx:1.30.7-alpine@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3 AS web
 # Alpine repositories prune superseded patch revisions. Take current security
 # patches from this digest-pinned base's repository; scanning still gates release.
 RUN apk upgrade --no-cache brotli-libs curl libcurl libexpat libxslt
