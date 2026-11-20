@@ -94,7 +94,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         await client.query("DELETE FROM knowledge_index_job WHERE generation_id IN (SELECT generation_id FROM knowledge_index_generation WHERE organization_id = $1)", [org]);
         await client.query("DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)", [org]);
         for (const table of ["knowledge_ai_release", "knowledge_collection_placement", "knowledge_collection_document", "knowledge_collection", "knowledge_current_publication", "knowledge_index_generation",
-          "shared_submission", "shared_draft_audience", "shared_draft", "selected_reader", "reader_selection", "knowledge_topic", "knowledge_base",
+          "shared_submission", "shared_draft_audience", "shared_draft", "selected_reader", "reader_selection", "knowledge_base",
           "audit_event", "audience_group_membership", "audience", "reviewer_grant"]) {
           await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
         }
@@ -119,18 +119,20 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
 
   it("enforces catalog ownership, stale writes, submit fields, frozen snapshots and reader-only curation", async () => {
     const repo = repository!, catalog = repo.knowledgeCatalog;
-    await expect(catalog.write(member, org, "topics", null, null, { name: "Denied", description: "", status: "ACTIVE" }, "denied"))
+    await expect(catalog.write(member, org, "collections", null, null, { name: "Denied", description: "", status: "ACTIVE", allowedTypes: ["Guide"] }, "denied"))
       .rejects.toMatchObject({ code: "UNAVAILABLE" });
     await expect(catalog.list(foreign, org)).rejects.toBeInstanceOf(CatalogError);
-    const topic = await catalog.write(owner, org, "topics", null, null,
-      { name: "Engineering practice", description: "", status: "ACTIVE" }, "create-topic");
-    await expect(catalog.write(owner, org, "topics", null, null,
-      { name: " engineering PRACTICE ", description: "", status: "ACTIVE" }, "duplicate")).rejects.toMatchObject({ code: "DUPLICATE" });
-    const races = await Promise.allSettled(["A", "B"].map(suffix => catalog.write(owner, org, "topics", topic.id, topic.version,
-      { name: `Engineering practice ${suffix}`, description: "", status: "ACTIVE" }, "race")));
+    const shell = await catalog.write(owner, org, "collections", null, null,
+      { name: "Engineering practice", description: "", status: "ACTIVE", allowedTypes: ["Guide"] }, "create-collection");
+    await expect(catalog.write(owner, org, "collections", null, null,
+      { name: " engineering PRACTICE ", description: "", status: "ACTIVE", allowedTypes: ["Guide"] }, "duplicate")).rejects.toMatchObject({ code: "DUPLICATE" });
+    const races = await Promise.allSettled(["A", "B"].map(suffix => catalog.write(owner, org, "collections", shell.id, shell.version,
+      { name: `Engineering practice ${suffix}`, description: "", status: "ACTIVE", allowedTypes: ["Guide"] }, "race")));
     expect(races.filter(result => result.status === "fulfilled")).toHaveLength(1);
     expect(races.filter(result => result.status === "rejected").map(result => result.reason.code)).toEqual(["CONFLICT"]);
-    const activeTopic = (await catalog.list(member, org)).topics[0]!;
+    // Decision 0025: the catalog has no Topics; an empty Collection shell is visible only to its manager.
+    expect((await catalog.list(member, org)).collections).toEqual([]);
+    expect(Object.keys(await catalog.list(owner, org))).not.toContain("topics");
     expect((await catalog.list(member, org)).canManage).toBe(false);
     expect((await catalog.list(owner, org)).canManage).toBe(true);
     // Decision 0021: name or email search, returning the full email like sharing in Google Drive.
@@ -147,21 +149,20 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     if (draft.kind !== "created") throw new Error("Draft fixture failed");
     draftId = draft.draft.id;
     await expect(repo.submitKnowledgeDraft(owner, org, draftId, 1, randomUUID(), "incomplete")).resolves.toEqual({ kind: "not-ready" });
-    const metadata = { type: "Guide" as const, topicId: activeTopic.id, version: "1.0", effectiveDate: "2027-01-01", expirationDate: null, changeNote: "" };
+    const metadata = { type: "Guide" as const, version: "1.0", effectiveDate: "2027-01-01", expirationDate: null, changeNote: "" };
     await expect(repo.updateKnowledgeDraft(owner, org, draftId, 1, { management: { ...metadata, expirationDate: "2026-01-01" } }, null, "invalid-date"))
       .resolves.toEqual({ kind: "invalid-metadata" });
     const saved = await repo.updateKnowledgeDraft(owner, org, draftId, 1, { management: metadata, targetReaders: { mode: "ORGANIZATION" } }, null, "save");
     expect(saved.kind).toBe("updated");
-    expect(saved).toMatchObject({ draft: { management: { topicId: null } } });
+    expect(saved).toMatchObject({ draft: { management: metadata } });
     const legacyDowngrade = await repo.updateKnowledgeDraft(owner, org, draftId, 2, {
       targetScopeType: "DEPARTMENT", audienceRoleIds: [], teamTag: "misroute-review",
     }, null, "legacy-downgrade");
     expect(legacyDowngrade).toMatchObject({ kind: "updated", draft: { targetScopeType: "ORGANIZATION", teamTag: null } });
-    await catalog.write(owner, org, "topics", activeTopic.id, activeTopic.version,
-      { name: "Retired topic", description: "", status: "INACTIVE" }, "retire-before-submit");
     const submitted = await repo.submitKnowledgeDraft(owner, org, draftId, 3, randomUUID(), "submit");
     if (submitted.kind !== "submitted") throw new Error("Submission fixture failed");
-    expect(submitted.submission.management).toMatchObject({ ...metadata, topicId: null, topicName: null, releaseKind: "NEW" });
+    expect(submitted.submission.management).toMatchObject({ ...metadata, releaseKind: "NEW" });
+    expect(submitted.submission.management).not.toHaveProperty("topicId");
     const changed = await repo.updateKnowledgeDraft(owner, org, draftId, 3, { management: { ...metadata, version: "9.0" } }, null, "edit-pending");
     expect(changed.kind).toBe("updated");
     expect((await repo.listKnowledgeSubmissions(owner, org))![0]!.management?.version).toBe("1.0");
@@ -220,16 +221,17 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
       const targetReaders = mode === "ORGANIZATION" ? { mode } : mode === "DEPARTMENT" ? { mode, departmentId: department }
         : { mode, memberIds: [memberId, colleagueId] };
       expect(await repo.updateKnowledgeDraft(owner, org, id, 1, { management, targetReaders }, null, "save-topic-free"))
-        .toMatchObject({ kind: "updated", draft: { management: { topicId: null }, targetReaders: { mode } } });
+        .toMatchObject({ kind: "updated", draft: { management, targetReaders: { mode } } });
       const submitted = await repo.submitKnowledgeDraft(owner, org, id, 2, randomUUID(), "submit-topic-free");
       if (submitted.kind !== "submitted") throw new Error("Topic-free submission failed");
-      expect(submitted.submission.management).toMatchObject({ ...management, topicId: null });
+      expect(submitted.submission.management).toMatchObject(management);
+      expect(submitted.submission.management).not.toHaveProperty("topicId");
       expect(await repo.decideReview(owner, org, submitted.submission.id, "APPROVE", submitted.submission.snapshotVersionId,
         submitted.submission.contentHash, null, randomUUID(), "approve-topic-free")).toMatchObject({ kind: "decided" });
       expect((await repo.listKnowledgeSubmissions(owner, org))!.find(item => item.id === submitted.submission.id)?.publicationState).toBe("PREPARING");
       const publicationId = await activateFixture();
       const reader = mode === "DEPARTMENT" ? owner : member;
-      expect(await repo.getPublishedKnowledge(reader, org, publicationId)).toMatchObject({ management: { topicId: null, version: "1.0" }, targetReaders: { mode } });
+      expect(await repo.getPublishedKnowledge(reader, org, publicationId)).toMatchObject({ management: { version: "1.0" }, targetReaders: { mode } });
       expect(await repo.getPublishedKnowledge(foreign, org, publicationId)).toBeNull();
       if (mode === "DEPARTMENT") expect(await repo.getPublishedKnowledge(member, org, publicationId)).toBeNull();
       if (mode === "SELECTED_MEMBERS") expect(await repo.getPublishedKnowledge(owner, org, publicationId)).toBeNull();
@@ -293,8 +295,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
 
   it("preserves an untouched legacy Topic snapshot when its draft is later saved Topic-free", async () => {
     const repo = repository!;
-    const topic = await repo.knowledgeCatalog.write(owner, org, "topics", null, null,
-      { name: "Legacy snapshot reference", description: "", status: "ACTIVE" }, "legacy-topic");
+    const topic = { id: randomUUID(), name: "Legacy snapshot reference" };
     const created = await repo.createNewKnowledgeDraft(owner, org, { actorMembershipId: ownerMembership, title: "Legacy fixture",
       classification: "INTERNAL", idempotencyKey: randomUUID(), content: { sourceUri: "arden-private-object://legacy-topic-fixture",
         mimeType: "text/plain", contentHash: "c".repeat(64) }, requestId: "legacy-create" });
@@ -304,15 +305,28 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     await repo.updateKnowledgeDraft(owner, org, id, 1, { management: metadata, targetReaders: { mode: "ORGANIZATION" } }, null, "legacy-save");
     // Trusted fixture setup only: simulate a draft saved by the previous application.
     await pool!.query("UPDATE arden.shared_draft SET management = management || jsonb_build_object('topicId', $1::text) WHERE shared_draft_id = $2", [topic.id, id]);
-    await repo.knowledgeCatalog.write(owner, org, "topics", topic.id, topic.version,
-      { name: topic.name, description: "", status: "INACTIVE" }, "legacy-retire");
     const submitted = await repo.submitKnowledgeDraft(owner, org, id, 2, randomUUID(), "legacy-submit");
     if (submitted.kind !== "submitted") throw new Error("Legacy submission failed");
-    expect(submitted.submission.management).toMatchObject({ topicId: topic.id, topicName: topic.name });
-    expect(await repo.updateKnowledgeDraft(owner, org, id, 2, { management: { ...metadata, topicId: randomUUID(), version: "2.0" } }, null, "new-save"))
-      .toMatchObject({ kind: "updated", draft: { management: { topicId: null, version: "2.0" } } });
+    expect(submitted.submission.management).not.toHaveProperty("topicId");
+    // Trusted fixture only: represent an immutable snapshot created before contraction.
+    // The application runtime never receives permission to disable this trigger.
+    const fixture = await pool!.connect();
+    let before: unknown;
+    try {
+      await fixture.query("BEGIN");
+      await fixture.query("ALTER TABLE arden.shared_submission DISABLE TRIGGER trg_freeze_submission_management");
+      before = (await fixture.query(`UPDATE arden.shared_submission SET management = management ||
+        jsonb_build_object('topicId', $1::text, 'topicName', $2::text) WHERE submission_id = $3 RETURNING management`,
+      [topic.id, topic.name, submitted.submission.id])).rows[0].management;
+      await fixture.query("ALTER TABLE arden.shared_submission ENABLE TRIGGER trg_freeze_submission_management");
+      await fixture.query("COMMIT");
+    } catch (error) { await fixture.query("ROLLBACK"); throw error; }
+    finally { fixture.release(); }
+    expect(await repo.updateKnowledgeDraft(owner, org, id, 2, { management: { ...metadata, version: "2.0" } }, null, "new-save"))
+      .toMatchObject({ kind: "updated", draft: { management: { version: "2.0" } } });
     expect((await repo.listKnowledgeSubmissions(owner, org))!.find(item => item.id === submitted.submission.id)?.management)
-      .toMatchObject({ topicId: topic.id, topicName: topic.name, version: "1.0" });
+      .toMatchObject({ version: "1.0" });
+    expect((await pool!.query("SELECT management FROM arden.shared_submission WHERE submission_id = $1", [submitted.submission.id])).rows[0].management).toEqual(before);
   });
 
   describe("P3B.2 Collection management API storage", () => {

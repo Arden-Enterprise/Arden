@@ -41,6 +41,7 @@ export const iconGlyphs = {
   "open-external": "\uf1b3",
   home: "\uf7b8",
   flag: "\uf695",
+  refresh: "\ufb34",
 } as const;
 
 export type IconName = keyof typeof iconGlyphs;

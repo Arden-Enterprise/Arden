@@ -50,7 +50,8 @@ export async function inventoryCollectionLegacy(client: PoolClient, organization
     WHERE legacy.organization_id = $1 ORDER BY legacy.collection_id, legacy.published_version_id`, [organizationId])).rows;
   const placements = (await client.query<ExistingPlacement>(`SELECT shared_draft_id AS "documentId", collection_id AS "collectionId",
     placement_revision::text AS revision FROM arden.knowledge_collection_placement WHERE organization_id = $1 ORDER BY shared_draft_id`, [organizationId])).rows;
-  const retainedTopics = Number((await client.query<{ count: string }>("SELECT count(*) FROM arden.knowledge_topic WHERE organization_id = $1", [organizationId])).rows[0]!.count);
+  // Topic storage is removed by 0042; frozen JSON is outside this link conversion.
+  const retainedTopics = 0;
   const snapshot = { organizationId, collections, links, placements, retainedTopics };
   return { ...snapshot, fingerprint: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex") };
 }

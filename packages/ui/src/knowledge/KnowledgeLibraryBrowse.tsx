@@ -67,7 +67,7 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
   return <div className="km-library">
     {catalogError && <p className="island-note is-warning" role="status">{catalogError}</p>}
     {discover && !query.trim() ? <>
-      <section aria-labelledby="km-types"><h2 id="km-types" className="km-section-label">Browse by type</h2><div className="km-types">
+      <section aria-labelledby="km-types"><header className="km-section-heading"><div><h2 id="km-types">Browse by type</h2><p>Find documents by what they are for.</p></div></header><div className="km-types">
         {knowledgeTypes.map(type => <button key={type} type="button" onClick={() => browseWith({ type })}>
           <Icon name={type === "Policy & Standard" ? "shield" : type === "Procedure" ? "layers" : type === "Guide" ? "knowledge" : type === "Reference" ? "document" : "chat"} size={20} />
           <strong>{type}</strong><span>{items.filter(item => item.management?.type === type).length}</span></button>)}

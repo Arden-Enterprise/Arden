@@ -145,12 +145,12 @@ Local conversion tests actually delete converted synthetic legacy associations.
 Only their old links are removed; no file, publication, snapshot, reader selection,
 private original or audit history is deleted. No applied migration is rewritten.
 
-Retained deliberately: the empty legacy relation/schema and Topic storage/API.
-`freeze_knowledge_management` still joins `knowledge_topic` when creating snapshots;
-mutable drafts can retain its FK, historical snapshots retain Topic provenance,
-and compatibility API/types still retain Topic. Dropping those objects now
-would break an accepted path. Verify the remaining API/SQL dependency
-inventory and preservation, then use a reviewed forward contraction migration.
+Retained deliberately: the empty legacy Collection relation/schema and historical
+frozen Topic JSON. [ADR0027](../decisions/0027-remove-knowledge-topics.md) and
+forward migration0042 supersede the earlier temporary Topic storage/API retention:
+new snapshots no longer join `knowledge_topic`, mutable Topic keys/FK/catalog are
+removed, and API projections omit old keys without rewriting immutable snapshots.
+Apply only after explicit live operator approval and combined-chain rehearsal.
 Do not erase frozen metadata or legacy Audience/role compatibility as collateral
 cleanup. This phase is not a complete physical schema contraction.
 

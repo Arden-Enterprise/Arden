@@ -9,7 +9,7 @@ export async function prepareKnowledgeFixture(pool: Pool, organizationId: string
   try {
     await client.query("BEGIN");
     await client.query("SET LOCAL search_path TO arden, public");
-    await client.query(`UPDATE shared_draft SET management = jsonb_build_object('type', 'Guide', 'topicId', NULL,
+    await client.query(`UPDATE shared_draft SET management = jsonb_build_object('type', 'Guide',
       'version', '1.0', 'effectiveDate', '2026-01-01', 'expirationDate', NULL, 'changeNote', '')
       WHERE shared_draft_id = $1`, [draftId]);
     if (selectReaders) {

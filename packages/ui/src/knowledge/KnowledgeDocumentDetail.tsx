@@ -23,7 +23,6 @@ export type ReaderDocumentVersion = {
 
 export type ReaderDocumentMetadata = {
   type?: string;
-  topic?: string;
   publishedDate?: string;
   expirationDate?: string;
   title: string;
@@ -165,7 +164,6 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
         </div>
         <dl>
           {metadata.type && <div><dt>Type</dt><dd>{metadata.type}</dd></div>}
-          {metadata.topic && <div><dt>Topic</dt><dd>{metadata.topic}</dd></div>}
           <div><dt>Version</dt><dd>{canChooseVersion ? <label><span className="sr-only">Document version</span><select
             value={activeVersion.id}
             onChange={(event) => onVersionChange?.(event.target.value)}

@@ -39,7 +39,7 @@ function mockKnowledge(publicationState: api.KnowledgeSubmission["publicationSta
     primaryDepartmentId: "dept", organizationReviewerAvailable: true,
   });
   vi.spyOn(api, "loadKnowledgeDraft").mockResolvedValue(draft);
-  vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, topics: [], collections: [] });
+  vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, collections: [] });
   vi.spyOn(api, "listKnowledgeSubmissions").mockResolvedValue([{
     id: "submission", draftId: "draft", snapshotVersionId: "version", title: draft.title,
     classification: "INTERNAL", responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT",

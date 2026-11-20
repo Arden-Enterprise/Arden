@@ -10,7 +10,7 @@ const applications: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => { await Promise.all(applications.map(app => app.close())); applications.length = 0; });
 function setup(authenticated = true, available = true) {
   const app = Fastify({ ajv: { customOptions: { removeAdditional: false } } }); applications.push(app);
-  const store: KnowledgeCatalogStore = { list: vi.fn().mockResolvedValue({ canManage: true, topics: [], collections: [] }),
+  const store: KnowledgeCatalogStore = { list: vi.fn().mockResolvedValue({ canManage: true, collections: [] }),
     readers: vi.fn().mockResolvedValue([{ id, name: "Reader" }]), write: vi.fn().mockResolvedValue(entry),
     getPlacement: vi.fn().mockResolvedValue({ documentId: id, collectionId: null, revision: 0 }),
     place: vi.fn().mockResolvedValue({ documentId: id, collectionId: null, revision: 1 }) };
@@ -28,14 +28,14 @@ describe("knowledge catalog HTTP contract", () => {
   it("keeps responses private and requires a version for edits", async () => {
     const { app, path, store } = setup();
     const list = await app.inject(path); expect(list.headers["cache-control"]).toBe("no-store");
-    expect((await app.inject({ method: "POST", url: `${path}/topics`, payload: input })).statusCode).toBe(201);
-    expect((await app.inject({ method: "PATCH", url: `${path}/topics/${id}`, payload: input })).statusCode).toBe(428);
-    expect((await app.inject({ method: "PATCH", url: `${path}/topics/${id}`, headers: { "if-match": '"catalog-1"' }, payload: input })).statusCode).toBe(200);
-    expect(store.write).toHaveBeenLastCalledWith("actor", org, "topics", id, 1, input, expect.any(String));
+    expect((await app.inject({ method: "POST", url: `${path}/collections`, payload: input })).statusCode).toBe(201);
+    expect((await app.inject({ method: "PATCH", url: `${path}/collections/${id}`, payload: input })).statusCode).toBe(428);
+    expect((await app.inject({ method: "PATCH", url: `${path}/collections/${id}`, headers: { "if-match": '"catalog-1"' }, payload: input })).statusCode).toBe(200);
+    expect(store.write).toHaveBeenLastCalledWith("actor", org, "collections", id, 1, input, expect.any(String));
   });
   it.each([["UNAVAILABLE", 404], ["INVALID", 400], ["CONFLICT", 412], ["DUPLICATE", 409], ["UPGRADE_REQUIRED", 409]] as const)("maps %s without internal details", async (code, status) => {
     const { app, path, store } = setup(); vi.mocked(store.write).mockRejectedValue(new CatalogError(code));
-    const result = await app.inject({ method: "POST", url: `${path}/topics`, payload: input });
+    const result = await app.inject({ method: "POST", url: `${path}/collections`, payload: input });
     expect(result.statusCode).toBe(status); expect(result.body).not.toMatch(/stack|SELECT|postgres/);
   });
   it("returns an uncached placement revision and accepts an explicit unassign", async () => {
@@ -73,7 +73,9 @@ describe("knowledge catalog HTTP contract", () => {
   it("rejects unsupported keys, kinds and oversized/invalid member requests", async () => {
     const { app, path, store } = setup();
     expect((await app.inject({ method: "POST", url: `${path}/roles`, payload: input })).statusCode).toBe(400);
-    expect((await app.inject({ method: "POST", url: `${path}/topics`, payload: { ...input, permission: "read-all" } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "POST", url: `${path}/collections`, payload: { ...input, permission: "read-all" } })).statusCode).toBe(400);
+    // Decision 0025: Topics are gone from the catalog API.
+    expect((await app.inject({ method: "POST", url: `${path}/topics`, payload: input })).statusCode).toBe(400);
     expect((await app.inject(`${path}/readers?ids=abc`)).statusCode).toBe(400);
     expect((await app.inject(`${path}/readers?q=Re&ids=${id}`)).statusCode).toBe(200);
     expect(store.readers).toHaveBeenCalledWith("actor", org, "Re", [id]);

@@ -21,7 +21,7 @@ const department = { ...common, id: "department-version", draftId: "department-d
 const selected = { ...common, id: "selected-version", draftId: "selected-doc", title: "Selected working guide",
   targetReaders: { mode: "SELECTED_MEMBERS" as const, departmentId: null, memberIds: ["synthetic-member"] } };
 const legacy = { ...common, id: "old-version", draftId: "old-doc", title: "Legacy readable guidance", targetReaders: null };
-const catalog: api.KnowledgeCatalog = { canManage: true, topics: [], collections: [{ id: "folder", name: "Company handbook", description: "", status: "ACTIVE", version: 1,
+const catalog: api.KnowledgeCatalog = { canManage: true, collections: [{ id: "folder", name: "Company handbook", description: "", status: "ACTIVE", version: 1,
   cover: "handbook", allowedTypes: ["Guide", "Reference"], documentIds: [assigned.id] }] };
 const props = { platform: "web" as const, organizationId: "org", organizationName: "Synthetic organization", view: "knowledge" as const,
   active: true, createdDraftId: null, contextOpen: false, onToggleContext: vi.fn(), canUsePrivateWorkspace: true };

@@ -19,7 +19,7 @@ export type NotificationRealtimeCredential = {
 };
 export type KnowledgeCatalogEntry = { id: string; name: string; description: string; status: "ACTIVE" | "INACTIVE"; version: number };
 export type KnowledgeCollection = KnowledgeCatalogEntry & { cover: "handbook" | "production"; documentIds: string[]; allowedTypes?: KnowledgeType[] | null };
-export type KnowledgeCatalog = { canManage: boolean; topics: KnowledgeCatalogEntry[]; collections: KnowledgeCollection[] };
+export type KnowledgeCatalog = { canManage: boolean; collections: KnowledgeCollection[] };
 export type KnowledgeCatalogWrite = { name: string; description: string; status: "ACTIVE" | "INACTIVE";
   cover?: "handbook" | "production"; documentIds?: string[]; allowedTypes?: KnowledgeType[] };
 export type CollectionPlacement = { documentId: string; collectionId: string | null; revision: number };
@@ -122,7 +122,7 @@ export type KnowledgeDraftSummary = {
   updatedAt: string;
 };
 export type KnowledgeSubmission = {
-  management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
+  management?: (KnowledgeMetadata & { releaseKind?: "NEW" | "UPDATED" }) | null;
   proposedTargetReaders?: TargetReaders | null;
   approvedTargetReaders?: TargetReaders | null;
   id: string;
@@ -200,7 +200,7 @@ export type PublishedKnowledge = {
   responsibleDepartmentId: string;
   /** Display metadata, independent of the author's permitted department choices. */
   responsibleDepartmentName?: string | null;
-  management?: (KnowledgeMetadata & { topicName?: string; releaseKind?: "NEW" | "UPDATED" }) | null;
+  management?: (KnowledgeMetadata & { releaseKind?: "NEW" | "UPDATED" }) | null;
   versionLabel?: string;
   summary?: string;
   audienceIds: string[];
@@ -355,7 +355,7 @@ export async function saveCollectionPlacement(platform: Platform, organizationId
 }
 // Catalog configuration no longer changes document placement. Older picker payloads
 // receive CATALOG_UPGRADE_REQUIRED until the management UI adopts this contract.
-export function saveKnowledgeCatalogEntry(platform: Platform, organizationId: string, kind: "topics" | "collections",
+export function saveKnowledgeCatalogEntry(platform: Platform, organizationId: string, kind: "collections",
   entry: KnowledgeCatalogEntry | null, input: KnowledgeCatalogWrite): Promise<KnowledgeCatalogEntry> {
   return request(platform, `${knowledgePath(organizationId)}/catalog/${kind}${entry ? `/${entry.id}` : ""}`, {
     method: entry ? "PATCH" : "POST", body: JSON.stringify(input),

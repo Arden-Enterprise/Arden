@@ -30,7 +30,7 @@ toolbar with its own download, print and drawing tools.
    still shows as Upcoming rather than being misreported.
 4. **One status vocabulary.** Current; **Expires in N days** when the expiration is 30 days away or less;
    Expired. Home lists VALID UNTIL ("No expiry" when unset) instead of EFFECTIVE DATE.
-5. **Reader information.** Type and Topic when set; Version as plain text ("Not recorded" when an older
+5. **Reader information.** Type when set (Topic removed by [0025](0027-remove-knowledge-topics.md)); Version as plain text ("Not recorded" when an older
    publication has none), with a selector only when more than one version can be chosen; Status;
    Classification when sensitive; Valid until when set; **Readers** in plain words (Whole organization,
    the department, Selected members; never member identities); Owner department; Published date. The

@@ -3,7 +3,7 @@
 ## Current KM2 contract — 20 November 2026
 
 Use [F11 KM2](../product/graph-ai-and-work.md#knowledge-organization-restructuring-km2-19-november-2026),
-[ADR0025](../decisions/0026-flat-organization-collection-placement.md) and the
+[ADR0026](../decisions/0026-flat-organization-collection-placement.md) and the
 [transition runbook](collection-legacy-transition.md). The KM-v1 text below is
 historical and must not be used to restore Topic requirements or exact-version
 Collection writers.
@@ -16,18 +16,20 @@ Description) and adds/moves/removes one logical document after publication.
 Placement never changes readers or Type. Eligible replacements retain location;
 ineligible replacements or Archive detach it without withdrawal or deletion.
 
-Authors do not choose a Collection or Topic. New saves clear Topic references,
-while frozen provenance/storage remain. Existing immutable review, exact snapshot
+Authors do not choose a Collection or Topic. [ADR0027](../decisions/0027-remove-knowledge-topics.md)
+and migration0042 remove Topic authoring/API/schema; historical frozen JSON stays
+unchanged and response projections omit its Topic keys. Existing immutable review, exact snapshot
 activation, Target Readers and AI/source authorization still govern. New config
 and placement operations are separate, audited and revision-conditional; the old
 bulk `documentIds` writer is refused. Follow the runbook for exact routes and
 safe stale/uncertain outcomes.
 
-Operator migrations0039/0040 require the authorized backed-up cutover. The
+After notification0039, operator migrations0040/0041/0042 require an explicitly
+approved backed-up cutover and a fresh rehearsal of the combined chain. The
 bounded metadata exception preserves ARD identity, fills only verified missing
 metadata of exact-hash sources, and audits before/after; it is not runtime editing
-of review history. Legacy Collection destinations/archive and physical Topic
-contraction need their separate reviewed decisions. Local implementation, CI,
+of review history. Legacy Collection destinations/archive remain undecided;
+source authorization for Topic contraction is not live operator authorization. Local implementation, CI,
 restored-copy rehearsal, live SQL and deployment remain distinct evidence.
 
 ## Historical KM-v1 implementation record
@@ -35,25 +37,23 @@ restored-copy rehearsal, live SQL and deployment remain distinct evidence.
 The remaining original rollout record describes the superseded catalog model.
 
 Contract: [F11 KM-v1](../product/graph-ai-and-work.md#knowledge-management-refinement-km-v1-accepted-12-november-2026).
-Decision: [ADR 0020](../decisions/0020-knowledge-management-catalog.md).
+Decision: [ADR 0020](../decisions/0020-knowledge-management-catalog.md); Topics removed by
+[ADR0027](../decisions/0027-remove-knowledge-topics.md) (original decision18 November2026; current migration0042).
 Original implementation baseline: staging `0e25b71`, branch
 `feat/knowledge-management`. This admin navigation follow-up was inspected
 against fetched staging `7a133af` and main `9fa3d34` on 16 November 2026;
 it does not establish a live migration or deployment of the follow-up.
 
-In the shared web/desktop UI, an Org Admin creates the first Topic through
-Knowledge Library → Discover → Manage catalog → New topic. Administration's
-Members screen links to Knowledge so this setup path is visible to
-admins. Topics are organization data and are not seeded automatically; a PDF
-contribution's Topic selector stays empty until an active Topic exists.
+There is no Topic (ADR0027). The historical Discover groups documents by Type and shows optional Collections,
+which an Org Admin manages through Knowledge Library → Discover → Manage catalog.
 
 ## API and data
 
 Under `/api/v1/organizations/:organizationId/knowledge`:
 
-- `GET /catalog`: active Topics and currently readable collection projections;
-  admin configuration may also include inactive/empty catalog shells.
-- `POST /catalog/topics` or `/catalog/collections`: Org Admin only.
+- `GET /catalog`: currently readable collection projections; admin configuration
+  may also include inactive/empty collection shells.
+- `POST /catalog/collections`: Org Admin only.
 - `PATCH /catalog/:kind/:id`: complete name/description/status write, requiring
   `If-Match: "catalog-N"`. Collections accept a fixed cover key and ordered exact
   `documentIds`; input source IDs must be currently readable by the curator.
@@ -69,13 +69,13 @@ Under `/api/v1/organizations/:organizationId/knowledge`:
   under the same draft/code, with a new immutable content revision; no text/PDF
   mixing, other-author writes or stale replacement is accepted.
 
-`management` contains Type, Topic ID, business Version, Effective Date, optional
+`management` contains Type, business Version, Effective Date, optional
 Expiration Date and Change Note. Save permits missing values, not malformed dates
-or inverted date ranges. Submission requires complete metadata, active Topic,
+or inverted date ranges; a `topicId` is refused. Submission requires complete metadata,
 explicit readers, an owner department, a new business Version and a Change Note
 for previously published knowledge. Saving while pending does not alter a frozen
-submission. System snapshot metadata adds the frozen Topic name and New/Updated
-release kind. Activation copies metadata from that submission, not from the latest
+submission. System snapshot metadata adds the New/Updated release kind. Versions frozen
+before migration 0039 keep historical `topicId`/`topicName` keys, which Arden no longer reads. Activation copies metadata from that submission, not from the latest
 draft. Published/activation timestamps retain their existing meaning.
 
 The server marks current metadata objects with `schemaVersion: 1`. The client does
@@ -124,7 +124,7 @@ permission regression. Verify current runtime-authorized reader sets instead.
 5. Deploy through the existing pipeline only with release authority. Create the
    organization catalog through the API. Backfill existing publications only
    with a separately approved source-ID mapping/rehearsal; this migration does not
-   invent Topics or overwrite approved publication history.
+   overwrite approved publication history.
 
 Recovery: stop the feature rollout on a mismatch, retain DB/files and previous
 images, and use a reviewed forward repair or verified backup recovery. A previous
