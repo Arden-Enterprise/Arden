@@ -42,11 +42,13 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   const openConversation = async (id: string) => {
     if (!organizationId || pending) return;
     const generation = ++requestGeneration.current;
+    // Reloading the open chat keeps an unsent follow-up; switching chats starts from an empty draft.
+    const sameChat = id === conversation.current.id;
     setHistoryLoading(true); setError(null);
     try {
       const saved = await loadAiConversation(platform, organizationId, id);
       if (generation !== requestGeneration.current) return;
-      showConversation(saved); setDraft(""); retryRequest.current = null; setHistoryOpen(false);
+      showConversation(saved); if (!sameChat) setDraft(""); retryRequest.current = null; setHistoryOpen(false);
     } catch (cause) {
       if (generation === requestGeneration.current) setError(cause instanceof ApiError ? cause.message : "Chat could not be opened.");
     } finally { if (generation === requestGeneration.current) setHistoryLoading(false); }
@@ -70,11 +72,16 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     const query = draft.trim();
     if (!query || pending || !organizationId) return;
     const generation = ++requestGeneration.current;
+    setHistoryLoading(false);
     const last = messages.at(-1);
     const questionId = last?.role === "member" && last.body === query ? last.id : crypto.randomUUID();
     pendingQuestion.current = { id: questionId, query };
-    setMessages((current) => current.some(message => message.id === questionId)
-      ? current : [...current, { id: questionId, role: "member", body: query }]);
+    // A different prompt replaces an earlier unsent one; resending the same text retries it in place.
+    setMessages((current) => {
+      const kept = current.filter((message) => !message.unsent || message.id === questionId)
+        .map((message) => message.id === questionId ? { ...message, unsent: false } : message);
+      return kept.some((message) => message.id === questionId) ? kept : [...kept, { id: questionId, role: "member", body: query }];
+    });
     setDraft("");
     setError(null);
     setPending(true);
@@ -82,9 +89,17 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
       const previous = retryRequest.current;
       const requestId = previous?.query === query && previous.scope === versionScope ? previous.id : crypto.randomUUID();
       retryRequest.current = { query, scope: versionScope, id: requestId };
-      const answer = await askArden(platform, organizationId, query, { conversationId: conversation.current.id,
+      const conversationId = conversation.current.id;
+      const answer = await askArden(platform, organizationId, query, { conversationId,
         expectedRevision: conversation.current.revision, requestId, versionScope });
-      if (generation !== requestGeneration.current) return;
+      if (generation !== requestGeneration.current) {
+        // A stopped request can still commit; keep the revision so the next prompt does not conflict.
+        if (answer.conversationId === conversationId && conversation.current.id === conversationId
+          && answer.revision !== undefined && answer.revision > conversation.current.revision) {
+          conversation.current = { id: conversationId, revision: answer.revision };
+        }
+        return;
+      }
       if (!answer.conversationId || answer.revision === undefined) throw new Error("Conversation persistence is unavailable.");
       conversation.current = { id: answer.conversationId, revision: answer.revision };
       retryRequest.current = null;
@@ -92,6 +107,9 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     } catch (cause) {
       if (generation === requestGeneration.current) {
         setError(cause instanceof ApiError ? cause.message : "Ask Arden could not prepare an answer.");
+        // Not answered: mark the prompt unsent and offer it again without overwriting newer text.
+        setMessages((current) => current.map((message) => message.id === questionId ? { ...message, unsent: true } : message));
+        setDraft((current) => current || query);
       }
     } finally {
       if (generation === requestGeneration.current) { setPending(false); pendingQuestion.current = null; }
@@ -101,6 +119,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   const reset = () => {
     requestGeneration.current++;
     setPending(false);
+    setHistoryLoading(false);
     setDraft("");
     setMessages([]);
     setError(null);

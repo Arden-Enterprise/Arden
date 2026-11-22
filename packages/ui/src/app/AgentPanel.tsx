@@ -37,10 +37,7 @@ export function AgentPanel({ open, platform, organizationId, onClose, onOpenAskA
     setResetting(false);
     focusComposer();
   };
-  const close = () => {
-    onClose();
-    document.querySelector<HTMLButtonElement>(".context-toggle")?.focus();
-  };
+  const close = () => onClose();
 
   return <aside id="arden-agent-panel" className="agent-panel" aria-label="Ask Arden" data-state={open ? "open" : "closed"} inert={!open}>
     <header className="agent-panel-header">

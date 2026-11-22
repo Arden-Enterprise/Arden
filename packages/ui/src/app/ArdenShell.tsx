@@ -167,6 +167,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [activeView, setActiveView] = useState<WorkspaceView>("knowledge");
   const privateNotes = usePrivateNotes(initialNotes);
   const [contextOpen, setContextOpen] = useState(false);
+  const contextOpener = useRef<HTMLElement | null>(null);
   const [navOpen, setNavOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [islandToast, setIslandToast] = useState<StatusIslandToast | null>(null);
@@ -292,11 +293,21 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     return () => observer.disconnect();
   }, [entryView]);
 
+  // While the floating panel or phone sheet covers the workspace, keep keyboard focus out of what it covers.
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell || !contextOpen || !contextOverlay) return;
+    const covered = [...shell.children].filter((child) => !child.hasAttribute("inert")
+      && !child.matches("#arden-agent-panel, .shell-context-scrim, .skip-link, dialog"));
+    covered.forEach((child) => child.setAttribute("inert", ""));
+    return () => covered.forEach((child) => child.removeAttribute("inert"));
+  }, [contextOpen, contextOverlay]);
+
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
       if (navOpen) setNavOpen(false);
-      else if (contextOpen) { setContextOpen(false); document.querySelector<HTMLButtonElement>(".context-toggle")?.focus(); }
+      else if (contextOpen) closeContext();
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
@@ -568,7 +579,18 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     showWorkspaceSelector();
   };
 
-  const contextControl = { contextOpen, onToggleContext: () => { setNavOpen(false); setContextOpen((open) => !open); } };
+  // Focus returns to whatever opened the panel, or to the page when that control is gone or hidden.
+  const closeContext = () => {
+    setContextOpen(false);
+    const opener = contextOpener.current;
+    (opener?.isConnected && opener.offsetParent !== null ? opener : document.getElementById("arden-main"))?.focus();
+  };
+  const contextControl = { contextOpen, onToggleContext: () => {
+    setNavOpen(false);
+    if (contextOpen) return closeContext();
+    contextOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setContextOpen(true);
+  } };
   const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
   const memberName = serverSession ? serverSession.actor.fullName?.trim() || "Signed-in member" : previewMember?.name;
@@ -657,7 +679,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
       {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close Ask Arden" onClick={contextControl.onToggleContext} />}
       <AgentPanel key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`} open={contextOpen}
-        platform={platform} organizationId={serverOrganizationId} onClose={() => setContextOpen(false)}
+        platform={platform} organizationId={serverOrganizationId} onClose={closeContext}
         onOpenAskArden={() => navigate("ask-arden")}
         onOpenCitation={(citation) => { if (contextOverlay) setContextOpen(false); openKnowledgeCitation(citation); }} />
       {settingsOpen && (

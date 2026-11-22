@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Icon } from "../shared/Icon";
 import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { useWorkspaceNavigation } from "../shared/WorkspaceNavigationContext";
@@ -38,9 +38,19 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
     focusComposer();
   };
 
+  // The first send swaps the centered composer for the docked one; move focus with it.
+  const composerFocused = useRef(false);
+  const wasEmpty = useRef(chat.empty);
+  useEffect(() => {
+    if (wasEmpty.current && !chat.empty && composerFocused.current) composerRef.current?.focus();
+    wasEmpty.current = chat.empty;
+  }, [chat.empty]);
+
   return <main id={active ? "arden-main" : undefined} className="workspace-page ask-arden-page" aria-labelledby="ask-arden-title" tabIndex={-1}>
     <h1 id="ask-arden-title" className="sr-only">Ask Arden</h1>
-    <div className={`ask-arden-stage${chat.empty ? " is-empty" : " is-thread"}`}>
+    <div className={`ask-arden-stage${chat.empty ? " is-empty" : " is-thread"}`}
+      onFocusCapture={(event) => { composerFocused.current = (event.target as Element) === composerRef.current; }}
+      onBlurCapture={(event) => { if ((event.target as Element) === composerRef.current && event.relatedTarget) composerFocused.current = false; }}>
       <header className="ask-thread-header">
         {navigation && <button type="button" className="ask-menu-button" aria-label={navigation.open ? "Close navigation" : "Open navigation"}
           aria-controls="arden-primary-navigation" aria-expanded={navigation.open} onClick={() => navigation.setOpen((open) => !open)}>

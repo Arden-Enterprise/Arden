@@ -13,7 +13,9 @@ export function ChatComposer({ chat, placement, composerRef }: {
   return <form className={`ask-composer is-${placement}`} onSubmit={submit}>
     <label className="sr-only" htmlFor={promptId}>Ask Arden</label>
     <textarea id={promptId} ref={composerRef} rows={2} value={chat.draft} onChange={(event) => chat.setDraft(event.target.value)}
-      onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) submit(); }}
+      onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+        if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) submit();
+      }}
       placeholder="Ask Arden…" />
     <div className="ask-composer-tools">
       <label className="ask-scope"><Icon name="knowledge" size={13} />
