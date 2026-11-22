@@ -217,8 +217,10 @@ BEGIN
          WHERE rejected_submission.shared_draft_id = p_document_id AND rejected_submission.organization_id = org
            AND rejected_submission.status = 'REJECTED'
            AND rejected_submission.request_type IN ('CONTENT', 'WITHDRAWAL'));
-    SELECT pv.published_version_id, pv.version_no, pv.valid_from, pv.valid_until,
-           s.status, s.request_type, s.publication_state
+    SELECT pv.published_version_id, pv.version_no,
+           GREATEST(pv.valid_from, (COALESCE(NULLIF(pv.management ->> 'effectiveDate', '')::date,
+               (pv.published_at AT TIME ZONE 'UTC')::date)::timestamp AT TIME ZONE 'UTC')) AS valid_from,
+           pv.valid_until, s.status, s.request_type, s.publication_state
       INTO current_row
       FROM knowledge_current_publication cp
       JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id

@@ -11,7 +11,8 @@ import { projectCase, type CaseAccess } from "./policy.js";
 export interface MaintenanceTx {
   actor(): Promise<ActorRecord | null>;
   readAnchor(documentId: string, publishedVersionId: string): Promise<AnchorRecord | null>;
-  canReadVersion(publishedVersionId: string): Promise<boolean>;
+  /** The caller can read the document's current publication; a replaced pin does not hide the case. */
+  canReadDocument(documentId: string): Promise<boolean>;
   /** The actor may review this exact published version (decision 0015 scope, classification and tags). */
   hasReviewerGrant(publishedVersionId: string): Promise<boolean>;
   isAdmin(): Promise<boolean>;
@@ -56,6 +57,17 @@ export interface MaintenancePort {
   transaction<T>(userId: string, organizationId: string, work: (tx: MaintenanceTx) => Promise<T>): Promise<T>;
 }
 
+
+/** The linked version or request names exactly the applicable publication outcome. */
+function publicationEvidenceMatches(row: CaseRecord, proof: PublicationProof, submission: PublicationSubmission | null,
+  evidence: string | null): boolean {
+  if (proof.state !== "applicable" || !proof.outcome || !evidence || proof.publishedVersionId !== evidence) return false;
+  const approvedWithdrawal = submission?.requestType === "WITHDRAWAL" && submission.status === "APPROVED"
+    && submission.targetPublishedVersionId === evidence && proof.outcome === "WITHDRAWN";
+  const linkedRequest = !!submission && submission.documentId === row.documentId
+    && (submission.producedVersionId === evidence || approvedWithdrawal);
+  return row.publicationLinkVersionId === evidence || linkedRequest;
+}
 
 export class MaintenanceCaseService {
   constructor(private readonly port: MaintenancePort, private readonly adapter: AnalysisAdapter | null = null) {}
@@ -234,7 +246,7 @@ export class MaintenanceCaseService {
         const access = {
           hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
           isAdmin: await tx.isAdmin(),
-          canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+          canReadDocument: await tx.canReadDocument(row.documentId),
         };
         const view = projectCase(row, actor, access);
         if (!view) continue;
@@ -369,13 +381,9 @@ export class MaintenanceCaseService {
         if (!(await tx.lockDocument(row.documentId))) throw new MaintenanceError("CONFLICT");
         const proof = await tx.readPublicationProof(row.documentId, row.publishedVersionId);
         const submission = row.publicationLinkSubmissionId ? await tx.readPublicationSubmission(row.publicationLinkSubmissionId) : null;
-        const linkedVersion = row.publicationLinkVersionId === evidencePublishedVersionId;
-        const approvedWithdrawal = submission?.requestType === "WITHDRAWAL" && submission.status === "APPROVED"
-          && submission.targetPublishedVersionId === evidencePublishedVersionId && proof.outcome === "WITHDRAWN";
-        const linkedRequest = !!submission && submission.documentId === row.documentId
-          && (submission.producedVersionId === evidencePublishedVersionId || approvedWithdrawal);
-        if (proof.state !== "applicable" || !proof.outcome || proof.publishedVersionId !== evidencePublishedVersionId
-          || (!linkedVersion && !linkedRequest)) throw new MaintenanceError("CONFLICT");
+        if (!publicationEvidenceMatches(row, proof, submission, evidencePublishedVersionId) || !proof.outcome) {
+          throw new MaintenanceError("CONFLICT");
+        }
         const now = new Date().toISOString();
         row.reporterStatus = "Resolved";
         row.outcome = proof.outcome;
@@ -426,7 +434,7 @@ export class MaintenanceCaseService {
       const view = locked ? projectCase(locked, actor, {
         hasGrant: await tx.hasReviewerGrant(locked.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(locked.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(locked.documentId),
       }) : null;
       if (!locked || !view) throw new MaintenanceError("DENIED");
       if (view.kind === "minimal") return { items: [], nextCursor: null };
@@ -584,7 +592,7 @@ export class MaintenanceCaseService {
       const visible = async (item: CaseRecord) => projectCase(item, actor, {
         hasGrant: await tx.hasReviewerGrant(item.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(item.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(item.documentId),
       });
       const left = await visible(row);
       const right = await visible(related);
@@ -614,7 +622,7 @@ export class MaintenanceCaseService {
       const access = {
         hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(row.documentId),
       };
       const view = projectCase(row, actor, access);
       // Sources need reviewer authority for the pin; Org Admin alone reads metadata only (decisions 0010, 0023).
@@ -643,7 +651,7 @@ export class MaintenanceCaseService {
       const access = {
         hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(row.documentId),
       };
       const view = projectCase(row, actor, access);
       // Sources need reviewer authority for the pin; Org Admin alone reads metadata only (decisions 0010, 0023).
@@ -669,7 +677,7 @@ export class MaintenanceCaseService {
       const access = {
         hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(row.documentId),
       };
       const view = projectCase(row, actor, access);
       if (!view || view.kind === "minimal" || view.kind === "reporter" || (!access.hasGrant && !access.isAdmin)) {
@@ -753,7 +761,7 @@ export class MaintenanceCaseService {
     return projectCase(row, actor, {
       hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
       isAdmin: await tx.isAdmin(),
-      canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+      canReadDocument: await tx.canReadDocument(row.documentId),
     });
   }
 
@@ -767,13 +775,15 @@ export class MaintenanceCaseService {
     const access: CaseAccess = {
       hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
       isAdmin: await tx.isAdmin(),
-      canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+      canReadDocument: await tx.canReadDocument(row.documentId),
     };
     const view = projectCase(row, actor, access);
     if (!view) throw new MaintenanceError("DENIED");
     if (view.kind !== "assigned") return view;
-    return { ...view, publicationProof: await tx.readPublicationProof(row.documentId, row.publishedVersionId),
-      analysisAvailable: this.adapter !== null };
+    const proof = await tx.readPublicationProof(row.documentId, row.publishedVersionId);
+    const submission = row.publicationLinkSubmissionId ? await tx.readPublicationSubmission(row.publicationLinkSubmissionId) : null;
+    return { ...view, publicationProof: proof, analysisAvailable: this.adapter !== null,
+      publicationReady: row.reporterStatus !== "Resolved" && publicationEvidenceMatches(row, proof, submission, proof.publishedVersionId) };
   }
 
   private async withUnread(tx: MaintenanceTx, actor: ActorRecord, view: CaseProjection): Promise<CaseProjection> {

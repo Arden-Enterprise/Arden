@@ -107,10 +107,11 @@ class PgMaintenanceTx implements MaintenanceTx {
     };
   }
 
-  async canReadVersion(publishedVersionId: string): Promise<boolean> {
-    const result = await this.client.query(`SELECT 1 FROM published_knowledge_version pv
-      JOIN knowledge_current_publication cp ON cp.published_version_id = pv.published_version_id
-      WHERE pv.published_version_id = $1 AND cp.organization_id = $2`, [publishedVersionId, this.organizationId]);
+  async canReadDocument(documentId: string): Promise<boolean> {
+    // Runs under the caller's publication RLS: true only when they can read the document's current publication.
+    const result = await this.client.query(`SELECT 1 FROM knowledge_current_publication cp
+      JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
+      WHERE cp.shared_draft_id = $1 AND cp.organization_id = $2`, [documentId, this.organizationId]);
     return (result.rowCount ?? 0) > 0;
   }
 

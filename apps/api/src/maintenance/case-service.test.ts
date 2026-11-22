@@ -46,7 +46,8 @@ class MemoryMaintenance {
         const anchor = this.anchors.get(`${document}:${version}`);
         return anchor && anchor.organizationId === organizationId && this.readable.has(version) ? anchor : null;
       },
-      canReadVersion: async (version) => this.readable.has(version),
+      canReadDocument: async (document) => [...this.anchors.values()]
+        .some((anchor) => anchor.documentId === document && this.readable.has(anchor.publishedVersionId)),
       hasReviewerGrant: async () => actor ? this.grants.has(actor.membershipId) : false,
       isAdmin: async () => actor ? this.admins.has(actor.membershipId) : false,
       lockRequest: async () => {},

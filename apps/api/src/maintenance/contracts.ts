@@ -108,7 +108,7 @@ export type CaseProjection =
       canDecide: boolean; needsReassignment: boolean; canReassign: boolean; unread: boolean;
       publicationLinkVersionId: string | null;
       publicationLinkSubmissionId: string | null;
-      publicationProof?: PublicationProof; analysisAvailable?: boolean };
+      publicationProof?: PublicationProof; analysisAvailable?: boolean; publicationReady?: boolean };
 
 export type HistoryPage = {
   items: Array<{ sequence: number; eventType: CaseEventType; message: string; occurredAt: string }>;
