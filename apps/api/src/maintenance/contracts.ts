@@ -164,14 +164,16 @@ export function intakeHash(input: IntakeInput): string {
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-/** Lowercases UUID-shaped strings so every comparison and hash uses PostgreSQL's canonical form. */
+/**
+ * Lowercases UUIDs in identifier fields (keys ending in `Id` or `Ids`) so comparisons and hashes use
+ * PostgreSQL's canonical form. Free text such as a description or rationale is kept exactly as typed.
+ */
 export function canonicalIds<T>(value: T): T {
-  if (typeof value === "string") return (uuidPattern.test(value) ? value.toLowerCase() : value) as T;
-  if (Array.isArray(value)) return value.map(canonicalIds) as T;
-  if (value && typeof value === "object") {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, canonicalIds(item)])) as T;
-  }
-  return value;
+  const canonical = (item: unknown): unknown => typeof item === "string" && uuidPattern.test(item) ? item.toLowerCase()
+    : Array.isArray(item) ? item.map(canonical) : item;
+  if (typeof value === "string") return canonical(value) as T;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /Ids?$/.test(key) ? canonical(item) : item])) as T;
 }
 
 export function assertUuid(value: string): void {

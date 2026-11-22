@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ActorRecord, AnchorRecord, CaseEventRecord, CaseRecord, LegacyReport, NotificationRecord, PublicationSubmission } from "./contracts.js";
 import { MaintenanceCaseService, type MaintenanceTx } from "./case-service.js";
 import { publicationProofFromPointer } from "./publication-proof.js";
-import { MaintenanceError } from "./contracts.js";
+import { MaintenanceError, canonicalIds } from "./contracts.js";
 
 const org = "11111111-1111-4111-8111-111111111111";
 const otherOrg = "22222222-2222-4222-8222-222222222222";
@@ -532,6 +532,45 @@ describe("bounded analysis", () => {
       .readAnalysis(reviewer.userId, org, created.caseId)).rejects.toMatchObject({ code: "DENIED" });
     expect(() => serviceFor(memory, reviewer).startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID()))
       .toThrow("UNAVAILABLE");
+  });
+
+  it("returns a run that another poll finished meanwhile with its findings", async () => {
+    const memory = new MemoryMaintenance();
+    memory.anchors.set(`${documentId}:${versionId}`, {
+      organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      authorMembershipId: author.membershipId,
+    });
+    memory.grants.add(reviewer.membershipId);
+    memory.versions.set(versionId, { documentId, text: "Restart the service." });
+    const created = await serviceFor(memory, reporter).createCase(reporter.userId, org, {
+      origin: "READER_REPORT", documentId, publishedVersionId: versionId, description: "Step 3 is wrong.",
+    }, randomUUID());
+    await serviceFor(memory, reviewer).claimCase(reviewer.userId, org, created.caseId, 1, randomUUID());
+    const adapter: import("./analysis.js").AnalysisAdapter = async (request) => ({
+      contractVersion: 1, state: "succeeded", findings: request.versionIds.map((id) => ({ versionId: id, summary: "Compared." })),
+    });
+    await serviceFor(memory, reviewer, adapter).startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
+    // The second poll reads the run as queued; the first poll finishes it before the second one advances.
+    let transactions = 0;
+    const second = new MaintenanceCaseService({
+      transaction: async (userId, organizationId, work) => {
+        transactions += 1;
+        if (transactions === 2) await serviceFor(memory, reviewer, adapter).readAnalysis(reviewer.userId, org, created.caseId);
+        return memory.transaction(userId, organizationId, work, reviewer);
+      },
+    }, adapter);
+    await expect(second.readAnalysis(reviewer.userId, org, created.caseId))
+      .resolves.toMatchObject({ state: "succeeded", findings: [{ versionId, summary: "Compared." }] });
+  });
+});
+
+describe("canonical identifiers", () => {
+  it("lowercases identifier fields and keeps free text as typed", () => {
+    const upper = "44444444-4444-4444-8444-44444444ABCD";
+    expect(canonicalIds({ publishedVersionId: upper, versionIds: [upper], description: upper, anchor: { passage: upper } }))
+      .toEqual({ publishedVersionId: upper.toLowerCase(), versionIds: [upper.toLowerCase()], description: upper, anchor: { passage: upper } });
+    expect(canonicalIds(upper)).toBe(upper.toLowerCase());
   });
 });
 
