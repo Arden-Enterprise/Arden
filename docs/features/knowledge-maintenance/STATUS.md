@@ -3,7 +3,24 @@
 - Last updated — 2026-11-22
 - Integration baseline — Arden staging `611092903c22e8dc85d8c02361254441ca5286e5`, fetched 2026-11-22.
 - Branches — `feat/knowledge-maintenance-cases` (schema, API, desktop IPC and documentation) and the stacked `feat/knowledge-maintenance-screens` (Flow 4 screens, Ask Arden panel and screenshots), pushed for review on 2026-11-22. Neither is merged or deployed.
-- Current checkpoint — **Committed review candidate, 2026-11-22.** The reconciled 2026-11-20 candidate is now split into those two branches. The earlier worktree and evidence below remain historical snapshots.
+- Current checkpoint — **Review corrections committed, 2026-11-22.** See [review corrections](#review-corrections-2026-11-22). The reconciled 2026-11-20 candidate is now split into those two branches. The earlier worktree and evidence below remain historical snapshots.
+
+## Review corrections, 2026-11-22
+
+Greptile, CodeRabbit and CodeRabbit Verify reviewed PRs #62 and #63. Each finding was checked against the code; all were valid and are fixed in the same branches. The flow diagrams and step catalog already describe the corrected behavior, so their structure is unchanged; the implementation now matches them.
+
+| Area | Correction | Steps |
+| --- | --- | --- |
+| Reviewer authority | Migration `0060` checks the exact pinned version under decision 0015: Organization grants for organization-wide readers, Department grants otherwise, plus classification, tags, active account and author exclusion. Claim, decisions, the reassignment picker and write, and new-case notices use the same rule. | F4-02a–e |
+| Source access | Source text is read per exact version inside the caller's organization, by an eligible reviewer only. Org Admin keeps version metadata, as the spec and decisions 0010/0023 require. An assignee who loses the grant sees queue facts only, and stored findings are withheld after grant or source loss. | F4-03, F4-04 |
+| Conversation | Event numbers ignore audience filtering, so a reporter can reply after a reassignment. Each message has its own notice key. | F4-04, F4-07 |
+| Cutover | Import pages past held reports, locks each source report against dismissal, imports open reports pinned to superseded versions, and removes imported reports from governance triage and dismissal. | F4-00 |
+| Outcomes | Proof names the exact withdrawn version, starts at the business effective date, and decisions hold Flow 2's document lock. The UI enables Record published outcome only when the server's evidence rule passes. A reporter keeps the outcome after a correction replaces the reported version. | F4-05–F4-07 |
+| Analysis | Start is rejected when no adapter is configured; expired leases fail instead of staying Running; the UI follows a queued run until it settles. | F4-04 |
+| Robustness | Overlapping retries of one key replay instead of failing; comparisons are memory-bounded; Semantic Document text keeps links, tables and assets; the version list always includes the pin. | F4-01, F4-03 |
+| Screens | Retry reopens a case whose first read failed, writes cannot replace another open case, single-version cases open their original, Compare with current shows reported against current, and Org Admin sees unassigned cases. Ask Arden returns focus correctly, keeps drafts on reload, and marks a failed prompt Not sent. | F4-02, F4-03, shell |
+
+Checks: API 511 passed (79 database-gated skips) and the PostgreSQL suite now runs in CI's database job; UI 64 files, 484 tests; migration inventory 60 entries. Migration `0060` is operator rollout and leaves `0043`–`0059` unchanged.
 
 ## Redesign and dev-1 setup, 2026-11-22
 
