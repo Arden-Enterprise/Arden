@@ -525,7 +525,8 @@ export class MaintenanceCaseService {
       const row = await tx.lockCase(caseId);
       if (!row || row.assigneeMembershipId !== actor.membershipId) throw new MaintenanceError("DENIED");
       const latest = await tx.latestAnalysis(caseId);
-      if (!latest || latest.state !== "queued") return { run: latest };
+      // Another poll may have finished the run meanwhile; return it with the same visibility gate as a read.
+      if (!latest || latest.state !== "queued") return { run: await this.visibleRun(tx, row, latest) };
       if (latest.startedByMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(row.publishedVersionId))) {
         await tx.failActiveAnalysis(caseId);
         return { run: await tx.latestAnalysis(caseId) };
@@ -544,7 +545,7 @@ export class MaintenanceCaseService {
       return { run, sources, claimed: run !== null };
     });
     if (!claimed || !prepared || prepared.state !== "running" || !prepared.fence || !this.adapter) {
-      return prepared ? { ...prepared, findings: [] } : { runId: "", state: "failed", findings: [], versionIds: [], startedByMembershipId: "", fence: null, attempt: 0 };
+      return prepared ?? { runId: "", state: "failed", findings: [], versionIds: [], startedByMembershipId: "", fence: null, attempt: 0 };
     }
     const fence = prepared.fence;
     let result: { findings: AnalysisFinding[] } | null = null;
