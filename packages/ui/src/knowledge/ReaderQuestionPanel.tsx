@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { CitedAnswer } from "../ask-arden/CitedAnswer";
 import { askReaderQuestion, type ReaderAnswer } from "../shared/reader-question-api";
 import { useReaderOperation, type ReaderOperationOptions } from "./useReaderOperation";
 import type { ReaderAccessSession } from "./useReaderAccess";
@@ -32,7 +33,7 @@ export function ReaderQuestionPanel({ options, access, onClose }: { options: Rea
         onClick={() => void operation.retry()}>{operation.retryAfterSeconds > 0 ? `Retry in ${operation.retryAfterSeconds}s` : "Retry"}</button>}</div>}
     {state.status === "ready" && state.result && <div className="reader-ai-question-answer">
       {query !== submitted && <p className="island-meta">Answer to: {submitted}</p>}
-      <p className="reader-ai-answer-text">{state.result.answer}</p>
+      <div className="reader-ai-answer-text"><CitedAnswer body={state.result.answer} citations={[]} /></div>
       <div className="reader-ai-summary-sources">{state.result.citations.map((citation, index) =>
         <button className="reader-ai-summary-source" key={index} type="button" aria-label={`View answer source ${index + 1}`}
           onClick={() => void operation.navigate(citation)}>{citation.page ? `Page ${citation.page}` : "View source"}</button>)}</div>
