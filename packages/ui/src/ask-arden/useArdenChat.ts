@@ -16,7 +16,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   const [historyLoading, setHistoryLoading] = useState(false);
   const [versionScope, setVersionScope] = useState<AiVersionScope>("CURRENT");
   const conversation = useRef<{ id: string; revision: number }>({ id: crypto.randomUUID(), revision: 0 });
-  const retryRequest = useRef<{ query: string; scope: AiVersionScope; id: string } | null>(null);
+  const retryRequest = useRef<{ query: string; scope: AiVersionScope; id: string; conversationId: string; revision: number } | null>(null);
   const pendingQuestion = useRef<{ id: string; query: string } | null>(null);
   const requestGeneration = useRef(0);
 
@@ -87,11 +87,15 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     setPending(true);
     try {
       const previous = retryRequest.current;
-      const requestId = previous?.query === query && previous.scope === versionScope ? previous.id : crypto.randomUUID();
-      retryRequest.current = { query, scope: versionScope, id: requestId };
       const conversationId = conversation.current.id;
+      // A retry replays the original turn, so it keeps the revision it was first sent with.
+      const retry = previous?.query === query && previous.scope === versionScope && previous.conversationId === conversationId
+        ? previous : null;
+      const requestId = retry?.id ?? crypto.randomUUID();
+      const expectedRevision = retry?.revision ?? conversation.current.revision;
+      retryRequest.current = { query, scope: versionScope, id: requestId, conversationId, revision: expectedRevision };
       const answer = await askArden(platform, organizationId, query, { conversationId,
-        expectedRevision: conversation.current.revision, requestId, versionScope });
+        expectedRevision, requestId, versionScope });
       if (generation !== requestGeneration.current) {
         // A stopped request can still commit; keep the revision so the next prompt does not conflict.
         if (answer.conversationId === conversationId && conversation.current.id === conversationId
