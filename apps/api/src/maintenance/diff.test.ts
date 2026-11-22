@@ -18,7 +18,7 @@ describe("version comparison", () => {
   it("keeps an identical pair as context and an empty pair without added or removed lines", () => {
     const same = "Restart the service.\nKeep the old note.\nLeave the rest.";
     const identical = compareLines(same, same.replace(/\n/g, "\r\n"));
-    expect(identical.some((row) => row.kind === "added" || row.kind === "removed")).toBe(false);
+    expect(identical!.some((row) => row.kind === "added" || row.kind === "removed")).toBe(false);
     expect(identical).toContainEqual({ kind: "collapsed", text: "Unchanged context", hidden: ["Keep the old note."] });
     expect(compareLines("", "")).toEqual([]);
     expect(compareLines("", "A new step.")).toEqual([{ kind: "added", text: "A new step." }]);
@@ -32,6 +32,16 @@ describe("version comparison", () => {
       { kind: "collapsed", text: "Unchanged context", hidden: ["two", "three"] },
       { kind: "context", text: "four" },
       { kind: "removed", text: "five" },
+      { kind: "added", text: "changed" },
+    ]);
+  });
+
+  it("falls back instead of allocating an unbounded comparison", () => {
+    const many = (prefix: string) => Array.from({ length: 2_100 }, (_, index) => `${prefix} ${index}`).join("\n");
+    expect(compareLines(many("a"), many("b"))).toBeNull();
+    const edited = many("a").replace("a 1000\n", "changed\n");
+    expect(compareLines(many("a"), edited)?.filter((row) => row.kind === "added" || row.kind === "removed")).toEqual([
+      { kind: "removed", text: "a 1000" },
       { kind: "added", text: "changed" },
     ]);
   });

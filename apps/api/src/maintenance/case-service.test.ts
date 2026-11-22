@@ -49,6 +49,8 @@ class MemoryMaintenance {
       canReadVersion: async (version) => this.readable.has(version),
       hasReviewerGrant: async () => actor ? this.grants.has(actor.membershipId) : false,
       isAdmin: async () => actor ? this.admins.has(actor.membershipId) : false,
+      lockRequest: async () => {},
+      lockDocument: async () => true,
       idempotency: async (membershipId, requestKey) => this.keys.find((item) => item.membershipId === membershipId && item.requestKey === requestKey) ?? null,
       saveIdempotency: async (membershipId, requestKey, payloadHash, caseId) => { this.keys.push({ membershipId, requestKey, payloadHash, caseId }); },
       insertCase: async (row) => { this.cases.push(structuredClone(row)); },
@@ -72,8 +74,10 @@ class MemoryMaintenance {
         const index = this.cases.findIndex((item) => item.caseId === row.caseId);
         if (index >= 0) this.cases[index] = structuredClone(row);
       },
-      insertNotification: async (notice) => { this.notices.push(notice); },
-      notificationExists: async (recipient, logicalKey) => this.notices.some((item) => item.recipientMembershipId === recipient && item.logicalKey === logicalKey),
+      insertNotification: async (notice) => {
+        if (this.notices.some((item) => item.recipientMembershipId === notice.recipientMembershipId && item.logicalKey === notice.logicalKey)) return;
+        this.notices.push(notice);
+      },
       eligibleReviewers: async (row) => [...this.grants].filter((id) => id !== row.authorMembershipId)
         .map((membershipId) => ({ membershipId, displayName: this.names.get(membershipId) ?? membershipId })),
       membershipHasGrant: async (membershipId) => this.grants.has(membershipId),
@@ -104,6 +108,7 @@ class MemoryMaintenance {
       activeAnalysis: async (caseId) => this.analyses.some((item) => item.caseId === caseId && (item.state === "queued" || item.state === "running")),
       queueAnalysis: async (caseId, run) => { this.analyses.push({ ...run, caseId, state: "queued", findings: [], fence: null }); },
       cancelActiveAnalysis: async (caseId) => { this.analyses = this.analyses.map((item) => item.caseId === caseId && (item.state === "queued" || item.state === "running") ? { ...item, state: "cancelled", findings: [], fence: null } : item); },
+      expireStaleAnalysis: async () => {},
       failActiveAnalysis: async (caseId) => { this.analyses = this.analyses.map((item) => item.caseId === caseId && (item.state === "queued" || item.state === "running") ? { ...item, state: "failed", findings: [], fence: null } : item); },
       claimAnalysis: async (caseId, fence) => {
         const item = this.analyses.find((run) => run.caseId === caseId && run.state === "queued");
@@ -250,7 +255,8 @@ describe("maintenance assignment", () => {
     expect(memory.events.filter((item) => item.eventType === "CLAIMED")).toHaveLength(1);
     memory.grants.delete(reviewer.membershipId);
     const lost = await serviceFor(memory, reviewer).getCase(reviewer.userId, org, created.caseId);
-    expect(lost).toMatchObject({ kind: "assigned", needsReassignment: true, canDecide: false });
+    expect(lost).toMatchObject({ kind: "queue", needsReassignment: true });
+    expect(lost).not.toHaveProperty("description");
   });
 
   it("blocks the previous reviewer after reassignment and separates the reporter explanation", async () => {
@@ -338,12 +344,17 @@ describe("version comparison access", () => {
     expect(scanned).toMatchObject({ unavailable: true });
     memory.grants.delete(reviewer.membershipId);
     const lost = await serviceFor(memory, reviewer).getCase(reviewer.userId, org, created.caseId);
-    expect(lost).toMatchObject({ kind: "assigned", canDecide: false, needsReassignment: true });
+    expect(lost).toMatchObject({ kind: "queue", needsReassignment: true });
     await expect(serviceFor(memory, reviewer).compareCase(reviewer.userId, org, created.caseId, versionId, next)).rejects.toMatchObject({ code: "DENIED" });
     await expect(serviceFor(memory, reviewer).readOriginal(reviewer.userId, org, created.caseId, versionId)).rejects.toMatchObject({ code: "DENIED" });
     memory.grants.add(reviewer.membershipId);
     await expect(serviceFor(memory, reporter).compareCase(reporter.userId, org, created.caseId, versionId, next)).rejects.toMatchObject({ code: "DENIED" });
     await expect(serviceFor(memory, reporter).readOriginal(reporter.userId, org, created.caseId, versionId)).rejects.toMatchObject({ code: "DENIED" });
+    const admin = { userId: randomUUID(), organizationId: org, membershipId: randomUUID() };
+    memory.admins.add(admin.membershipId);
+    await expect(serviceFor(memory, admin).readOriginal(admin.userId, org, created.caseId, versionId)).rejects.toMatchObject({ code: "DENIED" });
+    await expect(serviceFor(memory, admin).compareCase(admin.userId, org, created.caseId, versionId, next)).rejects.toMatchObject({ code: "DENIED" });
+    await expect(serviceFor(memory, admin).listVersions(admin.userId, org, created.caseId)).resolves.toMatchObject({ items: [] });
   });
 });
 
@@ -407,6 +418,28 @@ describe("publication proof", () => {
       "The correction is published.", "Matched the replacement.", versionId, randomUUID());
     expect(resolved.reporterStatus).toBe("Resolved");
     expect(memory.cases[0]?.outcome).toBe("UPDATED");
+  });
+
+  it("accepts a withdrawn document only for the exact withdrawn version", async () => {
+    const { memory, claim } = await claimed();
+    if (claim.kind !== "assigned") throw new Error("expected an assigned case");
+    const withdrawnVersion = randomUUID();
+    const unrelated = randomUUID();
+    const replacement = randomUUID();
+    memory.submissions.set(unrelated, { documentId, requestType: "CONTENT", status: "APPROVED",
+      producedVersionId: randomUUID(), targetPublishedVersionId: null, withdrawn: true });
+    memory.submissions.set(replacement, { documentId, requestType: "CONTENT", status: "APPROVED",
+      producedVersionId: withdrawnVersion, targetPublishedVersionId: null, withdrawn: true });
+    memory.proofs.set(documentId, { state: "applicable", outcome: "WITHDRAWN", publishedVersionId: withdrawnVersion });
+    const link = async (submissionId: string, revision: number) => serviceFor(memory, reviewer).linkPublication(reviewer.userId, org,
+      claim.caseId, revision, { submissionId }, "The replacement was withdrawn.", randomUUID());
+    const confirm = (revision: number) => serviceFor(memory, reviewer).confirmPublication(reviewer.userId, org, claim.caseId,
+      revision, "The guide was withdrawn.", "Matched the withdrawn version.", withdrawnVersion, randomUUID());
+    const wrong = await link(unrelated, claim.revision);
+    await expect(confirm((wrong as { revision: number }).revision)).rejects.toMatchObject({ code: "CONFLICT" });
+    const right = await link(replacement, (wrong as { revision: number }).revision);
+    await expect(confirm((right as { revision: number }).revision)).resolves.toMatchObject({ reporterStatus: "Resolved" });
+    expect(memory.cases[0]?.outcome).toBe("WITHDRAWN");
   });
 
   it("keeps a pending author request open until that request applies", async () => {
@@ -481,6 +514,9 @@ describe("bounded analysis", () => {
     const finished = await retry.readAnalysis(reviewer.userId, org, created.caseId);
     expect(finished.state).toBe("succeeded");
     expect(finished.findings).toEqual([{ versionId, summary: "The selected version was compared with the reported evidence." }]);
+    memory.versions.set(versionId, { documentId, text: null });
+    await expect(retry.readAnalysis(reviewer.userId, org, created.caseId)).resolves.toMatchObject({ state: "succeeded", findings: [] });
+    memory.versions.set(versionId, { documentId, text: "Restart the service." });
     memory.grants.delete(reviewer.membershipId);
     await retry.startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID()).catch(() => undefined);
     memory.grants.add(reviewer.membershipId);
@@ -488,9 +524,37 @@ describe("bounded analysis", () => {
       .startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
     expect(lost.state).toBe("queued");
     memory.grants.delete(reviewer.membershipId);
-    const denied = await serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }] }))
-      .readAnalysis(reviewer.userId, org, created.caseId);
-    expect(denied).toMatchObject({ state: "failed", findings: [] });
+    await expect(serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }] }))
+      .readAnalysis(reviewer.userId, org, created.caseId)).rejects.toMatchObject({ code: "DENIED" });
+    expect(() => serviceFor(memory, reviewer).startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID()))
+      .toThrow("UNAVAILABLE");
+  });
+});
+
+describe("case conversation", () => {
+  it("notifies every follow-up question and reply instead of failing on a repeated key", async () => {
+    const memory = new MemoryMaintenance();
+    memory.anchors.set(`${documentId}:${versionId}`, {
+      organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      authorMembershipId: author.membershipId,
+    });
+    memory.grants.add(reviewer.membershipId);
+    const created = await serviceFor(memory, reporter).createCase(reporter.userId, org, {
+      origin: "READER_REPORT", documentId, publishedVersionId: versionId, description: "Step 3 is wrong.",
+    }, randomUUID());
+    const claimed = await serviceFor(memory, reviewer).claimCase(reviewer.userId, org, created.caseId, 1, randomUUID());
+    const say = (actor: ActorRecord, message: string) =>
+      serviceFor(memory, actor).postMessage(actor.userId, org, created.caseId, (claimed as { revision: number }).revision, message, randomUUID());
+    await say(reviewer, "Which checklist?");
+    await say(reviewer, "Is it the printed one?");
+    await say(reporter, "Trolley 2.");
+    await say(reporter, "Printed last week.");
+    const keys = (recipient: string, prefix: string) => memory.notices
+      .filter((item) => item.recipientMembershipId === recipient && item.logicalKey.startsWith(prefix)).map((item) => item.logicalKey);
+    expect(new Set(keys(reporter.membershipId, "question:")).size).toBe(2);
+    expect(new Set(keys(reviewer.membershipId, "reply:")).size).toBe(2);
+    expect(memory.events.filter((item) => item.eventType === "MESSAGE")).toHaveLength(4);
   });
 });
 

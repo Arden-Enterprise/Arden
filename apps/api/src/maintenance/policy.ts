@@ -20,10 +20,12 @@ export function projectCase(row: CaseRecord, actor: ActorRecord, access: CaseAcc
   const independent = actor.membershipId !== row.authorMembershipId && (access.hasGrant || access.isAdmin
     || row.assigneeMembershipId === actor.membershipId);
   if (!independent) return null;
-  if (row.assigneeMembershipId !== actor.membershipId && !access.isAdmin) {
+  const assignee = row.assigneeMembershipId === actor.membershipId;
+  // An assignee who lost the grant keeps only the queue facts until an Org Admin reassigns the case.
+  if (!access.isAdmin && !(assignee && access.hasGrant)) {
     return {
       kind: "queue", caseId: row.caseId, reporterStatus: row.reporterStatus, revision: row.revision,
-      title: access.canReadDocument ? row.title : null, unread: false,
+      title: access.canReadDocument ? row.title : null, unread: false, ...(assignee ? { needsReassignment: true } : {}),
     };
   }
   return {
@@ -31,8 +33,8 @@ export function projectCase(row: CaseRecord, actor: ActorRecord, access: CaseAcc
     title: row.title, description: row.description, reporterStatus: row.reporterStatus,
     reporterExplanation: row.reporterExplanation, reviewerRationale: row.reviewerRationale, revision: row.revision,
     assigneeMembershipId: row.assigneeMembershipId,
-    canDecide: row.assigneeMembershipId === actor.membershipId && access.hasGrant,
-    needsReassignment: row.assigneeMembershipId === actor.membershipId && !access.hasGrant,
+    canDecide: assignee && access.hasGrant,
+    needsReassignment: assignee && !access.hasGrant,
     canReassign: access.isAdmin, unread: false,
     publicationLinkVersionId: row.publicationLinkVersionId,
     publicationLinkSubmissionId: row.publicationLinkSubmissionId,
