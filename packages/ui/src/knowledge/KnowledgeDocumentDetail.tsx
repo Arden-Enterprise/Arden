@@ -35,14 +35,6 @@ export type ReaderDocumentMetadata = {
   sensitiveLabel?: "CONFIDENTIAL" | "RESTRICTED";
 };
 
-export function readerDocumentStatusAt(validFrom: string, validUntil: string | null, now: Date): ReaderDocumentStatus {
-  const from = Date.parse(validFrom);
-  const until = validUntil ? Date.parse(validUntil) : null;
-  if (Number.isFinite(from) && from > now.getTime()) return "UPCOMING";
-  if (until !== null && Number.isFinite(until) && until <= now.getTime()) return "EXPIRED";
-  return "EFFECTIVE";
-}
-
 const informationCollapsedKey = "arden.reader.informationCollapsed";
 
 /** Per-viewer preference only; a blocked or empty storage simply starts expanded. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createKnowledgePreview, createSampleHandover, draftReadyForReview, handoverReady, knowledgeDraftMatchesPublication, reduceKnowledgePreview } from "../src/knowledge/knowledgePreviewModel";
+import { createKnowledgePreview, draftReadyForReview, knowledgeDraftMatchesPublication, reduceKnowledgePreview } from "../src/knowledge/knowledgePreviewModel";
 
 describe("synthetic knowledge governance preview", () => {
   it("blocks incomplete or private drafts from shared review", () => {
@@ -85,12 +85,3 @@ describe("synthetic knowledge governance preview", () => {
   });
 });
 
-describe("synthetic shared handover plan", () => {
-  it("requires a receiving owner for every transfer and revision", () => {
-    const documents = createSampleHandover();
-    expect(handoverReady(documents)).toBe(false);
-    expect(handoverReady(documents.map((document) => document.id === "sample-cutover" ? { ...document, owner: "Hoa Bui" } : document))).toBe(true);
-    expect(handoverReady([])).toBe(false);
-    expect(handoverReady(documents.map((document) => ({ ...document, outcome: "transfer", owner: " " })))).toBe(false);
-  });
-});

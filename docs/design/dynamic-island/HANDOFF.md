@@ -72,6 +72,9 @@ Tabs: Members · Departments · **Audiences** · Invitations · Reviewer access.
   now normalizes to `audienceIds`. (Optional follow-up: make the API list route use
   `representSharedDraft` so list and detail share one shape.)
 - Handover removed from navigation (route/component still exist; remove later if unused).
+  Removed on 22 November 2026 at the maintainer's request: the unreachable Knowledge Handover
+  sample page and its view, and the sample-mode `MemberDirectory` table (the session-preview
+  Administration Members tab and the setup wizard's Members step). Live Administration is unchanged.
 - Collapsed sidebar footer no longer stretches/overflows.
 
 ## 6. Reader Summary addition — 14 November 2026, local only

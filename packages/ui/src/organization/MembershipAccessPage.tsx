@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Icon } from "../shared/Icon";
-import { EffectiveAccessPreview } from "./MemberDirectory";
+import { EffectiveAccessPreview } from "./EffectiveAccessPreview";
 import { membershipReadiness } from "./organizationWorkflow";
 import type { OrganizationPreview } from "./previewModel";
 

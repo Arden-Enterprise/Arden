@@ -468,12 +468,6 @@ export async function withdrawPublication(platform: Platform, organizationId: st
     { method: "POST", body: JSON.stringify({ reason }) });
 }
 
-export async function reportPublicationProblem(platform: Platform, organizationId: string, publishedVersionId: string,
-  message: string): Promise<void> {
-  await request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}/reports`,
-    { method: "POST", body: JSON.stringify({ message }) });
-}
-
 export async function listPublicationReports(platform: Platform, organizationId: string): Promise<PublicationReport[]> {
   return (await request<{ items: PublicationReport[] }>(platform, `${knowledgePath(organizationId)}/reports`)).items;
 }
