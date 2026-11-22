@@ -299,8 +299,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (!shell || !contextOpen || !contextOverlay) return;
     const covered = [...shell.children].filter((child) => !child.hasAttribute("inert")
       && !child.matches("#arden-agent-panel, .shell-context-scrim, .skip-link, dialog"));
-    covered.forEach((child) => child.setAttribute("inert", ""));
-    return () => covered.forEach((child) => child.removeAttribute("inert"));
+    covered.forEach((child) => { child.setAttribute("inert", ""); child.setAttribute("data-context-covered", ""); });
+    return () => covered.forEach((child) => { child.removeAttribute("inert"); child.removeAttribute("data-context-covered"); });
   }, [contextOpen, contextOverlay]);
 
   useEffect(() => {
@@ -582,6 +582,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   // Focus returns to whatever opened the panel, or to the page when that control is gone or hidden.
   const closeContext = () => {
     setContextOpen(false);
+    shellRef.current?.querySelectorAll("[data-context-covered]").forEach((element) => {
+      element.removeAttribute("inert");
+      element.removeAttribute("data-context-covered");
+    });
     const opener = contextOpener.current;
     (opener?.isConnected && opener.offsetParent !== null ? opener : document.getElementById("arden-main"))?.focus();
   };

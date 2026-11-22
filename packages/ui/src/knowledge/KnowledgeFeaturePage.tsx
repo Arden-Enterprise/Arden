@@ -44,6 +44,7 @@ export function KnowledgeFeaturePage(props: KnowledgeFeaturePageProps) {
       citationTarget={props.citationTarget} requestedReviewId={props.requestedReviewId}
       onReviewTargetHandled={props.onReviewTargetHandled} awaitingAssignment={props.awaitingAssignment}
       canUsePrivateWorkspace={props.canUsePrivateWorkspace} onOpenPrivateNotes={props.onOpenPrivateNotes}
+      onOpenReviews={props.onNavigate ? () => props.onNavigate!("review-queue") : undefined}
       contextOpen={props.contextOpen} onToggleContext={props.onToggleContext} />;
   }
   return <SampleKnowledgeFeaturePage {...props} />;

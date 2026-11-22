@@ -33,8 +33,9 @@ describe("report an issue dialog", () => {
 
   it("sends an optional page and passage with a reviewer objective", async () => {
     const onSubmit = vi.fn(async () => "case-2");
+    const openCase = vi.fn();
     render(<ReportIssueDialog title="IT Support Guide" versionLabel="v3" purpose="review" busy={false}
-      onClose={() => undefined} onSubmit={onSubmit} onViewReports={() => undefined} />);
+      onClose={() => undefined} onSubmit={onSubmit} onViewReports={openCase} />);
     const hidden = { hidden: true };
     fireEvent.change(screen.getByLabelText("Review objective", hidden), { target: { value: "Confirm the restart step." } });
     fireEvent.change(screen.getByLabelText("Page", hidden), { target: { value: "4" } });
@@ -44,6 +45,8 @@ describe("report an issue dialog", () => {
     expect(onSubmit).toHaveBeenCalledWith("Confirm the restart step.", expect.any(String), {
       page: 4, passage: "Restart the service.",
     });
+    fireEvent.click(screen.getByRole("button", { name: "Open in Maintenance", hidden: true }));
+    expect(openCase).toHaveBeenCalledWith("case-2");
   });
 
   it("uses a new request key when the report text changes after a failure", async () => {

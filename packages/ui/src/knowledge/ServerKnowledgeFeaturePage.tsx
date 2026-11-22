@@ -72,6 +72,8 @@ type Props = ContextControlProps & {
   organizationId: string;
   organizationName: string;
   view: "knowledge" | "review-queue";
+  /** Opens Reviews, where Maintenance cases are worked. */
+  onOpenReviews?: () => void;
   active: boolean;
   createdDraftId: string | null;
   citationTarget?: KnowledgeNavigationTarget | null;
@@ -107,7 +109,7 @@ export function ServerKnowledgeFeaturePage(props: Props) {
 function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   view, active, createdDraftId, citationTarget, requestedReviewId, onReviewTargetHandled,
   onAssignedReviewCount, onDirtyChange, awaitingAssignment = false,
-  onOpenPrivateNotes, canUsePrivateWorkspace = false, contextOpen, onToggleContext }: Props) {
+  onOpenPrivateNotes, canUsePrivateWorkspace = false, contextOpen, onToggleContext, onOpenReviews }: Props) {
   const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
   const [submissions, setSubmissions] = useState<KnowledgeSubmission[]>([]);
   const home = useHomePublications(platform, organizationId);
@@ -164,6 +166,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   // The case the reader asked for, kept even when its first read fails, so Retry reopens that case.
   const requestedCaseId = useRef<string | null>(null);
   const historyEpoch = useRef(0);
+  const comparisonRequest = useRef(0);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceError, setMaintenanceError] = useState("");
   const claimKey = useRef<string | null>(null);
@@ -267,16 +270,16 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     }
     maintenancePairIndex.current = index;
     maintenancePairTo.current = toIndex;
+    const comparing = ++comparisonRequest.current;
+    const current = () => caseLoad.current.request === request && comparisonRequest.current === comparing;
     setMaintenanceOriginal(null);
     setMaintenanceComparison(null);
     setVersionPair(pair);
     try {
       const comparison = await compareMaintenanceCase(platform, organizationId, caseId, from.publishedVersionId, to.publishedVersionId);
-      if (caseLoad.current.request !== request || maintenancePairIndex.current !== index) return;
-      setMaintenanceComparison(comparison);
+      if (current()) setMaintenanceComparison(comparison);
     } catch {
-      if (caseLoad.current.request !== request || maintenancePairIndex.current !== index) return;
-      setMaintenanceComparison({ unavailable: true });
+      if (current()) setMaintenanceComparison({ unavailable: true });
     }
   }, [platform, organizationId]);
   const moveVersionPair = useCallback((action: "previous" | "next" | "current") => {
@@ -1308,7 +1311,9 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
         } finally { setBusy(false); }
       }} />}
     {reviewOpen && document && <ReportIssueDialog purpose="review" title={document.title} versionLabel={document.management?.version || document.versionLabel || "Published version"}
-      busy={busy} onClose={() => setReviewOpen(false)} onViewReports={() => { setReviewOpen(false); setReviewSection("maintenance"); setMessage("Open Reviews and choose Maintenance."); }}
+      busy={busy} onClose={() => setReviewOpen(false)} onViewReports={(caseId) => {
+        setReviewOpen(false); setReviewSection("maintenance"); onOpenReviews?.(); void openMaintenanceCase(caseId);
+      }}
       onSubmit={async (description, requestKey, anchor) => {
         setBusy(true);
         try {

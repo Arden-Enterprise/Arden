@@ -17,7 +17,7 @@ export function ReportIssueDialog({ title, versionLabel, busy, purpose = "report
   purpose?: "report" | "review";
   onClose: () => void;
   onSubmit: (description: string, requestKey: string, anchor?: { page?: number; passage?: string }) => Promise<string>;
-  onViewReports: () => void;
+  onViewReports: (caseId: string) => void;
 }) {
   const descriptionId = useId();
   const pageId = useId();
@@ -66,7 +66,8 @@ export function ReportIssueDialog({ title, versionLabel, busy, purpose = "report
       </div>
       <div className="dialog-actions">
         <button type="button" className="secondary-button" onClick={onClose}>Done</button>
-        <button type="button" className="primary-button" onClick={onViewReports}>View in My reports</button>
+        <button type="button" className="primary-button" onClick={() => onViewReports(caseId)}>
+          {reviewing ? "Open in Maintenance" : "View in My reports"}</button>
       </div>
     </div> : <div className="maintenance-dialog-form">
       <p className="maintenance-dialog-context">
