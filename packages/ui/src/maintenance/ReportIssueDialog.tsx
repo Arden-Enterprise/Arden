@@ -80,7 +80,9 @@ export function ReportIssueDialog({ title, versionLabel, busy, purpose = "report
             aria-describedby={describedBy} maxLength={4000} value={description} disabled={busy}
             onChange={(event) => setDescription(event.target.value)} />
         </label>
-        <small id={helpId}>Required. It stays attached to this exact published version.</small>
+        <small id={helpId}>{reviewing
+          ? "Only a reviewer whose grant covers this version can start a review. Otherwise, use Report an issue."
+          : "Required. It stays attached to this exact published version."}</small>
       </div>
       <fieldset className="maintenance-location">
         <legend>Location <span>(optional)</span></legend>

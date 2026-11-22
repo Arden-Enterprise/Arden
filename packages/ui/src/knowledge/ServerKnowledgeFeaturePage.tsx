@@ -196,7 +196,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const publicationLinkKey = useRef<CommandKey | null>(null);
   const publicationRequestKey = useRef<CommandKey | null>(null);
   const reassignKey = useRef<CommandKey | null>(null);
-  const messageKey = useRef<{ text: string; key: string } | null>(null);
+  const messageRequest = useRef<{ caseId: string; text: string; revision: number; key: string } | null>(null);
   const [selectedContributionId, setSelectedContributionId] = useState<string | null>(null);
   const [historyVersions, setHistoryVersions] = useState<{ draftId: string; items: KnowledgeDraftVersionSummary[] } | null>(null);
   const [historyError, setHistoryError] = useState("");
@@ -357,16 +357,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       if (next?.state !== "queued" && next?.state !== "running") return;
     }
   }, [platform, organizationId]);
-  const openMaintenanceCase = useCallback(async (caseId: string, surface: "reviews" | "reports") => {
-    requestedCaseId.current = caseId;
-    setCaseSurface(surface);
+  const clearMaintenanceCaseView = useCallback(() => {
     historyEpoch.current += 1;
     const request = startCaseLoad(caseLoad.current);
     analysisEpoch.current += 1;
-    const analysisRequest = analysisEpoch.current;
-    setMaintenanceLoading(true);
-    setMaintenanceError("");
-    setMaintenanceActionError("");
     setMaintenanceCase(null);
     setMaintenanceHistory(null);
     setRelatedCases([]);
@@ -376,11 +370,21 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     setVersionPair(null);
     maintenanceVersions.current = [];
     setReviewerChoices([]);
+    return request;
+  }, []);
+  const openMaintenanceCase = useCallback(async (caseId: string, surface: "reviews" | "reports") => {
+    requestedCaseId.current = caseId;
+    setCaseSurface(surface);
+    const request = clearMaintenanceCaseView();
+    const analysisRequest = analysisEpoch.current;
+    setMaintenanceLoading(true);
+    setMaintenanceError("");
+    setMaintenanceActionError("");
     claimKey.current = null;
     decisionKey.current = null;
     publicationKey.current = null;
     reassignKey.current = null;
-    messageKey.current = null;
+    messageRequest.current = null;
     publicationLinkKey.current = null;
     publicationRequestKey.current = null;
     linkKey.current = null;
@@ -444,7 +448,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     } catch (caught) {
       if (caseLoad.current.request === request) setMaintenanceError(errorMessage(caught));
     } finally { if (caseLoad.current.request === request) setMaintenanceLoading(false); }
-  }, [platform, organizationId, applyVersionPair, followAnalysis]);
+  }, [platform, organizationId, applyVersionPair, followAnalysis, clearMaintenanceCaseView]);
   /** Applies a write's result only while its own case is still open; `request` is captured when the write starts. */
   const refreshMaintenance = useCallback(async (next: MaintenanceCase, request: number) => {
     if (caseLoad.current.request !== request || next.caseId !== requestedCaseId.current) return;
@@ -480,16 +484,20 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       historyEpoch.current += 1;
       setMaintenanceCase(loaded.item);
       setMaintenanceHistory(loaded.history);
-    } catch {
-      // The current view stays; the inline error already explains the failed action.
+    } catch (caught) {
+      if (caseLoad.current.request !== request) return;
+      if (caught instanceof ApiError && [401, 403, 404].includes(caught.status)) {
+        clearMaintenanceCaseView();
+        setMaintenanceLoading(false);
+        setMaintenanceActionError("");
+        setMaintenanceError(errorMessage(caught));
+      }
+      // A temporary reload failure keeps the current view and inline error.
     }
   };
   const leaveMaintenanceCase = () => {
-    startCaseLoad(caseLoad.current);
-    analysisEpoch.current += 1;
+    clearMaintenanceCaseView();
     requestedCaseId.current = null;
-    setMaintenanceCase(null); setMaintenanceHistory(null); setRelatedCases([]); setMaintenanceComparison(null);
-    setMaintenanceOriginal(null); setVersionPair(null); setReviewerChoices([]); setAnalysisRun(null);
     setMaintenanceError(""); setMaintenanceActionError(""); setMaintenanceLoading(false);
   };
   const retryMaintenanceCase = (fallback: () => Promise<void>) => {
@@ -510,18 +518,26 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   };
   const sendMaintenanceMessage = useCallback(async (text: string) => {
     if (!maintenanceCase?.revision) return;
+    const { caseId, revision } = maintenanceCase;
     const request = caseLoad.current.request;
-    if (messageKey.current?.text !== text) messageKey.current = { text, key: crypto.randomUUID() };
+    if (messageRequest.current?.text !== text || messageRequest.current.caseId !== caseId) {
+      messageRequest.current = { caseId, text, revision, key: crypto.randomUUID() };
+    }
+    const command = messageRequest.current;
     setBusy(true);
     setMaintenanceActionError("");
     try {
-      const next = await postMaintenanceMessage(platform, organizationId, maintenanceCase.caseId, {
-        expectedRevision: maintenanceCase.revision, message: text,
-      }, messageKey.current.key);
+      const next = await postMaintenanceMessage(platform, organizationId, caseId, {
+        expectedRevision: command.revision, message: text,
+      }, command.key);
       if (caseLoad.current.request !== request) return;
-      messageKey.current = null;
       await refreshMaintenance(next, request);
+      if (messageRequest.current === command) messageRequest.current = null;
     } catch (caught) {
+      // Only a definite stale rejection lets us rebase without risking a duplicate message.
+      if (messageRequest.current === command && caught instanceof ApiError && caught.code === "MAINTENANCE_STALE") {
+        messageRequest.current = null;
+      }
       if (caseLoad.current.request === request) void reloadMaintenanceInPlace(request, caseActionError(caught));
       throw caught;
     } finally { setBusy(false); }

@@ -104,6 +104,50 @@ describe("maintenance case actions", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("That case is unavailable.");
   });
 
+  it("removes the open case and its evidence when the refresh denies access entirely", async () => {
+    const { getCase, openCase } = openReviews();
+    const denied = new api.ApiError(404, "That case is unavailable.", "MAINTENANCE_UNAVAILABLE");
+    vi.spyOn(maintenance, "readMaintenanceOriginal").mockResolvedValue({
+      unavailable: false, publishedVersionId: "v1", text: "Restricted original",
+    });
+    vi.spyOn(maintenance, "resolveMaintenanceCase").mockRejectedValue(denied);
+    await openCase();
+    fireEvent.click(await screen.findByRole("button", { name: "Open reported version" }));
+    expect(await screen.findByText("Restricted original")).toBeTruthy();
+    await writeNotes();
+
+    getCase.mockRejectedValue(denied);
+    fireEvent.click(screen.getByRole("button", { name: "No change needed" }));
+
+    expect(await screen.findByRole("heading", { name: "That case is unavailable" })).toBeTruthy();
+    expect(screen.queryByText("Restricted original")).toBeNull();
+    expect(screen.queryByText(assigned.description!)).toBeNull();
+  });
+
+  it.each([
+    { failure: new Error("Connection lost"), replay: true },
+    { failure: new api.ApiError(409, "This case changed.", "MAINTENANCE_STALE"), replay: false },
+  ])("retries a question using the right command after $failure.message", async ({ failure, replay }) => {
+    const { getCase, openCase } = openReviews();
+    const refreshed = { ...assigned, revision: 3, description: "Refreshed case details." };
+    const send = vi.spyOn(maintenance, "postMaintenanceMessage").mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(refreshed);
+    await openCase();
+    const question = await screen.findByLabelText("Question for the reporter");
+    fireEvent.change(question, { target: { value: "Does this still happen?" } });
+    getCase.mockResolvedValue(refreshed);
+    fireEvent.click(screen.getByRole("button", { name: "Ask", exact: true }));
+    expect(await screen.findByText("Refreshed case details.")).toBeTruthy();
+    expect(question).toHaveProperty("value", "Does this still happen?");
+
+    fireEvent.click(screen.getByRole("button", { name: "Ask", exact: true }));
+    await waitFor(() => expect(question).toHaveProperty("value", ""));
+    const [, , , body, key] = send.mock.calls[1]!;
+    expect(body).toEqual({ expectedRevision: replay ? 2 : 3, message: "Does this still happen?" });
+    if (replay) expect(key).toBe(send.mock.calls[0]![4]);
+    else expect(key).not.toBe(send.mock.calls[0]![4]);
+  });
+
   it("follows an analysis that is still running when the case opens", async () => {
     const { analysis, openCase } = openReviews();
     analysis.mockResolvedValueOnce({ runId: "run", state: "running", findings: [], attempt: 1 })
