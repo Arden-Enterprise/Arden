@@ -358,7 +358,7 @@
     {
       "id": "0060",
       "filename": "0060_maintenance_review_corrections.sql",
-      "sha256": "9ad17d414c0882dada40d34083ba80f4f92f8e01f9307a62919f83f0f317f057",
+      "sha256": "12faec7e03c12945810e0c6cf6160271b1a729fc5485b97cc081c66b0f75477d",
       "rollout": "operator"
     }
   ]

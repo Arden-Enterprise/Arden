@@ -8,7 +8,7 @@ Origin — Staging `af28915` contains the reader's **Report a problem** action a
 
 ## Decision
 
-Keep **Report a problem** as the reader's single entry point. At the Maintenance cutover, new submissions from the updated reader create a Maintenance case pinned to the reported version. Same-request replay and independently submitted reports follow the Maintenance intake rules. This changes where future reader submissions are handled under ADR 0023.
+Keep **Report a problem** as the reader's single entry point. The UI currently labels this action **Report an issue** (decision 0022); which label to keep is an open owner decision. At the Maintenance cutover, new submissions from the updated reader create a Maintenance case pinned to the reported version. Same-request replay and independently submitted reports follow the Maintenance intake rules. This changes where future reader submissions are handled under ADR 0023.
 
 At cutover, carry each eligible open governance report into one unassigned **Submitted** case. Preserve the original report reference, exact published version, reporter, text, timestamp, source record and audit history. Record import provenance and make the transition safe to retry. Imported work appears in the authorized Maintenance queue and reporter view without generating a fresh submission notification. Resolve any unverifiable version or routing facts through authorized review before import.
 

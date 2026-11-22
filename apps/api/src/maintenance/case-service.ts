@@ -18,6 +18,7 @@ export interface MaintenanceTx {
   isAdmin(): Promise<boolean>;
   lockRequest(membershipId: string, requestKey: string): Promise<void>;
   lockDocument(documentId: string): Promise<boolean>;
+  lockCasePair(caseId: string, relatedCaseId: string): Promise<void>;
   idempotency(membershipId: string, requestKey: string): Promise<{ payloadHash: string; caseId: string } | null>;
   saveIdempotency(membershipId: string, requestKey: string, payloadHash: string, caseId: string): Promise<void>;
   insertCase(row: CaseRecord): Promise<void>;
@@ -127,7 +128,7 @@ export class MaintenanceCaseService {
     documentId: string; publishedVersionId: string; message: string;
   }): Promise<CaseProjection> {
     const message = input.message.trim();
-    if (message.length < 1 || message.length > 1000) throw new MaintenanceError("INVALID");
+    if (message.length < 1 || [...message].length > 1000) throw new MaintenanceError("INVALID");
     return this.port.transaction(userId, organizationId, async (tx) => {
       const actor = await this.requireActor(tx, organizationId);
       await tx.lockReaderIntake(input.documentId, actor.membershipId);
@@ -187,7 +188,7 @@ export class MaintenanceCaseService {
         result.held.push(...loaded.held);
         const last = reports.at(-1);
         if (!last || reports.length < 200) break;
-        after = { createdAt: last.createdAt, reportId: last.reportId };
+        after = { createdAt: last.cursor ?? last.createdAt, reportId: last.reportId };
       }
       return result;
     });
@@ -260,7 +261,9 @@ export class MaintenanceCaseService {
   claimCase(userId: string, organizationId: string, caseId: string, expectedRevision: number, commandKey: string): Promise<CaseProjection> {
     return this.withCommand(userId, organizationId, caseId, commandKey, ["claim", String(expectedRevision)], async (tx, actor, row) => {
       this.requireIndependent(actor, row);
-      if (!(await tx.hasReviewerGrant(row.publishedVersionId))) throw new MaintenanceError("DENIED");
+      if (actor.membershipId === row.reporterMembershipId || !(await tx.hasReviewerGrant(row.publishedVersionId))) {
+        throw new MaintenanceError("DENIED");
+      }
       if (row.assigneeMembershipId && row.assigneeMembershipId !== actor.membershipId) throw new MaintenanceError("CONFLICT");
       if (row.revision !== expectedRevision) throw new MaintenanceError("STALE");
       if (row.assigneeMembershipId === actor.membershipId) return;
@@ -283,7 +286,7 @@ export class MaintenanceCaseService {
       if (!(await tx.isAdmin())) throw new MaintenanceError("DENIED");
       const row = (await tx.listCases()).find((item) => item.caseId === caseId);
       if (!row) throw new MaintenanceError("DENIED");
-      return tx.eligibleReviewers(row);
+      return (await tx.eligibleReviewers(row)).filter((reviewer) => reviewer.membershipId !== row.reporterMembershipId);
     });
   }
 
@@ -296,7 +299,9 @@ export class MaintenanceCaseService {
       ["reassign", String(expectedRevision), membershipId, cleanReason], async (tx, actor, row) => {
         if (!(await tx.isAdmin())) throw new MaintenanceError("DENIED");
         if (row.revision !== expectedRevision) throw new MaintenanceError("STALE");
-        if (membershipId === row.authorMembershipId || !(await tx.membershipHasGrant(membershipId, row))) throw new MaintenanceError("DENIED");
+        if (row.reporterStatus === "Resolved") throw new MaintenanceError("CONFLICT");
+        if (membershipId === row.authorMembershipId || membershipId === row.reporterMembershipId
+          || !(await tx.membershipHasGrant(membershipId, row))) throw new MaintenanceError("DENIED");
         const now = new Date().toISOString();
         const previous = row.assigneeMembershipId;
         row.assigneeMembershipId = membershipId;
@@ -393,7 +398,7 @@ export class MaintenanceCaseService {
         row.revision += 1;
         await tx.saveCase(row);
         await this.append(tx, row, actor.membershipId, "RESOLVED", "PUBLIC", explanation, now);
-        await this.append(tx, row, actor.membershipId, "RESOLVED", "REVIEWER", `${proof.outcome}: ${rationale}`, now);
+        await this.append(tx, row, actor.membershipId, "RESOLVED", "REVIEWER", rationale, now);
         if (row.reporterMembershipId) await this.notify(tx, row, row.reporterMembershipId, `resolved:${row.caseId}`, "Your report was resolved.");
       });
   }
@@ -438,8 +443,13 @@ export class MaintenanceCaseService {
       }) : null;
       if (!locked || !view) throw new MaintenanceError("DENIED");
       if (view.kind === "minimal") return { items: [], nextCursor: null };
-      const events = await tx.listEvents(caseId, after, 21);
-      const visible = events.filter((event) => event.audience === "PUBLIC" || actor.membershipId !== locked.reporterMembershipId);
+      const visible: CaseEventRecord[] = [];
+      for (let from = after; visible.length < 21;) {
+        const events = await tx.listEvents(caseId, from, 50);
+        visible.push(...events.filter((event) => event.audience === "PUBLIC" || view.kind === "assigned"));
+        if (events.length < 50) break;
+        from = events[events.length - 1]!.sequence;
+      }
       const page = visible.slice(0, 20);
       return {
         items: page.map((event) => ({ sequence: event.sequence, eventType: event.eventType, message: event.message, occurredAt: event.occurredAt })),
@@ -468,7 +478,7 @@ export class MaintenanceCaseService {
         runId: randomUUID(), versionIds, startedByMembershipId: actor.membershipId, attempt: (prior?.attempt ?? 0) + 1,
       });
     }).then(() => this.port.transaction(userId, organizationId, async (tx) => {
-      const latest = await tx.latestAnalysis(caseId);
+      const latest = await this.visibleRun(tx, await tx.lockCase(caseId), await tx.latestAnalysis(caseId));
       if (!latest) throw new MaintenanceError("DENIED");
       return latest;
     }));
@@ -498,8 +508,19 @@ export class MaintenanceCaseService {
     return this.advanceAnalysis(userId, organizationId, caseId);
   }
 
+  /** Findings derive from their sources: the caller needs the grant and every source, or they are withheld. */
+  private async visibleRun(tx: MaintenanceTx, row: CaseRecord | null, run: AnalysisRun | null): Promise<AnalysisRun | null> {
+    if (!run?.findings.length) return run;
+    if (!row || !(await tx.hasReviewerGrant(row.publishedVersionId))) return { ...run, findings: [] };
+    for (const versionId of run.versionIds) {
+      const source = await tx.readVersionText(versionId);
+      if (!source || source.documentId !== row.documentId || source.text === null) return { ...run, findings: [] };
+    }
+    return run;
+  }
+
   private async advanceAnalysis(userId: string, organizationId: string, caseId: string): Promise<AnalysisRun> {
-    const { run: prepared, sources } = await this.port.transaction(userId, organizationId, async (tx) => {
+    const { run: prepared, sources, claimed = false } = await this.port.transaction(userId, organizationId, async (tx) => {
       const actor = await this.requireActor(tx, organizationId);
       const row = await tx.lockCase(caseId);
       if (!row || row.assigneeMembershipId !== actor.membershipId) throw new MaintenanceError("DENIED");
@@ -519,9 +540,12 @@ export class MaintenanceCaseService {
         }
         sources.push({ versionId, text: source.text });
       }
-      return { run: await tx.claimAnalysis(caseId, randomUUID()), sources };
+      const run = await tx.claimAnalysis(caseId, randomUUID());
+      return { run, sources, claimed: run !== null };
     });
-    if (!prepared || prepared.state !== "running" || !prepared.fence || !this.adapter) return prepared ?? { runId: "", state: "failed", findings: [], versionIds: [], startedByMembershipId: "", fence: null, attempt: 0 };
+    if (!claimed || !prepared || prepared.state !== "running" || !prepared.fence || !this.adapter) {
+      return prepared ? { ...prepared, findings: [] } : { runId: "", state: "failed", findings: [], versionIds: [], startedByMembershipId: "", fence: null, attempt: 0 };
+    }
     const fence = prepared.fence;
     let result: { findings: AnalysisFinding[] } | null = null;
     try {
@@ -538,7 +562,7 @@ export class MaintenanceCaseService {
       const row = await tx.lockCase(caseId);
       const latest = await tx.latestAnalysis(caseId);
       if (!latest) throw new MaintenanceError("DENIED");
-      if (latest.state !== "running" || latest.fence !== fence) return latest;
+      if (latest.state !== "running" || latest.fence !== fence) return (await this.visibleRun(tx, row, latest))!;
       const sources = await Promise.all(prepared.versionIds.map((versionId) => tx.readVersionText(versionId)));
       const sourcesReady = sources.every((source) => source && row && source.documentId === row.documentId && source.text !== null);
       const stillAssigned = Boolean(row && row.assigneeMembershipId === actor.membershipId && row.assigneeMembershipId === prepared.startedByMembershipId
@@ -555,7 +579,7 @@ export class MaintenanceCaseService {
       if (row.assigneeMembershipId !== actor.membershipId) throw new MaintenanceError("DENIED");
       await tx.cancelActiveAnalysis(row.caseId);
     }).then(() => this.port.transaction(userId, organizationId, async (tx) => {
-      const latest = await tx.latestAnalysis(caseId);
+      const latest = await this.visibleRun(tx, await tx.lockCase(caseId), await tx.latestAnalysis(caseId));
       if (!latest) throw new MaintenanceError("DENIED");
       return latest;
     }));
@@ -605,7 +629,7 @@ export class MaintenanceCaseService {
       if (row.reporterStatus !== before.left || related.reporterStatus !== before.right || row.outcome !== before.outcome) {
         throw new MaintenanceError("CONFLICT");
       }
-    });
+    }, (tx) => tx.lockCasePair(caseId, relatedCaseId));
   }
 
   compareCase(userId: string, organizationId: string, caseId: string, fromVersionId: string, toVersionId: string): Promise<
@@ -700,7 +724,8 @@ export class MaintenanceCaseService {
   }
 
   private withCommand(userId: string, organizationId: string, caseId: string, commandKey: string, parts: string[],
-    mutate: (tx: MaintenanceTx, actor: ActorRecord, row: CaseRecord) => Promise<void>): Promise<CaseProjection> {
+    mutate: (tx: MaintenanceTx, actor: ActorRecord, row: CaseRecord) => Promise<void>,
+    beforeLock?: (tx: MaintenanceTx) => Promise<void>): Promise<CaseProjection> {
     assertUuid(organizationId);
     assertUuid(caseId);
     assertUuid(commandKey);
@@ -714,6 +739,7 @@ export class MaintenanceCaseService {
         if (prior.payloadHash !== hash || prior.caseId !== caseId) throw new MaintenanceError("CONFLICT");
         return this.projectLocked(tx, actor, caseId);
       }
+      await beforeLock?.(tx);
       const row = await tx.lockCase(caseId);
       if (!row) throw new MaintenanceError("DENIED");
       await mutate(tx, actor, row);
@@ -753,7 +779,7 @@ export class MaintenanceCaseService {
 
   private async requireActor(tx: MaintenanceTx, organizationId: string): Promise<ActorRecord> {
     const actor = await tx.actor();
-    if (!actor || actor.organizationId !== organizationId) throw new MaintenanceError("DENIED");
+    if (!actor || actor.organizationId !== organizationId.toLowerCase()) throw new MaintenanceError("DENIED");
     return actor;
   }
 

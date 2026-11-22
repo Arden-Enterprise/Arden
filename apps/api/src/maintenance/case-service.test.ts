@@ -52,6 +52,7 @@ class MemoryMaintenance {
       isAdmin: async () => actor ? this.admins.has(actor.membershipId) : false,
       lockRequest: async () => {},
       lockDocument: async () => true,
+      lockCasePair: async () => {},
       idempotency: async (membershipId, requestKey) => this.keys.find((item) => item.membershipId === membershipId && item.requestKey === requestKey) ?? null,
       saveIdempotency: async (membershipId, requestKey, payloadHash, caseId) => { this.keys.push({ membershipId, requestKey, payloadHash, caseId }); },
       insertCase: async (row) => { this.cases.push(structuredClone(row)); },
@@ -558,6 +559,39 @@ describe("case conversation", () => {
     expect(new Set(keys(reporter.membershipId, "question:")).size).toBe(2);
     expect(new Set(keys(reviewer.membershipId, "reply:")).size).toBe(2);
     expect(memory.events.filter((item) => item.eventType === "MESSAGE")).toHaveLength(4);
+  });
+});
+
+describe("review independence and private history", () => {
+  it("keeps reviewer-only history to the assigned view and the reporter off their own report", async () => {
+    const memory = new MemoryMaintenance();
+    memory.anchors.set(`${documentId}:${versionId}`, {
+      organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
+      title: "IT Support Guide", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      authorMembershipId: author.membershipId,
+    });
+    memory.grants.add(reviewer.membershipId);
+    memory.grants.add(reporter.membershipId);
+    const created = await serviceFor(memory, reporter).createCase(reporter.userId, org, {
+      origin: "READER_REPORT", documentId, publishedVersionId: versionId, description: "Step 3 is wrong.",
+    }, randomUUID());
+    await expect(serviceFor(memory, reporter).claimCase(reporter.userId, org, created.caseId, 1, randomUUID()))
+      .rejects.toMatchObject({ code: "DENIED" });
+    const claimed = await serviceFor(memory, reviewer).claimCase(reviewer.userId, org, created.caseId, 1, randomUUID());
+    const resolved = await serviceFor(memory, reviewer).decideNoChange(reviewer.userId, org, created.caseId,
+      (claimed as { revision: number }).revision, "Correct as published.", "Private reviewer reasoning.", randomUUID());
+    expect(resolved).toMatchObject({ kind: "assigned", canDecide: false });
+    const peer = { userId: randomUUID(), organizationId: org, membershipId: randomUUID() };
+    memory.grants.add(peer.membershipId);
+    const peerHistory = await serviceFor(memory, peer).listHistory(peer.userId, org, created.caseId, null);
+    expect(peerHistory.items.map((item) => item.message)).not.toContain("Private reviewer reasoning.");
+    const assignedHistory = await serviceFor(memory, reviewer).listHistory(reviewer.userId, org, created.caseId, null);
+    expect(assignedHistory.items.map((item) => item.message)).toContain("Private reviewer reasoning.");
+    const admin = { userId: randomUUID(), organizationId: org, membershipId: randomUUID() };
+    memory.admins.add(admin.membershipId);
+    await expect(serviceFor(memory, admin).reassignCase(admin.userId, org, created.caseId,
+      (resolved as { revision: number }).revision, peer.membershipId, "Coverage changed.", randomUUID()))
+      .rejects.toMatchObject({ code: "CONFLICT" });
   });
 });
 

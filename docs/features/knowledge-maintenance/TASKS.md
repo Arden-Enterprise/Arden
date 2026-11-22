@@ -4,7 +4,7 @@ One implementation owner coordinates the Arden worktree and the later Arden-AI s
 
 ## UI workflow for all slices
 
-Load `frontend-ui-engineering` for any UI work. Use Impeccable's Operate guidance for the document-first layout. Read [Arden's design system](../../../DESIGN.md) and the [Arden Flow Design skill](../../../.cursor/skills/arden-flow-design/SKILL.md). Use Save.design for read-only component research when a local pattern is missing. Use generic queries and translate useful patterns into existing components and semantic tokens. Record a short screen contract with its step IDs, primary action, permissions, states and responsive rules.
+Load `frontend-ui-engineering` for any UI work. Use Impeccable's Operate guidance for the document-first layout. Read [Arden's design system](../../../DESIGN.md) and the Arden Flow Design skill (a local agent skill, not part of this repository). Use Save.design for read-only component research when a local pattern is missing. Use generic queries and translate useful patterns into existing components and semantic tokens. Record a short screen contract with its step IDs, primary action, permissions, states and responsive rules.
 
 Reuse the Island workspace, shared reader, existing dialog/toast primitives, table and status styles. Keep title and exact version visible, and give the document the main reading area. Show the next action alongside it. Stack the panes on small screens. Use green and coral with **+ Added** and **− Removed** labels. Preserve predictable keyboard and focus behavior, and distinguish loading, empty, unavailable, error, stale and permission states. Keep display components separate from data fetching and permission decisions. Use the acceptance matrix for web and Electron.
 
