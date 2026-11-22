@@ -18,6 +18,12 @@
   z-index: 1000;
 }
 
+/* The dialog itself takes focus on open (announced by its title); controls inside keep their focus ring. */
+.settings-dialog:focus,
+.arden-app-shell .settings-dialog:focus-visible {
+  outline: none;
+}
+
 .settings-dialog::backdrop {
   background: rgb(8 8 10 / 65%);
   backdrop-filter: blur(4px);
