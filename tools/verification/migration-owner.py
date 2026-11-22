@@ -10,6 +10,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy" / "release
 from management import migration_role_name, migration_role_probe_sql, valid_migration_role_probe
 
 
+REVIEWED_BASELINE_DEFINER_COUNT = 34
+REVIEWED_MAINTENANCE_DEFINERS = {
+    "enqueue_maintenance_submission_notices()",
+    "list_closed_publication_reports()",
+    "list_closed_publication_reports(uuid)",
+    "list_maintenance_document_versions(uuid, uuid)",
+    "list_maintenance_eligible_reviewers(uuid)",
+    "list_unmapped_open_publication_reports(timestamp with time zone, uuid)",
+    "maintenance_actor_can_review_version(uuid)",
+    "maintenance_has_unmapped_open_reader_report(uuid)",
+    "maintenance_lock_document(uuid)",
+    "maintenance_membership_can_review_version(uuid, uuid)",
+    "maintenance_next_event_sequence(uuid)",
+    "maintenance_publication_proof(uuid, uuid)",
+    "maintenance_version_source(uuid)",
+}
+
+
 def verify_full_schema(container):
     """Leave the disposable real schema transferred before the API/RLS suite runs."""
     role = migration_role_name("staging")
@@ -23,7 +41,7 @@ def verify_full_schema(container):
             raise RuntimeError("Full-schema ownership rehearsal failed")
         return result.stdout.strip()
 
-    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "42":
+    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "60":
         raise ValueError("Review the full-schema ownership fixture when migrations change")
     sql(f"CREATE ROLE {role} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS "
         "NOCREATEDB NOCREATEROLE NOREPLICATION")
@@ -33,9 +51,12 @@ def verify_full_schema(container):
     if not valid_migration_role_probe(sql(f"SET ROLE {role};" + migration_role_probe_sql()),
                                       "arden_test_ci", role):
         raise AssertionError("Full-schema migration owner is not scoped correctly")
-    preserved = sql("SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
-                    "WHERE n.nspname='arden' AND p.prosecdef AND p.proowner='postgres'::regrole")
-    if preserved != "34":
+    preserved = set(sql("SELECT format('%s(%s)', p.proname, oidvectortypes(p.proargtypes)) "
+                        "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
+                        "WHERE n.nspname='arden' AND p.prosecdef AND "
+                        "p.proowner='postgres'::regrole").splitlines())
+    if (len(preserved) != REVIEWED_BASELINE_DEFINER_COUNT + len(REVIEWED_MAINTENANCE_DEFINERS)
+            or not REVIEWED_MAINTENANCE_DEFINERS.issubset(preserved)):
         raise AssertionError("Reviewed SECURITY DEFINER execution identities were not preserved")
     print("PASS: full schema transferred; API suite will run with the real post-transfer ownership")
 

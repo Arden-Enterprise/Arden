@@ -6,6 +6,8 @@ This is an evidence-backed map of **21 feature groups**, not a claim that the pr
 
 ## Read and update a feature
 
+Use the [product flow diagrams](flows/README.md) to trace the current flow numbering and stable sequence steps. Flow 4 in the November product plan is [AI-assisted Knowledge Maintenance](flows/flow-4-maintenance.md).
+
 Find its group below, read the linked owning sources and actual applicable source/tests, then select the required acceptance IDs. Record the brainstorm originator and decision owner from real evidence; the owner responsible for delivery need not be either person. Historical attribution is incomplete here: public ADRs often identify only the project lead/task owner, and no more precise identity is inferred. Resolve unknown attribution privately with the team before relying on it for a conflicting decision.
 
 Each group document distinguishes current main, branch-only alternatives, observed source boundaries and remaining evidence. Linear owns live assignment and scheduling. Do not duplicate all tickets here or create an issue for every acceptance row.

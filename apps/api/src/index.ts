@@ -152,11 +152,11 @@ const app = buildApp({
       })
       : null,
   testActor: remoteFlow1TestMode ? kietLocalFlow1TestActor : undefined,
-  authTrustedOrigins: flow1TestMode ? ["http://127.0.0.1:5180"] : trustedOrigins,
+  authTrustedOrigins: flow1TestMode ? [localFlow1Origin("ARDEN_PUBLIC_WEB_ORIGIN", "http://127.0.0.1:5180")] : trustedOrigins,
   secureCookies: process.env.NODE_ENV === "production",
   sessionSigningKey: sessionSigningKey(process.env.ARDEN_SESSION_SIGNING_KEY,
     process.env.NODE_ENV === "production"),
-  repository: new ArdenRepository(pool),
+  repository: new ArdenRepository(pool, contentStorage),
   storage: contentStorage,
   invitationMailer,
   askArden,
@@ -164,7 +164,7 @@ const app = buildApp({
   notificationRealtime,
   invitationDeliveryMode: smtpConfiguration ? "email" : "local-test-no-email",
   publicWebOrigin: (() => {
-    if (flow1TestMode) return "http://127.0.0.1:5180";
+    if (flow1TestMode) return localFlow1Origin("ARDEN_PUBLIC_WEB_ORIGIN", "http://127.0.0.1:5180");
     const configured = process.env.ARDEN_PUBLIC_WEB_ORIGIN ?? (process.env.NODE_ENV === "production" ? null : "http://127.0.0.1:5180");
     if (!configured) return null;
     const parsed = new URL(configured);
@@ -174,7 +174,7 @@ const app = buildApp({
     return parsed.origin;
   })(),
   publicApiOrigin: (() => {
-    if (flow1TestMode) return "http://127.0.0.1:3001";
+    if (flow1TestMode) return localFlow1Origin("ARDEN_PUBLIC_API_ORIGIN", "http://127.0.0.1:3001");
     const configured = process.env.ARDEN_PUBLIC_API_ORIGIN ?? (process.env.NODE_ENV === "production" ? null : "http://127.0.0.1:3001");
     if (!configured) return null;
     const parsed = new URL(configured);
@@ -262,6 +262,18 @@ process.once("SIGTERM", () => void shutdown());
 await app.listen({ port, host });
 scheduleIndexWorker(250);
 scheduleNotificationWorker(250);
+
+function localFlow1Origin(name: string, fallback: string): string {
+  const origin = process.env[name] || fallback;
+  const parsed = new URL(origin);
+  const host = parsed.hostname;
+  const loopback = host === "127.0.0.1" || host === "localhost" || host === "[::1]";
+  if (parsed.origin !== origin || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash
+    || parsed.protocol !== "http:" || !loopback) {
+    throw new Error(`${name} must be an exact loopback HTTP origin`);
+  }
+  return parsed.origin;
+}
 
 function assertBooleanEnvironmentValue(name: string, value: string | undefined): void {
   if (value !== undefined && value !== "true" && value !== "false") throw new Error(`${name} must be true or false`);

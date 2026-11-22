@@ -271,4 +271,38 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${notifications}/read-all`, method: "POST", body: "{}" }), false);
     assert.equal(validateDesktopApiRequest({ path: `${notifications}/realtime-credential`, method: "GET" }), false);
   });
+
+  it("allows maintenance reads and commands only on the exact routes", () => {
+    const cases = `/api/v1/organizations/${organizationId}/knowledge/maintenance/cases`;
+    assert.equal(validateDesktopApiRequest({ path: `${cases}?scope=mine`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}?scope=queue`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}?scope=all`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: cases, method: "POST", body: "{}", idempotencyKey }), true);
+    assert.equal(validateDesktopApiRequest({ path: cases, method: "POST", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/history`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/versions`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/versions/${sourcePrivateVersionId}`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/versions/${sourcePrivateVersionId}`, method: "POST" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/reviewers`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/links`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/analysis`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/links?count=1`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/reviewers?scope=all`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/claim`, method: "POST", body: "{}", idempotencyKey }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/publication-link`, method: "POST", body: "{}", idempotencyKey }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/publication-link`, method: "POST", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/compare`, method: "POST", body: "{}", idempotencyKey }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${cases}/${sourcePrivateVersionId}/decisions`, method: "GET" }), false);
+    const reports = `/api/v1/organizations/${organizationId}/knowledge/reports`;
+    assert.equal(validateDesktopApiRequest({ path: reports, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${reports}?disposition=closed`, method: "GET" }), true);
+    const cursor = "44444444-4444-4444-8444-444444444444";
+    assert.equal(validateDesktopApiRequest({ path: `${reports}?disposition=closed&cursor=${cursor}`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${reports}?disposition=closed&cursor=invalid`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${reports}?cursor=${cursor}`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${reports}?disposition=open`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/knowledge/maintenance/imports`, method: "POST" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/knowledge/maintenance/imports`, method: "POST", body: "{}" }), false);
+  });
 });

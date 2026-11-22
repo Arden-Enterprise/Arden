@@ -35,6 +35,16 @@ const knowledgeCatalogRead = new RegExp(`^/api/v1/organizations/${uuid}/knowledg
 const knowledgeCatalogCreate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/collections$`);
 const knowledgeCatalogItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/collections/${uuid}$`);
 const knowledgePlacement = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/placements/${uuid}$`);
+const maintenanceCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases$`);
+const maintenanceCase = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}$`);
+const maintenanceHistory = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/history$`);
+const maintenanceReviewers = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/reviewers$`);
+const maintenanceVersions = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/versions(?:/${uuid})?$`);
+const maintenanceLinks = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/links$`);
+const maintenanceAnalysis = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/analysis$`);
+const maintenanceCommand = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/(claim|reassign|decisions|compare|messages|publication-confirmation|publication-link|links|analysis|analysis-cancellation)$`);
+const maintenanceImport = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/imports$`);
+const closedReportQuery = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reports$`);
 const aiAnswerPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/answers$`);
 const aiConversationPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations(?:/${uuid})?$`);
 const reviewerGrantDeactivate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants/${uuid}/deactivate$`);
@@ -145,7 +155,12 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   // T6.1/T6.4: an author's reader-change or withdrawal request carries a body and an idempotency key.
   const knowledgeChange = knowledgeChangeRequest.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
-  const governance = (governanceRead.test(url.pathname) && request.method === "GET" && !request.body)
+  const reportCursors = url.searchParams.getAll("cursor");
+  const closedReports = closedReportQuery.test(url.pathname)
+    && [...url.searchParams.keys()].every((key) => key === "disposition" || key === "cursor")
+    && url.searchParams.getAll("disposition").length === 1 && url.searchParams.get("disposition") === "closed"
+    && reportCursors.length <= 1 && reportCursors.every((value) => new RegExp(`^${uuid}$`, "i").test(value));
+  const governance = (governanceRead.test(url.pathname) && request.method === "GET" && !request.body && (!url.search || closedReports))
     || (governanceWithBody.test(url.pathname) && request.method === "POST" && Boolean(request.body))
     || (governanceDismiss.test(url.pathname) && request.method === "POST" && !request.body);
   const governanceAllowed = governance && !request.ifMatch && !request.idempotencyKey;
@@ -220,13 +235,27 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && [...url.searchParams.keys()].every(key => key === "scope")
     && url.searchParams.getAll("scope").length === 1
     && ["ALL_READABLE", "ORGANIZATION", "SHARED"].includes(url.searchParams.get("scope") ?? "");
+  const maintenanceList = maintenanceCollection.test(url.pathname) && request.method === "GET"
+    && !request.body && !request.ifMatch && !request.idempotencyKey
+    && [...url.searchParams.keys()].every((key) => key === "scope")
+    && (url.searchParams.get("scope") === "mine" || url.searchParams.get("scope") === "queue");
+  const maintenanceCreate = maintenanceCollection.test(url.pathname) && request.method === "POST"
+    && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
+  const maintenanceRead = (maintenanceCase.test(url.pathname) || maintenanceHistory.test(url.pathname) || maintenanceReviewers.test(url.pathname) || maintenanceVersions.test(url.pathname) || maintenanceLinks.test(url.pathname) || maintenanceAnalysis.test(url.pathname))
+    && request.method === "GET" && !request.body && !request.ifMatch && !request.idempotencyKey
+    && (!url.search || (maintenanceHistory.test(url.pathname) && [...url.searchParams.keys()].every((key) => key === "cursor")));
+  const maintenanceImportPost = maintenanceImport.test(url.pathname) && request.method === "POST"
+    && !request.body && !request.ifMatch && !request.idempotencyKey && !url.search;
+  const maintenanceWrite = maintenanceCommand.test(url.pathname) && request.method === "POST"
+    && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   return (placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
     || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
+    || maintenanceImportPost || maintenanceList || maintenanceCreate || maintenanceRead || maintenanceWrite
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke
     || notificationsGet || notificationReadRequest || notificationReadAllRequest)
-    && (!url.search || queryAllowed || catalogQuery || notificationsGet || publicationScopeQuery);
+    && (!url.search || queryAllowed || catalogQuery || notificationsGet || publicationScopeQuery || maintenanceList || maintenanceRead || closedReports);
 }
 
 function notificationQuery(url: URL): boolean {
