@@ -25,6 +25,17 @@ type MainNotificationCredential = { endpoint: string; apiKey: string; accessToke
 class NotificationCredentialError extends Error {
   constructor(readonly status: number) { super("Notification updates are unavailable"); }
 }
+let jarLock: Promise<void> = Promise.resolve();
+
+function withJarLock<T>(work: () => Promise<T>): Promise<T> {
+  const run = jarLock.then(work, work);
+  jarLock = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+function canPassWaitingRequests(request: DesktopApiRequest): boolean {
+  return request.method === "POST" && request.path.endsWith("/analysis-cancellation");
+}
 
 function isTrustedRenderer(event: Electron.IpcMainInvokeEvent): boolean {
   const window = BrowserWindow.fromWebContents(event.sender);
@@ -98,7 +109,7 @@ function applySetCookies(jar: CookieJar, setCookies: string[]): void {
 
 async function doApiRequest(request: DesktopApiRequest): Promise<DesktopApiResponse> {
   const origin = trustedApiOrigin();
-  const jar = await readCookieJar(origin);
+  const jar = await withJarLock(() => readCookieJar(origin));
   const headers = new Headers({ accept: "application/json", origin });
   if (request.body !== undefined) headers.set("content-type", "application/json");
   if (request.ifMatch) headers.set("if-match", request.ifMatch);
@@ -115,9 +126,12 @@ async function doApiRequest(request: DesktopApiRequest): Promise<DesktopApiRespo
       redirect: "error",
       ...(controller ? { signal: controller.signal } : {}),
     });
-    applySetCookies(jar, response.headers.getSetCookie());
-    await persistCookieJar(jar, origin);
+    const setCookies = response.headers.getSetCookie();
     const body = await response.text();
+    await withJarLock(async () => {
+      applySetCookies(jar, setCookies);
+      await persistCookieJar(jar, origin);
+    });
     if (Buffer.byteLength(body, "utf8") > desktopApiResponseLimit(request)) throw new Error("The Arden response exceeded the desktop limit");
     return {
       status: response.status,
@@ -249,6 +263,7 @@ ipcMain.handle("arden:api-request", async (event, value: unknown) => {
   if (!isTrustedRenderer(event)) throw new Error("Untrusted IPC sender");
   if (!validateDesktopApiRequest(value)) throw new Error("Invalid desktop API request");
   const request = value as DesktopApiRequest;
+  if (canPassWaitingRequests(request)) return doApiRequest(request);
   const current = requestQueue.then(() => doApiRequest(request));
   requestQueue = current.then(() => undefined, () => undefined);
   return current;
