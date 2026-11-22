@@ -2833,6 +2833,10 @@ class MemoryRepository implements ArdenDataRepository {
     return requestedOrganization === organizationId && userId === otherId ? this.publicationReports : [];
   }
 
+  async listClosedPublicationReports(): Promise<{ items: PublicationReport[]; nextCursor: string | null }> {
+    return { items: [], nextCursor: null };
+  }
+
   async dismissPublicationReport(userId: string, requestedOrganization: string, reportId: string): Promise<boolean> {
     const before = this.publicationReports.length;
     if (userId !== otherId || requestedOrganization !== organizationId) return false;
