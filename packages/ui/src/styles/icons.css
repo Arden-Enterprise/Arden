@@ -18,10 +18,8 @@
 
 .arden-app-shell { min-height: 100dvh; }
 .arden-app-shell .app-sidebar,
-.arden-app-shell .workspace-page,
-.arden-app-shell .knowledge-pane-redesign { height: 100dvh; }
+.arden-app-shell .workspace-page { height: 100dvh; }
 @media (max-width: 760px) {
   .arden-app-shell .app-sidebar { height: 64px; }
   .arden-app-shell .workspace-page { height: calc(100dvh - 64px); }
-  .arden-app-shell .knowledge-pane-redesign { height: auto; }
 }

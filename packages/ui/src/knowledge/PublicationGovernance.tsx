@@ -1,9 +1,10 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { ApiError, dismissPublicationReport, listGovernancePublications, listPublicationReports, loadGovernanceInspection,
+import { ApiError, dismissPublicationReport, listClosedPublicationReports, listGovernancePublications, listPublicationReports, loadGovernanceInspection,
   loadResponsiblePublication, openGovernanceInspection, reportPublicationProblem, withdrawPublication,
   type GovernanceDocument, type GovernanceInspection, type GovernancePublication, type GovernanceReaderMode,
   type PublicationReport } from "../shared/api-client";
 import type { Platform } from "../shared/types";
+import { importOpenMaintenanceReports } from "../maintenance/maintenance-client";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { KnowledgeDialog } from "./KnowledgeDialog";
 import { PdfDocument } from "./PdfDocument";
@@ -85,8 +86,7 @@ function WithdrawPublicationDialog({ target, platform, organizationId, onDone, o
 }
 
 /**
- * Open problem reports for the documents the viewer is responsible for (all of them for an Organization Admin).
- * Renders nothing when there are none, so the Reviews page stays unchanged for most reviewers.
+ * Open and retained problem reports visible to the current governance actor.
  */
 export function PublicationReportsPanel({ platform, organizationId, departmentName, onInspect, refreshSignal = 0,
   allowDirectWithdrawal = false }: {
@@ -97,6 +97,10 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
   allowDirectWithdrawal?: boolean;
 }) {
   const [reports, setReports] = useState<PublicationReport[] | null>(null);
+  const [disposition, setDisposition] = useState<"open" | "closed">("open");
+  const [closedAvailable, setClosedAvailable] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [viewing, setViewing] = useState<GovernanceDocument | null>(null);
@@ -105,29 +109,99 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
   // Requests may settle after the page (or a test environment) is gone; never update state then.
   const mounted = useRef(false);
   const reportRequest = useRef(0);
+  const selectedDisposition = useRef(disposition);
+  selectedDisposition.current = disposition;
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; reportRequest.current += 1; };
   }, []);
   // A secondary panel: when reports can't be loaded it stays hidden rather than adding an error to Reviews.
+  // Actions call the latest `load`, which always reloads the disposition selected when it runs.
   const load = useCallback(() => {
     const request = ++reportRequest.current;
     const isCurrent = () => mounted.current && reportRequest.current === request;
-    listPublicationReports(platform, organizationId)
-      .then((items) => { if (isCurrent()) setReports(items); })
+    setNextCursor(null);
+    setLoadingMore(false);
+    if (selectedDisposition.current === "closed") {
+      void listClosedPublicationReports(platform, organizationId)
+        .then((page) => {
+          if (!isCurrent()) return;
+          setReports(page.items);
+          setNextCursor(page.nextCursor);
+        })
+        .catch((cause: unknown) => {
+          if (!isCurrent()) return;
+          setReports(null);
+          setError(failure(cause, "Couldn’t load closed reports."));
+        });
+      return;
+    }
+    setClosedAvailable(false);
+    void listPublicationReports(platform, organizationId)
+      .then(async (items) => {
+        if (!isCurrent()) return;
+        setReports(items);
+        if (items.length) return;
+        const closedPage = await listClosedPublicationReports(platform, organizationId);
+        if (isCurrent()) setClosedAvailable(closedPage.items.length > 0);
+      })
       .catch(() => { if (isCurrent()) setReports([]); });
   }, [platform, organizationId]);
-  useEffect(() => { load(); }, [load, refreshSignal]);
+  useEffect(() => { load(); }, [load, refreshSignal, disposition]);
+  const loadMore = async () => {
+    if (!nextCursor || loadingMore) return;
+    const request = ++reportRequest.current;
+    const isCurrent = () => mounted.current && reportRequest.current === request;
+    setLoadingMore(true);
+    setError("");
+    try {
+      const page = await listClosedPublicationReports(platform, organizationId, nextCursor);
+      if (!isCurrent()) return;
+      if (!page.items.length) {
+        setReports([]);
+        load();
+        return;
+      }
+      setReports((previous) => [...(previous ?? []), ...page.items]);
+      setNextCursor(page.nextCursor);
+    } catch (cause) {
+      if (!isCurrent()) return;
+      if (cause instanceof ApiError && [401, 403, 404].includes(cause.status)) {
+        setReports([]);
+        setNextCursor(null);
+      }
+      setError(failure(cause, "Couldn’t load more closed reports."));
+    } finally {
+      if (isCurrent()) setLoadingMore(false);
+    }
+  };
   const act = (work: () => Promise<void>) => { setBusy(true); setError(""); void work()
     .catch((cause: unknown) => { if (mounted.current) setError(failure(cause, "Couldn’t complete this action.")); })
     .finally(() => { if (mounted.current) setBusy(false); }); };
   // Stay visible while an outcome message is shown, even after the last report closes.
-  if (!reports?.length && !error && !message) return null;
+  if (disposition === "open" && !reports?.length && !closedAvailable && !error && !message) return null;
+  const closed = disposition === "closed";
   return <section className="island governance-reports" aria-labelledby="governance-reports-title">
-    <div className="governance-section-head"><h2 id="governance-reports-title">Reported problems</h2>
-      <span className="island-badge">{reports?.length ?? 0}</span></div>
+    <div className="governance-section-head">
+      <h2 id="governance-reports-title">Reported problems</h2>
+      <span className="island-badge">{reports?.length ?? 0}</span>
+      <div className="island-seg governance-report-filters" role="group" aria-label="Report status">
+        <button type="button" aria-pressed={disposition === "open"}
+          onClick={() => { if (closed) { setDisposition("open"); setReports(null); setError(""); } }}>Open</button>
+        <button type="button" aria-pressed={closed}
+          onClick={() => { if (!closed) { setDisposition("closed"); setReports(null); setError(""); } }}>Closed</button>
+      </div>
+      {allowDirectWithdrawal && <button type="button" className="secondary-button governance-import" disabled={busy}
+        onClick={() => act(async () => {
+          const result = await importOpenMaintenanceReports(platform, organizationId);
+          setMessage(`Imported ${result.imported.length}. Held ${result.held.length}.`);
+          load();
+        })}>Import open reports</button>}
+    </div>
     {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-    {message && <p role="status" className="island-meta">{message}</p>}
+    {error && closed && reports === null && <button type="button" className="secondary-button"
+      onClick={() => { setError(""); load(); }}>Retry</button>}
+    {message && <p role="status" className="island-meta governance-report-message">{message}</p>}
     <ul className="governance-report-list">
       {(reports ?? []).map((report) => <li key={report.id} className="governance-report">
         <div className="governance-report-copy">
@@ -136,18 +210,21 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
           <small>{report.reporterName} · {new Date(report.createdAt).toLocaleDateString()}
             {!report.stillCurrent && " · A newer version is published"}</small>
         </div>
-        <div className="governance-report-actions">
+        {closed && report.resolution && <span className="island-chip has-dot tone-strong">{report.resolution === "DISMISSED" ? "Dismissed" : "Withdrawn"}</span>}
+        {!closed && <div className="governance-report-actions">
           {report.canView && <button type="button" className="secondary-button" disabled={busy} onClick={() => act(async () => {
             setViewing(await loadResponsiblePublication(platform, organizationId, report.documentId)); })}>View document</button>}
           {!report.canView && onInspect && <button type="button" className="secondary-button" disabled={busy}
             onClick={() => onInspect(report.documentId, report.title)}>Inspect</button>}
-          {allowDirectWithdrawal && <button type="button" className="secondary-button governance-danger-text" disabled={busy}
-            onClick={() => setWithdrawing({ documentId: report.documentId, title: report.title })}>Withdraw</button>}
           <button type="button" className="secondary-button" disabled={busy} onClick={() => act(async () => {
             await dismissPublicationReport(platform, organizationId, report.id); setMessage("Report dismissed"); load(); })}>Dismiss</button>
-        </div>
+          {allowDirectWithdrawal && <button type="button" className="secondary-button governance-danger-text" disabled={busy}
+            onClick={() => setWithdrawing({ documentId: report.documentId, title: report.title })}>Withdraw</button>}
+        </div>}
       </li>)}
     </ul>
+    {closed && nextCursor && <button type="button" className="secondary-button" disabled={loadingMore}
+      onClick={() => void loadMore()}>{loadingMore ? "Loading…" : "Load more closed reports"}</button>}
     {viewing && <GovernanceContentDialog document={viewing} onClose={() => setViewing(null)}
       heading={<span>Responsible review · {governanceReadersLabel(viewing.readers.mode, viewing.readers.departmentId, departmentName)}</span>} />}
     {withdrawing && <WithdrawPublicationDialog target={withdrawing} platform={platform} organizationId={organizationId}

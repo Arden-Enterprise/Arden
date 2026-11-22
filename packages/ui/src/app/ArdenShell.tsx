@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppSidebar } from "./AppSidebar";
 import { MobileTabIsland } from "./MobileTabIsland";
-import { KnowledgePane } from "./KnowledgePane";
+import { AgentPanel } from "./AgentPanel";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
 import { SignInPage } from "../sign-in/SignInPage";
 import { clearRecoveryTokens, readRecoveryTokens, storeRecoveryTokens } from "../sign-in/recovery-session";
@@ -27,7 +27,7 @@ import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext
 import { StatusIslandContext, type StatusIslandConfirm, type StatusIslandToast } from "../shared/StatusIslandContext";
 import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
 import { membershipReadiness } from "../organization/organizationWorkflow";
-import type { PaneContent, Platform, PrivateNote, WorkspaceView } from "../shared/types";
+import type { Platform, PrivateNote, WorkspaceView } from "../shared/types";
 import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership } from "../shared/api-client";
 import { needsDepartmentAssignment } from "../shared/membershipAssignment";
 
@@ -56,53 +56,6 @@ const initialNotes: PrivateNote[] = [
     updatedLabel: "Updated 3d ago · Sample",
   },
 ];
-
-const paneContent: Record<WorkspaceView, PaneContent> = {
-  "ask-arden": {
-    eyebrow: "ASK ARDEN CONTEXT",
-    title: "Published knowledge only",
-    description: "The interface preview shows how permission-aware answers and exact-version citations will appear.",
-    suggestions: ["Ask a focused question", "Inspect cited versions", "Verify the audience scope"],
-    boundaryTitle: "Retrieval is not connected",
-    boundaryBody: "No live knowledge is searched in this preview. The production service must authorize the member before retrieval and cite only active published versions they can read.",
-  },
-  "personal-workspace": {
-    eyebrow: "ACTIVE CONTEXT",
-    title: "Private notes",
-    description:
-      "A personal drafting space. The current content is sample data held only in this running preview.",
-    suggestions: ["Organize private notes", "Find an earlier thought", "Prepare a shareable draft"],
-    boundaryTitle: "Only the owner",
-    boundaryBody:
-      "Private notes must never appear in department search, shared AI answers, counts or suggestions. Server-side authorization remains required before release.",
-  },
-  "organization-access": {
-    eyebrow: "ADMINISTRATION CONTEXT",
-    title: "Organization boundaries",
-    description: "Members, departments and readers",
-    suggestions: ["Review membership", "Inspect access changes", "Verify department scope"],
-    boundaryTitle: "Organization access",
-    boundaryBody: "Demo · Temporary changes",
-  },
-  "knowledge": {
-    eyebrow: "KNOWLEDGE CONTEXT", title: "Home",
-    description: "Explore clearly labeled sample records and any draft created in this session.",
-    suggestions: ["Inspect the source version", "Review the intended audience"],
-    boundaryTitle: "Shared knowledge", boundaryBody: "Sample records only. Real results must be selected by server-authorized scope.",
-  },
-  "review-queue": {
-    eyebrow: "REVIEW CONTEXT", title: "A snapshot to review",
-    description: "In the sample, approval moves the reviewed snapshot into publication preparation.",
-    suggestions: ["Check the intended audience", "Approve or reject the snapshot"],
-    boundaryTitle: "Immutable review snapshot", boundaryBody: "Review applies to the submitted version. Private originals remain excluded.",
-  },
-  "knowledge-handover": {
-    eyebrow: "HANDOVER CONTEXT", title: "Clear ownership",
-    description: "Review a sample transfer of responsibilities and shared knowledge.",
-    suggestions: ["Check receiving owner", "Review readiness"],
-    boundaryTitle: "Shared items only", boundaryBody: "Handover does not grant access to personal notes. Server checks remain required.",
-  },
-};
 
 type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
 
@@ -214,6 +167,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [activeView, setActiveView] = useState<WorkspaceView>("knowledge");
   const privateNotes = usePrivateNotes(initialNotes);
   const [contextOpen, setContextOpen] = useState(false);
+  const contextOpener = useRef<HTMLElement | null>(null);
   const [navOpen, setNavOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [islandToast, setIslandToast] = useState<StatusIslandToast | null>(null);
@@ -339,11 +293,21 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     return () => observer.disconnect();
   }, [entryView]);
 
+  // While the floating panel or phone sheet covers the workspace, keep keyboard focus out of what it covers.
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell || !contextOpen || !contextOverlay) return;
+    const covered = [...shell.children].filter((child) => !child.hasAttribute("inert")
+      && !child.matches("#arden-agent-panel, .shell-context-scrim, .skip-link, dialog"));
+    covered.forEach((child) => { child.setAttribute("inert", ""); child.setAttribute("data-context-covered", ""); });
+    return () => covered.forEach((child) => { child.removeAttribute("inert"); child.removeAttribute("data-context-covered"); });
+  }, [contextOpen, contextOverlay]);
+
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
       if (navOpen) setNavOpen(false);
-      else if (contextOpen) { setContextOpen(false); document.querySelector<HTMLButtonElement>(".context-toggle")?.focus(); }
+      else if (contextOpen) closeContext();
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
@@ -615,7 +579,22 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     showWorkspaceSelector();
   };
 
-  const contextControl = { contextOpen, onToggleContext: () => { setNavOpen(false); setContextOpen((open) => !open); } };
+  // Focus returns to whatever opened the panel, or to the page when that control is gone or hidden.
+  const closeContext = () => {
+    setContextOpen(false);
+    shellRef.current?.querySelectorAll("[data-context-covered]").forEach((element) => {
+      element.removeAttribute("inert");
+      element.removeAttribute("data-context-covered");
+    });
+    const opener = contextOpener.current;
+    (opener?.isConnected && opener.offsetParent !== null ? opener : document.getElementById("arden-main"))?.focus();
+  };
+  const contextControl = { contextOpen, onToggleContext: () => {
+    setNavOpen(false);
+    if (contextOpen) return closeContext();
+    contextOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setContextOpen(true);
+  } };
   const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
   const memberName = serverSession ? serverSession.actor.fullName?.trim() || "Signed-in member" : previewMember?.name;
@@ -623,22 +602,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const isUnassignedMember = Boolean(serverSession && activeMembership && needsDepartmentAssignment(activeMembership));
   const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue" || activeView === "knowledge-handover";
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
-  const activeContext = activeView === "personal-workspace"
-    ? {
-      ...paneContent[activeView],
-      title: privateNotes.selectedNote ? privateNotes.draft.title.trim() || "Untitled private note" : "Private notes",
-      description: privateNotes.serverBacked ? "Private notes" : "Demo · Temporary notes",
-      boundaryBody: privateNotes.serverBacked ? "Only you" : "Demo · Cleared on refresh",
-    }
-    : serverOrganizationId && activeView === "knowledge"
-      ? { ...paneContent.knowledge, description: "Documents and drafts",
-        boundaryBody: "Documents you can access" }
-      : serverOrganizationId && activeView === "review-queue"
-        ? { ...paneContent[activeView], description: "Pending submissions",
-          boundaryBody: "Submissions you can review" }
-        : serverOrganizationId && activeView === "organization-access"
-          ? { ...paneContent[activeView], boundaryBody: "Organization Admin" }
-          : paneContent[activeView];
 
   return (
     <NotificationProvider platform={platform} organizationId={serverSession ? serverOrganizationId : null}
@@ -718,8 +681,11 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       </div>
       </ErrorBoundary>
 
-      {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close context" onClick={contextControl.onToggleContext} />}
-      <KnowledgePane content={activeContext} open={contextOpen} onToggle={contextControl.onToggleContext} />
+      {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close Ask Arden" onClick={contextControl.onToggleContext} />}
+      <AgentPanel key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`} open={contextOpen}
+        platform={platform} organizationId={serverOrganizationId} onClose={closeContext}
+        onOpenAskArden={() => navigate("ask-arden")}
+        onOpenCitation={(citation) => { if (contextOverlay) setContextOpen(false); openKnowledgeCitation(citation); }} />
       {settingsOpen && (
         <SettingsDialog
           platform={platform}

@@ -3,6 +3,7 @@ import { createElement, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/shared/api-client";
+import * as maintenance from "../src/maintenance/maintenance-client";
 import { homeSourceItems, useHomePublications } from "../src/knowledge/useHomePublications";
 import { ServerKnowledgeFeaturePage } from "../src/knowledge/ServerKnowledgeFeaturePage";
 import { emptyLibraryFilters, filterLibrary } from "../src/knowledge/KnowledgeLibraryBrowse";
@@ -187,12 +188,19 @@ describe("connected Home composition", () => {
     expect((screen.getByRole("button", { name: "Private notes" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Unavailable in this workspace")).toBeTruthy();
   });
-  it("keeps Contributions separate and keyboard arrows skip disabled planned tabs", async () => {
+  it("lets keyboard users reach My reports and keeps Contributions separate", async () => {
     setup(); render(createElement(ServerKnowledgeFeaturePage, props)); await screen.findByRole("tab", { name: /Organization/ });
     const tabs = screen.getByRole("tablist", { name: "Home knowledge" });
     const start = within(tabs).getByRole("tab", { name: /Organization/ }); start.focus(); fireEvent.keyDown(start, { key: "ArrowRight" });
     expect(tab(/Shared with me/)).toBe(document.activeElement);
-    fireEvent.keyDown(document.activeElement!, { key: "End" }); expect(tab(/My Contributions/)).toBe(document.activeElement);
+    const listReports = vi.spyOn(maintenance, "listMaintenanceCases").mockResolvedValue([]);
+    fireEvent.keyDown(document.activeElement!, { key: "End" });
+    expect(tab(/My reports/)).toBe(document.activeElement);
+    expect(screen.getByRole("tabpanel", { name: "My reports" })).toBeTruthy();
+    expect(read(common.title)).toBeNull();
+    await waitFor(() => expect(listReports).toHaveBeenCalledWith("web", "org", "mine"));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowLeft" });
+    expect(tab(/My Contributions/)).toBe(document.activeElement);
     expect(screen.getByText("No contributions yet")).toBeTruthy(); expect(screen.queryByText("Only you")).toBeTruthy();
     expect(read(common.title)).toBeNull(); expect(screen.queryByRole("combobox", { name: "Collection" })).toBeNull();
   });

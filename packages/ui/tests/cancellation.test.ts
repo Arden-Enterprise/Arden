@@ -64,6 +64,24 @@ describe("explicit cancellation", () => {
     expect(screen.queryByText("Current answer")).toBeNull();
   });
 
+  it("resends a stopped question as a replay of its original turn after a late answer", async () => {
+    let finishFirst!: (answer: api.AskArdenAnswer) => void;
+    const ask = vi.spyOn(api, "askArden")
+      .mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }))
+      .mockImplementationOnce(async (_platform, _org, _query, options) => ({ status: "ANSWERED", answer: "Replayed answer",
+        citations: [], conversationId: options?.conversationId, revision: 1, turnId: "turn" }));
+    render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Arden" }), { target: { value: "First question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop waiting" }));
+    const first = ask.mock.calls[0]![3]!;
+    await act(() => finishFirst({ status: "ANSWERED", answer: "Late answer", citations: [],
+      conversationId: first.conversationId, revision: 1, turnId: "turn" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Replayed answer")).toBeTruthy();
+    expect(ask.mock.calls[1]![3]).toMatchObject({ requestId: first.requestId, expectedRevision: first.expectedRevision });
+  });
+
   it("allows keeping or discarding selected note edits without a server write", async () => {
     const request = vi.spyOn(api, "apiRequest");
     function Notes() {

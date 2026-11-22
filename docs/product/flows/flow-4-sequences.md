@@ -102,6 +102,7 @@ flowchart TD
     E -->|"Still authorized"| F["F4-03d · Show exact pair, additions and removals"]
     E -->|"Access changed"| X
     F -->|"Next, previous or compare with current"| B
+    F -->|"Case refresh denies access"| X
     F -->|"Inspect source"| G["Open authorized exact passage or page"]
     F -->|"Select evidence"| H["F4-04 · Manual or bounded AI investigation"]
 ```

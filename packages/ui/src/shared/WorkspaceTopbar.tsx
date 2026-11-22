@@ -125,7 +125,7 @@ export function WorkspaceTopbar({ breadcrumb, previewLabel, contextOpen, onToggl
       {!reader && <div className="topbar-actions">
         {previewLabel && <span className="preview-state">{previewLabel}</span>}
         <NotificationBell />
-        <button type="button" className="context-toggle" onClick={onToggleContext} aria-expanded={contextOpen} aria-controls="arden-context-panel" aria-label="Context" title="Context">
+        <button type="button" className="context-toggle" onClick={onToggleContext} aria-expanded={contextOpen} aria-controls="arden-agent-panel" aria-label="Ask Arden" title="Ask Arden">
           <img className="context-toggle-mark" src={ardenMark} alt="" />
         </button>
       </div>}
