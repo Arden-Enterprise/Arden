@@ -26,25 +26,33 @@ export function validityLabel({ status, daysLeft }: ReturnType<typeof validitySt
   return status;
 }
 
+/** Same chip tones as the reader: sage Current, blue Upcoming, amber Expires soon, coral Expired. */
+const statusTone: Record<ReturnType<typeof validityStatus>["status"], string> = {
+  Current: "effective", Upcoming: "upcoming", "Expiring soon": "expiring", Expired: "expired",
+};
+
 function DocumentRegister({ items, onOpen, recent = false, showReaders = false }: { items: PublishedKnowledge[]; onOpen: (id: string) => void; recent?: boolean; showReaders?: boolean }) {
-  return <IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={900}
-    columns="minmax(270px, 2.8fr) minmax(120px, 1fr) minmax(130px, 1fr) 70px 115px 100px"
+  return <IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={940}
+    columns="minmax(270px, 2.8fr) minmax(120px, 1fr) minmax(130px, 1fr) 70px 115px 140px"
     headers={["DOCUMENT", "TYPE", "OWNER", "VERSION", recent ? "PUBLISHED" : "VALID UNTIL", "STATUS"]}>
     {items.map(item => {
       const validity = validityStatus(item.management, new Date().toLocaleDateString("en-CA"));
       const release = item.management?.releaseKind;
+      const releaseTag = recent && release ? release === "UPDATED" ? "Updated" : "New" : null;
       return <IslandRow key={item.id} className="library-row">
-        <IslandCell className="island-row-cell is-name"><button className="island-row-name library-row-name" type="button" data-publication-id={item.id} aria-label={`Read ${item.title}`} onClick={() => onOpen(item.id)}>
+        <IslandCell className="island-row-cell is-name"><button className="island-row-name library-row-name" type="button" data-publication-id={item.id} aria-label={`Read ${item.title}`}
+          title={item.title} onClick={() => onOpen(item.id)}>
           <span className="library-row-icon"><Icon name="document" size={17} /></span><span className="library-row-copy">
             <strong className="library-row-title">{item.title}</strong>
-            <span className="library-row-meta">{showReaders && (item.targetReaders?.mode === "DEPARTMENT" ? "Department readers" : "Selected readers")}
-              {recent && release && <span className="km-release">{release === "UPDATED" ? "Updated" : "New"}</span>}</span>
+            {/* The meta line exists only when it says something; an empty line would add height to every row. */}
+            {(showReaders || releaseTag) && <span className="library-row-meta">{showReaders && (item.targetReaders?.mode === "DEPARTMENT" ? "Department readers" : "Selected readers")}
+              {releaseTag && <span className="km-release">{releaseTag}</span>}</span>}
           </span></button></IslandCell>
         <IslandCell className="library-row-secondary">{item.management?.type ?? "—"}</IslandCell>
         <IslandCell className="library-row-secondary">{item.responsibleDepartmentName ?? "—"}</IslandCell>
         <IslandCell className="library-row-secondary">{item.management?.version || "—"}</IslandCell>
         <IslandCell className="library-row-date">{recent ? libraryDateLabel(item.publishedAt) : item.management?.expirationDate ? libraryDateLabel(`${item.management.expirationDate}T00:00:00`) : <span className="km-no-expiry">No expiry</span>}</IslandCell>
-        <IslandCell><span className={`km-applicability is-${validity.status.toLowerCase().replace(" ", "-")}`}>{validityLabel(validity)}</span></IslandCell>
+        <IslandCell><span className={`island-chip knowledge-reader-status library-row-status is-${statusTone[validity.status]}`}>{validityLabel(validity)}</span></IslandCell>
       </IslandRow>;
     })}
   </IslandTable>;
@@ -67,19 +75,19 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
   return <div className="km-library">
     {catalogError && <p className="island-note is-warning" role="status">{catalogError}</p>}
     {discover && !query.trim() ? <>
-      <section aria-labelledby="km-types"><header className="km-section-heading"><div><h2 id="km-types">Browse by type</h2><p>Find documents by what they are for.</p></div></header><div className="km-types">
+      <section aria-labelledby="km-types"><header className="km-section-heading"><div><h2 id="km-types">Browse by type</h2></div></header><div className="km-types">
         {knowledgeTypes.map(type => <button key={type} type="button" onClick={() => browseWith({ type })}>
           <Icon name={type === "Policy & Standard" ? "shield" : type === "Procedure" ? "layers" : type === "Guide" ? "knowledge" : type === "Reference" ? "document" : "chat"} size={20} />
           <strong>{type}</strong><span>{items.filter(item => item.management?.type === type).length}</span></button>)}
       </div></section>
-      <section aria-labelledby="km-collections"><header className="km-section-heading"><div><h2 id="km-collections">Collections</h2><p>Organization documents, organized by type.</p></div>
+      <section aria-labelledby="km-collections"><header className="km-section-heading"><div><h2 id="km-collections">Collections</h2></div>
         {catalog?.canManage && <button className="km-text-button" type="button" onClick={onManage}>Manage collections <Icon name="sliders" size={13} /></button>}</header>
         <div className="km-collections">{collections.map(collection => <button className="km-collection" type="button" key={collection.id} onClick={() => browseWith({ collectionId: collection.id })}>
           <img src={knowledgeCovers[collection.cover]} alt="" loading="lazy" /><span className="km-collection-copy"><small>{collection.documentIds.filter(id => items.some(source => source.id === id)).length} documents</small>
             <strong>{collection.name}</strong>{collection.description && <span>{collection.description}</span>}<Icon name="arrow" size={15} /></span></button>)}</div>
         {!collections.length && <p className="km-empty-inline">No collections available.</p>}
       </section>
-      <section aria-labelledby="km-new"><header className="km-section-heading"><div><h2 id="km-new">Newly published</h2><p>New and updated knowledge you can read.</p></div>
+      <section aria-labelledby="km-new"><header className="km-section-heading"><div><h2 id="km-new">Newly published</h2></div>
         <button className="km-text-button" type="button" onClick={() => browseWith({})}>View all <Icon name="arrow" size={13} /></button></header>
         {items.length ? <DocumentRegister recent items={filterLibrary(items, catalog, "", emptyLibraryFilters()).slice(0, 8)} onOpen={onOpen} />
           : <div className="island island-empty"><h3>No documents available</h3><p>Published documents will appear here.</p></div>}

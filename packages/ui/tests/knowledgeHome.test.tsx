@@ -78,6 +78,19 @@ describe("Home source contract", () => {
     expect(result.current.views.organization.items).toEqual([assigned]);
     expect(result.current.views.shared.items).toEqual([]); expect(result.current.views.other.items).toEqual([]);
   });
+  it("keeps a ready list visible during a background refresh instead of showing loading again", async () => {
+    let finish!: (items: api.PublishedKnowledge[]) => void;
+    const lists = setup(); const { result } = renderHook(() => useHomePublications("web", "org"));
+    await act(async () => { await result.current.refresh(); });
+    expect(result.current.views.organization.status).toBe("ready");
+    lists.mockImplementation((_platform, _org, scope) => scope === "ORGANIZATION"
+      ? new Promise(resolve => { finish = resolve; }) : Promise.resolve([]));
+    let refreshing!: Promise<void>; act(() => { refreshing = result.current.refresh(); });
+    expect(result.current.views.organization.status).toBe("ready");
+    expect(result.current.views.organization.items.length).toBeGreaterThan(0);
+    await act(async () => { finish([assigned]); await refreshing; });
+    expect(result.current.views.organization.items).toEqual([assigned]);
+  });
   it("clears old titles/counts on a failed refresh while other source views remain usable", async () => {
     const lists = setup(); const { result } = renderHook(() => useHomePublications("web", "org"));
     await act(async () => { await result.current.refresh(); });
@@ -138,7 +151,7 @@ describe("connected Home composition", () => {
     expect(read(common.title)).toBeNull(); expect(screen.queryByRole("combobox", { name: "Collection" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Company handbook|Manage collections/ })).toBeNull();
     fireEvent.click(tab(/Other documents/)); expect(read(legacy.title)).toBeTruthy(); expect(read(common.title)).toBeNull();
-    expect(screen.getByText("Readable documents with sharing details not recorded.")).toBeTruthy();
+    expect(screen.getByRole("tabpanel", { name: /Other documents/ })).toBeTruthy();
   });
   it("opens folder contents, All includes assigned and unassigned, and Unassigned is narrower", async () => {
     setup(); render(createElement(ServerKnowledgeFeaturePage, props));
@@ -212,12 +225,27 @@ describe("connected Home composition", () => {
     expect(screen.getByText("Collection unavailable. Clear filters to browse documents.")).toBeTruthy(); expect(screen.queryByText("No results")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Clear filters" })); expect(read(common.title)).toBeTruthy();
   });
+  it("does not refetch or hide Home when the window regains focus soon after loading", async () => {
+    const lists = setup(); render(createElement(ServerKnowledgeFeaturePage, props));
+    await screen.findByRole("button", { name: `Read ${common.title}` });
+    const calls = lists.mock.calls.length;
+    fireEvent.blur(window); fireEvent.focus(window);
+    expect(lists.mock.calls.length).toBe(calls);
+    expect(screen.queryByText("Loading documents…")).toBeNull();
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 31_000);
+    fireEvent.focus(window);
+    await waitFor(() => expect(lists.mock.calls.length).toBeGreaterThan(calls));
+    expect(screen.queryByText("Loading documents…")).toBeNull();
+    expect(read(common.title)).toBeTruthy();
+  });
   it("restores Home navigation if catalog refresh fails while management is open", async () => {
     setup(); render(createElement(ServerKnowledgeFeaturePage, props));
     await screen.findByRole("button", { name: /Manage collections/ });
     fireEvent.click(screen.getByRole("button", { name: /Manage collections/ }));
     expect(await screen.findByRole("heading", { name: "Manage collections" })).toBeTruthy();
     vi.mocked(api.loadKnowledgeCatalog).mockRejectedValue(new Error("catalog outage"));
+    // Window focus refreshes at most every 30 seconds; pretend that much time has passed.
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 31_000);
     fireEvent.focus(window);
     await screen.findByRole("tab", { name: /Organization/ });
     expect(screen.getByRole("button", { name: "Refresh" })).toBeTruthy();

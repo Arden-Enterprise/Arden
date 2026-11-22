@@ -57,6 +57,9 @@ const ArdenDocumentView = lazy(() => import("./ArdenRichTextEditor")
   .then((module) => ({ default: module.ArdenDocumentView })));
 
 /** Reader status from the optional expiration date; publications are in force from approval. */
+/** Minimum time between window-focus refreshes of Home (deliberate Refresh and actions are not limited). */
+export const focusReloadIntervalMs = 30_000;
+
 function readerValidity(item: PublishedKnowledge): { status: "EFFECTIVE" | "EXPIRING" | "UPCOMING" | "EXPIRED"; expiresInDays?: number } {
   const { status, daysLeft } = validityStatus(item.management, new Date().toLocaleDateString("en-CA"));
   if (status === "Expiring soon") return { status: "EXPIRING", expiresInDays: daysLeft ?? 0 };
@@ -244,7 +247,9 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     (opener ?? window.document.getElementById("arden-main"))?.focus();
   }, [screen]);
 
+  const lastReloadAt = useRef(0);
   const reload = useCallback(async () => {
+    lastReloadAt.current = Date.now();
     // Each reading view owns its wait/error state; one slow source must not hide the other tabs.
     void home.refresh();
     const [nextDrafts, nextSubmissions, nextBoard, nextOptions, nextCatalog] = await Promise.all([
@@ -558,7 +563,12 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
 
   useEffect(() => {
     if (!active) return;
-    const onFocus = () => { void reload().catch(() => undefined); };
+    // Returning to the window refreshes Home at most every 30 seconds, so switching tabs or apps does not
+    // refetch every list each time. Opening a document still rechecks access on its own.
+    const onFocus = () => {
+      if (Date.now() - lastReloadAt.current < focusReloadIntervalMs) return;
+      void reload().catch(() => undefined);
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [active, reload]);
