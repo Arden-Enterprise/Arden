@@ -7,7 +7,8 @@ export type NotificationTarget = { view: "review-queue"; id: string } | { view: 
 export type NotificationItem = {
   id: string;
   type: "REVIEW_REQUESTED" | "REVIEW_APPROVED" | "REVIEW_REJECTED" | "PUBLICATION_ACTIVE"
-    | "PUBLICATION_FAILED" | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED";
+    | "PUBLICATION_FAILED" | "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP"
+    | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED";
   message: string;
   createdAt: string;
   readAt: string | null;

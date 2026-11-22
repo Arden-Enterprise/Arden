@@ -69,8 +69,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0034_publication_change_requests', '0035_apply_publication_change_requests',
           '0036_publication_preparation_retry', '0037_publication_governance',
           '0038_admin_only_direct_withdrawal', '0039_in_app_notifications', '0040_flat_collection_placement',
-          '0041_verified_legacy_metadata_repair', '0042_remove_knowledge_topics')`);
-    if (migration.rows[0]?.count !== "28") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0041_verified_legacy_metadata_repair', '0042_remove_knowledge_topics',
+          '0043_document_share_notifications')`);
+    if (migration.rows[0]?.count !== "29") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -260,6 +261,12 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       await workerClient.query("BEGIN");
       await workerClient.query("SET LOCAL ROLE arden_notification_worker");
       await expect(workerClient.query("SELECT 1 FROM arden.arden_notification_outbox LIMIT 0")).resolves.toBeTruthy();
+      await expect(workerClient.query(`SELECT notification_id, organization_id, recipient_membership_id
+        FROM arden.arden_notification LIMIT 0`)).resolves.toBeTruthy();
+      await workerClient.query("SAVEPOINT deny_share_metadata_read");
+      await expect(workerClient.query(`SELECT publication_title, shared_by_name
+        FROM arden.arden_notification LIMIT 0`)).rejects.toMatchObject({ code: "42501" });
+      await workerClient.query("ROLLBACK TO SAVEPOINT deny_share_metadata_read");
       await workerClient.query("SAVEPOINT deny_private_content_read");
       await expect(workerClient.query("SELECT 1 FROM arden.shared_submission LIMIT 0"))
         .rejects.toMatchObject({ code: "42501" });
@@ -1111,6 +1118,38 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
        WHERE pv.submission_id = $1`, [listed.submission.id]));
     const listedRows = await selections(listed.submission.id);
     expect(publicationReaders.rows).toEqual([{ pv: listedRows.approved_selection_id, cp: listedRows.approved_selection_id }]);
+
+    const sharedPublication = await superuser((client) => client.query<{ id: string }>(`
+      SELECT pv.published_version_id AS id FROM published_knowledge_version pv
+      JOIN knowledge_current_publication cp USING (published_version_id)
+      WHERE pv.submission_id = $1`, [listed.submission.id]));
+    const sharedPublicationId = sharedPublication.rows[0]?.id;
+    if (!sharedPublicationId) throw new Error("Expected the selected-reader publication to be current");
+    const activationShareNotifications = await pool.query(`
+      SELECT notification_id FROM arden.arden_notification
+       WHERE organization_id = $1 AND resource_type = 'PUBLICATION' AND resource_id = $2
+         AND event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')`, [ids.organization, sharedPublicationId]);
+    expect(activationShareNotifications.rows).toEqual([]);
+    await expect(repository.listReadableCurrentPublicationIds(readerFixtures[0]!.userId, ids.organization, [sharedPublicationId]))
+      .resolves.toEqual([sharedPublicationId]);
+    await expect(repository.listReadableCurrentPublicationIds(readerFixtures[5]!.userId, ids.organization, [sharedPublicationId]))
+      .resolves.toEqual([]);
+
+    const departmentPublication = await superuser((client) => client.query<{ id: string }>(`
+      SELECT pv.published_version_id AS id FROM published_knowledge_version pv
+      JOIN knowledge_current_publication cp USING (published_version_id)
+      WHERE pv.submission_id = $1`, [organization.submission.id]));
+    const legacyPublication = await superuser((client) => client.query<{ id: string }>(`
+      SELECT pv.published_version_id AS id FROM published_knowledge_version pv
+      JOIN knowledge_current_publication cp USING (published_version_id)
+      WHERE pv.submission_id = $1`, [legacy.submission.id]));
+    const activationShareEvents = await pool.query(`
+      SELECT notification_id FROM arden.arden_notification
+       WHERE organization_id = $1 AND resource_type = 'PUBLICATION'
+         AND event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
+         AND resource_id = ANY($2::uuid[])`, [ids.organization,
+      [sharedPublicationId, departmentPublication.rows[0]?.id, legacyPublication.rows[0]?.id]]);
+    expect(activationShareEvents.rows).toEqual([]);
 
     for (const [userId, readable] of [[readerFixtures[0]!.userId, true], [readerFixtures[5]!.userId, false],
       [ids.owner, false]] as const) {

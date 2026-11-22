@@ -252,6 +252,12 @@
       "filename": "0042_remove_knowledge_topics.sql",
       "sha256": "9cb358fd62a25214c9c137e4c7fdd875d5dcead6aabae165557cf350c719ac7e",
       "rollout": "operator"
+    },
+    {
+      "id": "0043",
+      "filename": "0043_document_share_notifications.sql",
+      "sha256": "409706abd369261e13d06d7563ad8ee5c71c2458a58059ff28a166234d48b2c1",
+      "rollout": "operator"
     }
   ]
 }

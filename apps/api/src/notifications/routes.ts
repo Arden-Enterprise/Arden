@@ -5,7 +5,7 @@ import type { NotificationStore } from "./store.js";
 import { signNotificationReaderToken, type NotificationRealtimeConfiguration } from "./realtime.js";
 
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
-const messages: Record<NotificationType, string> = {
+const messages: Record<Exclude<NotificationType, "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP">, string> = {
   REVIEW_REQUESTED: "A knowledge item is waiting for your review.",
   REVIEW_APPROVED: "Your knowledge request was approved.",
   REVIEW_REJECTED: "Your knowledge request was rejected.",
@@ -57,14 +57,32 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
       const ownedSubmissionIds = await repository.listOwnedKnowledgeSubmissionIds(actor.userId,
         request.params.organizationId, outcomeSubmissionIds);
       const ownedIds = new Set(ownedSubmissionIds ?? []);
+      const sharedPublicationIds = [...new Set(page.items
+        .filter(item => item.type === "DOCUMENT_SHARED_PERSONAL" || item.type === "DOCUMENT_SHARED_GROUP")
+        .map(item => item.resourceId))];
+      const readablePublicationIds = sharedPublicationIds.length
+        ? await repository.listReadableCurrentPublicationIds(actor.userId, request.params.organizationId, sharedPublicationIds)
+        : [];
+      if (readablePublicationIds === null) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "The organization is unavailable." } });
+      const readablePublications = new Set(readablePublicationIds);
       return reply.header("cache-control", "no-store").send({
         ...page,
         items: page.items.map(item => {
           if (item.type === "REVIEW_REQUESTED") return { id: item.id, type: item.type, message: messages[item.type],
             createdAt: item.createdAt, readAt: item.readAt, target: { view: "review-queue", id: item.resourceId } };
-          if (["REVIEW_APPROVED", "REVIEW_REJECTED", "PUBLICATION_ACTIVE", "PUBLICATION_FAILED"].includes(item.type)) {
+          if (item.type === "REVIEW_APPROVED" || item.type === "REVIEW_REJECTED"
+            || item.type === "PUBLICATION_ACTIVE" || item.type === "PUBLICATION_FAILED") {
             const visible = ownedIds.has(item.resourceId);
             return { id: item.id, type: item.type, message: visible ? messages[item.type] : "This notification's item is no longer available.",
+              createdAt: item.createdAt, readAt: item.readAt, ...(visible ? { target: { view: "knowledge" } } : {}) };
+          }
+          if (item.type === "DOCUMENT_SHARED_PERSONAL" || item.type === "DOCUMENT_SHARED_GROUP") {
+            const visible = readablePublications.has(item.resourceId);
+            const targetLabel = item.type === "DOCUMENT_SHARED_PERSONAL" ? "you" : "your group";
+            const message = visible
+              ? `${item.sharedByName ?? "A colleague"} shared “${item.publicationTitle ?? "a document"}” with ${targetLabel}.`
+              : "This notification's item is no longer available.";
+            return { id: item.id, type: item.type, message,
               createdAt: item.createdAt, readAt: item.readAt, ...(visible ? { target: { view: "knowledge" } } : {}) };
           }
           return { id: item.id, type: item.type, message: messages[item.type], createdAt: item.createdAt, readAt: item.readAt };

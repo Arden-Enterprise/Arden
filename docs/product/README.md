@@ -32,7 +32,7 @@ Each group document distinguishes current main, branch-only alternatives, observ
 | F18 | Shared web/Windows behavior and offline boundaries | [Platform and delivery](platform-and-delivery.md#f18-web-and-desktop) | Shared source exists; installer/native/offline guarantees separate |
 | F19 | Developer environments and release promotion | [Platform and delivery](platform-and-delivery.md#f19-development-and-release-flow) | Tooling/runbooks exist; each target/version needs evidence |
 | F20 | Customer installation, recovery and support | [Platform and delivery](platform-and-delivery.md#f20-installation-and-recovery) | Release gates remain; no general production-readiness claim |
-| F21 | In-app notifications | [In-app notifications](in-app-notifications.md#f21-in-app-notifications) | Code and migration are in `feat/in-app-notifications`; Realtime policy, PostgreSQL rehearsal, staging and deployment remain unverified |
+| F21 | In-app notifications | [In-app notifications](in-app-notifications.md#f21-in-app-notifications) | Inbox is in current staging source; personal/group share notices after approval are in this local follow-up; Share button integration, Realtime policy, PostgreSQL rehearsal, staging environment and deployment remain unverified |
 
 ## Known reconciliation gaps
 

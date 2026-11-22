@@ -8,6 +8,7 @@ const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const notificationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const reviewId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const ownedSubmissionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const sharedPublicationId = "abababab-abab-4aba-8aba-abababababab";
 const userId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 
 describe("notification routes", () => {
@@ -15,6 +16,7 @@ describe("notification routes", () => {
   afterEach(async () => { await Promise.all(apps.splice(0).map(app => app.close())); vi.restoreAllMocks(); });
 
   function makeApp(input: { reviewResourceIds?: string[]; reviewIds?: string[]; ownedSubmissionIds?: string[];
+    readablePublicationIds?: string[];
     list?: NotificationStore["list"]; realtime?: boolean } = {}) {
     const app = Fastify();
     apps.push(app);
@@ -43,6 +45,8 @@ describe("notification routes", () => {
       listKnowledgeSubmissions: vi.fn(async () => (input.ownedSubmissionIds ?? [ownedSubmissionId]).map(id => ({ id } as never))),
       listOwnedKnowledgeSubmissionIds: vi.fn(async (_userId, _organizationId, submissionIds: readonly string[]) =>
         (input.ownedSubmissionIds ?? [ownedSubmissionId]).filter(id => submissionIds.includes(id))),
+      listReadableCurrentPublicationIds: vi.fn(async (_userId, _organizationId, publishedVersionIds: readonly string[]) =>
+        (input.readablePublicationIds ?? [sharedPublicationId]).filter(id => publishedVersionIds.includes(id))),
       requireActiveMembership: vi.fn(async () => ({ organizationId, membershipId: "ffffffff-ffff-4fff-8fff-ffffffffffff", userId })),
     } as unknown as ArdenDataRepository;
     const secret = "ab".repeat(32);
@@ -119,6 +123,37 @@ describe("notification routes", () => {
     }));
     expect(response.json().items.find((item: { type: string }) => item.type === "REVIEW_APPROVED")).not.toHaveProperty("target");
     expect(JSON.stringify(response.json())).not.toContain(ownedSubmissionId);
+  });
+
+  it("distinguishes personal and group shares while the actor can read the current publication", async () => {
+    const personalShare = { id: "12121212-1212-4121-8121-121212121212", type: "DOCUMENT_SHARED_PERSONAL" as const,
+      resourceType: "PUBLICATION" as const, resourceId: sharedPublicationId,
+      publicationTitle: "Contract review procedure", sharedByName: "Ava Patel",
+      createdAt: "2026-11-22T08:00:00.000Z", readAt: null };
+    const groupShare = { ...personalShare, id: "13131313-1313-4131-8131-131313131313", type: "DOCUMENT_SHARED_GROUP" as const };
+    const list = vi.fn(async () => ({ items: [personalShare, groupShare], unreadCount: 2, nextCursor: null }));
+    const allowed = makeApp({ list, readablePublicationIds: [sharedPublicationId] });
+    const response = await allowed.app.inject(`/api/v1/organizations/${organizationId}/notifications`);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items).toEqual([
+      expect.objectContaining({ type: "DOCUMENT_SHARED_PERSONAL",
+        message: "Ava Patel shared “Contract review procedure” with you.", target: { view: "knowledge" } }),
+      expect.objectContaining({ type: "DOCUMENT_SHARED_GROUP",
+        message: "Ava Patel shared “Contract review procedure” with your group.", target: { view: "knowledge" } }),
+    ]);
+    expect(allowed.repository.listReadableCurrentPublicationIds).toHaveBeenCalledWith(userId, organizationId, [sharedPublicationId]);
+
+    const revoked = makeApp({ list, readablePublicationIds: [] });
+    const hiddenResponse = await revoked.app.inject(`/api/v1/organizations/${organizationId}/notifications`);
+    expect(hiddenResponse.statusCode).toBe(200);
+    expect(hiddenResponse.json().items).toHaveLength(2);
+    for (const item of hiddenResponse.json().items) {
+      expect(item.message).toBe("This notification's item is no longer available.");
+      expect(item).not.toHaveProperty("target");
+    }
+    expect(JSON.stringify(hiddenResponse.json())).not.toContain(sharedPublicationId);
+    expect(JSON.stringify(hiddenResponse.json())).not.toContain("Ava Patel");
+    expect(JSON.stringify(hiddenResponse.json())).not.toContain("Contract review procedure");
   });
 
   it("rejects an invalid page cursor", async () => {
