@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
 import { Icon } from "../shared/Icon";
 import type { KnowledgeCitationReference } from "../knowledge/knowledgeCitation";
 import type { Platform } from "../shared/types";
 import { starterPrompts } from "../ask-arden/askArdenModel";
 import { ChatComposer } from "../ask-arden/ChatComposer";
 import { ChatMessages } from "../ask-arden/ChatMessages";
+import { CitationSourcesPanel } from "../ask-arden/CitationSourcesPanel";
 import { NewChatDialog } from "../ask-arden/NewChatDialog";
 import { useArdenChat } from "../ask-arden/useArdenChat";
 
@@ -22,6 +23,7 @@ export function AgentPanel({ open, platform, organizationId, onClose, onOpenAskA
   const [resetting, setResetting] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const sourcesId = useId();
   const focusComposer = () => requestAnimationFrame(() => composerRef.current?.focus());
 
   useEffect(() => {
@@ -64,9 +66,12 @@ export function AgentPanel({ open, platform, organizationId, onClose, onOpenAskA
             <Icon name={index === 0 ? "review" : index === 1 ? "search" : "people"} size={14} /><span>{prompt}</span>
           </button>)}
         </div>}
-      </div> : <ChatMessages chat={chat} onOpenCitation={onOpenCitation} />}
+      </div> : <ChatMessages chat={chat} />}
     </div>
     <ChatComposer chat={chat} placement="panel" composerRef={composerRef} />
+    {/* In the narrow panel the Sources view covers the chat; Close or Escape returns to the chip. */}
+    {chat.sourcePanel && <CitationSourcesPanel id={sourcesId} citations={chat.sourcePanel.citations}
+      selected={chat.sourcePanel.selected} onOpenDocument={onOpenCitation} onClose={chat.closeSources} />}
     {resetting && <NewChatDialog hasDraft={Boolean(chat.draft.trim())} onCancel={() => setResetting(false)} onConfirm={startNewChat} />}
   </aside>;
 }
