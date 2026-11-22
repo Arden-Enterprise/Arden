@@ -62,8 +62,6 @@
 .arden-app-shell .role-config-tabs button.is-active { color: var(--arden-info); border-bottom-color: var(--arden-info); }
 .arden-app-shell .organization-department-nav > button.is-selected { color: var(--arden-info); border-color: var(--arden-info); background: #293846; }
 .arden-app-shell .organization-department-nav > button.is-selected strong { color: var(--arden-info); }
-.arden-app-shell .knowledge-pane-redesign { background: var(--arden-sidebar); }
-.arden-app-shell .access-boundary { border-color: var(--arden-line); }
 @container workspace (max-width: 500px) {
   .arden-app-shell .preview-state { display: block; max-width: 140px; font-size: 9px; }
   .arden-app-shell .knowledge-row { gap: 10px; }

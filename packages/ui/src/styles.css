@@ -10,8 +10,6 @@
 @import "./styles/organization.css";
 @import "./styles/role-configuration.css";
 @import "./styles/knowledge.css";
-@import "./styles/knowledge-pane.css";
-@import "./styles/maintenance.css";
 @import "./styles/responsive.css";
 @import "./styles/motion.css";
 @import "./styles/my-work-redesign.css";
@@ -26,6 +24,8 @@
 @import "./styles/island-knowledge.css";
 @import "./styles/knowledge-management.css";
 @import "./styles/publication-changes.css";
+@import "./styles/maintenance.css";
 @import "./styles/island-ask.css";
+@import "./styles/agent-panel.css";
 @import "./styles/settings.css";
 @import "./styles/notifications.css";

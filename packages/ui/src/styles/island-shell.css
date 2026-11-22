@@ -86,10 +86,10 @@
 /* ---------- Shell grid ---------- */
 .arden-app-shell,
 .arden-app-shell.is-context-collapsed { grid-template-columns: 256px minmax(0, 1fr); align-items: start; }
-.arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 256px minmax(0, 1fr) 320px; }
+.arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 256px minmax(0, 1fr) 360px; }
 .arden-app-shell.is-nav-collapsed,
 .arden-app-shell.is-nav-collapsed.is-context-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
-.arden-app-shell.is-nav-collapsed:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 56px minmax(0, 1fr) 320px; }
+.arden-app-shell.is-nav-collapsed:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 56px minmax(0, 1fr) 360px; }
 .arden-app-shell .workspace-page {
   height: calc(var(--arden-shell-height) + var(--arden-shell-gap));
   margin-top: calc(-1 * var(--arden-shell-gap));
@@ -456,14 +456,6 @@
 .arden-app-shell dialog.admin-confirm { margin-top: 12vh; animation: island-content .32s both var(--arden-morph); }
 .arden-app-shell dialog::backdrop { background: rgb(8 8 10 / 62%); }
 
-/* ---------- Context pane as an island ---------- */
-.arden-app-shell .knowledge-pane-redesign {
-  top: var(--arden-shell-gap); height: var(--arden-shell-height); border: 1px solid var(--arden-border); border-radius: 16px; background: var(--arden-bg-sidebar);
-}
-.arden-app-shell .knowledge-pane-redesign.is-collapsed { display: none; }
-.arden-app-shell .knowledge-pane-header { border-bottom-color: var(--arden-border); }
-.arden-app-shell .access-boundary { border: 1px solid var(--arden-border); border-radius: 12px; background: var(--arden-surface-base); }
-
 /* ---------- Mobile tab island ---------- */
 .mobile-tab-island { display: none; }
 
@@ -494,7 +486,6 @@
   .arden-app-shell .app-sidebar .sidebar-nav-item { position: relative; justify-content: center; padding: 0; min-height: 36px; }
   .arden-app-shell .app-sidebar .sidebar-review-count { position: absolute; transform: translate(12px, -10px); min-width: 18px; height: 18px; padding: 0 4px; font-size: 10px; }
   .arden-app-shell .app-sidebar .sidebar-session { flex-direction: column; }
-  .arden-app-shell .knowledge-pane-redesign:not(.is-collapsed) { top: var(--arden-shell-gap); right: var(--arden-shell-gap); bottom: auto; height: var(--arden-shell-height); }
 }
 @media (max-width: 639px) {
   /* Touch targets: the page's primary action reaches 44px; other controls step up to 36px (Mobile.dc.html). */

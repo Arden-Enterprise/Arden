@@ -294,25 +294,6 @@
     gap: 28px;
     margin-top: 28px;
   }
-  .knowledge-pane-redesign {
-    position: static;
-    height: auto;
-    min-height: 0;
-    scroll-margin-top: 124px;
-    border-top: 1px solid var(--arden-line);
-    border-left: 0;
-  }
-  .knowledge-pane-redesign.is-collapsed {
-    display: none;
-  }
-  .knowledge-pane-body {
-    overflow: visible;
-    padding: 24px;
-  }
-  .knowledge-pane-header {
-    padding-right: 24px;
-    padding-left: 24px;
-  }
   .personal-content .note-editor-card {
     display: none;
   }
@@ -476,5 +457,4 @@
   .personal-content.is-editing-note .personal-title-row { display: flex; }
   .personal-content.is-editing-note .note-editor-card { display: flex; }
   .private-editor-toolbar .private-state { flex-basis: 100%; }
-  .knowledge-pane-redesign { scroll-margin-top: 172px; }
 }
