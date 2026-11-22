@@ -790,7 +790,7 @@ export class MaintenanceCaseService {
     return { ...view, unread: await tx.hasUnread(actor.membershipId, view.caseId) };
   }
 
-  /** One notice per recipient and logical key; the store ignores a repeated key. */
+  /** Logical keys are unique per event (messages) or per revision, so each notice is inserted once. */
   private async notify(tx: MaintenanceTx, row: CaseRecord, recipient: string, logicalKey: string, message: string): Promise<void> {
     await tx.insertNotification({
       notificationId: randomUUID(), organizationId: row.organizationId, caseId: row.caseId,

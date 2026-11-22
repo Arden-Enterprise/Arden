@@ -217,8 +217,7 @@ class PgMaintenanceTx implements MaintenanceTx {
   async insertNotification(notice: NotificationRecord) {
     await this.client.query(`INSERT INTO maintenance_notification
       (notification_id, organization_id, case_id, recipient_membership_id, logical_key, message)
-      VALUES ($1,$2,$3,$4,$5,$6)
-      ON CONFLICT (organization_id, recipient_membership_id, logical_key) DO NOTHING`,
+      VALUES ($1,$2,$3,$4,$5,$6)`,
     [notice.notificationId, notice.organizationId, notice.caseId, notice.recipientMembershipId,
       notice.logicalKey, notice.message]);
   }
