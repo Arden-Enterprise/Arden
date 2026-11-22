@@ -1,9 +1,9 @@
 # Flow 4 implementation status
 
 - Last updated — 2026-11-22
-- Integration baseline — Arden staging `4df192df7d32ce75db879d7745bbbb761ec8f92a` with a local patch from `feat/knowledge-maintenance` at `d81b062` and its uncommitted changes.
-- Branch — `feat/flow-4-knowledge-maintenance`, published for review on 2026-11-22.
-- Current checkpoint — **Reconciled local candidate, 2026-11-20.** The earlier worktree and evidence below remain historical snapshots.
+- Integration baseline — Arden staging `611092903c22e8dc85d8c02361254441ca5286e5`, fetched 2026-11-22.
+- Branches — `feat/knowledge-maintenance-cases` (schema, API, desktop IPC and documentation) and the stacked `feat/knowledge-maintenance-screens` (Flow 4 screens, Ask Arden panel and screenshots), pushed for review on 2026-11-22. Neither is merged or deployed.
+- Current checkpoint — **Committed review candidate, 2026-11-22.** The reconciled 2026-11-20 candidate is now split into those two branches. The earlier worktree and evidence below remain historical snapshots.
 
 ## Redesign and dev-1 setup, 2026-11-22
 
