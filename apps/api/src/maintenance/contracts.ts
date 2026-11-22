@@ -122,7 +122,7 @@ export class MaintenanceError extends Error {
 }
 
 export function commandHash(parts: readonly string[]): string {
-  return createHash("sha256").update(parts.join("\u001f")).digest("hex");
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 }
 
 export type LegacyReport = {
@@ -136,6 +136,8 @@ export type LegacyReport = {
   verifiable: boolean;
   /** Routing facts of the original pin; it need not still be current. */
   anchor?: AnchorRecord | null;
+  /** Full-precision paging position from the database. */
+  cursor?: string;
 };
 
 export function legacyRequestKey(organizationId: string, membershipId: string, documentId: string,
@@ -150,17 +152,27 @@ export function legacyRequestKey(organizationId: string, membershipId: string, d
 }
 
 export function intakeHash(input: IntakeInput): string {
-  return createHash("sha256").update([
+  return createHash("sha256").update(JSON.stringify([
     input.origin,
     input.documentId,
     input.publishedVersionId,
     input.description.trim(),
-    input.anchor?.page ?? "",
-    input.anchor?.passage?.trim() ?? "",
-  ].join("\u001f")).digest("hex");
+    input.anchor?.page ?? null,
+    input.anchor?.passage?.trim() ?? null,
+  ])).digest("hex");
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Lowercases UUID-shaped strings so every comparison and hash uses PostgreSQL's canonical form. */
+export function canonicalIds<T>(value: T): T {
+  if (typeof value === "string") return (uuidPattern.test(value) ? value.toLowerCase() : value) as T;
+  if (Array.isArray(value)) return value.map(canonicalIds) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, canonicalIds(item)])) as T;
+  }
+  return value;
+}
 
 export function assertUuid(value: string): void {
   if (!uuidPattern.test(value)) throw new MaintenanceError("INVALID");

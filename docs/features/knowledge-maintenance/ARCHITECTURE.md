@@ -2,7 +2,7 @@
 
 ## Current design baseline
 
-The reconciled local candidate on staging `4df192d` wires the reader report, reviewer queue and case actions, exact-version comparison, analysis, Flow 2 proof, links and authorized history through shared web and Electron UI. The staged migration prefix is 0001–0042. Maintenance follows at 0043–0059, beginning with [case schema 0043](../../../apps/api/migrations/0043_maintenance_cases.sql). Case events, notices and access remain Core concerns. Arden-AI v2 accepts bounded source evidence for the opt-in provider. Read the [observed runtime evidence](STATUS.md#combined-staging-rehearsal-2026-11-20) before using the historical notes below.
+The reconciled local candidate on staging `4df192d` wires the reader report, reviewer queue and case actions, exact-version comparison, analysis, Flow 2 proof, links and authorized history through shared web and Electron UI. The staged migration prefix is 0001–0042. Maintenance follows at 0043–0060, beginning with [case schema 0043](../../../apps/api/migrations/0043_maintenance_cases.sql). Case events, notices and access remain Core concerns. Arden-AI v2 accepts bounded source evidence for the opt-in provider. Read the [observed runtime evidence](STATUS.md#combined-staging-rehearsal-2026-11-20) before using the historical notes below.
 
 ## Historical implementation baseline — observed facts
 
@@ -10,7 +10,7 @@ The reconciled local candidate on staging `4df192d` wires the reader report, rev
 | --- | --- |
 | Core | [Routes](../../../apps/api/src/maintenance/routes.ts), [case service](../../../apps/api/src/maintenance/case-service.ts), [store](../../../apps/api/src/maintenance/case-store.ts) and [policy](../../../apps/api/src/maintenance/policy.ts) serve the manual commands and case history. Later routes exist for messages, compare, publication confirmation, links and analysis. Stored publication text, exact publication proof and safe result reads need integration work. |
 | Database | The integrated branch reserves 0036–0038 for staging. Maintenance 0039 in the original feature checkout and forward migrations through 0045 supply the local schema inventory. Upgrade, actor-grant and runtime ledger evidence is pending. [Release policy](../../../apps/api/migrations/release-policy.json) |
-| Shared UI | The [Knowledge page](../../../packages/ui/src/knowledge/ServerKnowledgeFeaturePage.tsx) connects the manual path. The shared [Maintenance UI](../../../packages/ui/src/maintenance/) includes components for later features that still need live case data and actions. The [desktop allowlist](../../../apps/desktop/src/main/apiRequestPolicy.ts) needs to match the individual route contracts. |
+| Shared UI | The [Knowledge page](../../../packages/ui/src/knowledge/ServerKnowledgeFeaturePage.tsx) connects the manual path. The shared Maintenance UI (`packages/ui/src/maintenance/`, added by the stacked UI PR) includes components for later features that still need live case data and actions. The [desktop allowlist](../../../apps/desktop/src/main/apiRequestPolicy.ts) needs to match the individual route contracts. |
 | Arden-AI | The paired branch at `ed2776e` defines a Maintenance request/response fixture. Core still uses a controlled fake in the local slices. The worker, served contract and cited evidence path are planned. [AI main baseline](https://github.com/Arden-Enterprise/Arden-AI/tree/e56a89bb429b8580d0e4c8c6171ff191bbce004d/src/arden_ai/contracts) |
 
 ## Proposed design

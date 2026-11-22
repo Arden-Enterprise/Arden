@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { MaintenanceError, type IntakeInput } from "./contracts.js";
+import { MaintenanceError, canonicalIds, type IntakeInput } from "./contracts.js";
 import type { MaintenanceCaseService } from "./case-service.js";
 
 export function registerMaintenanceRoutes(app: FastifyInstance, service: MaintenanceCaseService | undefined,
@@ -16,6 +16,10 @@ export function registerMaintenanceRoutes(app: FastifyInstance, service: Mainten
     if (!user) return;
     reply.header("Cache-Control", "no-store");
     if (!service) return reply.code(503).send({ error: { code: "MAINTENANCE_UNAVAILABLE", message: "Maintenance is unavailable." } });
+    request.params = canonicalIds(request.params);
+    request.body = canonicalIds(request.body);
+    const key = request.headers["idempotency-key"];
+    if (typeof key === "string") request.headers["idempotency-key"] = canonicalIds(key);
     try {
       return await work(user.userId);
     } catch (error) {

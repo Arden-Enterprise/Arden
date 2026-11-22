@@ -75,14 +75,14 @@ class PgMaintenanceTx implements MaintenanceTx {
     private readonly content?: VersionContentReader) {}
 
   async actor(): Promise<ActorRecord | null> {
-    const result = await this.client.query<{ membership_id: string; user_id: string }>(`
-      SELECT om.membership_id, om.user_id
+    const result = await this.client.query<{ membership_id: string; user_id: string; organization_id: string }>(`
+      SELECT om.membership_id, om.user_id, om.organization_id
         FROM organization_membership om
         JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
        WHERE om.organization_id = $1 AND om.user_id = NULLIF(current_setting('arden.actor_id', true), '')::uuid
          AND om.status = 'ACTIVE'`, [this.organizationId]);
     const row = result.rows[0];
-    return row ? { userId: row.user_id, organizationId: this.organizationId, membershipId: row.membership_id } : null;
+    return row ? { userId: row.user_id, organizationId: row.organization_id, membershipId: row.membership_id } : null;
   }
 
   async readAnchor(documentId: string, publishedVersionId: string): Promise<AnchorRecord | null> {
@@ -128,8 +128,15 @@ class PgMaintenanceTx implements MaintenanceTx {
 
   async lockRequest(membershipId: string, requestKey: string): Promise<void> {
     await this.client.query(`SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
-      concat_ws(':', 'maintenance-request', $1::text, $2::text, $3::text), 0))`,
+      concat_ws(':', 'maintenance-request', $1::uuid::text, $2::uuid::text, $3::uuid::text), 0))`,
     [this.organizationId, membershipId, requestKey]);
+  }
+
+  async lockCasePair(caseId: string, relatedCaseId: string): Promise<void> {
+    const [left, right] = [caseId.toLowerCase(), relatedCaseId.toLowerCase()].sort();
+    await this.client.query(`SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
+      concat_ws(':', 'maintenance-link', $1::uuid::text, $2::uuid::text, $3::uuid::text), 0))`,
+    [this.organizationId, left, right]);
   }
 
   async lockDocument(documentId: string): Promise<boolean> {
@@ -237,7 +244,7 @@ class PgMaintenanceTx implements MaintenanceTx {
 
   async lockReaderIntake(documentId: string, reporterMembershipId: string): Promise<void> {
     await this.client.query(`SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(
-      concat_ws(':', 'maintenance-reader-intake', $1::text, $2::text, $3::text), 0))`,
+      concat_ws(':', 'maintenance-reader-intake', $1::uuid::text, $2::uuid::text, $3::uuid::text), 0))`,
     [this.organizationId, documentId, reporterMembershipId]);
   }
 
@@ -267,14 +274,15 @@ class PgMaintenanceTx implements MaintenanceTx {
       report_id: string; shared_draft_id: string; published_version_id: string; reporter_membership_id: string;
       message: string; created_at: Date; verifiable: boolean; title: string | null; content_hash: string | null;
       classification: AnchorRecord["classification"] | null; responsible_department_id: string | null;
-      team_tag: string | null; project_tag: string | null; author_membership_id: string | null;
+      team_tag: string | null; project_tag: string | null; author_membership_id: string | null; cursor_at: string;
     }>(`SELECT report_id, shared_draft_id, published_version_id, reporter_membership_id, message, created_at, verifiable,
-        title, content_hash, classification, responsible_department_id, team_tag, project_tag, author_membership_id
-      FROM list_unmapped_open_publication_reports($1, $2)`, [after?.createdAt ?? null, after?.reportId ?? null]);
+        title, content_hash, classification, responsible_department_id, team_tag, project_tag, author_membership_id,
+        created_at::text AS cursor_at
+      FROM list_unmapped_open_publication_reports($1::timestamptz, $2)`, [after?.createdAt ?? null, after?.reportId ?? null]);
     return result.rows.map((row) => ({
       reportId: row.report_id, documentId: row.shared_draft_id, publishedVersionId: row.published_version_id,
       reporterMembershipId: row.reporter_membership_id, message: row.message,
-      createdAt: row.created_at.toISOString(), status: "OPEN", verifiable: row.verifiable,
+      createdAt: row.created_at.toISOString(), status: "OPEN", verifiable: row.verifiable, cursor: row.cursor_at,
       anchor: row.verifiable ? {
         organizationId: this.organizationId, documentId: row.shared_draft_id, publishedVersionId: row.published_version_id,
         contentHash: row.content_hash ?? "", title: row.title ?? "", classification: row.classification!,

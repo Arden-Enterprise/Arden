@@ -28,6 +28,7 @@ RETURNS boolean LANGUAGE sql STABLE SET search_path = arden, pg_temp AS $$
         SELECT 1
           FROM published_knowledge_version pv
           JOIN shared_draft d ON d.shared_draft_id = pv.shared_draft_id
+           AND d.organization_id = NULLIF(current_setting('arden.organization_id', true), '')::uuid
           JOIN organization_membership om ON om.membership_id = p_membership_id
            AND om.organization_id = d.organization_id AND om.status = 'ACTIVE'
           JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
@@ -366,9 +367,8 @@ DECLARE
     actor uuid := maintenance_actor_membership(NEW.organization_id);
 BEGIN
     IF actor IS NULL OR actor IS DISTINCT FROM NEW.actor_membership_id THEN RETURN NEW; END IF;
+    -- The case was verified at intake; a replacement activating meanwhile must not drop its notices.
     SELECT c.* INTO submitted FROM maintenance_case c
-      JOIN knowledge_current_publication cp ON cp.organization_id = c.organization_id
-        AND cp.shared_draft_id = c.document_id AND cp.published_version_id = c.published_version_id
      WHERE c.organization_id = NEW.organization_id AND c.case_id = NEW.case_id
        AND c.reporter_status = 'Submitted'
        AND ((c.origin = 'READER_REPORT' AND c.reporter_membership_id = actor)

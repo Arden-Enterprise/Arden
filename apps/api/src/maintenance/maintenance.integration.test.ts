@@ -10,6 +10,7 @@ import { MaintenanceError } from "./contracts.js";
 const adminUrl = process.env.ARDEN_TEST_DATABASE_URL;
 const runtimeLogin = `arden_test_maintenance_${randomUUID().replaceAll("-", "")}`;
 const runtimePassword = randomUUID();
+let runtimeRoleCreated = false;
 const org = "11111111-1111-4111-8111-111111111111";
 const otherOrg = "22222222-2222-4222-8222-222222222222";
 const department = "33333333-3333-4333-8333-333333333311";
@@ -154,6 +155,7 @@ describe.skipIf(!adminUrl)("maintenance manual path on disposable PostgreSQL", (
     if (!owner.superuser) throw new Error("Fixture setup needs the owner connection on the disposable target");
     // Identifier and password are generated UUIDs, never caller input; the role exists only on this target.
     await adminPool.query(`CREATE ROLE ${runtimeLogin} LOGIN PASSWORD '${runtimePassword}' NOSUPERUSER NOBYPASSRLS NOINHERIT`);
+    runtimeRoleCreated = true;
     await adminPool.query(`GRANT arden_runtime TO ${runtimeLogin}`);
     const runtimeUrl = new URL(adminUrl!);
     runtimeUrl.username = runtimeLogin;
@@ -177,7 +179,7 @@ describe.skipIf(!adminUrl)("maintenance manual path on disposable PostgreSQL", (
 
   afterAll(async () => {
     await pool?.end();
-    await adminPool?.query(`DROP ROLE IF EXISTS ${runtimeLogin}`);
+    if (runtimeRoleCreated) await adminPool?.query(`DROP ROLE IF EXISTS ${runtimeLogin}`);
     await adminPool?.end();
   });
 

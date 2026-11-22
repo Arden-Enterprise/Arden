@@ -33,7 +33,7 @@ export function projectCase(row: CaseRecord, actor: ActorRecord, access: CaseAcc
     title: row.title, description: row.description, reporterStatus: row.reporterStatus,
     reporterExplanation: row.reporterExplanation, reviewerRationale: row.reviewerRationale, revision: row.revision,
     assigneeMembershipId: row.assigneeMembershipId,
-    canDecide: assignee && access.hasGrant,
+    canDecide: assignee && access.hasGrant && row.reporterStatus !== "Resolved",
     needsReassignment: assignee && !access.hasGrant,
     canReassign: access.isAdmin, unread: false,
     publicationLinkVersionId: row.publicationLinkVersionId,

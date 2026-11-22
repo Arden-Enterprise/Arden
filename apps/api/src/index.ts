@@ -264,10 +264,10 @@ scheduleIndexWorker(250);
 scheduleNotificationWorker(250);
 
 function localFlow1Origin(name: string, fallback: string): string {
-  const origin = process.env[name] ?? fallback;
+  const origin = process.env[name] || fallback;
   const parsed = new URL(origin);
   const host = parsed.hostname;
-  const loopback = host === "127.0.0.1" || host === "localhost" || host === "::1";
+  const loopback = host === "127.0.0.1" || host === "localhost" || host === "[::1]";
   if (parsed.origin !== origin || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash
     || parsed.protocol !== "http:" || !loopback) {
     throw new Error(`${name} must be an exact loopback HTTP origin`);
