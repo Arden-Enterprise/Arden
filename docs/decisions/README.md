@@ -82,6 +82,8 @@ accepts the F21 implementation scope while retaining 0024's inspection-notificat
 deferral. Code and migration are branch-only until full PostgreSQL, Realtime and
 staging evidence is obtained; no rollout is implied.
 
+The Flow 4 owner approved the [Maintenance report intake decision](0028-maintenance-report-intake.md) on 18 November 2026. It covers intake cutover, transition of open reports and preservation of closed report history.
+
 The Home start page and reader validity rules are [0022: Home start page and reader
 validity](0022-home-start-page-and-reader-validity.md), accepted on 15 November 2026;
 implementation is on branch `feat/home-reader-information` only.
