@@ -2,7 +2,7 @@
 
 ## Current design baseline
 
-The reconciled local candidate on staging `4df192d` wires the reader report, reviewer queue and case actions, exact-version comparison, analysis, Flow 2 proof, links and authorized history through shared web and Electron UI. The staged migration prefix is 0001–0042. Maintenance follows at 0043–0060, beginning with [case schema 0043](../../../apps/api/migrations/0043_maintenance_cases.sql). Case events, notices and access remain Core concerns. Arden-AI v2 accepts bounded source evidence for the opt-in provider. Read the [observed runtime evidence](STATUS.md#combined-staging-rehearsal-2026-11-20) before using the historical notes below.
+The review branches, based on staging `6110929`, wire the reader report, reviewer queue and case actions, exact-version comparison, analysis, Flow 2 proof, links and authorized history through shared web and Electron UI. The staged migration prefix is 0001–0042. Maintenance follows at 0043–0060, beginning with [case schema 0043](../../../apps/api/migrations/0043_maintenance_cases.sql). Case events, notices and access remain Core concerns. Arden-AI v2 accepts bounded source evidence for the opt-in provider. Read the [observed runtime evidence](STATUS.md#combined-staging-rehearsal-2026-11-20) before using the historical notes below.
 
 ## Historical implementation baseline — observed facts
 

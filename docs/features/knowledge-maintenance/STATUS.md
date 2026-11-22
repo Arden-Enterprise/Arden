@@ -3,11 +3,11 @@
 - Last updated — 2026-11-22
 - Integration baseline — Arden staging `611092903c22e8dc85d8c02361254441ca5286e5`, fetched 2026-11-22.
 - Branches — `feat/knowledge-maintenance-cases` (schema, API, desktop IPC and documentation) and the stacked `feat/knowledge-maintenance-screens` (Flow 4 screens, Ask Arden panel and screenshots), pushed for review on 2026-11-22. Neither is merged or deployed.
-- Current checkpoint — **Review corrections committed, 2026-11-22.** See [review corrections](#review-corrections-2026-11-22). The reconciled 2026-11-20 candidate is now split into those two branches. The earlier worktree and evidence below remain historical snapshots.
+- Current checkpoint — **Pre-merge review done, 2026-11-22.** See [review corrections](#review-corrections-2026-11-22) and [known limitations](#known-limitations-and-follow-ups). Shared rollout follows the [Flow 4 runbook](../../engineering/operations.md#knowledge-maintenance-flow-4-rollout). The reconciled 2026-11-20 candidate is now split into those two branches. The earlier worktree and evidence below remain historical snapshots.
 
 ## Review corrections, 2026-11-22
 
-Greptile, CodeRabbit and CodeRabbit Verify reviewed PRs #62 and #63. Each finding was checked against the code; all were valid and are fixed in the same branches. The flow diagrams and step catalog already describe the corrected behavior, so their structure is unchanged; the implementation now matches them.
+Greptile, CodeRabbit and CodeRabbit Verify reviewed PRs #62 and #63. Each finding was checked against the code and fixed in the same branches, except the low-impact items listed under [known limitations](#known-limitations-and-follow-ups). A pre-merge review of the final heads, which no automated reviewer saw, added the last Screens fix below. The flow diagrams and step catalog already describe the corrected behavior, so their structure is unchanged; the implementation now matches them.
 
 | Area | Correction | Steps |
 | --- | --- | --- |
@@ -18,9 +18,23 @@ Greptile, CodeRabbit and CodeRabbit Verify reviewed PRs #62 and #63. Each findin
 | Outcomes | Proof names the exact withdrawn version, starts at the business effective date, and decisions hold Flow 2's document lock. The UI enables Record published outcome only when the server's evidence rule passes. A reporter keeps the outcome after a correction replaces the reported version. | F4-05–F4-07 |
 | Analysis | Start is rejected when no adapter is configured; expired leases fail instead of staying Running; the UI follows a queued run until it settles. | F4-04 |
 | Robustness | Overlapping retries of one key replay instead of failing; comparisons are memory-bounded; Semantic Document text keeps links, tables and assets; the version list always includes the pin. | F4-01, F4-03 |
-| Screens | Retry reopens a case whose first read failed, writes cannot replace another open case, single-version cases open their original, Compare with current shows reported against current, and Org Admin sees unassigned cases. Ask Arden returns focus correctly, keeps drafts on reload, and marks a failed prompt Not sent. | F4-02, F4-03, shell |
+| Screens | Retry reopens a case whose first read failed, writes cannot replace another open case, single-version cases open their original, Compare with current shows reported against current, and Org Admin sees unassigned cases. Ask Arden returns focus correctly, keeps drafts on reload, and marks a failed prompt Not sent. A failed case action shows an inline alert and refreshes the case in place, so typed notes survive; only a failed load shows the unavailable state. This is the existing F4-02d lost-race branch (reload the permitted assignment), so the diagrams are unchanged. | F4-02, F4-03, F4-05, shell |
 
-Checks: API 511 passed (79 database-gated skips) and the PostgreSQL suite now runs in CI's database job; UI 64 files, 484 tests; migration inventory 60 entries. Migration `0060` is operator rollout and leaves `0043`–`0059` unchanged.
+Checks: API 511 passed (79 database-gated skips) and the PostgreSQL suite now runs in CI's database job; UI 65 files, 486 tests; migration inventory 60 entries. Migration `0060` is operator rollout and leaves `0043`–`0059` unchanged.
+
+## Known limitations and follow-ups
+
+Found in the pre-merge review, or left from automated review as low impact. None of them affects staging safety. Resolve 1–3 before production.
+
+| # | Limitation | Effect | Follow-up |
+| --- | --- | --- | --- |
+| 1 | PDF versions have no in-app comparison or original | A PDF case shows "Comparison is unavailable", and its Open original buttons return unavailable, so the manual path the screen offers is a dead end | Serve the exact stored PDF version through the case-scoped source resolver (F4-03) |
+| 2 | Case lists have no paging | The queue and My reports read every visible case, about four database calls each, and keep resolved cases forever | Server-side status filter, paging and a set-based projection |
+| 3 | Imported reports send no new-case notice | The notice trigger fires only for `SUBMITTED`; reviewers find imported cases in the queue | Notify eligible reviewers on `IMPORTED` too |
+| 4 | Before claiming, an eligible reviewer can read the case's public messages in its history, and the version list includes numbers and dates of versions the reviewer cannot open | The report text stays hidden; comparing an unreadable version reports unavailable | Align with the F4-02 and F4-03 projections in the flow spec |
+| 5 | An organization without a reviewer grant cannot handle cases | Org Admin can only reassign, by design, so the case waits | Give each rollout organization a reviewer grant held by someone other than the author |
+| 6 | Single assignment, analysis-run reads and reviewer-only events are enforced in the service, not in RLS | None for users: only the API reads these tables | Database-level hardening in a later migration |
+| 7 | Low-impact review items | Desktop IPC rejects a case list without `scope` (the app always sends one); a ` \| ` inside a table cell can blur a diff line; analysis fails on sources over 8,000 characters (analysis is off by default) | Fix with related work |
 
 ## Redesign and dev-1 setup, 2026-11-22
 
