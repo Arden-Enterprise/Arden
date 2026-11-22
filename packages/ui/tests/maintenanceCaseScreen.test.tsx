@@ -125,4 +125,19 @@ describe("maintenance case screen", () => {
     expect(moves).toEqual(["next", "current"]);
     expect(screen.getByText("Contact the service desk if the client stays offline.").closest("li")?.textContent).toContain("+ Added");
   });
+
+  it("shows a failed action inline and keeps the case and typed notes", () => {
+    const props = { item, history: { items: [], nextCursor: null }, loading: false, error: "", busy: false,
+      onBack: () => undefined, onClaim: () => undefined, onResolve: () => undefined, onReassign: () => undefined,
+      onMoreHistory: () => undefined, onRetry: () => undefined };
+    const view = render(<MaintenanceCaseScreen {...props} />);
+    fireEvent.change(screen.getByLabelText("Reporter explanation"), { target: { value: "Step 3 now names the right menu." } });
+    fireEvent.change(screen.getByLabelText("Reviewer rationale"), { target: { value: "Checked against the current screens." } });
+    view.rerender(<MaintenanceCaseScreen {...props} actionError="This case changed while you were working." />);
+    expect(screen.getByRole("alert").textContent).toContain("This case changed while you were working.");
+    expect(screen.getByRole("heading", { name: "IT Support Guide" })).toBeTruthy();
+    expect(screen.queryByText("That case is unavailable")).toBeNull();
+    expect(screen.getByLabelText("Reporter explanation")).toHaveProperty("value", "Step 3 now names the right menu.");
+    expect(screen.getByLabelText("Reviewer rationale")).toHaveProperty("value", "Checked against the current screens.");
+  });
 });

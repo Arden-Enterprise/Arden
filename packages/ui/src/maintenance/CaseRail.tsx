@@ -13,6 +13,8 @@ export type CaseRailProps = {
   busy: boolean;
   reviewers: EligibleReviewer[];
   relatedCases: RelatedCase[];
+  /** Why the last action failed; shown inline so the case and any typed notes stay. */
+  actionError?: string;
   onClaim: () => void;
   onResolve: (explanation: string, rationale: string) => void;
   onReassign: (membershipId: string, reason: string) => void;
@@ -94,11 +96,12 @@ function RelatedCases({ relatedCases, busy, onOpenRelated, onLinkRelated }: Pick
   </section>;
 }
 
-export function CaseRail({ item, history, busy, reviewers, relatedCases, onClaim, onResolve, onReassign, onMoreHistory, onRetry, onAsk,
+export function CaseRail({ item, history, busy, reviewers, relatedCases, actionError, onClaim, onResolve, onReassign, onMoreHistory, onRetry, onAsk,
   onConfirmPublication, onLinkPublication, onLinkPublicationRequest, onOpenRelated, onLinkRelated }: CaseRailProps) {
   const open = item.reporterStatus !== "Resolved";
   const reviewerView = item.kind === "assigned" || item.kind === "queue";
   return <aside className="case-aside" aria-label="Case actions">
+    {actionError && <p className="island-note is-warning" role="alert"><Icon name="warning" size={14} />{actionError}</p>}
     {item.needsReassignment && <p className="island-note is-warning" role="status">
       <Icon name="warning" size={14} />Needs reassignment. You can no longer decide this case.</p>}
     {item.kind === "queue" && <div className="maintenance-claim">
