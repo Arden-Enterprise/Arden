@@ -354,6 +354,12 @@
       "filename": "0059_maintenance_legacy_report_compatibility.sql",
       "sha256": "bdb0924fe79b0cab61065b7fa5f3f31de572abf96a90678eeb27d01f5589d90e",
       "rollout": "operator"
+    },
+    {
+      "id": "0060",
+      "filename": "0060_maintenance_review_corrections.sql",
+      "sha256": "7e49ebe8672d68a13a121af290db366fabc54e1ec2d3b322ee19730c42b3b763",
+      "rollout": "operator"
     }
   ]
 }

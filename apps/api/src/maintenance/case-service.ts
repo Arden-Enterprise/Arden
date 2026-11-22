@@ -11,9 +11,13 @@ import { projectCase, type CaseAccess } from "./policy.js";
 export interface MaintenanceTx {
   actor(): Promise<ActorRecord | null>;
   readAnchor(documentId: string, publishedVersionId: string): Promise<AnchorRecord | null>;
-  canReadVersion(publishedVersionId: string): Promise<boolean>;
-  hasReviewerGrant(anchor: Pick<AnchorRecord, "departmentId" | "classification" | "teamTag" | "projectTag">): Promise<boolean>;
+  /** The caller can read the document's current publication; a replaced pin does not hide the case. */
+  canReadDocument(documentId: string): Promise<boolean>;
+  /** The actor may review this exact published version (decision 0015 scope, classification and tags). */
+  hasReviewerGrant(publishedVersionId: string): Promise<boolean>;
   isAdmin(): Promise<boolean>;
+  lockRequest(membershipId: string, requestKey: string): Promise<void>;
+  lockDocument(documentId: string): Promise<boolean>;
   idempotency(membershipId: string, requestKey: string): Promise<{ payloadHash: string; caseId: string } | null>;
   saveIdempotency(membershipId: string, requestKey: string, payloadHash: string, caseId: string): Promise<void>;
   insertCase(row: CaseRecord): Promise<void>;
@@ -24,18 +28,17 @@ export interface MaintenanceTx {
   listEvents(caseId: string, afterSequence: number, limit: number): Promise<CaseEventRecord[]>;
   saveCase(row: CaseRecord): Promise<void>;
   insertNotification(notice: NotificationRecord): Promise<void>;
-  notificationExists(recipientMembershipId: string, logicalKey: string): Promise<boolean>;
   eligibleReviewers(row: CaseRecord): Promise<Array<{ membershipId: string; displayName: string }>>;
   membershipHasGrant(membershipId: string, row: CaseRecord): Promise<boolean>;
   lockReaderIntake(documentId: string, reporterMembershipId: string): Promise<void>;
   hasOpenReaderReport(documentId: string, reporterMembershipId: string): Promise<boolean>;
   findImport(reportId: string): Promise<string | null>;
   saveImport(reportId: string, caseId: string): Promise<void>;
-  unmappedOpenReports(): Promise<LegacyReport[]>;
+  unmappedOpenReports(after: { createdAt: string; reportId: string } | null): Promise<LegacyReport[]>;
   hasUnread(membershipId: string, caseId: string): Promise<boolean>;
   markRead(membershipId: string, caseId: string): Promise<void>;
   readVersionText(publishedVersionId: string): Promise<{ documentId: string; text: string | null } | null>;
-  listDocumentVersions(documentId: string): Promise<Array<{ publishedVersionId: string; versionNo: number; publishedAt: string; current: boolean }>>;
+  listDocumentVersions(documentId: string, pinnedVersionId: string): Promise<Array<{ publishedVersionId: string; versionNo: number; publishedAt: string; current: boolean }>>;
   readPublicationProof(documentId: string, publishedVersionId: string): Promise<PublicationProof>;
   readPublicationSubmission(submissionId: string): Promise<PublicationSubmission | null>;
   saveLink(caseId: string, relatedCaseId: string): Promise<void>;
@@ -47,17 +50,23 @@ export interface MaintenanceTx {
   claimAnalysis(caseId: string, fence: string): Promise<AnalysisRun | null>;
   commitAnalysis(caseId: string, fence: string, state: "succeeded" | "failed", findings: AnalysisFinding[]): Promise<boolean>;
   failActiveAnalysis(caseId: string): Promise<void>;
+  expireStaleAnalysis(caseId: string): Promise<void>;
 }
 
 export interface MaintenancePort {
   transaction<T>(userId: string, organizationId: string, work: (tx: MaintenanceTx) => Promise<T>): Promise<T>;
 }
 
-function grantSubject(row: CaseRecord): Pick<AnchorRecord, "departmentId" | "classification" | "teamTag" | "projectTag"> {
-  return {
-    departmentId: row.routeDepartmentId, classification: row.classification,
-    teamTag: row.teamTag, projectTag: row.projectTag,
-  };
+
+/** The linked version or request names exactly the applicable publication outcome. */
+function publicationEvidenceMatches(row: CaseRecord, proof: PublicationProof, submission: PublicationSubmission | null,
+  evidence: string | null): boolean {
+  if (proof.state !== "applicable" || !proof.outcome || !evidence || proof.publishedVersionId !== evidence) return false;
+  const approvedWithdrawal = submission?.requestType === "WITHDRAWAL" && submission.status === "APPROVED"
+    && submission.targetPublishedVersionId === evidence && proof.outcome === "WITHDRAWN";
+  const linkedRequest = !!submission && submission.documentId === row.documentId
+    && (submission.producedVersionId === evidence || approvedWithdrawal);
+  return row.publicationLinkVersionId === evidence || linkedRequest;
 }
 
 export class MaintenanceCaseService {
@@ -78,6 +87,7 @@ export class MaintenanceCaseService {
     return this.port.transaction(userId, organizationId, async (tx) => {
       const actor = await this.requireActor(tx, organizationId);
       if (input.origin === "READER_REPORT") await tx.lockReaderIntake(input.documentId, actor.membershipId);
+      await tx.lockRequest(actor.membershipId, requestKey);
       const prior = await tx.idempotency(actor.membershipId, requestKey);
       if (prior) {
         if (prior.payloadHash !== hash) throw new MaintenanceError("CONFLICT");
@@ -86,7 +96,7 @@ export class MaintenanceCaseService {
       const anchor = await tx.readAnchor(input.documentId, input.publishedVersionId);
       if (!anchor || anchor.organizationId !== organizationId) throw new MaintenanceError("DENIED");
       if (input.origin === "REVIEWER_INTAKE") {
-        const grant = await tx.hasReviewerGrant(anchor);
+        const grant = await tx.hasReviewerGrant(anchor.publishedVersionId);
         if (!grant || anchor.authorMembershipId === actor.membershipId) throw new MaintenanceError("DENIED");
       }
       const now = new Date().toISOString();
@@ -167,7 +177,19 @@ export class MaintenanceCaseService {
     const once = () => this.port.transaction(userId, organizationId, async (tx) => {
       const actor = await this.requireActor(tx, organizationId);
       if (!(await tx.isAdmin())) throw new MaintenanceError("DENIED");
-      return this.importLoaded(tx, actor, organizationId, await tx.unmappedOpenReports());
+      const result = { imported: [] as Array<{ reportId: string; caseId: string }>, retained: [] as string[], held: [] as string[] };
+      // Pages advance past held reports, so they cannot block later eligible ones.
+      for (let after: { createdAt: string; reportId: string } | null = null, page = 0; page < 50; page += 1) {
+        const reports = await tx.unmappedOpenReports(after);
+        const loaded = await this.importLoaded(tx, actor, organizationId, reports);
+        result.imported.push(...loaded.imported);
+        result.retained.push(...loaded.retained);
+        result.held.push(...loaded.held);
+        const last = reports.at(-1);
+        if (!last || reports.length < 200) break;
+        after = { createdAt: last.createdAt, reportId: last.reportId };
+      }
+      return result;
     });
     return once().catch((error: unknown) => {
       if (typeof error !== "object" || error === null || !("code" in error) || error.code !== "23505") throw error;
@@ -192,7 +214,8 @@ export class MaintenanceCaseService {
           retained.push(report.reportId);
           continue;
         }
-        const anchor = report.verifiable ? await tx.readAnchor(report.documentId, report.publishedVersionId) : null;
+        const anchor = !report.verifiable ? null
+          : report.anchor !== undefined ? report.anchor : await tx.readAnchor(report.documentId, report.publishedVersionId);
         if (!anchor || report.message.trim().length < 1) {
           held.push(report.reportId);
           continue;
@@ -221,9 +244,9 @@ export class MaintenanceCaseService {
       const projected: CaseProjection[] = [];
       for (const row of rows) {
         const access = {
-          hasGrant: await tx.hasReviewerGrant(grantSubject(row)),
+          hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
           isAdmin: await tx.isAdmin(),
-          canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+          canReadDocument: await tx.canReadDocument(row.documentId),
         };
         const view = projectCase(row, actor, access);
         if (!view) continue;
@@ -237,7 +260,7 @@ export class MaintenanceCaseService {
   claimCase(userId: string, organizationId: string, caseId: string, expectedRevision: number, commandKey: string): Promise<CaseProjection> {
     return this.withCommand(userId, organizationId, caseId, commandKey, ["claim", String(expectedRevision)], async (tx, actor, row) => {
       this.requireIndependent(actor, row);
-      if (!(await tx.hasReviewerGrant(grantSubject(row)))) throw new MaintenanceError("DENIED");
+      if (!(await tx.hasReviewerGrant(row.publishedVersionId))) throw new MaintenanceError("DENIED");
       if (row.assigneeMembershipId && row.assigneeMembershipId !== actor.membershipId) throw new MaintenanceError("CONFLICT");
       if (row.revision !== expectedRevision) throw new MaintenanceError("STALE");
       if (row.assigneeMembershipId === actor.membershipId) return;
@@ -295,13 +318,14 @@ export class MaintenanceCaseService {
     if (text.length < 1 || text.length > 2000) throw new MaintenanceError("INVALID");
     return this.withCommand(userId, organizationId, caseId, commandKey, ["message", String(expectedRevision), text], async (tx, actor, row) => {
       if (row.reporterStatus === "Resolved") throw new MaintenanceError("CONFLICT");
-      const reviewer = row.assigneeMembershipId === actor.membershipId && await tx.hasReviewerGrant(grantSubject(row));
+      const reviewer = row.assigneeMembershipId === actor.membershipId && await tx.hasReviewerGrant(row.publishedVersionId);
       const reporter = row.reporterMembershipId === actor.membershipId;
       if (!reviewer && !reporter) throw new MaintenanceError("DENIED");
       if (row.revision !== expectedRevision) throw new MaintenanceError("STALE");
-      await this.append(tx, row, actor.membershipId, "MESSAGE", "PUBLIC", text, new Date().toISOString());
-      if (reporter && row.assigneeMembershipId) await this.notify(tx, row, row.assigneeMembershipId, `reply:${row.caseId}:${row.revision}`, "A reply is waiting.");
-      if (reviewer && row.reporterMembershipId) await this.notify(tx, row, row.reporterMembershipId, `question:${row.caseId}:${row.revision}`, "A reviewer asked a question.");
+      // Messages leave the revision unchanged, so each notice is keyed by its own event.
+      const sequence = await this.append(tx, row, actor.membershipId, "MESSAGE", "PUBLIC", text, new Date().toISOString());
+      if (reporter && row.assigneeMembershipId) await this.notify(tx, row, row.assigneeMembershipId, `reply:${row.caseId}:${sequence}`, "A reply is waiting.");
+      if (reviewer && row.reporterMembershipId) await this.notify(tx, row, row.reporterMembershipId, `question:${row.caseId}:${sequence}`, "A reviewer asked a question.");
     });
   }
 
@@ -316,9 +340,10 @@ export class MaintenanceCaseService {
     return this.withCommand(userId, organizationId, caseId, commandKey,
       ["publication-link", String(expectedRevision), publishedVersionId ?? "", submissionId ?? "", cleanReason], async (tx, actor, row) => {
         this.requireIndependent(actor, row);
-        if (row.assigneeMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(grantSubject(row)))) throw new MaintenanceError("DENIED");
+        if (row.assigneeMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(row.publishedVersionId))) throw new MaintenanceError("DENIED");
         if (row.revision !== expectedRevision || row.reporterStatus === "Resolved") throw new MaintenanceError("CONFLICT");
         if (publishedVersionId) {
+          if (!(await tx.lockDocument(row.documentId))) throw new MaintenanceError("CONFLICT");
           const proof = await tx.readPublicationProof(row.documentId, row.publishedVersionId);
           const source = await tx.readVersionText(publishedVersionId);
           if (proof.state !== "applicable" || proof.publishedVersionId !== publishedVersionId
@@ -349,20 +374,16 @@ export class MaintenanceCaseService {
     return this.withCommand(userId, organizationId, caseId, commandKey,
       ["confirm-publication", String(expectedRevision), explanation, rationale, evidencePublishedVersionId], async (tx, actor, row) => {
         this.requireIndependent(actor, row);
-        if (row.assigneeMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(grantSubject(row)))) throw new MaintenanceError("DENIED");
+        if (row.assigneeMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(row.publishedVersionId))) throw new MaintenanceError("DENIED");
         if (row.revision !== expectedRevision) throw new MaintenanceError("STALE");
         if (row.reporterStatus === "Resolved") throw new MaintenanceError("CONFLICT");
+        // Holds Flow 2's document lock until the decision commits, so the proof cannot go stale.
+        if (!(await tx.lockDocument(row.documentId))) throw new MaintenanceError("CONFLICT");
         const proof = await tx.readPublicationProof(row.documentId, row.publishedVersionId);
         const submission = row.publicationLinkSubmissionId ? await tx.readPublicationSubmission(row.publicationLinkSubmissionId) : null;
-        const linkedVersion = row.publicationLinkVersionId === evidencePublishedVersionId;
-        const approvedWithdrawal = submission?.requestType === "WITHDRAWAL" && submission.status === "APPROVED"
-          && submission.targetPublishedVersionId === evidencePublishedVersionId && proof.outcome === "WITHDRAWN";
-        const linkedRequest = !!submission && submission.documentId === row.documentId && (
-          submission.producedVersionId === evidencePublishedVersionId
-            || approvedWithdrawal
-          || (submission.withdrawn && proof.outcome === "WITHDRAWN" && proof.publishedVersionId === evidencePublishedVersionId));
-        if (proof.state !== "applicable" || !proof.outcome || proof.publishedVersionId !== evidencePublishedVersionId
-          || (!linkedVersion && !linkedRequest)) throw new MaintenanceError("CONFLICT");
+        if (!publicationEvidenceMatches(row, proof, submission, evidencePublishedVersionId) || !proof.outcome) {
+          throw new MaintenanceError("CONFLICT");
+        }
         const now = new Date().toISOString();
         row.reporterStatus = "Resolved";
         row.outcome = proof.outcome;
@@ -385,7 +406,7 @@ export class MaintenanceCaseService {
     return this.withCommand(userId, organizationId, caseId, commandKey,
       ["no-change", String(expectedRevision), explanation, rationale], async (tx, actor, row) => {
         this.requireIndependent(actor, row);
-        if (row.assigneeMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(grantSubject(row)))) throw new MaintenanceError("DENIED");
+        if (row.assigneeMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(row.publishedVersionId))) throw new MaintenanceError("DENIED");
         if (row.revision !== expectedRevision) throw new MaintenanceError("STALE");
         if (row.reporterStatus === "Resolved") throw new MaintenanceError("CONFLICT");
         const now = new Date().toISOString();
@@ -411,9 +432,9 @@ export class MaintenanceCaseService {
       const actor = await this.requireActor(tx, organizationId);
       const locked = await tx.lockCase(caseId);
       const view = locked ? projectCase(locked, actor, {
-        hasGrant: await tx.hasReviewerGrant(grantSubject(locked)),
+        hasGrant: await tx.hasReviewerGrant(locked.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(locked.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(locked.documentId),
       }) : null;
       if (!locked || !view) throw new MaintenanceError("DENIED");
       if (view.kind === "minimal") return { items: [], nextCursor: null };
@@ -432,9 +453,11 @@ export class MaintenanceCaseService {
       throw new MaintenanceError("INVALID");
     }
     for (const versionId of versionIds) assertUuid(versionId);
+    if (!this.adapter) throw new MaintenanceError("UNAVAILABLE");
     return this.withCommand(userId, organizationId, caseId, commandKey, ["analyze", ...versionIds], async (tx, actor, row) => {
-      if (row.assigneeMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(grantSubject(row)))) throw new MaintenanceError("DENIED");
+      if (row.assigneeMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(row.publishedVersionId))) throw new MaintenanceError("DENIED");
       if (row.reporterStatus === "Resolved") throw new MaintenanceError("CONFLICT");
+      await tx.expireStaleAnalysis(row.caseId);
       if (await tx.activeAnalysis(row.caseId)) throw new MaintenanceError("CONFLICT");
       for (const versionId of versionIds) {
         const source = await tx.readVersionText(versionId);
@@ -457,8 +480,18 @@ export class MaintenanceCaseService {
     const current = await this.port.transaction(userId, organizationId, async (tx) => {
       const actor = await this.requireActor(tx, organizationId);
       const row = await tx.lockCase(caseId);
-      if (!row || row.assigneeMembershipId !== actor.membershipId) throw new MaintenanceError("DENIED");
-      return tx.latestAnalysis(caseId);
+      if (!row || row.assigneeMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(row.publishedVersionId))) {
+        throw new MaintenanceError("DENIED");
+      }
+      await tx.expireStaleAnalysis(caseId);
+      const latest = await tx.latestAnalysis(caseId);
+      if (!latest?.findings.length) return latest;
+      // Stored findings derive from their sources; losing any source withholds them.
+      for (const versionId of latest.versionIds) {
+        const source = await tx.readVersionText(versionId);
+        if (!source || source.documentId !== row.documentId || source.text === null) return { ...latest, findings: [] };
+      }
+      return latest;
     });
     if (!current) throw new MaintenanceError("DENIED");
     if (current.state !== "queued" || !this.adapter) return current;
@@ -472,7 +505,7 @@ export class MaintenanceCaseService {
       if (!row || row.assigneeMembershipId !== actor.membershipId) throw new MaintenanceError("DENIED");
       const latest = await tx.latestAnalysis(caseId);
       if (!latest || latest.state !== "queued") return { run: latest };
-      if (latest.startedByMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(grantSubject(row)))) {
+      if (latest.startedByMembershipId !== actor.membershipId || !(await tx.hasReviewerGrant(row.publishedVersionId))) {
         await tx.failActiveAnalysis(caseId);
         return { run: await tx.latestAnalysis(caseId) };
       }
@@ -509,7 +542,7 @@ export class MaintenanceCaseService {
       const sources = await Promise.all(prepared.versionIds.map((versionId) => tx.readVersionText(versionId)));
       const sourcesReady = sources.every((source) => source && row && source.documentId === row.documentId && source.text !== null);
       const stillAssigned = Boolean(row && row.assigneeMembershipId === actor.membershipId && row.assigneeMembershipId === prepared.startedByMembershipId
-        && await tx.hasReviewerGrant(grantSubject(row)));
+        && await tx.hasReviewerGrant(row.publishedVersionId));
       await tx.commitAnalysis(caseId, fence, result && sourcesReady && stillAssigned ? "succeeded" : "failed", result && sourcesReady && stillAssigned ? result.findings : []);
       const saved = await tx.latestAnalysis(caseId);
       if (!saved) throw new MaintenanceError("DENIED");
@@ -557,9 +590,9 @@ export class MaintenanceCaseService {
       const related = await tx.lockCase(relatedCaseId);
       if (!related) throw new MaintenanceError("DENIED");
       const visible = async (item: CaseRecord) => projectCase(item, actor, {
-        hasGrant: await tx.hasReviewerGrant(grantSubject(item)),
+        hasGrant: await tx.hasReviewerGrant(item.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(item.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(item.documentId),
       });
       const left = await visible(row);
       const right = await visible(related);
@@ -587,21 +620,21 @@ export class MaintenanceCaseService {
       const row = await tx.lockCase(caseId);
       if (!row) throw new MaintenanceError("DENIED");
       const access = {
-        hasGrant: await tx.hasReviewerGrant(grantSubject(row)),
+        hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(row.documentId),
       };
       const view = projectCase(row, actor, access);
-      if (!view || view.kind === "minimal" || view.kind === "reporter" || (view.kind === "assigned" && !view.canDecide && !access.isAdmin)) {
-        throw new MaintenanceError("DENIED");
-      }
+      // Sources need reviewer authority for the pin; Org Admin alone reads metadata only (decisions 0010, 0023).
+      if (!view || view.kind === "minimal" || view.kind === "reporter" || !access.hasGrant) throw new MaintenanceError("DENIED");
       const from = await tx.readVersionText(fromVersionId);
       const to = await tx.readVersionText(toVersionId);
       if (!from || !to || from.documentId !== row.documentId || to.documentId !== row.documentId
         || from.text === null || to.text === null || from.text.length > 20_000 || to.text.length > 20_000) {
         return { unavailable: true as const, fromVersionId, toVersionId };
       }
-      return { unavailable: false as const, fromVersionId, toVersionId, rows: compareLines(from.text, to.text) };
+      const rows = compareLines(from.text, to.text);
+      return rows ? { unavailable: false as const, fromVersionId, toVersionId, rows } : { unavailable: true as const, fromVersionId, toVersionId };
     });
   }
 
@@ -616,14 +649,13 @@ export class MaintenanceCaseService {
       const row = await tx.lockCase(caseId);
       if (!row) throw new MaintenanceError("DENIED");
       const access = {
-        hasGrant: await tx.hasReviewerGrant(grantSubject(row)),
+        hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(row.documentId),
       };
       const view = projectCase(row, actor, access);
-      if (!view || view.kind === "minimal" || view.kind === "reporter" || (view.kind === "assigned" && !view.canDecide && !access.isAdmin)) {
-        throw new MaintenanceError("DENIED");
-      }
+      // Sources need reviewer authority for the pin; Org Admin alone reads metadata only (decisions 0010, 0023).
+      if (!view || view.kind === "minimal" || view.kind === "reporter" || !access.hasGrant) throw new MaintenanceError("DENIED");
       const source = await tx.readVersionText(publishedVersionId);
       if (!source || source.documentId !== row.documentId || source.text === null || source.text.length > 20_000) {
         return { unavailable: true as const, publishedVersionId };
@@ -643,15 +675,15 @@ export class MaintenanceCaseService {
       const row = await tx.lockCase(caseId);
       if (!row) throw new MaintenanceError("DENIED");
       const access = {
-        hasGrant: await tx.hasReviewerGrant(grantSubject(row)),
+        hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
         isAdmin: await tx.isAdmin(),
-        canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+        canReadDocument: await tx.canReadDocument(row.documentId),
       };
       const view = projectCase(row, actor, access);
-      if (!view || view.kind === "minimal" || view.kind === "reporter" || (view.kind === "assigned" && !view.canDecide && !access.isAdmin)) {
+      if (!view || view.kind === "minimal" || view.kind === "reporter" || (!access.hasGrant && !access.isAdmin)) {
         throw new MaintenanceError("DENIED");
       }
-      const items = await tx.listDocumentVersions(row.documentId);
+      const items = await tx.listDocumentVersions(row.documentId, row.publishedVersionId);
       return { items, currentPublishedVersionId: items.find((item) => item.current)?.publishedVersionId ?? null };
     });
   }
@@ -675,6 +707,8 @@ export class MaintenanceCaseService {
     const hash = commandHash([caseId, ...parts]);
     return this.port.transaction(userId, organizationId, async (tx) => {
       const actor = await this.requireActor(tx, organizationId);
+      // Serializes overlapping retries of one key, so the second replays the first instead of failing.
+      await tx.lockRequest(actor.membershipId, commandKey);
       const prior = await tx.idempotency(actor.membershipId, commandKey);
       if (prior) {
         if (prior.payloadHash !== hash || prior.caseId !== caseId) throw new MaintenanceError("CONFLICT");
@@ -708,11 +742,13 @@ export class MaintenanceCaseService {
   }
 
   private async append(tx: MaintenanceTx, row: CaseRecord, actorMembershipId: string, eventType: CaseEventRecord["eventType"],
-    audience: CaseEventRecord["audience"], message: string, occurredAt: string): Promise<void> {
+    audience: CaseEventRecord["audience"], message: string, occurredAt: string): Promise<number> {
+    const sequence = await tx.nextSequence(row.caseId);
     await tx.insertEvent({
       eventId: randomUUID(), organizationId: row.organizationId, caseId: row.caseId,
-      sequence: await tx.nextSequence(row.caseId), actorMembershipId, eventType, audience, message, occurredAt,
+      sequence, actorMembershipId, eventType, audience, message, occurredAt,
     });
+    return sequence;
   }
 
   private async requireActor(tx: MaintenanceTx, organizationId: string): Promise<ActorRecord> {
@@ -723,9 +759,9 @@ export class MaintenanceCaseService {
 
   private async safeView(tx: MaintenanceTx, actor: ActorRecord, row: CaseRecord): Promise<CaseProjection | null> {
     return projectCase(row, actor, {
-      hasGrant: await tx.hasReviewerGrant(grantSubject(row)),
+      hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
       isAdmin: await tx.isAdmin(),
-      canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+      canReadDocument: await tx.canReadDocument(row.documentId),
     });
   }
 
@@ -737,22 +773,25 @@ export class MaintenanceCaseService {
 
   private async projectRow(tx: MaintenanceTx, actor: ActorRecord, row: CaseRecord): Promise<CaseProjection> {
     const access: CaseAccess = {
-      hasGrant: await tx.hasReviewerGrant(grantSubject(row)),
+      hasGrant: await tx.hasReviewerGrant(row.publishedVersionId),
       isAdmin: await tx.isAdmin(),
-      canReadDocument: await tx.canReadVersion(row.publishedVersionId),
+      canReadDocument: await tx.canReadDocument(row.documentId),
     };
     const view = projectCase(row, actor, access);
     if (!view) throw new MaintenanceError("DENIED");
     if (view.kind !== "assigned") return view;
-    return { ...view, publicationProof: await tx.readPublicationProof(row.documentId, row.publishedVersionId) };
+    const proof = await tx.readPublicationProof(row.documentId, row.publishedVersionId);
+    const submission = row.publicationLinkSubmissionId ? await tx.readPublicationSubmission(row.publicationLinkSubmissionId) : null;
+    return { ...view, publicationProof: proof, analysisAvailable: this.adapter !== null,
+      publicationReady: row.reporterStatus !== "Resolved" && publicationEvidenceMatches(row, proof, submission, proof.publishedVersionId) };
   }
 
   private async withUnread(tx: MaintenanceTx, actor: ActorRecord, view: CaseProjection): Promise<CaseProjection> {
     return { ...view, unread: await tx.hasUnread(actor.membershipId, view.caseId) };
   }
 
+  /** One notice per recipient and logical key; the store ignores a repeated key. */
   private async notify(tx: MaintenanceTx, row: CaseRecord, recipient: string, logicalKey: string, message: string): Promise<void> {
-    if (await tx.notificationExists(recipient, logicalKey)) return;
     await tx.insertNotification({
       notificationId: randomUUID(), organizationId: row.organizationId, caseId: row.caseId,
       recipientMembershipId: recipient, logicalKey, message,

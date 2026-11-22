@@ -100,14 +100,15 @@ export type CaseProjection =
   | { kind: "minimal"; caseId: string; reporterStatus: ReporterStatus; unread: boolean }
   | { kind: "reporter"; caseId: string; documentId: string; publishedVersionId: string; title: string;
       description: string; reporterStatus: ReporterStatus; reporterExplanation: string | null; revision: number; unread: boolean }
-  | { kind: "queue"; caseId: string; reporterStatus: ReporterStatus; title: string | null; revision: number; unread: boolean }
+  | { kind: "queue"; caseId: string; reporterStatus: ReporterStatus; title: string | null; revision: number; unread: boolean;
+      needsReassignment?: boolean }
   | { kind: "assigned"; caseId: string; documentId: string; publishedVersionId: string; title: string;
       description: string; reporterStatus: ReporterStatus; reporterExplanation: string | null;
       reviewerRationale: string | null; revision: number; assigneeMembershipId: string | null;
       canDecide: boolean; needsReassignment: boolean; canReassign: boolean; unread: boolean;
       publicationLinkVersionId: string | null;
       publicationLinkSubmissionId: string | null;
-      publicationProof?: PublicationProof };
+      publicationProof?: PublicationProof; analysisAvailable?: boolean; publicationReady?: boolean };
 
 export type HistoryPage = {
   items: Array<{ sequence: number; eventType: CaseEventType; message: string; occurredAt: string }>;
@@ -115,7 +116,7 @@ export type HistoryPage = {
 };
 
 export class MaintenanceError extends Error {
-  constructor(readonly code: "DENIED" | "CONFLICT" | "STALE" | "INVALID") {
+  constructor(readonly code: "DENIED" | "CONFLICT" | "STALE" | "INVALID" | "UNAVAILABLE") {
     super(code);
   }
 }
@@ -133,6 +134,8 @@ export type LegacyReport = {
   createdAt: string;
   status: "OPEN" | "CLOSED";
   verifiable: boolean;
+  /** Routing facts of the original pin; it need not still be current. */
+  anchor?: AnchorRecord | null;
 };
 
 export function legacyRequestKey(organizationId: string, membershipId: string, documentId: string,

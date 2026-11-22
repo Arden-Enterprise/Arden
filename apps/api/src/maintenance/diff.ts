@@ -6,14 +6,35 @@ function linesOf(value: string): string[] {
   return normalized.split("\n");
 }
 
-/** Deterministic line diff. Layout-only line endings are normalized. Case and punctuation stay. */
-export function compareLines(before: string, after: string): DiffRow[] {
+/** Largest changed region compared exactly; beyond it the caller falls back to manual originals. */
+export const maximumDiffCells = 4_000_000;
+
+/** Deterministic line diff. Layout-only line endings are normalized. Case and punctuation stay. Null when too large. */
+export function compareLines(before: string, after: string): DiffRow[] | null {
   const left = linesOf(before);
   const right = linesOf(after);
-  const dp = Array.from({ length: left.length + 1 }, () => new Array<number>(right.length + 1).fill(0));
+  let start = 0;
+  while (start < left.length && start < right.length && left[start] === right[start]) start += 1;
+  let leftEnd = left.length;
+  let rightEnd = right.length;
+  while (leftEnd > start && rightEnd > start && left[leftEnd - 1] === right[rightEnd - 1]) {
+    leftEnd -= 1;
+    rightEnd -= 1;
+  }
+  const rows = (lines: string[]): DiffRow[] => lines.map((text) => ({ kind: "context", text }));
+  const changed = middleRows(left.slice(start, leftEnd), right.slice(start, rightEnd));
+  if (!changed) return null;
+  return collapseContext([...rows(left.slice(0, start)), ...changed, ...rows(left.slice(leftEnd))]);
+}
+
+function middleRows(left: string[], right: string[]): DiffRow[] | null {
+  const width = right.length + 1;
+  if ((left.length + 1) * width > maximumDiffCells) return null;
+  const dp = new Uint32Array((left.length + 1) * width);
+  const at = (i: number, j: number) => dp[i * width + j]!;
   for (let i = left.length - 1; i >= 0; i -= 1) {
     for (let j = right.length - 1; j >= 0; j -= 1) {
-      dp[i]![j] = left[i] === right[j] ? dp[i + 1]![j + 1]! + 1 : Math.max(dp[i + 1]![j]!, dp[i]![j + 1]!);
+      dp[i * width + j] = left[i] === right[j] ? at(i + 1, j + 1) + 1 : Math.max(at(i + 1, j), at(i, j + 1));
     }
   }
   const rows: DiffRow[] = [];
@@ -24,7 +45,7 @@ export function compareLines(before: string, after: string): DiffRow[] {
       rows.push({ kind: "context", text: left[i]! });
       i += 1;
       j += 1;
-    } else if (dp[i + 1]![j]! >= dp[i]![j + 1]!) {
+    } else if (at(i + 1, j) >= at(i, j + 1)) {
       rows.push({ kind: "removed", text: left[i]! });
       i += 1;
     } else {
@@ -34,7 +55,7 @@ export function compareLines(before: string, after: string): DiffRow[] {
   }
   while (i < left.length) rows.push({ kind: "removed", text: left[i++]! });
   while (j < right.length) rows.push({ kind: "added", text: right[j++]! });
-  return collapseContext(rows);
+  return rows;
 }
 
 function collapseContext(rows: DiffRow[]): DiffRow[] {

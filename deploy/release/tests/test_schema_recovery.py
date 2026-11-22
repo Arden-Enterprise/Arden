@@ -20,7 +20,7 @@ class SchemaRecoveryInventoryTests(unittest.TestCase):
         self.assertIn("0030_knowledge_management_catalog.sql", migration_names)
         self.assertIn("0031_deduplicate_reviewer_grants.sql", migration_names)
         self.assertIn("0032_governed_ai_sources_and_conversations.sql", migration_names)
-        self.assertEqual(self.paths[-1].name, "0042_remove_knowledge_topics.sql")
+        self.assertEqual(self.paths[-1].name, "0060_maintenance_review_corrections.sql")
         module.validate_migration_inventory(self.paths)
 
     def test_previous_inventory_missing_catalog_is_rejected(self):

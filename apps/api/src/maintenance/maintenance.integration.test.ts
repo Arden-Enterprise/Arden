@@ -5,8 +5,11 @@ import { ArdenRepository } from "../db/repository.js";
 import { MaintenanceCaseService } from "./case-service.js";
 import { MaintenanceError } from "./contracts.js";
 
-const databaseUrl = process.env.ARDEN_MAINTENANCE_TEST_RUNTIME_URL ?? process.env.ARDEN_TEST_DATABASE_URL;
-const adminUrl = process.env.ARDEN_MIGRATION_DATABASE_URL;
+// Requires a disposable, fully migrated arden_test_* database reached by its owner login (CI's
+// ARDEN_TEST_DATABASE_URL). The service runs through a restricted login created for this file only.
+const adminUrl = process.env.ARDEN_TEST_DATABASE_URL;
+const runtimeLogin = `arden_test_maintenance_${randomUUID().replaceAll("-", "")}`;
+const runtimePassword = randomUUID();
 const org = "11111111-1111-4111-8111-111111111111";
 const otherOrg = "22222222-2222-4222-8222-222222222222";
 const department = "33333333-3333-4333-8333-333333333311";
@@ -21,7 +24,7 @@ const next = { userId: "16161616-1616-4616-8616-161616161616", membershipId: "17
 const outsider = { userId: "23232323-2323-4232-8232-232323232323", membershipId: "24242424-2424-4242-8242-242424242424" };
 const hash = "ab".repeat(32);
 
-const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 6 }) : null;
+let pool: Pool | null = null;
 const adminPool = adminUrl ? new Pool({ connectionString: adminUrl, max: 1 }) : null;
 
 async function assertDisposable(target: Pool, label: string) {
@@ -29,8 +32,8 @@ async function assertDisposable(target: Pool, label: string) {
     SELECT current_database() AS database_name, r.rolsuper AS superuser, r.rolbypassrls AS bypass
       FROM pg_roles r WHERE r.rolname = current_user`);
   const row = identity.rows[0];
-  if (!row || !/^arden_test_flow4(?:_[a-z0-9_]+)?$/.test(row.database_name)) {
-    throw new Error(`${label} must use a disposable arden_test_flow4 database`);
+  if (!row || !/^arden_test_[a-z0-9_]+$/.test(row.database_name)) {
+    throw new Error(`${label} must use a disposable arden_test_* database`);
   }
   return row;
 }
@@ -142,17 +145,23 @@ async function seed(target: Pool) {
   }
 }
 
-describe.skipIf(!databaseUrl || !adminUrl)("maintenance manual path on disposable PostgreSQL", () => {
-  const service = new MaintenanceCaseService(new ArdenRepository(pool!).maintenance);
+describe.skipIf(!adminUrl)("maintenance manual path on disposable PostgreSQL", () => {
+  let service: MaintenanceCaseService;
 
   beforeAll(async () => {
-    if (!pool || !adminPool) throw new Error("Disposable database URLs were not provided");
-    const runtime = await assertDisposable(pool, "ARDEN_TEST_DATABASE_URL");
-    if (runtime?.superuser || runtime?.bypass) throw new Error("The maintenance check connection must be the restricted API login");
-    const owner = await assertDisposable(adminPool, "ARDEN_MIGRATION_DATABASE_URL");
-    if (!owner.superuser || runtime.database_name !== owner.database_name || new URL(databaseUrl!).host !== new URL(adminUrl!).host) {
-      throw new Error("Fixture setup needs the owner connection on the same disposable target");
-    }
+    if (!adminPool) throw new Error("ARDEN_TEST_DATABASE_URL was not provided");
+    const owner = await assertDisposable(adminPool, "ARDEN_TEST_DATABASE_URL");
+    if (!owner.superuser) throw new Error("Fixture setup needs the owner connection on the disposable target");
+    // Identifier and password are generated UUIDs, never caller input; the role exists only on this target.
+    await adminPool.query(`CREATE ROLE ${runtimeLogin} LOGIN PASSWORD '${runtimePassword}' NOSUPERUSER NOBYPASSRLS NOINHERIT`);
+    await adminPool.query(`GRANT arden_runtime TO ${runtimeLogin}`);
+    const runtimeUrl = new URL(adminUrl!);
+    runtimeUrl.username = runtimeLogin;
+    runtimeUrl.password = runtimePassword;
+    pool = new Pool({ connectionString: runtimeUrl.href, max: 6, connectionTimeoutMillis: 5000 });
+    const runtime = await assertDisposable(pool, "the restricted runtime login");
+    if (runtime.superuser || runtime.bypass) throw new Error("The maintenance check connection must be the restricted API login");
+    service = new MaintenanceCaseService(new ArdenRepository(pool).maintenance);
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -168,6 +177,7 @@ describe.skipIf(!databaseUrl || !adminUrl)("maintenance manual path on disposabl
 
   afterAll(async () => {
     await pool?.end();
+    await adminPool?.query(`DROP ROLE IF EXISTS ${runtimeLogin}`);
     await adminPool?.end();
   });
 

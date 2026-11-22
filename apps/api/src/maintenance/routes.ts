@@ -20,9 +20,11 @@ export function registerMaintenanceRoutes(app: FastifyInstance, service: Mainten
       return await work(user.userId);
     } catch (error) {
       if (!(error instanceof MaintenanceError)) throw error;
-      const status = error.code === "INVALID" ? 400 : error.code === "DENIED" ? 404 : 409;
-      const code = error.code === "DENIED" ? "MAINTENANCE_UNAVAILABLE" : error.code === "STALE" ? "MAINTENANCE_STALE" : error.code === "CONFLICT" ? "MAINTENANCE_CONFLICT" : "INVALID_REQUEST";
+      const status = error.code === "INVALID" ? 400 : error.code === "DENIED" ? 404 : error.code === "UNAVAILABLE" ? 503 : 409;
+      const code = error.code === "DENIED" ? "MAINTENANCE_UNAVAILABLE" : error.code === "STALE" ? "MAINTENANCE_STALE"
+        : error.code === "CONFLICT" ? "MAINTENANCE_CONFLICT" : error.code === "UNAVAILABLE" ? "MAINTENANCE_ANALYSIS_UNAVAILABLE" : "INVALID_REQUEST";
       return reply.code(status).send({ error: { code, message: error.code === "DENIED" ? "That case is unavailable."
+        : error.code === "UNAVAILABLE" ? "Analysis is not available. Continue the review manually."
         : error.code === "CONFLICT" ? "This request conflicts with an existing case."
           : error.code === "STALE" ? "This case changed. Reload it and try again."
             : "Check the report and try again." } });

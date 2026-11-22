@@ -33,4 +33,12 @@ describe("maintenance projections", () => {
   it("gives an unmatched member no projection", () => {
     expect(projectCase(row, { ...actor, membershipId: "peer" }, { hasGrant: false, isAdmin: false, canReadDocument: true })).toBeNull();
   });
+
+  it("keeps only queue facts for an assignee who lost the grant", () => {
+    const assigned = { ...row, assigneeMembershipId: "reviewer", reporterStatus: "In Progress" as const, revision: 2 };
+    const view = projectCase(assigned, { ...actor, membershipId: "reviewer" }, { hasGrant: false, isAdmin: false, canReadDocument: true });
+    expect(view).toMatchObject({ kind: "queue", needsReassignment: true, title: "IT Support Guide" });
+    expect(view).not.toHaveProperty("description");
+    expect(view).not.toHaveProperty("reviewerRationale");
+  });
 });
