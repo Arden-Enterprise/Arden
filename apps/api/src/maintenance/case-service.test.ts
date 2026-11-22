@@ -76,7 +76,9 @@ class MemoryMaintenance {
         if (index >= 0) this.cases[index] = structuredClone(row);
       },
       insertNotification: async (notice) => {
-        if (this.notices.some((item) => item.recipientMembershipId === notice.recipientMembershipId && item.logicalKey === notice.logicalKey)) return;
+        if (this.notices.some((item) => item.recipientMembershipId === notice.recipientMembershipId && item.logicalKey === notice.logicalKey)) {
+          throw new Error("duplicate notification key");
+        }
         this.notices.push(notice);
       },
       eligibleReviewers: async (row) => [...this.grants].filter((id) => id !== row.authorMembershipId)
