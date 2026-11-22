@@ -24,7 +24,7 @@ export function ReportIssueDialog({ title, versionLabel, busy, purpose = "report
   const passageId = useId();
   const helpId = useId();
   const errorId = useId();
-  const requestKey = useRef<string | null>(null);
+  const requestKey = useRef<{ payload: string; key: string } | null>(null);
   const [description, setDescription] = useState("");
   const [page, setPage] = useState("");
   const [passage, setPassage] = useState("");
@@ -43,10 +43,12 @@ export function ReportIssueDialog({ title, versionLabel, busy, purpose = "report
       setError("Enter a page from 1 to 10000, or leave it blank.");
       return;
     }
-    requestKey.current ??= crypto.randomUUID();
+    // An unchanged retry reuses its key; edited text is a different report and gets a new key.
+    const payload = JSON.stringify([text, parsedPage ?? null, passage.trim()]);
+    if (requestKey.current?.payload !== payload) requestKey.current = { payload, key: crypto.randomUUID() };
     setError("");
     try {
-      setCaseId(await onSubmit(text, requestKey.current, {
+      setCaseId(await onSubmit(text, requestKey.current.key, {
         page: parsedPage,
         passage: passage.trim() || undefined,
       }));

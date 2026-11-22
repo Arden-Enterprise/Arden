@@ -26,4 +26,10 @@ describe("maintenance lists", () => {
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(retry).toHaveBeenCalledOnce();
   });
+
+  it("counts an Org Admin's unassigned case as unassigned", () => {
+    const adminView: MaintenanceCase = { ...unread, kind: "assigned", caseId: "case-2", assigneeMembershipId: null, unread: false };
+    render(<MaintenanceQueue items={[adminView]} loading={false} error="" onOpen={() => undefined} onRetry={() => undefined} />);
+    expect(screen.getByRole("button", { name: /Open IT Support Guide, Submitted/ })).toBeTruthy();
+  });
 });

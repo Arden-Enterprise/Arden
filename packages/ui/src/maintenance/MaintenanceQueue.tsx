@@ -12,7 +12,8 @@ const filters = [
 function matches(item: MaintenanceCase, filter: (typeof filters)[number]["id"]) {
   if (filter === "all") return true;
   if (filter === "mine") return Boolean(item.canDecide || item.needsReassignment);
-  return item.reporterStatus === "Submitted" && item.kind === "queue";
+  // Claim and reassignment both move a case to In Progress, so Submitted means unassigned for every role.
+  return item.reporterStatus === "Submitted";
 }
 
 function caseTitle(item: MaintenanceCase) {

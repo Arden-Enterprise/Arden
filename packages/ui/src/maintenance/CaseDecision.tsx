@@ -57,9 +57,10 @@ export function CaseDecision({ item, busy, onResolve, onConfirmPublication, onLi
   const notesReady = Boolean(explanation.trim() && rationale.trim());
   const proof = item.publicationProof;
   const applicable = proof?.state === "applicable" && Boolean(proof.publishedVersionId);
-  const linked = Boolean(item.publicationLinkSubmissionId) || (applicable && item.publicationLinkVersionId === proof?.publishedVersionId);
+  const linked = applicable && Boolean(item.publicationReady);
   const help = !notesReady ? `Add both notes before recording ${applicable ? "the outcome" : "no change"}.`
-    : applicable && !linked ? "Link the current publication before recording the outcome." : "This closes the case.";
+    : applicable && !linked ? "Link the applicable publication, or an approved request that produced it, before recording the outcome."
+      : "This closes the case.";
   const noChange = <button type="button" className={applicable ? "secondary-button" : "primary-button"} disabled={busy || !notesReady}
     aria-describedby={helpId} onClick={() => onResolve(explanation.trim(), rationale.trim())}>No change needed</button>;
   return <section className="maintenance-rail-section" aria-labelledby={headingId}>

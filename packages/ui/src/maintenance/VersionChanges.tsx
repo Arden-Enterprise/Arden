@@ -61,14 +61,17 @@ function DiffRow({ row, index, onOpenOriginal }: { row: VersionRow; index: numbe
   </li>;
 }
 
-export function VersionChanges({ comparison, original = null, onOpenOriginal, pair = null, onVersionPair }: {
+export function VersionChanges({ comparison, original = null, onOpenOriginal, pair = null, onVersionPair, onOpenReported }: {
   comparison: Comparison;
   original?: Original;
   onOpenOriginal?: (which: "earlier" | "later") => void;
   pair?: VersionPair | null;
   onVersionPair?: (action: "previous" | "next" | "current") => void;
+  /** Opens the exact reported version when there is no pair to compare. */
+  onOpenReported?: () => void;
 }) {
-  if (!comparison && !original && !pair) return null;
+  const single = !comparison && !pair && Boolean(onOpenReported);
+  if (!comparison && !original && !pair && !single) return null;
   const rows = comparison && !comparison.unavailable ? comparison.rows : null;
   return <section className="maintenance-card maintenance-version-changes" aria-labelledby="version-changes-title">
     <header className="maintenance-card-header">
@@ -77,7 +80,11 @@ export function VersionChanges({ comparison, original = null, onOpenOriginal, pa
         <button type="button" className="maintenance-text-button" onClick={() => onOpenOriginal("earlier")}>Open earlier original</button>
         <button type="button" className="maintenance-text-button" onClick={() => onOpenOriginal("later")}>Open later original</button>
       </div>}
+      {single && <div className="maintenance-card-actions">
+        <button type="button" className="maintenance-text-button" onClick={onOpenReported}>Open reported version</button>
+      </div>}
     </header>
+    {single && !original && <p className="maintenance-card-note">This document has one published version, so there is nothing to compare yet.</p>}
     {pair && <VersionPager pair={pair} onVersionPair={onVersionPair} />}
     {original && <article className="maintenance-original" aria-label={`${original.label} original`}>
       <h4>{original.label}</h4>

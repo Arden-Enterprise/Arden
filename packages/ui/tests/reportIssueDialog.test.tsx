@@ -45,4 +45,24 @@ describe("report an issue dialog", () => {
       page: 4, passage: "Restart the service.",
     });
   });
+
+  it("uses a new request key when the report text changes after a failure", async () => {
+    const keys: string[] = [];
+    const onSubmit = vi.fn(async (_description: string, requestKey: string) => {
+      keys.push(requestKey);
+      if (keys.length === 1) throw new Error("Couldn’t confirm this action.");
+      return "case-3";
+    });
+    render(<ReportIssueDialog title="IT Support Guide" versionLabel="v3" busy={false} onClose={() => undefined}
+      onSubmit={onSubmit} onViewReports={() => undefined} />);
+    const hidden = { hidden: true };
+    fireEvent.change(screen.getByLabelText("What needs attention?", hidden), { target: { value: "Step 3 is wrong." } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit report", ...hidden }));
+    await screen.findByRole("alert", hidden);
+    fireEvent.change(screen.getByLabelText("What needs attention?", hidden), { target: { value: "Step 4 is wrong." } });
+    fireEvent.click(screen.getByRole("button", { name: "Submit report", ...hidden }));
+    await screen.findByRole("status", hidden);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+  });
 });

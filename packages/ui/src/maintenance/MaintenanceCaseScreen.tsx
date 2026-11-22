@@ -19,6 +19,7 @@ export type MaintenanceCaseScreenProps = Omit<CaseRailProps, "item" | "reviewers
   onVersionPair?: (action: "previous" | "next" | "current") => void;
   original?: { unavailable: true; label: string } | { unavailable: false; label: string; text: string } | null;
   onOpenOriginal?: (which: "earlier" | "later") => void;
+  onOpenReported?: () => void;
   relatedCases?: CaseRailProps["relatedCases"];
   reviewers?: CaseRailProps["reviewers"];
   onStartAnalysis?: () => void;
@@ -44,7 +45,7 @@ function AnalysisAction({ run, busy, onStart, onCancel }: { run: AnalysisRun | n
 }
 
 export function MaintenanceCaseScreen({ item, loading, error, onBack, comparison = null, versionPair = null, onVersionPair, original = null,
-  onOpenOriginal, relatedCases = [], reviewers = [], onStartAnalysis, onCancelAnalysis, onOpenCitation, analysis = null, ...rail }: MaintenanceCaseScreenProps) {
+  onOpenOriginal, onOpenReported, relatedCases = [], reviewers = [], onStartAnalysis, onCancelAnalysis, onOpenCitation, analysis = null, ...rail }: MaintenanceCaseScreenProps) {
   if (loading) return <div className="case-state" role="status" aria-busy="true"><span className="case-state-spinner" aria-hidden="true" />Loading case…</div>;
   if (error || !item) return <div className="case-state" role="alert">
     <h2>That case is unavailable</h2>
@@ -63,7 +64,7 @@ export function MaintenanceCaseScreen({ item, loading, error, onBack, comparison
     <BackButton onBack={onBack} />
   </div>;
   const open = item.reporterStatus !== "Resolved";
-  const canAnalyze = Boolean(open && item.canDecide && onStartAnalysis);
+  const canAnalyze = Boolean(open && item.canDecide && item.analysisAvailable !== false && onStartAnalysis);
   return <div className="case-view">
     <article className="case-main" aria-labelledby="maintenance-case-title">
       <header className="case-header">
@@ -86,7 +87,8 @@ export function MaintenanceCaseScreen({ item, loading, error, onBack, comparison
         <blockquote>{item.description}</blockquote>
         <figcaption>{item.kind === "reporter" ? "Your report" : "Reader report"}</figcaption>
       </figure>}
-      <VersionChanges comparison={comparison} original={original} onOpenOriginal={onOpenOriginal} pair={versionPair} onVersionPair={onVersionPair} />
+      <VersionChanges comparison={comparison} original={original} onOpenOriginal={onOpenOriginal} pair={versionPair} onVersionPair={onVersionPair}
+        onOpenReported={item.kind === "reporter" ? undefined : onOpenReported} />
       {item.kind === "assigned" && <Findings run={analysis} onOpenCitation={onOpenCitation}
         action={canAnalyze && <AnalysisAction run={analysis} busy={rail.busy} onStart={onStartAnalysis} onCancel={onCancelAnalysis} />}
         scope={canAnalyze ? analysisScope(versionPair) : undefined} />}

@@ -109,24 +109,31 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
   // Requests may settle after the page (or a test environment) is gone; never update state then.
   const mounted = useRef(false);
   const reportRequest = useRef(0);
+  const selectedDisposition = useRef(disposition);
+  selectedDisposition.current = disposition;
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; reportRequest.current += 1; };
   }, []);
   // A secondary panel: when reports can't be loaded it stays hidden rather than adding an error to Reviews.
+  // Actions call the latest `load`, which always reloads the disposition selected when it runs.
   const load = useCallback(() => {
     const request = ++reportRequest.current;
     const isCurrent = () => mounted.current && reportRequest.current === request;
     setNextCursor(null);
     setLoadingMore(false);
-    if (disposition === "closed") {
+    if (selectedDisposition.current === "closed") {
       void listClosedPublicationReports(platform, organizationId)
         .then((page) => {
           if (!isCurrent()) return;
           setReports(page.items);
           setNextCursor(page.nextCursor);
         })
-        .catch(() => { if (isCurrent()) setReports([]); });
+        .catch((cause: unknown) => {
+          if (!isCurrent()) return;
+          setReports(null);
+          setError(failure(cause, "Couldn’t load closed reports."));
+        });
       return;
     }
     setClosedAvailable(false);
@@ -139,8 +146,8 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
         if (isCurrent()) setClosedAvailable(closedPage.items.length > 0);
       })
       .catch(() => { if (isCurrent()) setReports([]); });
-  }, [platform, organizationId, disposition]);
-  useEffect(() => { load(); }, [load, refreshSignal]);
+  }, [platform, organizationId]);
+  useEffect(() => { load(); }, [load, refreshSignal, disposition]);
   const loadMore = async () => {
     if (!nextCursor || loadingMore) return;
     const request = ++reportRequest.current;
@@ -192,6 +199,8 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
         })}>Import open reports</button>}
     </div>
     {error && <p role="alert" className="knowledge-live-error">{error}</p>}
+    {error && closed && reports === null && <button type="button" className="secondary-button"
+      onClick={() => { setError(""); load(); }}>Retry</button>}
     {message && <p role="status" className="island-meta governance-report-message">{message}</p>}
     <ul className="governance-report-list">
       {(reports ?? []).map((report) => <li key={report.id} className="governance-report">

@@ -84,7 +84,8 @@ describe("maintenance case screen", () => {
 
   it("keeps a published outcome closed until the proof applies and the publication is linked", () => {
     const screenFor = (publicationProof: MaintenanceCase["publicationProof"], publicationLinkVersionId: string | null = null) =>
-      render(<MaintenanceCaseScreen item={{ ...item, publicationProof, publicationLinkVersionId }} history={{ items: [], nextCursor: null }}
+      render(<MaintenanceCaseScreen item={{ ...item, publicationProof, publicationLinkVersionId, publicationReady: publicationLinkVersionId !== null }}
+        history={{ items: [], nextCursor: null }}
         loading={false} error="" busy={false} onBack={() => undefined} onClaim={() => undefined} onResolve={() => undefined}
         onReassign={() => undefined} onMoreHistory={() => undefined} onRetry={() => undefined} />);
     const view = screenFor({ state: "rejected", outcome: null, publishedVersionId: "v3" });
@@ -99,7 +100,7 @@ describe("maintenance case screen", () => {
     fireEvent.change(screen.getByLabelText("Reporter explanation"), { target: { value: "Fixed in version 4." } });
     fireEvent.change(screen.getByLabelText("Reviewer rationale"), { target: { value: "Checked version 4." } });
     expect(screen.getByRole("button", { name: "Record published outcome" }).hasAttribute("disabled")).toBe(true);
-    expect(screen.getByText("Link the current publication before recording the outcome.")).toBeTruthy();
+    expect(screen.getByText(/Link the applicable publication, or an approved request that produced it/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Link current publication" })).toBeTruthy();
     unlinked.unmount();
     screenFor({ state: "applicable", outcome: "UPDATED", publishedVersionId: "v4" }, "v4");

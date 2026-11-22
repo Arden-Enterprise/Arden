@@ -51,4 +51,12 @@ describe("version changes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open later version: Record the ticket number." }));
     expect(open).toHaveBeenCalledWith("later");
   });
+
+  it("opens the reported version when a case has a single published version", () => {
+    const open = vi.fn();
+    render(<VersionChanges comparison={null} onOpenReported={open} />);
+    expect(screen.getByText(/one published version/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open reported version" }));
+    expect(open).toHaveBeenCalledOnce();
+  });
 });

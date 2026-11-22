@@ -12,18 +12,20 @@ export type VersionPair = {
 
 const label = (version: MaintenanceVersion | undefined) => version ? `Version ${version.versionNo}` : null;
 
-export function describeVersionPair(items: MaintenanceVersion[], index: number, reportedVersionId?: string): VersionPair | null {
+export function describeVersionPair(items: MaintenanceVersion[], index: number, reportedVersionId?: string,
+  toIndex = index + 1): VersionPair | null {
   const from = items[index];
-  const to = items[index + 1];
-  if (index < 0 || !from || !to) return null;
+  const to = items[toIndex];
+  if (index < 0 || toIndex <= index || !from || !to) return null;
   const currentIndex = items.findIndex((version) => version.current);
+  const reportedIndex = items.findIndex((version) => version.publishedVersionId === reportedVersionId);
   return {
     earlierLabel: `Version ${from.versionNo}`,
     laterLabel: `Version ${to.versionNo}`,
-    reportedLabel: label(items.find((version) => version.publishedVersionId === reportedVersionId)),
+    reportedLabel: label(items[reportedIndex]),
     currentLabel: label(items[currentIndex]),
     canPrevious: index > 0,
-    canNext: index < items.length - 2,
-    canCompareCurrent: currentIndex > 0 && index !== currentIndex - 1,
+    canNext: toIndex < items.length - 1,
+    canCompareCurrent: reportedIndex >= 0 && currentIndex > reportedIndex && !(index === reportedIndex && toIndex === currentIndex),
   };
 }

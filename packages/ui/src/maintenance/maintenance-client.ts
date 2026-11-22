@@ -21,6 +21,10 @@ export type MaintenanceCase = {
   publicationProof?: { state: "pending" | "applicable" | "rejected" | "upcoming"; outcome: "UPDATED" | "WITHDRAWN" | null; publishedVersionId: string | null };
   publicationLinkVersionId?: string | null;
   publicationLinkSubmissionId?: string | null;
+  /** False when the server has no analysis adapter configured. */
+  analysisAvailable?: boolean;
+  /** The linked evidence names the applicable outcome; the confirmation write uses the same rule. */
+  publicationReady?: boolean;
 };
 export type MaintenanceHistory = {
   items: Array<{ sequence: number; eventType: string; message: string; occurredAt: string }>;

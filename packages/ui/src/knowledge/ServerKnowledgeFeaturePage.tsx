@@ -160,6 +160,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const [versionPair, setVersionPair] = useState<VersionPair | null>(null);
   const maintenanceVersions = useRef<MaintenanceVersion[]>([]);
   const maintenancePairIndex = useRef(0);
+  const maintenancePairTo = useRef(1);
+  // The case the reader asked for, kept even when its first read fails, so Retry reopens that case.
+  const requestedCaseId = useRef<string | null>(null);
+  const historyEpoch = useRef(0);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceError, setMaintenanceError] = useState("");
   const claimKey = useRef<string | null>(null);
@@ -249,17 +253,20 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     finally { setMaintenanceQueueLoading(false); }
   }, [platform, organizationId]);
   const applyVersionPair = useCallback(async (caseId: string, items: MaintenanceVersion[], index: number, request: number,
-    reportedVersionId?: string) => {
+    reportedVersionId?: string, toIndex = index + 1) => {
     if (caseLoad.current.request !== request) return;
-    const pair = describeVersionPair(items, index, reportedVersionId);
+    const pair = describeVersionPair(items, index, reportedVersionId, toIndex);
     const from = items[index];
-    const to = items[index + 1];
+    const to = items[toIndex];
     if (!pair || !from || !to) {
+      maintenancePairIndex.current = Math.max(0, index);
+      maintenancePairTo.current = Math.max(0, index);
       setVersionPair(null);
       setMaintenanceComparison(null);
       return;
     }
     maintenancePairIndex.current = index;
+    maintenancePairTo.current = toIndex;
     setMaintenanceOriginal(null);
     setMaintenanceComparison(null);
     setVersionPair(pair);
@@ -275,11 +282,16 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const moveVersionPair = useCallback((action: "previous" | "next" | "current") => {
     if (!maintenanceCase) return;
     const items = maintenanceVersions.current;
-    const currentIndex = items.findIndex((version) => version.current);
-    const index = action === "previous" ? maintenancePairIndex.current - 1
-      : action === "next" ? maintenancePairIndex.current + 1
-        : Math.max(0, currentIndex - 1);
-    void applyVersionPair(maintenanceCase.caseId, items, index, caseLoad.current.request, maintenanceCase.publishedVersionId);
+    const request = caseLoad.current.request;
+    if (action === "current") {
+      // The reported version against the applicable current version, even when they are not adjacent.
+      const reportedIndex = items.findIndex((version) => version.publishedVersionId === maintenanceCase.publishedVersionId);
+      const currentIndex = items.findIndex((version) => version.current);
+      void applyVersionPair(maintenanceCase.caseId, items, reportedIndex, request, maintenanceCase.publishedVersionId, currentIndex);
+      return;
+    }
+    const index = action === "previous" ? maintenancePairIndex.current - 1 : maintenancePairIndex.current + 1;
+    void applyVersionPair(maintenanceCase.caseId, items, index, request, maintenanceCase.publishedVersionId);
   }, [maintenanceCase, applyVersionPair]);
   const openExactOriginal = useCallback((versionId: string, label: string) => {
     if (!maintenanceCase) return;
@@ -295,14 +307,22 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       .catch(() => { if (caseLoad.current.request === request) setMaintenanceOriginal({ unavailable: true, label }); });
   }, [maintenanceCase, organizationId, platform]);
   const openOriginal = (which: "earlier" | "later") => {
-    const version = maintenanceVersions.current[maintenancePairIndex.current + (which === "later" ? 1 : 0)];
+    const version = maintenanceVersions.current[which === "later" ? maintenancePairTo.current : maintenancePairIndex.current];
     if (version) openExactOriginal(version.publishedVersionId, `Version ${version.versionNo}`);
+  };
+  const openReported = () => {
+    const pinned = maintenanceCase?.publishedVersionId;
+    if (!pinned) return;
+    const version = maintenanceVersions.current.find((item) => item.publishedVersionId === pinned);
+    openExactOriginal(pinned, version ? `Version ${version.versionNo}` : "Reported version");
   };
   const openCitation = (versionId: string) => {
     const version = maintenanceVersions.current.find((item) => item.publishedVersionId === versionId);
     openExactOriginal(versionId, version ? `Version ${version.versionNo}` : "Cited version");
   };
   const openMaintenanceCase = useCallback(async (caseId: string) => {
+    requestedCaseId.current = caseId;
+    historyEpoch.current += 1;
     const request = startCaseLoad(caseLoad.current);
     analysisEpoch.current += 1;
     setMaintenanceLoading(true);
@@ -379,14 +399,37 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       if (caseLoad.current.request === request) setMaintenanceError(errorMessage(caught));
     } finally { if (caseLoad.current.request === request) setMaintenanceLoading(false); }
   }, [platform, organizationId, applyVersionPair]);
-  const refreshMaintenance = useCallback(async (next: MaintenanceCase) => {
-    const request = caseLoad.current.request;
+  /** Applies a write's result only while its own case is still open; `request` is captured when the write starts. */
+  const refreshMaintenance = useCallback(async (next: MaintenanceCase, request: number) => {
+    if (caseLoad.current.request !== request || next.caseId !== requestedCaseId.current) return;
     const history = await listMaintenanceHistory(platform, organizationId, next.caseId);
     const loaded = caseLoadVisible(caseLoad.current, request, next, history);
     if (!loaded) return;
+    historyEpoch.current += 1;
     setMaintenanceCase(loaded.item);
     setMaintenanceHistory(loaded.history);
   }, [platform, organizationId]);
+  const leaveMaintenanceCase = () => {
+    startCaseLoad(caseLoad.current);
+    analysisEpoch.current += 1;
+    requestedCaseId.current = null;
+    setMaintenanceCase(null); setMaintenanceHistory(null); setRelatedCases([]); setMaintenanceComparison(null);
+    setMaintenanceOriginal(null); setVersionPair(null); setReviewerChoices([]); setAnalysisRun(null);
+    setMaintenanceError(""); setMaintenanceLoading(false);
+  };
+  const retryMaintenanceCase = (fallback: () => Promise<void>) => {
+    if (requestedCaseId.current) void openMaintenanceCase(requestedCaseId.current);
+    else void fallback();
+  };
+  /** One case write: stale results and errors never reach a different case opened meanwhile. */
+  const runCaseWrite = (write: () => Promise<MaintenanceCase>, after?: (next: MaintenanceCase, request: number) => Promise<void>) => {
+    const request = caseLoad.current.request;
+    setBusy(true);
+    void write()
+      .then(async (next) => { await refreshMaintenance(next, request); await after?.(next, request); })
+      .catch((caught) => { if (caseLoad.current.request === request) setMaintenanceError(errorMessage(caught)); })
+      .finally(() => setBusy(false));
+  };
   const sendMaintenanceMessage = useCallback(async (text: string) => {
     if (!maintenanceCase?.revision) return;
     const request = caseLoad.current.request;
@@ -399,7 +442,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       }, messageKey.current.key);
       if (caseLoad.current.request !== request) return;
       messageKey.current = null;
-      await refreshMaintenance(next);
+      await refreshMaintenance(next, request);
     } catch (caught) {
       if (caseLoad.current.request === request) setMaintenanceError(errorMessage(caught));
       throw caught;
@@ -741,12 +784,14 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const loadMoreHistory = () => {
     if (!maintenanceCase || !maintenanceHistory?.nextCursor) return;
     const request = caseLoad.current.request;
+    const epoch = historyEpoch.current;
     const caseId = maintenanceCase.caseId;
     const cursor = maintenanceHistory.nextCursor;
     const current = maintenanceHistory.items;
     void listMaintenanceHistory(platform, organizationId, caseId, cursor)
       .then((page) => {
-        if (caseLoad.current.request !== request) return;
+        // A refresh while this page loaded already has newer history; drop the stale page.
+        if (caseLoad.current.request !== request || historyEpoch.current !== epoch) return;
         setMaintenanceHistory({ items: [...current, ...page.items], nextCursor: page.nextCursor });
       })
       .catch((caught) => { if (caseLoad.current.request === request) setMaintenanceError(errorMessage(caught)); });
@@ -765,12 +810,12 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       {error && <p role="alert" className="knowledge-live-error">{error}</p>}
       {loading ? <div className="island island-empty" role="status">Loading documents…</div> : view === "review-queue" && reviewSection === "maintenance" ? <>
         <div className="island-seg maintenance-section-switch" role="group" aria-label="Review sections">
-          <button type="button" aria-pressed={false} onClick={() => { setReviewSection("publication"); setMaintenanceCase(null); }}>Publications</button>
+          <button type="button" aria-pressed={false} onClick={() => { setReviewSection("publication"); leaveMaintenanceCase(); }}>Publications</button>
           <button type="button" aria-pressed={true} onClick={() => setReviewSection("maintenance")}>Maintenance</button>
         </div>
         {maintenanceCase || maintenanceLoading || maintenanceError ? <MaintenanceCaseScreen key={maintenanceCase?.caseId ?? "maintenance-case"} item={maintenanceCase} history={maintenanceHistory}
           comparison={maintenanceComparison} versionPair={versionPair} onVersionPair={moveVersionPair}
-          original={maintenanceOriginal} onOpenOriginal={openOriginal}
+          original={maintenanceOriginal} onOpenOriginal={openOriginal} onOpenReported={openReported}
           loading={maintenanceLoading} error={maintenanceError} busy={busy} reviewers={reviewerChoices}
           analysis={analysisRun}
           onStartAnalysis={() => {
@@ -778,9 +823,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             const request = ++analysisEpoch.current;
             const pinnedVersion = maintenanceCase.publishedVersionId;
             const pairStart = maintenancePairIndex.current;
+            const pairEnd = maintenancePairTo.current;
             const versionIds = maintenanceVersions.current
               .filter((version, index) => version.publishedVersionId === pinnedVersion
-                || (versionPair && (index === pairStart || index === pairStart + 1)))
+                || (versionPair && (index === pairStart || index === pairEnd)))
               .map((version) => version.publishedVersionId);
             if (!versionIds.includes(pinnedVersion)) versionIds.unshift(pinnedVersion);
             const evidence = [maintenanceCase.caseId, ...versionIds].join(":");
@@ -792,9 +838,15 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                 analysisKey.current = null;
                 setAnalysisRun(queued);
                 setBusy(false);
-                const next = await readMaintenanceAnalysis(platform, organizationId, maintenanceCase.caseId);
-                if (analysisEpoch.current !== request) return;
-                setAnalysisRun(next);
+                // Follow the run until it settles; a new case or another start supersedes this loop.
+                for (let attempt = 0; attempt < 40; attempt += 1) {
+                  const next = await readMaintenanceAnalysis(platform, organizationId, maintenanceCase.caseId);
+                  if (analysisEpoch.current !== request) return;
+                  setAnalysisRun(next);
+                  if (next.state !== "queued" && next.state !== "running") return;
+                  await new Promise((resolve) => setTimeout(resolve, 1500));
+                  if (analysisEpoch.current !== request) return;
+                }
               })
               .catch((caught) => { if (analysisEpoch.current === request) setMaintenanceError(errorMessage(caught)); setBusy(false); });
           }}
@@ -813,84 +865,94 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           onOpenRelated={(caseId) => void openMaintenanceCase(caseId)}
           onLinkRelated={(relatedCaseId) => {
             if (!maintenanceCase) return;
+            const caseId = maintenanceCase.caseId;
             linkKey.current ??= crypto.randomUUID();
-            setBusy(true);
-            void linkMaintenanceCase(platform, organizationId, maintenanceCase.caseId, relatedCaseId, linkKey.current)
-              .then(async (next) => {
-                linkKey.current = null;
-                await refreshMaintenance(next);
-                setRelatedCases((await listMaintenanceLinks(platform, organizationId, next.caseId)).items);
-              })
-              .catch((caught) => setMaintenanceError(errorMessage(caught)))
-              .finally(() => setBusy(false));
+            const key = linkKey.current;
+            runCaseWrite(async () => {
+              const next = await linkMaintenanceCase(platform, organizationId, caseId, relatedCaseId, key);
+              linkKey.current = null;
+              return next;
+            }, async (next, request) => {
+              const links = await listMaintenanceLinks(platform, organizationId, next.caseId);
+              if (caseLoad.current.request === request) setRelatedCases(links.items);
+            });
           }}
-          onBack={() => { setMaintenanceCase(null); setMaintenanceHistory(null); setRelatedCases([]); setMaintenanceComparison(null); setVersionPair(null); setReviewerChoices([]); }}
-          onRetry={() => maintenanceCase ? void openMaintenanceCase(maintenanceCase.caseId) : void loadMaintenanceQueue()}
+          onBack={leaveMaintenanceCase}
+          onRetry={() => retryMaintenanceCase(loadMaintenanceQueue)}
           onMoreHistory={loadMoreHistory}
           onAsk={(message) => sendMaintenanceMessage(message)}
           onClaim={() => {
             if (!maintenanceCase?.revision) return;
-            claimKey.current ??= crypto.randomUUID();
-            setBusy(true);
-            void claimMaintenanceCase(platform, organizationId, maintenanceCase.caseId, maintenanceCase.revision, claimKey.current)
-              .then((next) => { claimKey.current = null; return refreshMaintenance(next); })
-              .catch((caught) => setMaintenanceError(errorMessage(caught)))
-              .finally(() => setBusy(false));
+            const { caseId, revision } = maintenanceCase;
+            const key = claimKey.current ??= crypto.randomUUID();
+            runCaseWrite(async () => {
+              const next = await claimMaintenanceCase(platform, organizationId, caseId, revision, key);
+              claimKey.current = null;
+              return next;
+            });
           }}
           onLinkPublicationRequest={(submissionId) => {
             if (!maintenanceCase?.revision) return;
-            publicationRequestKey.current ??= crypto.randomUUID();
-            setBusy(true);
-            void linkMaintenancePublication(platform, organizationId, maintenanceCase.caseId, {
-              expectedRevision: maintenanceCase.revision, submissionId,
-              reason: "The author request applies to this report.",
-            }, publicationRequestKey.current).then((next) => { publicationRequestKey.current = null; return refreshMaintenance(next); })
-              .catch((caught) => setMaintenanceError(errorMessage(caught)))
-              .finally(() => setBusy(false));
+            const { caseId, revision } = maintenanceCase;
+            const key = publicationRequestKey.current ??= crypto.randomUUID();
+            runCaseWrite(async () => {
+              const next = await linkMaintenancePublication(platform, organizationId, caseId, {
+                expectedRevision: revision, submissionId, reason: "The author request applies to this report.",
+              }, key);
+              publicationRequestKey.current = null;
+              return next;
+            });
           }}
           onLinkPublication={() => {
             const evidence = maintenanceCase?.publicationProof?.publishedVersionId;
             if (!maintenanceCase?.revision || !evidence) return;
-            publicationLinkKey.current ??= crypto.randomUUID();
-            setBusy(true);
-            void linkMaintenancePublication(platform, organizationId, maintenanceCase.caseId, {
-              expectedRevision: maintenanceCase.revision, publishedVersionId: evidence,
-              reason: "The current publication applies to this report.",
-            }, publicationLinkKey.current).then((next) => { publicationLinkKey.current = null; return refreshMaintenance(next); })
-              .catch((caught) => setMaintenanceError(errorMessage(caught)))
-              .finally(() => setBusy(false));
+            const { caseId, revision } = maintenanceCase;
+            const key = publicationLinkKey.current ??= crypto.randomUUID();
+            runCaseWrite(async () => {
+              const next = await linkMaintenancePublication(platform, organizationId, caseId, {
+                expectedRevision: revision, publishedVersionId: evidence, reason: "The current publication applies to this report.",
+              }, key);
+              publicationLinkKey.current = null;
+              return next;
+            });
           }}
           onConfirmPublication={(explanation, rationale) => {
             const evidence = maintenanceCase?.publicationProof?.publishedVersionId;
             if (!maintenanceCase?.revision || !evidence) return;
-            publicationKey.current ??= crypto.randomUUID();
-            setBusy(true);
-            void confirmMaintenancePublication(platform, organizationId, maintenanceCase.caseId, {
-              expectedRevision: maintenanceCase.revision, reporterExplanation: explanation, reviewerRationale: rationale,
-              evidencePublishedVersionId: evidence,
-            }, publicationKey.current).then((next) => { publicationKey.current = null; return refreshMaintenance(next); })
-              .catch((caught) => setMaintenanceError(errorMessage(caught)))
-              .finally(() => setBusy(false));
+            const { caseId, revision } = maintenanceCase;
+            const key = publicationKey.current ??= crypto.randomUUID();
+            runCaseWrite(async () => {
+              const next = await confirmMaintenancePublication(platform, organizationId, caseId, {
+                expectedRevision: revision, reporterExplanation: explanation, reviewerRationale: rationale,
+                evidencePublishedVersionId: evidence,
+              }, key);
+              publicationKey.current = null;
+              return next;
+            });
           }}
           onResolve={(explanation, rationale) => {
             if (!maintenanceCase?.revision) return;
-            decisionKey.current ??= crypto.randomUUID();
-            setBusy(true);
-            void resolveMaintenanceCase(platform, organizationId, maintenanceCase.caseId, {
-              expectedRevision: maintenanceCase.revision, reporterExplanation: explanation, reviewerRationale: rationale,
-            }, decisionKey.current).then((next) => { decisionKey.current = null; return refreshMaintenance(next); })
-              .catch((caught) => setMaintenanceError(errorMessage(caught)))
-              .finally(() => setBusy(false));
+            const { caseId, revision } = maintenanceCase;
+            const key = decisionKey.current ??= crypto.randomUUID();
+            runCaseWrite(async () => {
+              const next = await resolveMaintenanceCase(platform, organizationId, caseId, {
+                expectedRevision: revision, reporterExplanation: explanation, reviewerRationale: rationale,
+              }, key);
+              decisionKey.current = null;
+              return next;
+            });
           }}
           onReassign={(membershipId, reason) => {
             if (!maintenanceCase?.revision) return;
-            reassignKey.current ??= crypto.randomUUID();
-            setBusy(true);
-            void reassignMaintenanceCase(platform, organizationId, maintenanceCase.caseId, {
-              expectedRevision: maintenanceCase.revision, membershipId, reason,
-            }, reassignKey.current).then((next) => { reassignKey.current = null; return refreshMaintenance(next); })
-              .catch((caught) => setMaintenanceError(errorMessage(caught)))
-              .finally(() => setBusy(false));
+            const { caseId, revision } = maintenanceCase;
+            const key = reassignKey.current ??= crypto.randomUUID();
+            runCaseWrite(async () => {
+              const next = await reassignMaintenanceCase(platform, organizationId, caseId, {
+                expectedRevision: revision, membershipId, reason,
+              }, key);
+              reassignKey.current = null;
+              return next;
+            });
           }} /> : <MaintenanceQueue items={maintenanceQueue} loading={maintenanceQueueLoading} error={maintenanceQueueError}
             onOpen={(caseId) => void openMaintenanceCase(caseId)} onRetry={() => void loadMaintenanceQueue()} />}
       </> : view === "review-queue" && !review ? <>
@@ -1160,8 +1222,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             onManage={() => setManagingCatalog(true)} onRetry={() => void home.refresh()} />}
         {!managingCatalog && libraryTab === "reports" && <section role="tabpanel" aria-labelledby="home-tab-reports">{maintenanceCase || maintenanceLoading || maintenanceError
           ? <MaintenanceCaseScreen key={maintenanceCase?.caseId ?? "report-case"} item={maintenanceCase} history={maintenanceHistory} loading={maintenanceLoading} error={maintenanceError} busy={busy}
-            onBack={() => { setMaintenanceCase(null); setMaintenanceHistory(null); setRelatedCases([]); setMaintenanceError(""); setReviewerChoices([]); }}
-            onRetry={() => maintenanceCase ? void openMaintenanceCase(maintenanceCase.caseId) : void loadReports()}
+            onBack={leaveMaintenanceCase}
+            onRetry={() => retryMaintenanceCase(loadReports)}
             reviewers={reviewerChoices}
             onAsk={(message) => sendMaintenanceMessage(message)}
             onMoreHistory={loadMoreHistory} onClaim={() => undefined} onResolve={() => undefined} onReassign={() => undefined} />
