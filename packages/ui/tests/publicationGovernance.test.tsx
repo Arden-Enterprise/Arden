@@ -117,9 +117,41 @@ describe("decision 0023 reported problems", () => {
 
   it("stays hidden when there is nothing to show", async () => {
     const list = vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
+    vi.spyOn(api, "listClosedPublicationReports").mockResolvedValue({ items: [], nextCursor: null });
     const { container } = render(createElement(PublicationReportsPanel, { platform: "web", organizationId: "org", departmentName }));
     await waitFor(() => expect(list).toHaveBeenCalled());
     expect(container.innerHTML).toBe("");
+  });
+
+  it("lets reviewers open and page Closed reports when there are no open reports", async () => {
+    vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
+    const first = { ...report, resolution: "DISMISSED" as const };
+    const list = vi.spyOn(api, "listClosedPublicationReports").mockImplementation(async (_platform, _organization, cursor) =>
+      cursor ? { items: [{ ...first, id: "later", message: "Older report" }], nextCursor: null }
+        : { items: [first], nextCursor: first.id });
+    render(createElement(PublicationReportsPanel, { platform: "web", organizationId: "org", departmentName }));
+    fireEvent.click(await screen.findByRole("button", { name: "Closed", exact: true }));
+    fireEvent.click(await screen.findByRole("button", { name: "Load more closed reports" }));
+    expect(await screen.findByText("Older report")).toBeTruthy();
+    expect(screen.getByText("Wrong column")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    expect(list).toHaveBeenLastCalledWith("web", "org", "report");
+  });
+
+  it("clears closed history when paging reports lost access", async () => {
+    vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
+    const first = { ...report, resolution: "DISMISSED" as const };
+    vi.spyOn(api, "listClosedPublicationReports").mockImplementation(async (_platform, _organization, cursor) => {
+      if (cursor) throw new api.ApiError(404, "History is unavailable");
+      return { items: [first], nextCursor: first.id };
+    });
+    render(createElement(PublicationReportsPanel, { platform: "web", organizationId: "org", departmentName }));
+    fireEvent.click(await screen.findByRole("button", { name: "Closed", exact: true }));
+    expect(await screen.findByText(first.message)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Load more closed reports" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("History is unavailable");
+    expect(screen.queryByText(first.message)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Load more closed reports" })).toBeNull();
   });
 
   it("lets the responsible reviewer view the document and dismiss the report", async () => {
@@ -164,6 +196,20 @@ describe("decision 0023 reported problems", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Inspect" }));
     expect(screen.queryByRole("button", { name: "View document" })).toBeNull();
     expect(inspect).toHaveBeenCalledWith("doc", "Salary bands");
+  });
+
+  it("shows a closed report as read-only history", async () => {
+    vi.spyOn(api, "listPublicationReports").mockResolvedValue([report]);
+    const list = vi.spyOn(api, "listClosedPublicationReports").mockResolvedValue({
+      items: [{ ...report, resolution: "DISMISSED", canView: false }], nextCursor: null,
+    });
+    render(createElement(PublicationReportsPanel, { platform: "web", organizationId: "org", departmentName, allowDirectWithdrawal: true }));
+    expect(await screen.findByRole("button", { name: "Dismiss" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Closed" }));
+    expect(await screen.findByText(/Dismissed/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
+    expect(list).toHaveBeenCalledWith("web", "org");
   });
 });
 

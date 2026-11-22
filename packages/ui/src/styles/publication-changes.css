@@ -28,17 +28,21 @@
 .governance-documents { display: grid; gap: 14px; }
 .governance-search { max-width: 360px; }
 .governance-row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.governance-danger-text { color: var(--arden-danger); }
+.governance-danger-text, .arden-app-shell .secondary-button.governance-danger-text { color: var(--arden-danger); }
 .primary-button.governance-danger { background: var(--arden-danger); border-color: var(--arden-danger); }
-.governance-reports { display: grid; gap: 10px; }
-.governance-section-head { display: flex; gap: 8px; align-items: center; }
-.governance-section-head h2 { margin: 0; font-size: 15px; }
-.governance-report-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.governance-report { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: flex-start;
-  padding: 10px 12px; border: 1px solid var(--arden-border, rgba(127, 127, 127, .25)); border-radius: 8px; }
-.governance-report-copy { display: grid; gap: 4px; min-width: 0; flex: 1 1 240px; }
+.arden-app-shell .governance-reports { display: grid; gap: 12px; padding: 16px 18px 18px; }
+.governance-section-head { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.arden-app-shell .governance-section-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.governance-report-filters { margin-left: 6px; }
+.governance-import { margin-left: auto; }
+.governance-report-message { margin: 0; }
+.governance-report-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.governance-report { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: space-between; align-items: center; padding: 14px 0; }
+.governance-report + .governance-report { border-top: 1px solid var(--arden-border); }
+.governance-report-copy { display: grid; gap: 4px; min-width: 0; flex: 1 1 260px; }
+.governance-report-copy strong { color: var(--arden-text-primary); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
 .governance-report-copy p { margin: 0; color: var(--arden-text-primary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
-.governance-report-copy small { color: var(--arden-text-secondary); font-size: 12px; }
+.governance-report-copy small { color: var(--arden-text-muted); font-size: 12px; }
 .governance-report-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .governance-view { display: grid; gap: 12px; min-width: 0; }
 .governance-view-meta { color: var(--arden-text-secondary); font-size: 13px; }

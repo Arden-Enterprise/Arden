@@ -439,6 +439,7 @@ export type PublicationReport = {
   createdAt: string; stillCurrent: boolean;
   /** The actor is the responsible reviewer and can open the responsible view. */
   canView: boolean;
+  resolution?: "DISMISSED" | "WITHDRAWN" | null;
 };
 
 export async function listGovernancePublications(platform: Platform, organizationId: string): Promise<GovernancePublication[]> {
@@ -475,6 +476,14 @@ export async function reportPublicationProblem(platform: Platform, organizationI
 
 export async function listPublicationReports(platform: Platform, organizationId: string): Promise<PublicationReport[]> {
   return (await request<{ items: PublicationReport[] }>(platform, `${knowledgePath(organizationId)}/reports`)).items;
+}
+
+export async function listClosedPublicationReports(platform: Platform, organizationId: string, cursor?: string): Promise<{
+  items: PublicationReport[]; nextCursor: string | null;
+}> {
+  const query = new URLSearchParams({ disposition: "closed" });
+  if (cursor) query.set("cursor", cursor);
+  return request(platform, `${knowledgePath(organizationId)}/reports?${query}`);
 }
 
 export async function dismissPublicationReport(platform: Platform, organizationId: string, reportId: string): Promise<void> {
