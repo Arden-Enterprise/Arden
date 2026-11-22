@@ -771,12 +771,13 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
            WHERE n.organization_id = $1 AND n.event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
              AND n.resource_type = 'PUBLICATION' AND n.resource_id = $2
            ORDER BY n.recipient_membership_id`, [ids.orgA, versionId]));
-      expect(personalShareNotifications.rows).toEqual([
+      expect(personalShareNotifications.rows).toHaveLength(2);
+      expect(personalShareNotifications.rows).toEqual(expect.arrayContaining([
         { event_type: "DOCUMENT_SHARED_PERSONAL", recipient_membership_id: ids.engineerM,
           publication_title: "Published then narrowed", shared_by_name: "Synthetic reader", has_outbox: true },
         { event_type: "DOCUMENT_SHARED_PERSONAL", recipient_membership_id: ids.outsiderM,
           publication_title: "Published then narrowed", shared_by_name: "Synthetic reader", has_outbox: true },
-      ]);
+      ]));
       // The version and content stay; only the readers changed, effective on the next request.
       const see = async (userId: string) => (await repository.getPublishedKnowledge(userId, ids.orgA, versionId))?.id ?? null;
       await expect(see(ids.engineer)).resolves.toBe(versionId);
@@ -799,11 +800,10 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
          WHERE organization_id = $1 AND event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
            AND resource_type = 'PUBLICATION' AND resource_id = $2
          ORDER BY recipient_membership_id`, [ids.orgA, versionId]));
-      expect(afterNarrowingNotifications.rows).toEqual([
-        { event_type: "DOCUMENT_SHARED_PERSONAL", recipient_membership_id: ids.engineerM },
-        { event_type: "DOCUMENT_SHARED_PERSONAL", recipient_membership_id: ids.outsiderM },
-        { event_type: "DOCUMENT_SHARED_PERSONAL", recipient_membership_id: ids.outsiderM },
-      ]);
+      expect(afterNarrowingNotifications.rows).toHaveLength(3);
+      expect(afterNarrowingNotifications.rows.every(row => row.event_type === "DOCUMENT_SHARED_PERSONAL")).toBe(true);
+      expect(afterNarrowingNotifications.rows.map(row => row.recipient_membership_id).sort())
+        .toEqual([ids.engineerM, ids.outsiderM, ids.outsiderM].sort());
       await expect(see(ids.engineer)).resolves.toBeNull();
       await expect(asRuntime(ids.author, ids.orgA, (client) => client.query(
         "SELECT apply_publication_change($1)", [requested.submission.id])))
@@ -834,12 +834,13 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       }>(`SELECT event_type, recipient_membership_id, publication_title, shared_by_name FROM arden_notification
            WHERE organization_id = $1 AND resource_id = $2
            ORDER BY recipient_membership_id`, [ids.orgA, versionId]));
-      expect(groupNotifications.rows).toEqual([
+      expect(groupNotifications.rows).toHaveLength(2);
+      expect(groupNotifications.rows).toEqual(expect.arrayContaining([
         { event_type: "DOCUMENT_SHARED_GROUP", recipient_membership_id: ids.reviewerM,
           publication_title: "Published for group share", shared_by_name: "Synthetic reader" },
         { event_type: "DOCUMENT_SHARED_GROUP", recipient_membership_id: ids.outsiderM,
           publication_title: "Published for group share", shared_by_name: "Synthetic reader" },
-      ]);
+      ]));
     });
 
     it("T6.2: refuses to approve a request whose publication is no longer current", async () => {
