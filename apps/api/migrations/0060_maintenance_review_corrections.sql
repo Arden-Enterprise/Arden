@@ -21,7 +21,8 @@ RETURNS text LANGUAGE sql STABLE SET search_path = arden, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION maintenance_version_reader_mode(uuid) FROM PUBLIC;
 
-CREATE FUNCTION maintenance_reviewer_eligible(p_membership_id uuid, p_version_id uuid)
+-- Grant coverage of one exact version. Decisions add independence from the pinned version's author.
+CREATE FUNCTION maintenance_reviewer_covers(p_membership_id uuid, p_version_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SET search_path = arden, pg_temp AS $$
     SELECT p_membership_id IS NOT NULL AND EXISTS (
         SELECT 1
@@ -34,7 +35,6 @@ RETURNS boolean LANGUAGE sql STABLE SET search_path = arden, pg_temp AS $$
           JOIN reviewer_grant g ON g.reviewer_membership_id = om.membership_id AND g.organization_id = d.organization_id
           LEFT JOIN department dep ON dep.department_id = g.department_id AND dep.organization_id = g.organization_id
          WHERE pv.published_version_id = p_version_id
-           AND p_membership_id IS DISTINCT FROM pv.author_membership_id
            AND g.status = 'ACTIVE' AND g.valid_from <= now() AND (g.valid_until IS NULL OR g.valid_until > now())
            AND pv.classification = ANY(g.classifications)
            AND (pv.classification <> 'RESTRICTED' OR g.level IN ('SPECIALIST', 'SENIOR'))
@@ -44,6 +44,14 @@ RETURNS boolean LANGUAGE sql STABLE SET search_path = arden, pg_temp AS $$
                     THEN g.scope = 'ORGANIZATION'
                     ELSE g.scope = 'DEPARTMENT' AND g.department_id = pv.responsible_department_id
                          AND dep.status = 'ACTIVE' END);
+$$;
+REVOKE ALL ON FUNCTION maintenance_reviewer_covers(uuid, uuid) FROM PUBLIC;
+
+CREATE FUNCTION maintenance_reviewer_eligible(p_membership_id uuid, p_version_id uuid)
+RETURNS boolean LANGUAGE sql STABLE SET search_path = arden, pg_temp AS $$
+    SELECT maintenance_reviewer_covers(p_membership_id, p_version_id)
+       AND NOT EXISTS (SELECT 1 FROM published_knowledge_version pv
+            WHERE pv.published_version_id = p_version_id AND pv.author_membership_id = p_membership_id);
 $$;
 REVOKE ALL ON FUNCTION maintenance_reviewer_eligible(uuid, uuid) FROM PUBLIC;
 
@@ -122,7 +130,8 @@ $$;
 REVOKE ALL ON FUNCTION maintenance_lock_document(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION maintenance_lock_document(uuid) TO arden_runtime;
 
--- Source access is per exact version, inside the caller's organization, for an eligible reviewer only.
+-- Source access is per exact version inside the caller's organization: a reviewer whose grant covers that
+-- version, or its author. Independence is enforced on the case's pinned version, not on comparison versions.
 DROP FUNCTION list_maintenance_document_versions(uuid);
 DROP FUNCTION maintenance_publication_proof(uuid, uuid);
 DROP FUNCTION maintenance_can_read_document_versions(uuid);
@@ -133,7 +142,12 @@ LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = arden, pg_temp AS $$
 DECLARE
     org uuid := NULLIF(current_setting('arden.organization_id', true), '')::uuid;
 BEGIN
-    IF NOT maintenance_reviewer_eligible(governance_actor_membership(org), p_published_version_id) THEN RETURN; END IF;
+    IF NOT maintenance_reviewer_covers(governance_actor_membership(org), p_published_version_id)
+       AND NOT EXISTS (SELECT 1 FROM published_knowledge_version pv
+            WHERE pv.published_version_id = p_published_version_id
+              AND pv.author_membership_id = governance_actor_membership(org)) THEN
+        RETURN;
+    END IF;
     RETURN QUERY
     SELECT pv.shared_draft_id, pv.content_uri, pv.content_hash, COALESCE(s.mime_type, 'text/plain')
       FROM published_knowledge_version pv
