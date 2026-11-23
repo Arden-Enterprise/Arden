@@ -8,6 +8,7 @@ import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataReposi
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
+import { MemoryPrivateOrganizationStore } from "./private-notes/organization.test-support.js";
 import type { InvitationEmail, InvitationMailer } from "./email/smtp-mailer.js";
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
 import { AudienceGroupError, type AudienceGroup, type AudienceGroupStore } from "./audiences/store.js";
@@ -1213,6 +1214,227 @@ describe("API auth and private draft routes", () => {
       payload: { title: "Large", body: "x".repeat(129 * 1024) },
     });
     expect(tooLarge.statusCode).toBe(413);
+  });
+
+  describe("private notes organization, favorites and trash (decision 0029)", () => {
+    const base = `/api/v1/organizations/${organizationId}/private-workspace`;
+    const noteUrl = `${base}/drafts/${draftId}`;
+    async function ownerHeaders() {
+      return { cookie: await desktopSession(app, "owner@example.test"), origin: "http://localhost:5180" };
+    }
+    async function createCollection(headers: Record<string, string>, title: string, parentId: string | null = null) {
+      const response = await app.inject({ method: "POST", url: `${base}/collections`, headers, payload: { title, parentId } });
+      expect(response.statusCode).toBe(201);
+      return response.json() as { id: string; title: string; parentId: string | null };
+    }
+
+    it("creates, renames and nests collections, rejecting a move into itself or a descendant", async () => {
+      const headers = await ownerHeaders();
+      const parent = await createCollection(headers, "  ");
+      expect(parent.title).toBe("Untitled collection");
+      const child = await createCollection(headers, "Child", parent.id);
+      expect(child.parentId).toBe(parent.id);
+
+      const renamed = await app.inject({ method: "PATCH", url: `${base}/collections/${parent.id}`, headers, payload: { title: " Projects " } });
+      expect(renamed.statusCode).toBe(200);
+      expect(renamed.json()).toMatchObject({ id: parent.id, title: "Projects", parentId: null, favoritedAt: null });
+      for (const target of [parent.id, child.id]) {
+        const cycle = await app.inject({ method: "PATCH", url: `${base}/collections/${parent.id}`, headers, payload: { parentId: target } });
+        expect(cycle.statusCode).toBe(409);
+        expect(cycle.json().error.code).toBe("COLLECTION_CYCLE");
+      }
+      const toRoot = await app.inject({ method: "PATCH", url: `${base}/collections/${child.id}`, headers, payload: { parentId: null } });
+      expect(toRoot.json().parentId).toBeNull();
+      expect((await app.inject({ method: "PATCH", url: `${base}/collections/${child.id}`, headers, payload: {} })).statusCode).toBe(400);
+      expect((await app.inject({ method: "POST", url: `${base}/collections`, headers, payload: { title: "Orphan", parentId: otherId } })).statusCode).toBe(404);
+
+      const list = await app.inject({ method: "GET", url: `${base}/collections`, headers });
+      expect(list.statusCode).toBe(200);
+      expect(list.headers["cache-control"]).toBe("no-store");
+      expect(list.json().items.map((item: { title: string }) => item.title).sort()).toEqual(["Child", "Projects"]);
+      expect(repository.privateOrganization.audit.map((event) => event.eventType)).toContain("PRIVATE_COLLECTION_UPDATED");
+      expect(JSON.stringify(repository.privateOrganization.audit)).not.toContain("Projects");
+
+      repository.privateOrganization.collectionLimit = 2;
+      const overLimit = await app.inject({ method: "POST", url: `${base}/collections`, headers, payload: { title: "Third" } });
+      expect(overLimit.statusCode).toBe(409);
+      expect(overLimit.json().error.code).toBe("COLLECTION_LIMIT_REACHED");
+      repository.privateOrganization.collectionLimit = 1_000;
+    });
+
+    it("returns a non-enumerating 404 to another member for every organization route", async () => {
+      const owner = await ownerHeaders();
+      const collection = await createCollection(owner, "Secret plans");
+      const trashed = await app.inject({ method: "POST", url: `${base}/drafts/${draftId}/trash`, headers: owner });
+      const batchId = trashed.json().batchId as string;
+      const other = { cookie: await desktopSession(app, "other@example.test"), origin: "http://localhost:5180" };
+      const attempts = [
+        { method: "PATCH" as const, url: `${base}/collections/${collection.id}`, payload: { title: "Taken" } },
+        { method: "PUT" as const, url: `${base}/collections/${collection.id}/favorite`, payload: { favorite: true } },
+        { method: "POST" as const, url: `${base}/collections/${collection.id}/duplicate` },
+        { method: "POST" as const, url: `${base}/collections/${collection.id}/trash` },
+        { method: "POST" as const, url: `${base}/collections`, payload: { title: "Inside", parentId: collection.id } },
+        { method: "PUT" as const, url: `${noteUrl}/collection`, payload: { collectionId: null } },
+        { method: "PUT" as const, url: `${noteUrl}/favorite`, payload: { favorite: true } },
+        { method: "POST" as const, url: `${noteUrl}/duplicate` },
+        { method: "POST" as const, url: `${noteUrl}/trash` },
+        { method: "POST" as const, url: `${base}/trash/${batchId}/restore` },
+        { method: "POST" as const, url: `${base}/trash/${batchId}/purge` },
+      ];
+      for (const attempt of attempts) {
+        const response = await app.inject({ ...attempt, headers: other });
+        expect(response.statusCode, `${attempt.method} ${attempt.url}`).toBe(404);
+        expect(response.json().error.code).toBe("RESOURCE_NOT_AVAILABLE");
+      }
+      for (const url of [`${base}/collections`, `${base}/trash`]) {
+        const response = await app.inject({ method: "GET", url, headers: other });
+        expect(response.statusCode).toBe(200);
+        expect(response.json().items).toEqual([]);
+      }
+      const foreign = await app.inject({ method: "GET", url: `/api/v1/organizations/${otherOrganizationId}/private-workspace/trash`, headers: owner });
+      expect(foreign.statusCode).toBe(404);
+      expect(repository.privateOrganization.isActiveCollection(collection.id)).toBe(true);
+      expect((await app.inject({ method: "GET", url: `${base}/trash`, headers: owner })).json().items).toHaveLength(1);
+    });
+
+    it("moves notes between collections and root, and favorites notes and collections idempotently", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const collection = await createCollection(headers, "Research");
+      const moved = await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id } });
+      expect(moved.statusCode).toBe(200);
+      expect(moved.json()).toMatchObject({ id: draftId, collectionId: collection.id, favoritedAt: null,
+        currentVersion: { id: versionId, version: 2, mimeType: "text/plain" } });
+      const read = await app.inject({ method: "GET", url: noteUrl, headers });
+      expect(read.json()).toMatchObject({ collectionId: collection.id, favoritedAt: null });
+
+      const first = await app.inject({ method: "PUT", url: `${noteUrl}/favorite`, headers, payload: { favorite: true } });
+      const second = await app.inject({ method: "PUT", url: `${noteUrl}/favorite`, headers, payload: { favorite: true } });
+      expect(first.json().favoritedAt).not.toBeNull();
+      expect(second.json().favoritedAt).toBe(first.json().favoritedAt);
+      const list = await app.inject({ method: "GET", url: `${base}/drafts`, headers });
+      expect(list.json().items[0]).toMatchObject({ id: draftId, collectionId: collection.id, favoritedAt: first.json().favoritedAt });
+      expect((await app.inject({ method: "PUT", url: `${noteUrl}/favorite`, headers, payload: { favorite: false } })).json().favoritedAt).toBeNull();
+      const favoriteCollection = await app.inject({ method: "PUT", url: `${base}/collections/${collection.id}/favorite`, headers, payload: { favorite: true } });
+      expect(favoriteCollection.json().favoritedAt).not.toBeNull();
+      expect((await app.inject({ method: "PUT", url: `${noteUrl}/favorite`, headers, payload: { favorite: "yes" } })).statusCode).toBe(400);
+
+      const toRoot = await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: null } });
+      expect(toRoot.json().collectionId).toBeNull();
+      await app.inject({ method: "POST", url: `${base}/collections/${collection.id}/trash`, headers });
+      expect((await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id } })).statusCode).toBe(404);
+      expect((await app.inject({ method: "POST", url: `${base}/collections`, headers, payload: { title: "Nested", parentId: collection.id } })).statusCode).toBe(404);
+      const created = await app.inject({ method: "POST", url: `${base}/drafts`, headers, payload: { title: "New", body: "Body", collectionId: collection.id } });
+      expect(created.statusCode).toBe(404);
+    });
+
+    it("hides a trashed note from get, patch, list and contribution, and restores it to the root when its collection is gone", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      let tick = Date.parse("2026-11-01T00:00:00.000Z");
+      repository.privateOrganization.now = () => new Date(tick += 1_000);
+      const headers = await ownerHeaders();
+      const collection = await createCollection(headers, "Archive");
+      await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id } });
+      const trashed = await app.inject({ method: "POST", url: `${noteUrl}/trash`, headers });
+      expect(trashed.statusCode).toBe(200);
+      const entry = trashed.json();
+      expect(entry).toMatchObject({ kind: "note", id: draftId, title: "Review notes", fromCollectionTitle: "Archive", itemCount: 1 });
+      expect(Date.parse(entry.purgeAfter) - Date.parse(entry.trashedAt)).toBe(30 * 24 * 60 * 60 * 1000);
+
+      expect((await app.inject({ method: "GET", url: noteUrl, headers })).statusCode).toBe(404);
+      expect((await app.inject({ method: "PATCH", url: noteUrl, headers: { ...headers, "if-match": '"2"' }, payload: { body: "Edited" } })).statusCode).toBe(404);
+      expect((await app.inject({ method: "POST", url: `${noteUrl}/trash`, headers })).statusCode).toBe(404);
+      expect((await app.inject({ method: "POST", url: `${noteUrl}/duplicate`, headers })).statusCode).toBe(404);
+      expect((await app.inject({ method: "GET", url: `${base}/drafts`, headers })).json().items).toEqual([]);
+      const contribute = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/knowledge/drafts`,
+        headers: { ...headers, "idempotency-key": createKey }, payload: { sourcePrivateVersionId: versionId, classification: "INTERNAL" } });
+      expect(contribute.statusCode).toBe(404);
+      expect(repository.sharedDraft).toBeNull();
+
+      const collectionTrash = await app.inject({ method: "POST", url: `${base}/collections/${collection.id}/trash`, headers });
+      expect(collectionTrash.json()).toMatchObject({ kind: "collection", itemCount: 1, fromCollectionTitle: null });
+      const trash = await app.inject({ method: "GET", url: `${base}/trash`, headers });
+      expect(trash.json().items.map((item: { kind: string }) => item.kind)).toEqual(["collection", "note"]);
+
+      const restored = await app.inject({ method: "POST", url: `${base}/trash/${entry.batchId}/restore`, headers });
+      expect(restored.statusCode).toBe(200);
+      expect(restored.json().notes).toEqual([expect.objectContaining({ id: draftId, collectionId: null })]);
+      expect((await app.inject({ method: "GET", url: noteUrl, headers })).json()).toMatchObject({ body: "Private body", collectionId: null });
+      expect((await app.inject({ method: "POST", url: `${base}/trash/${entry.batchId}/restore`, headers })).statusCode).toBe(404);
+    });
+
+    it("restores a trashed collection with its subtree into its still-active parent", async () => {
+      const headers = await ownerHeaders();
+      const parent = await createCollection(headers, "Parent");
+      const child = await createCollection(headers, "Child", parent.id);
+      await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: child.id } });
+      const trashed = await app.inject({ method: "POST", url: `${base}/collections/${child.id}/trash`, headers });
+      expect(trashed.json()).toMatchObject({ kind: "collection", id: child.id, fromCollectionTitle: "Parent", itemCount: 2 });
+      expect((await app.inject({ method: "GET", url: `${base}/collections`, headers })).json().items).toHaveLength(1);
+      const restored = await app.inject({ method: "POST", url: `${base}/trash/${trashed.json().batchId}/restore`, headers });
+      expect(restored.json().collections).toEqual([expect.objectContaining({ id: child.id, parentId: parent.id })]);
+      expect(restored.json().notes).toEqual([expect.objectContaining({ id: draftId, collectionId: child.id })]);
+    });
+
+    it("duplicates a note into a new content object and a collection with its whole subtree", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const duplicate = await app.inject({ method: "POST", url: `${noteUrl}/duplicate`, headers });
+      expect(duplicate.statusCode).toBe(201);
+      expect(duplicate.headers.etag).toBe('"1"');
+      expect(duplicate.json()).toMatchObject({ title: "Review notes (copy)", body: "Private body", version: 1, collectionId: null });
+      expect(duplicate.json().id).not.toBe(draftId);
+      const copied = repository.privateOrganization.notes.get(duplicate.json().id)?.content();
+      expect(copied?.sourceUri).not.toBe(repository.currentSource.sourceUri);
+      expect(await storage.read(copied!.sourceUri, copied!.contentHash)).toBe("Private body");
+
+      const root = await createCollection(headers, "Team");
+      const nested = await createCollection(headers, "Nested", root.id);
+      await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: nested.id } });
+      const copy = await app.inject({ method: "POST", url: `${base}/collections/${root.id}/duplicate`, headers });
+      expect(copy.statusCode).toBe(201);
+      const result = copy.json();
+      expect(result.collection).toMatchObject({ title: "Team (copy)", parentId: null });
+      expect(result.collections).toHaveLength(2);
+      const nestedCopy = result.collections.find((item: { title: string }) => item.title === "Nested");
+      expect(nestedCopy.parentId).toBe(result.collection.id);
+      expect(result.notes).toEqual([expect.objectContaining({ title: "Review notes", collectionId: nestedCopy.id })]);
+      const copiedNote = repository.privateOrganization.notes.get(result.notes[0].id)?.content();
+      expect(copiedNote?.sourceUri).not.toBe(repository.currentSource.sourceUri);
+      expect(await storage.read(copiedNote!.sourceUri, copiedNote!.contentHash)).toBe("Private body");
+      expect(repository.privateOrganization.notes.get(draftId)?.collectionId).toBe(nested.id);
+    });
+
+    it("purges a batch permanently: content objects are erased and the items never appear again", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const collection = await createCollection(headers, "Old");
+      await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id } });
+      const trashed = await app.inject({ method: "POST", url: `${base}/collections/${collection.id}/trash`, headers });
+      const purge = await app.inject({ method: "POST", url: `${base}/trash/${trashed.json().batchId}/purge`, headers });
+      expect(purge.statusCode).toBe(204);
+      await expect(storage.read(repository.currentSource.sourceUri, repository.currentSource.contentHash)).rejects.toThrow();
+      expect(repository.privateOrganization.notes.get(draftId)).toMatchObject({ status: "PURGED", title: "", contentPurged: true });
+      expect((await app.inject({ method: "GET", url: `${base}/trash`, headers })).json().items).toEqual([]);
+      expect((await app.inject({ method: "GET", url: `${base}/collections`, headers })).json().items).toEqual([]);
+      expect((await app.inject({ method: "GET", url: noteUrl, headers })).statusCode).toBe(404);
+      expect((await app.inject({ method: "POST", url: `${base}/trash/${trashed.json().batchId}/restore`, headers })).statusCode).toBe(404);
+      expect((await app.inject({ method: "POST", url: `${base}/trash/${trashed.json().batchId}/purge`, headers })).statusCode).toBe(404);
+      const audit = repository.privateOrganization.audit.find((event) => event.eventType === "PRIVATE_ITEM_PURGED");
+      expect(audit?.details).toMatchObject({ itemCount: 2 });
+      expect(JSON.stringify(repository.privateOrganization.audit)).not.toMatch(/Old|Review notes|Private body/);
+    });
+
+    it("keeps the purge committed and reports success when content erasure fails", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const trashed = await app.inject({ method: "POST", url: `${noteUrl}/trash`, headers });
+      vi.spyOn(storage, "remove").mockRejectedValueOnce(new Error("disk unavailable"));
+      const purge = await app.inject({ method: "POST", url: `${base}/trash/${trashed.json().batchId}/purge`, headers });
+      expect(purge.statusCode).toBe(204);
+      expect(repository.privateOrganization.notes.get(draftId)).toMatchObject({ status: "PURGED", contentPurged: false });
+      expect((await app.inject({ method: "GET", url: noteUrl, headers })).statusCode).toBe(404);
+    });
   });
 
   it("creates an independent shared copy of the author's private version and replays the same request", async () => {
@@ -2487,6 +2709,11 @@ class MemoryRepository implements ArdenDataRepository {
   readonly conversations = new MemoryConversationStore();
   readonly audienceGroups: AudienceGroupStore = new MemoryAudienceGroupStore();
   readonly systemAdministration: SystemAdministrationStore = new MemorySystemAdministrationStore();
+  readonly privateOrganization = new MemoryPrivateOrganizationStore({ organizationId, ownerId, memberIds: [otherId] });
+  constructor() {
+    this.privateOrganization.addNote({ id: draftId, title: "Review notes",
+      content: () => ({ versionId, version: this.currentVersion, ...this.currentSource }) });
+  }
   createdOrganization: { userId: string; email: string; name: string } | null = null;
   pendingInvitation: { invitationId: string; email: string; tokenHash: string; expiresAt: Date; accepted: boolean } | null = null;
   currentBody = "Private body";
@@ -2607,17 +2834,18 @@ class MemoryRepository implements ArdenDataRepository {
 
   async listDrafts(userId: string, requestedOrganization: string, _limit: number, _cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId) return null;
-    const note = this.note();
-    return { items: [{ id: note.id, organizationId, title: note.title, currentVersion: note.currentVersion, createdAt: note.createdAt, updatedAt: note.updatedAt }], nextCursor: null };
+    return { items: this.privateOrganization.activeNotes(), nextCursor: null };
   }
 
   async getDraft(userId: string, requestedOrganization: string, requestedDraft: string): Promise<PrivateDraft | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId || requestedDraft !== draftId) return null;
+    if (this.privateOrganization.hidden(draftId)) return null;
     return this.note();
   }
 
   async getPrivateContributionSource(userId: string, requestedOrganization: string, requestedVersion: string): Promise<PrivateContributionSource | null> {
     if (userId !== ownerId || requestedOrganization !== organizationId || requestedVersion !== versionId) return null;
+    if (this.privateOrganization.hidden(draftId)) return null;
     return {
       versionId, organizationId, ownerMembershipId: ownerId, title: "Review notes",
       sourceUri: this.currentSource.sourceUri, mimeType: this.currentSource.mimeType, contentHash: this.currentSource.contentHash,
@@ -3022,17 +3250,20 @@ class MemoryRepository implements ArdenDataRepository {
 
   async createDraft(_userId: string, requestedOrganization: string, write: DraftWrite, content: StoredContentFields): Promise<PrivateDraft | null> {
     if (requestedOrganization !== organizationId) return null;
+    if (write.collectionId && !this.privateOrganization.isActiveCollection(write.collectionId)) return null;
     this.currentBody = write.body;
     this.currentVersion = 1;
     this.currentSource = content;
-    return { ...this.note(), title: write.title };
+    return { ...this.note(), title: write.title, collectionId: write.collectionId ?? null };
   }
 
   async canUpdateDraft(userId: string, requestedOrganization: string, requestedDraft: string): Promise<boolean> {
-    return userId === ownerId && requestedOrganization === organizationId && requestedDraft === draftId;
+    return userId === ownerId && requestedOrganization === organizationId && requestedDraft === draftId
+      && !this.privateOrganization.hidden(draftId);
   }
 
   async updateDraft(_userId: string, _organization: string, _draft: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }> {
+    if (this.privateOrganization.hidden(draftId)) return { kind: "not-found" };
     if (expectedVersion !== this.currentVersion) return { kind: "conflict", currentVersion: this.currentVersion };
     this.currentVersion += 1;
     if (patch.body !== undefined) {
@@ -3049,6 +3280,8 @@ class MemoryRepository implements ArdenDataRepository {
       sourceUri: this.currentSource.sourceUri, mimeType: this.currentSource.mimeType,
       contentHash: this.currentSource.contentHash, currentVersion: this.currentVersion,
       createdAt: new Date("2026-10-05T09:00:00.000Z"), updatedAt: new Date("2026-10-05T09:00:00.000Z"),
+      collectionId: this.privateOrganization.notes.get(draftId)?.collectionId ?? null,
+      favoritedAt: this.privateOrganization.notes.get(draftId)?.favoritedAt ?? null,
     };
   }
 }

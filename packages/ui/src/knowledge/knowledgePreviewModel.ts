@@ -130,5 +130,3 @@ export function reduceKnowledgePreview(state: KnowledgePreviewState, action: Kno
 export function formatSampleVersion(version: number): string {
   return `v${Math.floor(version / 10)}.${version % 10}`;
 }
-
-

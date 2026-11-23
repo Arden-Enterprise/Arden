@@ -1,0 +1,24 @@
+# Harness check that runs against the current (pre-feature) UI: the demo
+# session opens and the Private Notes page loads. It also probes that Maestro
+# web resolves an icon button by its aria-label ("New private note"), which the
+# feature flows rely on ("More actions for <title>", "Add a note to <title>").
+# This flow targets the old Private Notes page and may need updating once the
+# sidebar tree replaces it.
+url: http://127.0.0.1:5180/?preview=1
+name: Smoke - Private Notes page opens in demo mode
+tags:
+  - smoke
+---
+- runFlow: ../subflows/login-demo.yaml
+- tapOn: "Private Notes"
+# Sidebar item + page heading.
+- extendedWaitUntil:
+    visible:
+      text: "Private Notes"
+      index: 1
+    timeout: 10000
+# Icon-only button, resolvable only through its aria-label. Maestro web
+# exposes aria-label/title/id as `resource-id`, so it needs `id:`, not text.
+- assertVisible:
+    id: "New private note"
+- takeScreenshot: smoke-private-notes-page

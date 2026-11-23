@@ -84,4 +84,3 @@ describe("synthetic knowledge governance preview", () => {
     expect(state.publication?.draft.title).toBe("API Gateway Runbook");
   });
 });
-

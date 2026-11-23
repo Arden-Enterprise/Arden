@@ -1,0 +1,38 @@
+# F03-ORG-AC2: create a note inside a collection with the collection "+".
+url: http://127.0.0.1:5180/?preview=1
+name: Private Notes - create a note inside a collection
+tags:
+  - private-notes
+  - f03-org
+---
+- runFlow: subflows/login-demo.yaml
+
+- runFlow:
+    file: subflows/create-collection.yaml
+    env:
+      NAME: QA Research
+- tapOn:
+    id: "Add a note to QA Research"
+- runFlow:
+    file: subflows/name-new-item.yaml
+    env:
+      NAME: QA Interview notes
+- assertVisible: "QA Interview notes"
+
+# The note is nested under the collection row in the tree.
+- assertVisible:
+    text: "QA Interview notes"
+    below: "QA Research"
+
+# "Move to" marks the note's current location.
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Interview notes
+- tapOn: "Move to"
+- assertVisible:
+    text: "Current"
+    rightOf: "QA Research"
+- tapOn:
+    point: "60%,92%"  # close the menu by clicking outside (Escape key is not supported by Maestro web)
+- takeScreenshot: 02-note-in-collection

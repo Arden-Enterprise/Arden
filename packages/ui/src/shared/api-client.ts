@@ -545,6 +545,7 @@ const userErrorMessages: Record<string, string> = {
   SOURCE_NOT_SUPPORTED: "Couldn’t copy this note.",
   IDEMPOTENCY_CONFLICT: "Request changed. Reopen to try again.",
   INVALID_EMAIL: "Enter a valid email address.",
+  COLLECTION_CYCLE: "A collection can’t move into itself or a collection inside it.",
 };
 
 export class ApiError extends Error {
@@ -802,7 +803,7 @@ type ApiResponse = { status: number; body: string; etag?: string; location?: str
 
 async function request<T>(platform: Platform, path: string, init: RequestInit = {}, timeoutMs?: number): Promise<T> {
   const rawMethod = init.method ?? "GET";
-  if (rawMethod !== "GET" && rawMethod !== "POST" && rawMethod !== "PATCH") {
+  if (rawMethod !== "GET" && rawMethod !== "POST" && rawMethod !== "PATCH" && rawMethod !== "PUT") {
     throw new ApiError(0, "This request method is not available in the Arden client.");
   }
   const method = rawMethod;

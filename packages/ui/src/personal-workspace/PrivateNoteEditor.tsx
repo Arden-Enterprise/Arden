@@ -13,6 +13,8 @@ type PrivateNoteEditorProps = {
   onTitleChange: (value: string) => void;
   onBodyChange: (value: string) => void;
   entering?: boolean;
+  /** Location trail shown above the title. */
+  header?: ReactNode;
 };
 
 export function PrivateNoteEditor({
@@ -25,6 +27,7 @@ export function PrivateNoteEditor({
   onTitleChange,
   onBodyChange,
   entering = false,
+  header,
 }: PrivateNoteEditorProps) {
   const titleRef = useAutosizeTextarea(draftTitle, 40);
 
@@ -34,6 +37,7 @@ export function PrivateNoteEditor({
         <>
           <div className="private-editor-toolbar" role="toolbar" aria-label="Note actions">{toolbar}</div>
           <div className="note-editor-page">
+            {header}
             <label className="editor-title-label">
               <span className="sr-only">Note title</span>
               <textarea

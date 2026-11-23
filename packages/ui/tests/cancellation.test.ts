@@ -129,16 +129,19 @@ describe("explicit cancellation", () => {
   it("returns focus to creating a note when the last unsaved note is discarded", async () => {
     function Notes() {
       const controller = usePrivateNotes([]);
-      return createElement(PersonalWorkspacePage, {
-        controller, platform: "web", organizationId: "org", contributionAttempt: null,
-        onContributionAttemptChange: vi.fn(), onKnowledgeDraftCreated: vi.fn(), contextOpen: false, onToggleContext: vi.fn(),
-      });
+      // A never-saved local note (the controller API still offers one); the visible buttons create saved notes.
+      return createElement("div", null,
+        createElement("button", { type: "button", onClick: () => controller.createNote() }, "Start local note"),
+        createElement(PersonalWorkspacePage, {
+          controller, platform: "web", organizationId: "org", contributionAttempt: null,
+          onContributionAttemptChange: vi.fn(), onKnowledgeDraftCreated: vi.fn(), contextOpen: false, onToggleContext: vi.fn(),
+        }));
     }
     render(createElement(Notes));
-    fireEvent.click(screen.getByLabelText("New private note"));
+    fireEvent.click(screen.getByRole("button", { name: "Start local note" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard changes" }));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("New private note")));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "New note" })));
     expect(screen.queryByRole("textbox", { name: "Note content" })).toBeNull();
   });
 

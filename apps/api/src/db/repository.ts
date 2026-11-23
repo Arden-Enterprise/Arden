@@ -9,6 +9,8 @@ import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
+import { PgPrivateOrganizationStore, isActiveCollection, lockTree, type PrivateOrganizationStore,
+  type PrivateTrashRetentionStore } from "../private-notes/organization-store.js";
 import type { MaintenancePort } from "../maintenance/case-service.js";
 import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
@@ -41,10 +43,22 @@ export type PrivateDraft = {
   currentVersion: number;
   createdAt: Date;
   updatedAt: Date;
+  collectionId: string | null;
+  favoritedAt: Date | null;
 };
 
-export type DraftListItem = Omit<PrivateDraft, "versionId" | "sourceUri" | "mimeType" | "contentHash">;
-export type DraftWrite = { title: string; body: string };
+/** Decision 0029 note summary; trashed and purged notes are never listed. */
+export type DraftListItem = {
+  id: string;
+  organizationId: string;
+  title: string;
+  currentVersion: { id: string; version: number; mimeType: string; contentHash: string };
+  createdAt: Date;
+  updatedAt: Date;
+  collectionId: string | null;
+  favoritedAt: Date | null;
+};
+export type DraftWrite = { title: string; body: string; collectionId?: string | null };
 export type DraftPatch = { title?: string; body?: string };
 export type PrivateContributionSource = {
   versionId: string;
@@ -626,6 +640,7 @@ export interface ArdenDataRepository {
   readonly audienceGroups?: AudienceGroupStore;
   readonly systemAdministration?: SystemAdministrationStore;
   readonly maintenance?: MaintenancePort;
+  readonly privateOrganization: PrivateOrganizationStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
   createOrganization(userId: string, email: string, fullName: string | null, setup: OrganizationSetup, requestId: string): Promise<CreatedOrganization>;
@@ -760,6 +775,9 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly audienceGroups: AudienceGroupStore;
   readonly systemAdministration: SystemAdministrationStore;
   readonly maintenance: MaintenancePort;
+  readonly privateOrganization: PgPrivateOrganizationStore;
+  /** System-only retention capability for the in-process 30-day purge loop. */
+  readonly privateTrashRetention: PrivateTrashRetentionStore;
   constructor(private readonly pool: Pool, content?: { read(sourceUri: string, expectedHash: string): Promise<string> }) {
     this.notifications = new PgNotificationStore((user, org, work) => this.withActorContext(user, org, work));
     this.readerSources = new PgReaderSourceStore((user, org, work) => this.withActorContext(user, org, work));
@@ -769,6 +787,9 @@ export class ArdenRepository implements ArdenDataRepository {
     this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.systemAdministration = new PgSystemAdministrationStore((user, work) => this.withSystemAdmin(user, work));
     this.maintenance = new PgMaintenanceStore((user, org, work) => this.withActorContext(user, org, work), content);
+    this.privateOrganization = new PgPrivateOrganizationStore((user, org, work) => this.withActorContext(user, org, work),
+      (work) => this.withPrivateTrashRetention(work));
+    this.privateTrashRetention = this.privateOrganization;
   }
 
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
@@ -1452,26 +1473,35 @@ export class ArdenRepository implements ArdenDataRepository {
       draft_id: string;
       title: string;
       current_version_no: number;
+      draft_version_id: string;
+      mime_type: string;
+      content_hash: string;
       created_at: Date;
       updated_at: Date;
+      collection_id: string | null;
+      favorited_at: Date | null;
     }>(`
-      SELECT d.draft_id, d.title, d.current_version_no, d.created_at, d.updated_at
+      SELECT d.draft_id, d.title, d.current_version_no, v.draft_version_id, v.mime_type, v.content_hash,
+             d.created_at, d.updated_at, d.collection_id, d.favorited_at
         FROM draft_document d
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
-       WHERE w.membership_id = $1 AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
+        JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
+       WHERE w.membership_id = $1 AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
          AND ($2::timestamptz IS NULL OR (d.updated_at, d.draft_id) < ($2, $3::uuid))
        ORDER BY d.updated_at DESC, d.draft_id DESC
        LIMIT $4`, [membershipId, cursor?.updatedAt ?? null, cursor?.draftId ?? null, limit + 1]);
 
     const hasNextPage = result.rows.length > limit;
     const page = hasNextPage ? result.rows.slice(0, limit) : result.rows;
-    const items = page.map((row) => ({
+    const items: DraftListItem[] = page.map((row) => ({
       id: row.draft_id,
       organizationId,
       title: row.title,
-      currentVersion: row.current_version_no,
+      currentVersion: { id: row.draft_version_id, version: row.current_version_no, mimeType: row.mime_type, contentHash: row.content_hash },
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      collectionId: row.collection_id,
+      favoritedAt: row.favorited_at,
     }));
     const last = page.at(-1);
     return {
@@ -1493,15 +1523,17 @@ export class ArdenRepository implements ArdenDataRepository {
       current_version_no: number;
       created_at: Date;
       updated_at: Date;
+      collection_id: string | null;
+      favorited_at: Date | null;
     }>(`
       SELECT d.draft_id, v.draft_version_id, d.title, v.source_uri, v.mime_type, v.content_hash,
-             d.current_version_no, d.created_at, d.updated_at
+             d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at
         FROM draft_document d
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
         JOIN organization_membership om ON om.membership_id = w.membership_id
         JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
        WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
-         AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
+         AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
          AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ"]);
     const row = result.rows[0];
     return row ? {
@@ -1515,6 +1547,8 @@ export class ArdenRepository implements ArdenDataRepository {
       currentVersion: row.current_version_no,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+      collectionId: row.collection_id,
+      favoritedAt: row.favorited_at,
     } : null;
     });
   }
@@ -2626,11 +2660,17 @@ export class ArdenRepository implements ArdenDataRepository {
          WHERE membership_id = $1 AND status = 'ACTIVE'`, [membershipId]);
       const workspaceId = workspace.rows[0]?.workspace_id;
       if (!workspaceId) return null;
+      const collectionId = write.collectionId ?? null;
+      if (collectionId) {
+        // Serialize with trash/restore so a note never lands in a collection being trashed.
+        await lockTree(client, workspaceId);
+        if (!await isActiveCollection(client, workspaceId, collectionId)) return null;
+      }
 
       const draft = await client.query<{ draft_id: string; created_at: Date; updated_at: Date }>(`
-        INSERT INTO draft_document (workspace_id, title, current_version_no)
-        VALUES ($1, $2, 1)
-        RETURNING draft_id, created_at, updated_at`, [workspaceId, write.title]);
+        INSERT INTO draft_document (workspace_id, title, current_version_no, collection_id)
+        VALUES ($1, $2, 1, $3)
+        RETURNING draft_id, created_at, updated_at`, [workspaceId, write.title, collectionId]);
       const created = draft.rows[0];
       if (!created) throw new Error("Draft insert returned no row");
       const versionResult = await client.query<{ draft_version_id: string }>(`
@@ -2651,6 +2691,8 @@ export class ArdenRepository implements ArdenDataRepository {
         currentVersion: 1,
         createdAt: created.created_at,
         updatedAt: created.updated_at,
+        collectionId,
+        favoritedAt: null,
       };
     });
   }
@@ -2662,7 +2704,7 @@ export class ArdenRepository implements ArdenDataRepository {
       JOIN private_workspace w ON w.workspace_id = d.workspace_id
       JOIN organization_membership om ON om.membership_id = w.membership_id
      WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
-       AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
+       AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
        AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
     return result.rowCount === 1;
     });
@@ -2677,7 +2719,7 @@ export class ArdenRepository implements ArdenDataRepository {
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
         JOIN organization_membership om ON om.membership_id = w.membership_id
         WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
-          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
+          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
           AND ${membershipPermissionSql("$4")}
         FOR UPDATE OF d`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_WRITE"]);
       if (!locked.rowCount) return { kind: "not-found" };
@@ -2691,9 +2733,11 @@ export class ArdenRepository implements ArdenDataRepository {
         current_version_no: number;
         created_at: Date;
         updated_at: Date;
+        collection_id: string | null;
+        favorited_at: Date | null;
       }>(`
         SELECT om.membership_id, d.title, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash,
-               d.current_version_no, d.created_at, d.updated_at
+               d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at
           FROM draft_document d
           JOIN private_workspace w ON w.workspace_id = d.workspace_id
           JOIN organization_membership om ON om.membership_id = w.membership_id
@@ -2740,6 +2784,8 @@ export class ArdenRepository implements ArdenDataRepository {
           currentVersion: version,
           createdAt: timestamps.created_at,
           updatedAt: timestamps.updated_at,
+          collectionId: current.collection_id,
+          favoritedAt: current.favorited_at,
         },
       };
     });
@@ -2758,7 +2804,7 @@ export class ArdenRepository implements ArdenDataRepository {
         JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
         JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
        WHERE v.draft_version_id = $1 AND om.user_id = $2 AND om.organization_id = $3
-         AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE'
+         AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
          AND ${membershipPermissionSql("$4")}`, [sourceVersionId, userId, organizationId, "PRIVATE_WORKSPACE_READ"]);
     const row = result.rows[0];
     return row ? {
@@ -2864,6 +2910,30 @@ export class ArdenRepository implements ArdenDataRepository {
     await client.query(`
       INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
       VALUES ($1, $2, $3, 'SUCCESS', $4::jsonb)`, [organizationId, membershipId, eventType, JSON.stringify({ draftId, version, requestId })]);
+  }
+
+  /**
+   * Decision 0029 retention context: no actor or organization. Migration 0062
+   * policies expose only trash older than 30 days and purged notes with
+   * pending content erasure, and allow only tombstone updates.
+   */
+  private async withPrivateTrashRetention<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE arden_runtime");
+      await client.query("SET LOCAL search_path TO arden, public");
+      await client.query(`SELECT set_config('arden.actor_id', '', true), set_config('arden.organization_id', '', true),
+        set_config('arden.private_trash_retention', 'true', true)`);
+      const result = await work(client);
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   private async withActorContext<T>(userId: string, organizationId: string | null, work: (client: PoolClient) => Promise<T>): Promise<T> {

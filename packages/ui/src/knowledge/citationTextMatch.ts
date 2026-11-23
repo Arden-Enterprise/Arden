@@ -61,4 +61,3 @@ export function findQuoteInSegments(segments: readonly string[], quote: string):
   }
   return null;
 }
-

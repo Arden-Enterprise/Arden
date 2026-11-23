@@ -1,0 +1,5 @@
+# Maestro workspace config: `maestro test e2e/maestro/private-notes` runs the
+# numbered feature flows only. Subflows and the smoke check live in
+# subdirectories and are not picked up as top-level flows.
+flows:
+  - "*"

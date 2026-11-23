@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-type DesktopApiRequest = { path: string; method: "GET" | "POST" | "PATCH"; body?: string; ifMatch?: string; idempotencyKey?: string; timeoutMs?: number };
+type DesktopApiRequest = { path: string; method: "GET" | "POST" | "PATCH" | "PUT"; body?: string; ifMatch?: string; idempotencyKey?: string; timeoutMs?: number };
 type DesktopApiResponse = { status: number; body: string; etag?: string; location?: string };
 
 contextBridge.exposeInMainWorld("ardenDesktop", {

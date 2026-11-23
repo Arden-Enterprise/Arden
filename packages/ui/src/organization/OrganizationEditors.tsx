@@ -51,4 +51,3 @@ export function DepartmentEditor({ organization, onChange }: {
     </section>
   );
 }
-

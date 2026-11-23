@@ -28,4 +28,3 @@ export function KnowledgeRow({ title, details, status, tone = "jade", icon = "do
   const content = <><Icon name={icon} size={24} /><span className="knowledge-row-copy"><strong>{title}</strong><small>{details}</small></span><span className={`knowledge-row-status knowledge-tone-${tone}`}>{status}</span></>;
   return onClick ? <button type="button" className="knowledge-row" onClick={onClick}>{content}</button> : <div className="knowledge-row">{content}</div>;
 }
-

@@ -305,4 +305,3 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
       onClose={() => setWithdrawing(null)} onDone={() => { setWithdrawing(null); setMessage("Publication withdrawn"); reload(); }} />}
   </div>;
 }
-

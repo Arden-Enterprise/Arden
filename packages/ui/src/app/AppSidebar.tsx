@@ -1,7 +1,9 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Icon, type IconName } from "../shared/Icon";
 import type { Platform, WorkspaceView } from "../shared/types";
 import type { OrganizationPreview } from "../organization/previewModel";
+import type { PrivateNotesController } from "../personal-workspace/usePrivateNotes";
+import { PrivateNotesNavSection } from "../personal-workspace/PrivateNotesTree";
 
 type AppSidebarProps = {
   activeView: WorkspaceView;
@@ -25,6 +27,11 @@ type AppSidebarProps = {
   onNavigate: (view: WorkspaceView) => void;
   onSignOut: () => void;
   onOpenSettings?: () => void;
+  /** Private Notes tree inside the main navigation (ADR 0029); omitted when the private workspace is unavailable. */
+  privateNotes?: { controller: PrivateNotesController; pageVisible: boolean; onOpen: () => void };
+  /** Private Notes trash, reached from the account menu. */
+  trashCount?: number;
+  onOpenTrash?: () => void;
 };
 
 export type NavigationItem = {
@@ -62,27 +69,30 @@ export function initialsOf(label: string): string {
   return label.split(/[\s.@]+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 }
 
-function SidebarAccountMenu({ memberName, memberRole, authenticated, onSignOut, onOpenSettings }: {
+/** Notion-style account menu: identity, Settings, Private Notes Trash and sign-out. */
+function SidebarAccountMenu({ memberName, memberRole, organizationName, authenticated, trashCount, onSignOut, onOpenSettings, onOpenTrash }: {
   memberName: string;
   memberRole: string;
+  organizationName: string;
   authenticated: boolean;
+  trashCount?: number;
   onSignOut: () => void;
   onOpenSettings?: () => void;
+  onOpenTrash?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const actionRef = useRef<HTMLButtonElement>(null);
-  const focusActionOnOpen = useRef(false);
   useEffect(() => {
     if (!open) return;
-    if (focusActionOnOpen.current) {
-      focusActionOnOpen.current = false;
-      actionRef.current?.focus();
-    }
+    rootRef.current?.querySelector<HTMLButtonElement>(".sidebar-account-menu [role=menuitem]:not(:disabled)")?.focus();
     const onPointer = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (rootRef.current?.contains(event.target as Node)) return;
+      setOpen(false);
+      requestAnimationFrame(() => {
+        if (!document.activeElement || document.activeElement === document.body) triggerRef.current?.focus();
+      });
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -97,21 +107,38 @@ function SidebarAccountMenu({ memberName, memberRole, authenticated, onSignOut, 
     };
   }, [open]);
 
+  const moveFocus = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("[role=menuitem]:not(:disabled)")];
+    const index = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+      : event.key === "ArrowDown" ? (index + 1) % items.length : (index - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
+  const choose = (run?: () => void) => { setOpen(false); triggerRef.current?.focus(); run?.(); };
+
   return (
     <div className="sidebar-account" ref={rootRef}>
       <button type="button" className="sidebar-member" title={`${memberName} · ${memberRole}`} ref={triggerRef}
-        aria-expanded={open} aria-haspopup="menu" aria-controls={menuId}
-        onClick={(event) => {
-          const next = !open;
-          focusActionOnOpen.current = next && event.detail === 0;
-          setOpen(next);
-        }}>
+        aria-label="Account menu" aria-expanded={open} aria-haspopup="menu" aria-controls={open ? menuId : undefined}
+        onClick={() => setOpen((current) => !current)}>
         <span className="sidebar-avatar" aria-hidden="true">{initialsOf(memberName)}</span>
-        <div><strong>{memberName}</strong><span>{memberRole}</span></div>
+        <div><strong>{memberName}</strong></div>
+        <i className="sidebar-account-chevron" aria-hidden="true"><Icon name="chevron" size={12} /></i>
       </button>
-      {open && <div className="sidebar-account-menu" id={menuId} role="menu">
-        <button type="button" role="menuitem" onClick={() => { triggerRef.current?.focus(); setOpen(false); onOpenSettings?.(); }}>Settings</button>
-        <button type="button" role="menuitem" ref={actionRef} onClick={() => { setOpen(false); onSignOut(); }}>{authenticated ? "Log out" : "Exit preview"}</button>
+      {open && <div className="sidebar-account-menu" id={menuId} role="menu" aria-label="Account" onKeyDown={moveFocus}>
+        <div className="sidebar-account-identity">
+          <i className="sidebar-avatar" aria-hidden="true">{initialsOf(memberName)}</i>
+          <div><strong>{memberName}</strong><small>{memberRole} · {organizationName}</small></div>
+        </div>
+        <div className="sidebar-account-separator" role="separator" />
+        <button type="button" role="menuitem" onClick={() => choose(onOpenSettings)}><Icon name="settings" size={15} /><b>Settings</b></button>
+        {onOpenTrash && <button type="button" role="menuitem" onClick={() => choose(onOpenTrash)}>
+          <Icon name="trash" size={15} /><b>Trash</b>{trashCount ? <small className="sidebar-account-count" data-count={trashCount} aria-hidden="true" /> : null}
+        </button>}
+        <div className="sidebar-account-separator" role="separator" />
+        <button type="button" role="menuitem" className="sidebar-account-signout" onClick={() => { setOpen(false); onSignOut(); }}><b>{authenticated ? "Log out" : "Exit preview"}</b></button>
       </div>}
     </div>
   );
@@ -139,6 +166,9 @@ export function AppSidebar({
   onNavigate,
   onSignOut,
   onOpenSettings,
+  privateNotes,
+  trashCount,
+  onOpenTrash,
 }: AppSidebarProps) {
   const organizationName = organizationLabel ?? organization?.name ?? "FPT Digital";
   const sessionLabel = environmentLabel ?? (authenticated ? "Signed in" : "Preview");
@@ -192,7 +222,10 @@ export function AppSidebar({
 
       <nav className="sidebar-navigation" aria-label="Workspace">
         <span className="meta-label navigation-label">WORK</span>
-        {workNavigation.map(navButton)}
+        {workNavigation.map((item) => item.view === "personal-workspace" && privateNotes && !navigationDisabled(item, authenticated, isUnassigned)
+          ? <PrivateNotesNavSection key={item.label} controller={privateNotes.controller} navItem={navButton(item)}
+            pageVisible={privateNotes.pageVisible} collapsed={collapsed} onOpen={privateNotes.onOpen} />
+          : navButton(item))}
         <span className="meta-label navigation-label">REVIEW</span>
         {knowledgeNavigation.map(navButton)}
         {((previewRole === "admin" && !authenticated) || showAdmin) && <>
@@ -202,7 +235,8 @@ export function AppSidebar({
       </nav>
 
       <div className="sidebar-session">
-        <SidebarAccountMenu memberName={memberName} memberRole={memberRole} authenticated={authenticated} onSignOut={onSignOut} onOpenSettings={onOpenSettings} />
+        <SidebarAccountMenu memberName={memberName} memberRole={memberRole} organizationName={organizationName} authenticated={authenticated}
+          trashCount={trashCount} onSignOut={onSignOut} onOpenSettings={onOpenSettings} onOpenTrash={onOpenTrash} />
         <span className="sidebar-platform">{platform === "desktop" ? "WINDOWS" : "WEB"} · {authenticated ? "SIGNED IN" : "SAMPLE SESSION"}</span>
       </div>
     </aside>

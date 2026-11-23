@@ -366,6 +366,12 @@
       "filename": "0061_document_share_notifications.sql",
       "sha256": "409706abd369261e13d06d7563ad8ee5c71c2458a58059ff28a166234d48b2c1",
       "rollout": "operator"
+    },
+    {
+      "id": "0062",
+      "filename": "0062_private_notes_organization_and_trash.sql",
+      "sha256": "1a5f690352b0d94c58fbc26f245ed21a0e0af2f4abd1c0da44b397da06c7323e",
+      "rollout": "operator"
     }
   ]
 }

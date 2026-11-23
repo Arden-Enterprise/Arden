@@ -1,0 +1,73 @@
+# F03-ORG-AC2: move a note from one collection to another, then to the
+# top level ("Private Notes" destination).
+url: http://127.0.0.1:5180/?preview=1
+name: Private Notes - move a note between collections and to the top level
+tags:
+  - private-notes
+  - f03-org
+---
+- runFlow: subflows/login-demo.yaml
+
+- runFlow:
+    file: subflows/create-collection.yaml
+    env:
+      NAME: QA Inbox
+- runFlow:
+    file: subflows/create-collection.yaml
+    env:
+      NAME: QA Archive
+- tapOn:
+    id: "Add a note to QA Inbox"
+- runFlow:
+    file: subflows/name-new-item.yaml
+    env:
+      NAME: QA Travel plan
+
+# --- Move to another collection -------------------------------------------
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Travel plan
+- tapOn: "Move to"
+# Destination list: "Private Notes" (top level) followed by every collection.
+# Each destination button is labelled "Move to <title>"; the current one is disabled.
+- tapOn:
+    id: "Move to QA Archive"
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Travel plan
+- tapOn: "Move to"
+# Maestro web does not report the disabled state, so check the "Current" tag inside the button.
+- assertVisible:
+    text: "Current"
+    childOf:
+      id: "Move to QA Archive"
+- tapOn:
+    point: "60%,92%"  # close the menu by clicking outside (Escape key is not supported by Maestro web)
+- takeScreenshot: 05-moved-to-collection
+
+# --- Move to the top level ------------------------------------------------
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Travel plan
+- tapOn: "Move to"
+- tapOn:
+    id: "Move to Private Notes"
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Travel plan
+- tapOn: "Move to"
+- assertVisible:
+    text: "Current"
+    childOf:
+      id: "Move to Private Notes"
+- assertNotVisible:
+    text: "Current"
+    childOf:
+      id: "Move to QA Archive"
+- tapOn:
+    point: "60%,92%"  # close the menu by clicking outside (Escape key is not supported by Maestro web)
+- takeScreenshot: 05-moved-to-top-level
