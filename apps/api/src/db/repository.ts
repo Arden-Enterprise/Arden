@@ -45,9 +45,11 @@ export type PrivateDraft = {
   updatedAt: Date;
   collectionId: string | null;
   favoritedAt: Date | null;
+  /** Owner-chosen order inside the collection or root (spec F03-ARR); null sorts first. */
+  position: number | null;
 };
 
-/** Decision 0029 note summary; trashed and purged notes are never listed. */
+/** Decision 0029 note summary; trashed, archived and purged notes are never listed. */
 export type DraftListItem = {
   id: string;
   organizationId: string;
@@ -57,8 +59,17 @@ export type DraftListItem = {
   updatedAt: Date;
   collectionId: string | null;
   favoritedAt: Date | null;
+  position: number | null;
+  /** Set while archived (spec F03-ARR); only archive responses carry a non-null value. */
+  archivedAt: Date | null;
 };
 export type DraftWrite = { title: string; body: string; collectionId?: string | null };
+/**
+ * Decision 0030: `replacedSourceUri` is the content object the save made unreachable (the open version was
+ * overwritten and no other version uses it); the caller erases it after commit.
+ */
+export type DraftUpdateResult = { kind: "not-found" } | { kind: "conflict"; currentVersion: number }
+  | { kind: "updated"; draft: PrivateDraft; replacedSourceUri: string | null };
 export type DraftPatch = { title?: string; body?: string };
 export type PrivateContributionSource = {
   versionId: string;
@@ -659,7 +670,7 @@ export interface ArdenDataRepository {
   canCreateDraft(userId: string, organizationId: string): Promise<boolean>;
   createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, requestId: string): Promise<PrivateDraft | null>;
   canUpdateDraft(userId: string, organizationId: string, draftId: string): Promise<boolean>;
-  updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }>;
+  updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<DraftUpdateResult>;
   getPrivateContributionSource(userId: string, organizationId: string, sourceVersionId: string): Promise<PrivateContributionSource | null>;
   createKnowledgeDraft(userId: string, organizationId: string, input: {
     actorMembershipId: string;
@@ -1480,13 +1491,15 @@ export class ArdenRepository implements ArdenDataRepository {
       updated_at: Date;
       collection_id: string | null;
       favorited_at: Date | null;
+      sort_position: number | null;
     }>(`
       SELECT d.draft_id, d.title, d.current_version_no, v.draft_version_id, v.mime_type, v.content_hash,
-             d.created_at, d.updated_at, d.collection_id, d.favorited_at
+             d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position
         FROM draft_document d
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
         JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
        WHERE w.membership_id = $1 AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
+         AND d.archived_at IS NULL
          AND ($2::timestamptz IS NULL OR (d.updated_at, d.draft_id) < ($2, $3::uuid))
        ORDER BY d.updated_at DESC, d.draft_id DESC
        LIMIT $4`, [membershipId, cursor?.updatedAt ?? null, cursor?.draftId ?? null, limit + 1]);
@@ -1502,6 +1515,8 @@ export class ArdenRepository implements ArdenDataRepository {
       updatedAt: row.updated_at,
       collectionId: row.collection_id,
       favoritedAt: row.favorited_at,
+      position: row.sort_position,
+      archivedAt: null,
     }));
     const last = page.at(-1);
     return {
@@ -1525,9 +1540,10 @@ export class ArdenRepository implements ArdenDataRepository {
       updated_at: Date;
       collection_id: string | null;
       favorited_at: Date | null;
+      sort_position: number | null;
     }>(`
       SELECT d.draft_id, v.draft_version_id, d.title, v.source_uri, v.mime_type, v.content_hash,
-             d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at
+             d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position
         FROM draft_document d
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
         JOIN organization_membership om ON om.membership_id = w.membership_id
@@ -1549,6 +1565,7 @@ export class ArdenRepository implements ArdenDataRepository {
       updatedAt: row.updated_at,
       collectionId: row.collection_id,
       favoritedAt: row.favorited_at,
+      position: row.sort_position,
     } : null;
     });
   }
@@ -1571,6 +1588,9 @@ export class ArdenRepository implements ArdenDataRepository {
       const createRequestHash = createHash("sha256")
         .update(`${input.sourceVersionId}:${input.classification}`)
         .digest("hex");
+      // Decision 0030: serialize with saves of the source note, which may overwrite an open version.
+      await client.query(`SELECT 1 FROM draft_version v JOIN draft_document d ON d.draft_id = v.draft_id
+        WHERE v.draft_version_id = $1 FOR UPDATE OF d, v`, [input.sourceVersionId]);
       const source = await this.findPrivateContributionSource(client, userId, organizationId, input.sourceVersionId);
       if (!source || !canCreateSharedDraft({
         actor: { membershipId: input.actorMembershipId, organizationId, status: "ACTIVE" },
@@ -1604,6 +1624,9 @@ export class ArdenRepository implements ArdenDataRepository {
         INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash)
         VALUES ($1, 1, $2, $3, $4)`, [draftId, input.copiedContent.sourceUri,
         input.copiedContent.mimeType, input.copiedContent.contentHash]);
+      // The contributed wording must stay exactly as reviewed: later saves start a new private version.
+      await client.query(`UPDATE draft_version SET sealed_at = now() WHERE draft_version_id = $1 AND sealed_at IS NULL`,
+        [input.sourceVersionId]);
       await this.appendAudit(client, organizationId, source.ownerMembershipId,
         "SHARED_DRAFT_CREATED", draftId, 1, input.requestId);
       const created = await this.findSharedDraftByCreateRequest(client, source.ownerMembershipId, organizationId, input.idempotencyKey);
@@ -2693,6 +2716,7 @@ export class ArdenRepository implements ArdenDataRepository {
         updatedAt: created.updated_at,
         collectionId,
         favoritedAt: null,
+        position: null,
       };
     });
   }
@@ -2710,7 +2734,7 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }> {
+  async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<DraftUpdateResult> {
     return this.withActorContext(userId, organizationId, async (client) => {
       // Lock the mutable document before reading its version join. Under READ
       // COMMITTED, a waiter otherwise rechecks the new document against an old
@@ -2735,9 +2759,14 @@ export class ArdenRepository implements ArdenDataRepository {
         updated_at: Date;
         collection_id: string | null;
         favorited_at: Date | null;
+        sort_position: number | null;
+        sealed: boolean;
       }>(`
         SELECT om.membership_id, d.title, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash,
-               d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at
+               d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position,
+               (v.sealed_at IS NOT NULL
+                OR EXISTS (SELECT 1 FROM shared_draft s WHERE s.source_private_version_id = v.draft_version_id)
+                OR EXISTS (SELECT 1 FROM shared_submission s WHERE s.draft_version_id = v.draft_version_id)) AS sealed
           FROM draft_document d
           JOIN private_workspace w ON w.workspace_id = d.workspace_id
           JOIN organization_membership om ON om.membership_id = w.membership_id
@@ -2760,12 +2789,28 @@ export class ArdenRepository implements ArdenDataRepository {
         UPDATE draft_document
            SET title = $2, current_version_no = $3, updated_at = now()
          WHERE draft_id = $1`, [draftId, title, version]);
-      const versionResult = await client.query<{ draft_version_id: string }>(`
-        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash, current.membership_id]);
-      const versionId = versionResult.rows[0]?.draft_version_id;
-      if (!versionId) throw new Error("Draft version insert returned no row");
+      let versionId: string;
+      let replacedSourceUri: string | null = null;
+      if (!current.sealed) {
+        // Decision 0030: the open current version is overwritten instead of adding history.
+        await client.query(`
+          UPDATE draft_version SET version_no = $2, source_uri = $3, mime_type = $4, content_hash = $5
+           WHERE draft_version_id = $1`, [current.draft_version_id, version, source.sourceUri, source.mimeType, source.contentHash]);
+        versionId = current.draft_version_id;
+        if (source.sourceUri !== current.source_uri) {
+          const shared = await client.query(`SELECT 1 FROM draft_version WHERE source_uri = $1 LIMIT 1`, [current.source_uri]);
+          if (!shared.rowCount) replacedSourceUri = current.source_uri;
+        }
+      } else {
+        // A contributed (sealed) version stays as it is; the note continues in a new open version.
+        const versionResult = await client.query<{ draft_version_id: string }>(`
+          INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash, current.membership_id]);
+        const inserted = versionResult.rows[0]?.draft_version_id;
+        if (!inserted) throw new Error("Draft version insert returned no row");
+        versionId = inserted;
+      }
       await this.appendAudit(client, organizationId, current.membership_id, "PRIVATE_DRAFT_UPDATED", draftId, version, requestId);
       const updated = await client.query<{ created_at: Date; updated_at: Date }>(`
         SELECT created_at, updated_at FROM draft_document WHERE draft_id = $1`, [draftId]);
@@ -2786,7 +2831,9 @@ export class ArdenRepository implements ArdenDataRepository {
           updatedAt: timestamps.updated_at,
           collectionId: current.collection_id,
           favoritedAt: current.favorited_at,
+          position: current.sort_position,
         },
+        replacedSourceUri,
       };
     });
   }

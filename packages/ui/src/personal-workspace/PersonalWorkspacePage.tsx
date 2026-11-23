@@ -12,6 +12,7 @@ import type { Platform } from "../shared/types";
 import { ItemActionsMenu } from "./ItemActionsMenu";
 import { focusNoteTitle, itemActions } from "./PrivateNotesTree";
 import { PrivateNotesTrash } from "./PrivateNotesTrash";
+import { PrivateNotesArchive } from "./PrivateNotesArchive";
 import { ancestorsOf, childrenOf, collectionItem, noteItem, ROOT_LABEL, type TreeItem } from "./privateNotesModel";
 
 function FavoriteToggle({ item, controller, disabled }: { item: TreeItem; controller: PrivateNotesController; disabled: boolean }) {
@@ -21,17 +22,30 @@ function FavoriteToggle({ item, controller, disabled }: { item: TreeItem; contro
     onClick={() => void controller.toggleFavorite({ kind: item.kind, id: item.id })}><Icon name="star" size={16} /></button>;
 }
 
-function CollectionTitleInput({ title, onDone }: { title: string; onDone: (value: string | null) => void }) {
+/**
+ * In-place title editing on a collection page (spec F03-ARR): Enter or leaving the field saves, Escape cancels.
+ * An empty title is not saved: Enter keeps the field open with an error, leaving it restores the old title.
+ */
+export function CollectionTitleInput({ title, onDone }: { title: string; onDone: (value: string | null) => void }) {
   const input = useRef<HTMLInputElement>(null);
   const settled = useRef(false);
+  const [empty, setEmpty] = useState(false);
   useEffect(() => { input.current?.focus(); input.current?.select(); }, []);
   const finish = (value: string | null) => { if (settled.current) return; settled.current = true; onDone(value); };
-  return <input ref={input} className="pn-title-input" aria-label={`Rename ${title}`} defaultValue={title} maxLength={200}
-    onKeyDown={(event) => {
-      if (event.key === "Enter") { event.preventDefault(); finish(event.currentTarget.value); }
-      else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finish(null); }
-    }}
-    onBlur={(event) => finish(event.currentTarget.value)} />;
+  return <span className="pn-title-field">
+    <input ref={input} className="pn-title-input" aria-label={`Rename ${title}`} defaultValue={title} maxLength={200}
+      aria-invalid={empty || undefined} aria-describedby={empty ? "pn-title-error" : undefined}
+      onChange={(event) => { if (empty && event.currentTarget.value.trim()) setEmpty(false); }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (!event.currentTarget.value.trim()) { setEmpty(true); return; }
+          finish(event.currentTarget.value);
+        } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finish(null); }
+      }}
+      onBlur={(event) => finish(event.currentTarget.value.trim() ? event.currentTarget.value : null)} />
+    {empty && <span id="pn-title-error" className="pn-title-error" role="alert">A collection needs a title.</span>}
+  </span>;
 }
 
 /** Lists a collection's (or the root's) children, collections first. */
@@ -61,14 +75,16 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   const sourceVersionId = selectedNote?.sourceVersionId;
   const matchingAttempt = contributionAttempt?.sourceVersionId === sourceVersionId ? contributionAttempt : null;
   const collection = focus.kind === "collection" ? collections.find((entry) => entry.id === focus.id) ?? null : null;
-  const view = focus.kind === "trash" ? "trash" : collection ? "collection" : focus.kind === "note" && selectedNote ? "note" : "root";
+  const view = focus.kind === "trash" ? "trash" : focus.kind === "archive" ? "archive"
+    : collection ? "collection" : focus.kind === "note" && selectedNote ? "note" : "root";
   const titleOf = (note: (typeof state.notes)[number]) => state.drafts[note.id]?.title ?? note.title;
   const current: TreeItem | null = view === "note" && selectedNote ? noteItem(selectedNote, collections, draft.title)
     : view === "collection" && collection ? collectionItem(collection) : null;
   const ancestors = current ? ancestorsOf(collections, current.parentId) : [];
-  const breadcrumb = ["Arden", view === "trash" ? "Trash" : ROOT_LABEL, ...ancestors.map((entry) => entry.title), ...(current ? [current.title] : [])].join(" / ");
+  const pageLabel = view === "trash" ? "Trash" : view === "archive" ? "Archived" : null;
+  const breadcrumb = ["Arden", pageLabel ?? ROOT_LABEL, ...ancestors.map((entry) => entry.title), ...(current ? [current.title] : [])].join(" / ");
   // Like Notion: the trail starts at the outermost collection; only items at the top level show the Private Notes root.
-  const crumbs: TopbarCrumb[] = view === "trash" ? [{ label: "Trash" }] : [
+  const crumbs: TopbarCrumb[] = pageLabel ? [{ label: pageLabel }] : [
     ...(ancestors.length ? [] : [{ label: ROOT_LABEL, onSelect: controller.openRoot }]),
     ...ancestors.map((entry) => ({ label: entry.title, onSelect: () => controller.openCollection(entry.id) })),
     ...(current ? [{ label: current.title || "Untitled" }] : []),
@@ -105,6 +121,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
         titleId="personal-workspace-title"
       />}>
         {loading && <p className="island-meta pn-page-status" role="status">Loading your private notes…</p>}
+        {busyAction === "import-pdf" && <p className="island-meta pn-page-status" role="status">Reading the PDF…</p>}
         {error && <p className="admin-feedback is-error personal-feedback pn-page-status" role="alert">{error}</p>}
         {actionError && <p className="admin-feedback is-error personal-feedback pn-page-status" role="alert">{actionError}
           {" "}<button type="button" className="pn-link-button" onClick={controller.dismissActionError}>Dismiss</button></p>}
@@ -115,7 +132,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
             toolbar={<>
               <FavoriteToggle item={current} controller={controller} disabled={pending || busyAction === "favorite"} />
               <span className="island-chip"><Icon name="lock" size={12} />Only you</span>
-              <span className="private-state" aria-live="polite">{isDirty ? "Unsaved changes" : serverBacked ? "Saved" : "Saved · Demo"}</span>
+              <span className="private-state" aria-live="polite">{controller.autosaving ? "Saving…" : isDirty ? "Unsaved changes" : serverBacked ? "Saved" : "Saved · Demo"}</span>
               <span className="note-toolbar-spacer" />
               {isDirty && <button type="button" className="secondary-button" disabled={saving} onClick={() => setDiscarding(true)}>Discard changes</button>}
               {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}><Icon name="layers" size={14} />Create review draft</button>}
@@ -138,8 +155,15 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
                   ? <CollectionTitleInput title={current.title} onDone={(value) => {
                     if (value === null) controller.cancelRename();
                     else void controller.commitRename({ kind: "collection", id: collection.id }, value);
+                    requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".pn-title-button")?.focus());
                   }} />
-                  : <h2 id="private-collection-title">{current.title}</h2>}
+                  : <>
+                    <h2 id="private-collection-title">
+                      <button type="button" className="pn-title-button" aria-describedby="pn-title-hint" title="Click to rename"
+                        onClick={() => controller.startRename({ kind: "collection", id: collection.id }, "page")}>{current.title}</button>
+                    </h2>
+                    <span id="pn-title-hint" className="sr-only">Select to rename this collection</span>
+                  </>}
               </div>
               {(() => {
                 const children = childrenOf(collections, state.notes, collection.id, titleOf);
@@ -151,6 +175,9 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
               <div className="pn-page-actions">
                 <button type="button" className="secondary-button" disabled={busyAction === "create-note"} onClick={() => void controller.addNote(collection.id, "page").then(focusNoteTitle)}>
                   <Icon name="plus" size={14} />New note in this collection
+                </button>
+                <button type="button" className="secondary-button" disabled={busyAction === "import-pdf"} onClick={() => void controller.pickPdf(collection.id)}>
+                  <Icon name="pdf" size={14} />Import PDF
                 </button>
               </div>
             </div>
@@ -179,11 +206,15 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
                   onClick={() => void controller.createCollection(null, "page")}>
                   <Icon name="folder-add" size={14} />New collection
                 </button>
+                <button type="button" className="secondary-button" disabled={loading || busyAction === "import-pdf"} onClick={() => void controller.pickPdf(null)}>
+                  <Icon name="pdf" size={14} />Import PDF
+                </button>
               </div>
             </div>
           </section>}
 
           {view === "trash" && <PrivateNotesTrash controller={controller} />}
+          {view === "archive" && <PrivateNotesArchive controller={controller} />}
         </div>
       </WorkspacePageContent>
       {discarding && <DiscardChangesDialog exiting={false} onCancel={() => setDiscarding(false)} onDiscard={() => {

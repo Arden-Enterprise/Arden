@@ -177,7 +177,7 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ ...request, path: "https://other.invalid/api/v1/me" }), false);
   });
 
-  it("allows exactly the decision 0029 private-notes organization routes and methods", () => {
+  it("allows exactly the decision 0029 and F03-ARR private-notes organization routes and methods", () => {
     const base = `/api/v1/organizations/${organizationId}/private-workspace`;
     const id = sourcePrivateVersionId;
     const allowed = [
@@ -185,6 +185,9 @@ describe("desktop API request allowlist", () => {
       { path: `${base}/collections`, method: "POST", body: JSON.stringify({ title: "Projects", parentId: null }) },
       { path: `${base}/collections/${id}`, method: "PATCH", body: JSON.stringify({ parentId: id }) },
       { path: `${base}/drafts/${id}/collection`, method: "PUT", body: JSON.stringify({ collectionId: null }) },
+      { path: `${base}/drafts/${id}/collection`, method: "PUT", body: JSON.stringify({ collectionId: id, index: 2 }) },
+      { path: `${base}/drafts/${id}/archive`, method: "PUT", body: JSON.stringify({ archived: true }) },
+      { path: `${base}/archive`, method: "GET" },
       { path: `${base}/drafts/${id}/favorite`, method: "PUT", body: JSON.stringify({ favorite: true }) },
       { path: `${base}/collections/${id}/favorite`, method: "PUT", body: JSON.stringify({ favorite: false }) },
       { path: `${base}/drafts/${id}/duplicate`, method: "POST" },
@@ -215,6 +218,11 @@ describe("desktop API request allowlist", () => {
       { path: `${base}/trash/${id}/restore`, method: "GET" },
       { path: `${base}/trash/not-a-uuid/purge`, method: "POST" },
       { path: `${base}/trash`, method: "POST" },
+      { path: `${base}/drafts/${id}/archive`, method: "PUT" },
+      { path: `${base}/drafts/${id}/archive`, method: "POST", body: "{}" },
+      { path: `${base}/archive`, method: "POST", body: "{}" },
+      { path: `${base}/archive/${id}`, method: "GET" },
+      { path: `${base}/collections/${id}/archive`, method: "PUT", body: JSON.stringify({ archived: true }) },
     ];
     for (const request of denied) assert.equal(validateDesktopApiRequest(request), false, `${request.method} ${request.path}`);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/me", method: "PUT", body: "{}" }), false);

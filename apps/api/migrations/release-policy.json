@@ -372,6 +372,18 @@
       "filename": "0062_private_notes_organization_and_trash.sql",
       "sha256": "1a5f690352b0d94c58fbc26f245ed21a0e0af2f4abd1c0da44b397da06c7323e",
       "rollout": "operator"
+    },
+    {
+      "id": "0063",
+      "filename": "0063_private_notes_order_and_archive.sql",
+      "sha256": "9f22d17e977b874951b0bc9549ba5d868a8310e5cf21c34c0536580c8326d729",
+      "rollout": "operator"
+    },
+    {
+      "id": "0064",
+      "filename": "0064_private_note_live_version.sql",
+      "sha256": "b0fce40f892e88726622d1cceb5a35b128e32bf0c09321e2ac2cf87ee88d8cab",
+      "rollout": "operator"
     }
   ]
 }

@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { DraftListItem, PrivateDraft, StoredContentFields } from "../db/repository.js";
 import type { PrivateContentStorage } from "./content-storage.js";
 import { maxListedCollections, PrivateCollectionLimitError } from "./organization-store.js";
-import type { PrivateCollection, PrivateNoteSource, PrivateOrganizationStore, PrivateTrashEntry } from "./organization-store.js";
+import type { PrivateArchivedNote, PrivateCollection, PrivateNoteSource, PrivateOrganizationStore, PrivateTrashEntry } from "./organization-store.js";
 import { erasePurgedContent, privateTrashPurgeAfter } from "./trash-retention.js";
 
 type RequestActor = (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>;
@@ -13,6 +13,8 @@ const copySuffix = " (copy)";
 /** Bounds the synchronous content copy of one collection duplicate request. */
 export const maxDuplicatedNotes = 500;
 export const maxDuplicatedCollections = 1_000;
+/** Larger indexes are accepted by clamping to the end; this only bounds the request. */
+const maxPlacementIndex = 1_000_000;
 
 export function representNoteSummary(item: DraftListItem) {
   return {
@@ -20,6 +22,7 @@ export function representNoteSummary(item: DraftListItem) {
     currentVersion: item.currentVersion,
     createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString(),
     collectionId: item.collectionId, favoritedAt: item.favoritedAt?.toISOString() ?? null,
+    position: item.position, archivedAt: item.archivedAt?.toISOString() ?? null,
   };
 }
 
@@ -30,6 +33,7 @@ export function representPrivateNote(draft: PrivateDraft, body: string) {
     version: draft.currentVersion,
     createdAt: draft.createdAt.toISOString(), updatedAt: draft.updatedAt.toISOString(),
     collectionId: draft.collectionId, favoritedAt: draft.favoritedAt?.toISOString() ?? null,
+    position: draft.position,
   };
 }
 
@@ -38,6 +42,13 @@ function representCollection(collection: PrivateCollection) {
     id: collection.id, title: collection.title, parentId: collection.parentId,
     favoritedAt: collection.favoritedAt?.toISOString() ?? null,
     createdAt: collection.createdAt.toISOString(), updatedAt: collection.updatedAt.toISOString(),
+  };
+}
+
+function representArchivedNote(note: PrivateArchivedNote) {
+  return {
+    id: note.id, title: note.title, collectionId: note.collectionId, collectionTitle: note.collectionTitle,
+    archivedAt: note.archivedAt.toISOString(), createdAt: note.createdAt.toISOString(), updatedAt: note.updatedAt.toISOString(),
   };
 }
 
@@ -136,16 +147,19 @@ export function registerPrivateOrganizationRoutes(app: FastifyInstance, input: {
     } catch (error) { return failed(reply, request, error, "collection update"); }
   });
 
-  app.put<{ Params: { organizationId: string; draftId: string }; Body: { collectionId: string | null } }>(`${base}/drafts/:draftId/collection`, {
+  // `index` (spec F03-ARR) places the note at that 0-based position of the destination; without it the note goes last.
+  app.put<{ Params: { organizationId: string; draftId: string }; Body: { collectionId: string | null; index?: number } }>(`${base}/drafts/:draftId/collection`, {
     schema: {
       params: params("draftId"),
-      body: { type: "object", additionalProperties: false, required: ["collectionId"], properties: { collectionId: nullableUuid } },
+      body: { type: "object", additionalProperties: false, required: ["collectionId"],
+        properties: { collectionId: nullableUuid, index: { type: "integer", minimum: 0, maximum: maxPlacementIndex } } },
     },
   }, async (request, reply) => {
     const actor = await requestActor(request, reply);
     if (!actor) return;
     try {
-      const note = await store.moveNote(actor.userId, request.params.organizationId, request.params.draftId, request.body.collectionId);
+      const note = await store.moveNote(actor.userId, request.params.organizationId, request.params.draftId,
+        request.body.collectionId, request.body.index ?? null);
       if (!note) return notFound(reply, request);
       return noStore(reply).send(representNoteSummary(note));
     } catch (error) { return failed(reply, request, error, "note move"); }
@@ -161,6 +175,32 @@ export function registerPrivateOrganizationRoutes(app: FastifyInstance, input: {
       if (!note) return notFound(reply, request);
       return noStore(reply).send(representNoteSummary(note));
     } catch (error) { return failed(reply, request, error, "note favorite"); }
+  });
+
+  app.put<{ Params: { organizationId: string; draftId: string }; Body: { archived: boolean } }>(`${base}/drafts/:draftId/archive`, {
+    schema: {
+      params: params("draftId"),
+      body: { type: "object", additionalProperties: false, required: ["archived"], properties: { archived: { type: "boolean" } } },
+    },
+  }, async (request, reply) => {
+    const actor = await requestActor(request, reply);
+    if (!actor) return;
+    try {
+      const note = await store.setNoteArchived(actor.userId, request.params.organizationId, request.params.draftId,
+        request.body.archived, request.id);
+      if (!note) return notFound(reply, request);
+      return noStore(reply).send(representNoteSummary(note));
+    } catch (error) { return failed(reply, request, error, "note archive"); }
+  });
+
+  app.get<{ Params: { organizationId: string } }>(`${base}/archive`, { schema: { params: params() } }, async (request, reply) => {
+    const actor = await requestActor(request, reply);
+    if (!actor) return;
+    try {
+      const archived = await store.listArchived(actor.userId, request.params.organizationId);
+      if (!archived) return notFound(reply, request);
+      return noStore(reply).send({ items: archived.items.map(representArchivedNote), hasMore: archived.hasMore });
+    } catch (error) { return failed(reply, request, error, "archive list"); }
   });
 
   app.put<{ Params: { organizationId: string; collectionId: string }; Body: { favorite: boolean } }>(`${base}/collections/:collectionId/favorite`, {

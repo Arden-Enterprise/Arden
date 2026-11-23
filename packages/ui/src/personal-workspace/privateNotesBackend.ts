@@ -1,12 +1,12 @@
 import type { Platform, PrivateCollection, PrivateNote } from "../shared/types";
 import { ApiError } from "../shared/api-client";
 import * as api from "../shared/private-workspace-api";
-import type { PrivateCollectionRecord, PrivateNoteRecord, PrivateNoteSummary, PrivateTrashEntry } from "../shared/private-workspace-api";
-import { itemSubtree, UNTITLED_COLLECTION, UNTITLED_NOTE, type TreeItemRef } from "./privateNotesModel";
+import type { PrivateArchiveList, PrivateCollectionRecord, PrivateNoteRecord, PrivateNoteSummary, PrivateTrashEntry } from "../shared/private-workspace-api";
+import { itemSubtree, placeNote, UNTITLED_COLLECTION, UNTITLED_NOTE, type TreeItemRef } from "./privateNotesModel";
 
 /** A loaded note plus the content version its next edit must be based on. */
 export type LoadedNote = PrivateNote & { version: number };
-export type NotePlacement = { id: string; collectionId: string | null; favoritedAt: string | null };
+export type NotePlacement = { id: string; collectionId: string | null; favoritedAt: string | null; position: number | null };
 
 /**
  * Every Private Notes operation, served either by the Core API or by the in-memory demo.
@@ -20,8 +20,13 @@ export interface PrivateNotesBackend {
   updateNote(id: string, version: number, input: { title: string; body: string }): Promise<LoadedNote>;
   createCollection(title: string, parentId: string | null): Promise<PrivateCollection>;
   updateCollection(id: string, input: { title?: string; parentId?: string | null }): Promise<PrivateCollection>;
-  moveNote(id: string, collectionId: string | null): Promise<NotePlacement>;
+  /** Moves a note to `index` (0-based) of the destination's order; null appends it last (spec F03-ARR). */
+  moveNote(id: string, collectionId: string | null, index: number | null): Promise<NotePlacement>;
   favoriteNote(id: string, favorite: boolean): Promise<NotePlacement>;
+  archiveNote(id: string): Promise<NotePlacement>;
+  /** Returns the note to its collection (or the root) with its current content. */
+  unarchiveNote(id: string): Promise<LoadedNote>;
+  loadArchive(): Promise<PrivateArchiveList>;
   favoriteCollection(id: string, favorite: boolean): Promise<PrivateCollection>;
   duplicateNote(id: string): Promise<LoadedNote>;
   duplicateCollection(id: string): Promise<{ collection: PrivateCollection; collections: PrivateCollection[]; notes: LoadedNote[] }>;
@@ -40,11 +45,13 @@ function toNote(record: PrivateNoteRecord): LoadedNote {
     updatedLabel: `Saved ${new Date(record.updatedAt).toLocaleString()}`,
     sourceVersionId: record.currentVersion.id, version: record.currentVersion.version,
     collectionId: record.collectionId ?? null, favoritedAt: record.favoritedAt ?? null,
+    position: record.position ?? null, createdAt: record.createdAt,
   };
 }
 
 const toPlacement = (summary: PrivateNoteSummary): NotePlacement => ({
   id: summary.id, collectionId: summary.collectionId ?? null, favoritedAt: summary.favoritedAt ?? null,
+  position: summary.position ?? null,
 });
 
 export function createServerBackend(platform: Platform, organizationId: string): PrivateNotesBackend {
@@ -79,7 +86,13 @@ export function createServerBackend(platform: Platform, organizationId: string):
     async updateNote(id, version, input) { return toNote(await api.updatePrivateNote(platform, organizationId, id, version, input)); },
     async createCollection(title, parentId) { return toCollection(await api.createPrivateCollection(platform, organizationId, { title, parentId })); },
     async updateCollection(id, input) { return toCollection(await api.updatePrivateCollection(platform, organizationId, id, input)); },
-    async moveNote(id, collectionId) { return toPlacement(await api.movePrivateNote(platform, organizationId, id, collectionId)); },
+    async moveNote(id, collectionId, index) { return toPlacement(await api.movePrivateNote(platform, organizationId, id, collectionId, index)); },
+    async archiveNote(id) { return toPlacement(await api.setPrivateNoteArchived(platform, organizationId, id, true)); },
+    async unarchiveNote(id) {
+      await api.setPrivateNoteArchived(platform, organizationId, id, false);
+      return toNote(await api.loadPrivateNote(platform, organizationId, id));
+    },
+    loadArchive: () => api.listPrivateArchive(platform, organizationId),
     async favoriteNote(id, favorite) { return toPlacement(await api.setPrivateNoteFavorite(platform, organizationId, id, favorite)); },
     async favoriteCollection(id, favorite) { return toCollection(await api.setPrivateCollectionFavorite(platform, organizationId, id, favorite)); },
     async duplicateNote(id) { return toNote(await api.duplicatePrivateNote(platform, organizationId, id)); },
@@ -100,6 +113,7 @@ export function createServerBackend(platform: Platform, organizationId: string):
 }
 
 type DemoBatch = { entry: PrivateTrashEntry; notes: LoadedNote[]; collections: PrivateCollection[] };
+type DemoArchived = { note: LoadedNote; archivedAt: string };
 const TRASH_RETENTION_MS = 30 * 86_400_000;
 
 /**
@@ -110,14 +124,17 @@ export function createDemoBackend(seed: { notes: PrivateNote[]; collections: Pri
   let notes: LoadedNote[] = seed.notes.map((note) => ({ ...note, version: 1, collectionId: note.collectionId ?? null, favoritedAt: note.favoritedAt ?? null }));
   let collections: PrivateCollection[] = seed.collections.map((collection) => ({ ...collection }));
   const batches = new Map<string, DemoBatch>();
+  const archived = new Map<string, DemoArchived>();
   const newId = () => `preview-${crypto.randomUUID()}`;
   const stamp = () => now().toISOString();
   const missing = () => Promise.reject(new ApiError(404, "This item is no longer available.", "NOT_FOUND"));
   const findNote = (id: string) => notes.find((note) => note.id === id);
   const findCollection = (id: string) => collections.find((collection) => collection.id === id);
-  const placement = (note: LoadedNote): NotePlacement => ({ id: note.id, collectionId: note.collectionId ?? null, favoritedAt: note.favoritedAt ?? null });
+  const placement = (note: LoadedNote): NotePlacement => ({ id: note.id, collectionId: note.collectionId ?? null,
+    favoritedAt: note.favoritedAt ?? null, position: note.position ?? null });
   const copyNote = (note: LoadedNote, collectionId: string | null, title: string): LoadedNote =>
-    ({ ...note, id: newId(), title, collectionId, favoritedAt: null, version: 1, sourceVersionId: undefined, updatedLabel: "Saved in this preview" });
+    ({ ...note, id: newId(), title, collectionId, favoritedAt: null, version: 1, sourceVersionId: undefined, updatedLabel: "Saved in this preview",
+      position: null, createdAt: stamp() });
 
   return {
     kind: "demo",
@@ -126,7 +143,7 @@ export function createDemoBackend(seed: { notes: PrivateNote[]; collections: Pri
     async createNote(input) {
       if (input.collectionId && !findCollection(input.collectionId)) return missing();
       const note: LoadedNote = { id: newId(), title: input.title.trim() || UNTITLED_NOTE, body: input.body, updatedLabel: "Saved in this preview",
-        version: 1, collectionId: input.collectionId, favoritedAt: null };
+        version: 1, collectionId: input.collectionId, favoritedAt: null, position: null, createdAt: stamp() };
       notes = [note, ...notes];
       return { ...note };
     },
@@ -159,11 +176,38 @@ export function createDemoBackend(seed: { notes: PrivateNote[]; collections: Pri
       collections = collections.map((entry) => entry.id === id ? updated : entry);
       return { ...updated };
     },
-    async moveNote(id, collectionId) {
+    async moveNote(id, collectionId, index) {
       const note = findNote(id);
       if (!note || (collectionId && !findCollection(collectionId))) return missing();
-      note.collectionId = collectionId;
+      const changed = new Map(placeNote(collections, notes, id, collectionId, index).map((entry) => [entry.id, entry]));
+      notes = notes.map((entry) => changed.has(entry.id) ? { ...entry, ...changed.get(entry.id) } : entry);
+      return placement(findNote(id)!);
+    },
+    async archiveNote(id) {
+      const note = findNote(id);
+      if (!note) return missing();
+      archived.set(id, { note, archivedAt: stamp() });
+      notes = notes.filter((entry) => entry.id !== id);
       return placement(note);
+    },
+    async unarchiveNote(id) {
+      const entry = archived.get(id);
+      if (!entry) return missing();
+      archived.delete(id);
+      const collectionId = entry.note.collectionId && findCollection(entry.note.collectionId) ? entry.note.collectionId : null;
+      const note: LoadedNote = { ...entry.note, collectionId, position: null };
+      notes = [note, ...notes];
+      return { ...note };
+    },
+    async loadArchive() {
+      return {
+        hasMore: false,
+        items: [...archived.values()].reverse().map(({ note, archivedAt }) => {
+          const collection = note.collectionId ? findCollection(note.collectionId) : undefined;
+          return { id: note.id, title: note.title || UNTITLED_NOTE, collectionId: collection?.id ?? null, collectionTitle: collection?.title ?? null,
+            archivedAt, createdAt: note.createdAt ?? archivedAt, updatedAt: note.createdAt ?? archivedAt };
+        }),
+      };
     },
     async favoriteNote(id, favorite) {
       const note = findNote(id);
@@ -202,6 +246,12 @@ export function createDemoBackend(seed: { notes: PrivateNote[]; collections: Pri
       return { collection: copiedCollections.find((collection) => collection.id === ids.get(id))!, collections: copiedCollections, notes: copiedNotes };
     },
     async trash(item) {
+      // An archived note goes to trash like any note; restoring it brings it back to the tree.
+      const fromArchive = item.kind === "note" ? archived.get(item.id) : undefined;
+      if (fromArchive) {
+        archived.delete(item.id);
+        notes = [fromArchive.note, ...notes];
+      }
       const source = item.kind === "note" ? findNote(item.id) : findCollection(item.id);
       if (!source) return missing();
       const subtree = itemSubtree(collections, notes, item);

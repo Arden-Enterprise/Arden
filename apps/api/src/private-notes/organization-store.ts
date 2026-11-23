@@ -22,7 +22,19 @@ export type PrivateTrashEntry = {
   trashedAt: Date;
 };
 
-/** The current content reference of an active, untrashed note. */
+/** An archived note as the Archived view lists it (spec F03-ARR). */
+export type PrivateArchivedNote = {
+  id: string;
+  title: string;
+  /** The collection it returns to; null when it was at the root or that collection is gone. */
+  collectionId: string | null;
+  collectionTitle: string | null;
+  archivedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+/** The current content reference of an active, untrashed, unarchived note. */
 export type PrivateNoteSource = {
   id: string;
   title: string;
@@ -60,8 +72,12 @@ export interface PrivateOrganizationStore {
   updateCollection(userId: string, organizationId: string, collectionId: string,
     input: { title?: string; parentId?: string | null }, requestId: string): Promise<UpdateCollectionResult>;
   setCollectionFavorite(userId: string, organizationId: string, collectionId: string, favorite: boolean): Promise<PrivateCollection | null>;
-  moveNote(userId: string, organizationId: string, draftId: string, collectionId: string | null): Promise<DraftListItem | null>;
+  /** Places the note at `index` (0-based) in the destination's order; null appends it at the end. */
+  moveNote(userId: string, organizationId: string, draftId: string, collectionId: string | null, index: number | null): Promise<DraftListItem | null>;
   setNoteFavorite(userId: string, organizationId: string, draftId: string, favorite: boolean): Promise<DraftListItem | null>;
+  /** Archive or unarchive; unarchive returns the note to its collection, or the root when that collection is gone. */
+  setNoteArchived(userId: string, organizationId: string, draftId: string, archived: boolean, requestId: string): Promise<DraftListItem | null>;
+  listArchived(userId: string, organizationId: string): Promise<{ items: PrivateArchivedNote[]; hasMore: boolean } | null>;
   getNoteSource(userId: string, organizationId: string, draftId: string): Promise<PrivateNoteSource | null>;
   /** Null when the source note is no longer active at the same version. */
   duplicateNote(userId: string, organizationId: string, source: PrivateNoteSource, title: string,
@@ -96,7 +112,7 @@ type CollectionRow = {
 type NoteSummaryRow = {
   draft_id: string; title: string; current_version_no: number; draft_version_id: string;
   mime_type: string; content_hash: string; created_at: Date; updated_at: Date;
-  collection_id: string | null; favorited_at: Date | null;
+  collection_id: string | null; favorited_at: Date | null; sort_position: number | null; archived_at: Date | null;
 };
 type NoteSourceRow = {
   draft_id: string; title: string; collection_id: string | null; draft_version_id: string;
@@ -108,6 +124,8 @@ type BatchItemRow = {
 
 /** Upper bound of active collections per workspace; the list route returns them all, so inserts must not exceed it. */
 export const maxListedCollections = 1_000;
+/** The Archived view lists at most this many notes, newest archive first. */
+export const maxListedArchivedNotes = 1_000;
 
 /** Raised inside a tree transaction when an insert or restore would exceed {@link maxListedCollections}. */
 export class PrivateCollectionLimitError extends Error {
@@ -122,9 +140,13 @@ async function ensureCollectionCapacity(client: PoolClient, workspaceId: string,
 }
 const collectionColumns = `c.collection_id, c.title, c.parent_collection_id, c.favorited_at, c.created_at, c.updated_at`;
 const activeCollection = `c.status = 'ACTIVE' AND c.trashed_at IS NULL`;
+/** A note shown in the private tree: live, not in trash, not archived. */
+const treeNote = `d.status = 'ACTIVE' AND d.trashed_at IS NULL AND d.archived_at IS NULL`;
+/** Order of notes inside one container (spec F03-ARR); the UI applies the same order. */
+const noteOrder = `d.sort_position ASC NULLS FIRST, d.created_at DESC, d.draft_id DESC`;
 const noteSummarySelect = `
   SELECT d.draft_id, d.title, d.current_version_no, v.draft_version_id, v.mime_type, v.content_hash,
-         d.created_at, d.updated_at, d.collection_id, d.favorited_at
+         d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position, d.archived_at
     FROM draft_document d
     JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no`;
 
@@ -202,17 +224,29 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
     });
   }
 
-  async moveNote(userId: string, organizationId: string, draftId: string, collectionId: string | null): Promise<DraftListItem | null> {
+  async moveNote(userId: string, organizationId: string, draftId: string, collectionId: string | null, index: number | null): Promise<DraftListItem | null> {
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await findOwner(client, userId, organizationId);
       if (!owner?.workspaceId) return null;
       const workspaceId = owner.workspaceId;
       await lockTree(client, workspaceId);
       if (collectionId && !await isActiveCollection(client, workspaceId, collectionId)) return null;
-      const updated = await client.query(`UPDATE draft_document d SET collection_id = $3
-        WHERE d.draft_id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL`,
-      [draftId, workspaceId, collectionId]);
-      if (!updated.rowCount) return null;
+      const note = await client.query(`SELECT 1 FROM draft_document d
+        WHERE d.draft_id = $1 AND d.workspace_id = $2 AND ${treeNote} FOR UPDATE`, [draftId, workspaceId]);
+      if (!note.rowCount) return null;
+      // Renumber the destination from 1 with the note inserted; only changed rows are written.
+      const siblings = await client.query<{ draft_id: string }>(`SELECT d.draft_id FROM draft_document d
+        WHERE d.workspace_id = $1 AND ${treeNote} AND d.collection_id IS NOT DISTINCT FROM $2::uuid AND d.draft_id <> $3
+        ORDER BY ${noteOrder}`, [workspaceId, collectionId, draftId]);
+      const order = siblings.rows.map((row) => row.draft_id);
+      order.splice(Math.min(index ?? order.length, order.length), 0, draftId);
+      await client.query(`UPDATE draft_document d
+          SET sort_position = o.position::integer,
+              collection_id = CASE WHEN d.draft_id = $3 THEN $2::uuid ELSE d.collection_id END
+          FROM unnest($1::uuid[]) WITH ORDINALITY AS o(draft_id, position)
+        WHERE d.draft_id = o.draft_id AND d.workspace_id = $4
+          AND (d.draft_id = $3 OR d.sort_position IS DISTINCT FROM o.position::integer)`,
+      [order, collectionId, draftId, workspaceId]);
       return (await noteSummaries(client, workspaceId, organizationId, [draftId]))[0] ?? null;
     });
   }
@@ -223,10 +257,63 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       if (!owner?.workspaceId) return null;
       const updated = await client.query(`UPDATE draft_document d
           SET favorited_at = CASE WHEN $3::boolean THEN COALESCE(d.favorited_at, now()) ELSE NULL END
-        WHERE d.draft_id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL`,
+        WHERE d.draft_id = $1 AND d.workspace_id = $2 AND ${treeNote}`,
       [draftId, owner.workspaceId, favorite]);
       if (!updated.rowCount) return null;
       return (await noteSummaries(client, owner.workspaceId, organizationId, [draftId]))[0] ?? null;
+    });
+  }
+
+  async setNoteArchived(userId: string, organizationId: string, draftId: string, archived: boolean, requestId: string): Promise<DraftListItem | null> {
+    return this.withActor(userId, organizationId, async (client) => {
+      const owner = await findOwner(client, userId, organizationId);
+      if (!owner?.workspaceId) return null;
+      const workspaceId = owner.workspaceId;
+      await lockTree(client, workspaceId);
+      const current = await client.query<{ archived_at: Date | null; collection_id: string | null }>(`SELECT d.archived_at, d.collection_id
+        FROM draft_document d WHERE d.draft_id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
+        FOR UPDATE`, [draftId, workspaceId]);
+      const row = current.rows[0];
+      if (!row) return null;
+      if ((row.archived_at !== null) !== archived) {
+        if (archived) {
+          await client.query(`UPDATE draft_document SET archived_at = now() WHERE draft_id = $1 AND workspace_id = $2`, [draftId, workspaceId]);
+        } else {
+          // Back to its collection while that collection is active, otherwise to the root; it shows first there.
+          const collectionId = row.collection_id && await isActiveCollection(client, workspaceId, row.collection_id) ? row.collection_id : null;
+          await client.query(`UPDATE draft_document SET archived_at = NULL, collection_id = $3, sort_position = NULL
+            WHERE draft_id = $1 AND workspace_id = $2`, [draftId, workspaceId, collectionId]);
+        }
+        await appendPrivateAudit(client, organizationId, owner.membershipId,
+          archived ? "PRIVATE_DRAFT_ARCHIVED" : "PRIVATE_DRAFT_UNARCHIVED", { draftId, requestId });
+      }
+      return (await noteSummaries(client, workspaceId, organizationId, [draftId]))[0] ?? null;
+    });
+  }
+
+  async listArchived(userId: string, organizationId: string): Promise<{ items: PrivateArchivedNote[]; hasMore: boolean } | null> {
+    return this.withActor(userId, organizationId, async (client) => {
+      const owner = await findOwner(client, userId, organizationId);
+      if (!owner) return null;
+      if (!owner.workspaceId) return { items: [], hasMore: false };
+      const result = await client.query<{
+        draft_id: string; title: string; collection_id: string | null; collection_title: string | null;
+        archived_at: Date; created_at: Date; updated_at: Date;
+      }>(`SELECT d.draft_id, d.title, d.collection_id, c.title AS collection_title, d.archived_at, d.created_at, d.updated_at
+          FROM draft_document d
+          LEFT JOIN private_collection c ON c.collection_id = d.collection_id AND c.workspace_id = d.workspace_id AND ${activeCollection}
+         WHERE d.workspace_id = $1 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL AND d.archived_at IS NOT NULL
+         ORDER BY d.archived_at DESC, d.draft_id DESC
+         LIMIT $2`, [owner.workspaceId, maxListedArchivedNotes + 1]);
+      return {
+        items: result.rows.slice(0, maxListedArchivedNotes).map((row) => ({
+          id: row.draft_id, title: row.title,
+          collectionId: row.collection_title === null ? null : row.collection_id,
+          collectionTitle: row.collection_title,
+          archivedAt: row.archived_at, createdAt: row.created_at, updatedAt: row.updated_at,
+        })),
+        hasMore: result.rows.length > maxListedArchivedNotes,
+      };
     });
   }
 
@@ -245,7 +332,8 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       if (!owner?.workspaceId) return null;
       await lockTree(client, owner.workspaceId);
       const current = (await noteSources(client, owner.workspaceId, { draftIds: [source.id] }))[0];
-      if (!current || current.versionId !== source.versionId) return null;
+      // Decision 0030: an open version can change in place, so compare its content too.
+      if (!current || current.versionId !== source.versionId || current.contentHash !== source.contentHash) return null;
       const created = await insertNoteCopy(client, owner, current.collectionId, title, copy);
       await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_DRAFT_DUPLICATED",
         { draftId: created.draftId, sourceDraftId: source.id, requestId });
@@ -253,7 +341,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
         id: created.draftId, organizationId, title, versionId: created.versionId,
         sourceUri: copy.sourceUri, mimeType: copy.mimeType, contentHash: copy.contentHash, currentVersion: 1,
         createdAt: created.createdAt, updatedAt: created.updatedAt,
-        collectionId: current.collectionId, favoritedAt: null,
+        collectionId: current.collectionId, favoritedAt: null, position: null,
       };
     });
   }
@@ -314,7 +402,8 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       if (!owner?.workspaceId) return null;
       await lockTree(client, owner.workspaceId);
       const batchId = randomUUID();
-      const trashed = await client.query(`UPDATE draft_document d SET trashed_at = now(), trash_batch_id = $3
+      // An archived note can be moved to trash too; restoring it brings it back to the tree.
+      const trashed = await client.query(`UPDATE draft_document d SET trashed_at = now(), trash_batch_id = $3, archived_at = NULL
         WHERE d.draft_id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL`,
       [draftId, owner.workspaceId, batchId]);
       if (!trashed.rowCount) return null;
@@ -335,7 +424,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       const batchId = randomUUID();
       // Notes before collections: every tree writer uses this order under the workspace lock.
       const notes = await client.query(`UPDATE draft_document d SET trashed_at = now(), trash_batch_id = $3
-        WHERE d.workspace_id = $1 AND d.collection_id = ANY($2::uuid[]) AND d.status = 'ACTIVE' AND d.trashed_at IS NULL`,
+        WHERE d.workspace_id = $1 AND d.collection_id = ANY($2::uuid[]) AND ${treeNote}`,
       [workspaceId, subtree, batchId]);
       await client.query(`UPDATE private_collection c SET trashed_at = now(), trash_batch_id = $3
         WHERE c.workspace_id = $1 AND c.collection_id = ANY($2::uuid[]) AND ${activeCollection}`,
@@ -516,7 +605,7 @@ async function readSubtree(client: PoolClient, workspaceId: string, collectionId
 function sameSubtree(current: PrivateCollectionSubtree, snapshot: PrivateCollectionSubtree): boolean {
   const key = (subtree: PrivateCollectionSubtree) => JSON.stringify({
     collections: subtree.collections.map((collection) => [collection.id, collection.parentId]).sort(),
-    notes: subtree.notes.map((note) => [note.id, note.versionId, note.collectionId]).sort(),
+    notes: subtree.notes.map((note) => [note.id, note.versionId, note.contentHash, note.collectionId]).sort(),
   });
   return key(current) === key(snapshot);
 }
@@ -528,7 +617,7 @@ async function noteSources(client: PoolClient, workspaceId: string,
     SELECT d.draft_id, d.title, d.collection_id, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash
       FROM draft_document d
       JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
-     WHERE d.workspace_id = $1 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
+     WHERE d.workspace_id = $1 AND ${treeNote}
        AND ${byDraft ? "d.draft_id" : "d.collection_id"} = ANY($2::uuid[])
      ORDER BY d.created_at, d.draft_id`, [workspaceId, byDraft ? filter.draftIds : filter.collectionIds]);
   return result.rows.map((row) => ({
@@ -675,5 +764,6 @@ function mapNoteSummary(row: NoteSummaryRow, organizationId: string): DraftListI
     currentVersion: { id: row.draft_version_id, version: row.current_version_no, mimeType: row.mime_type, contentHash: row.content_hash },
     createdAt: row.created_at, updatedAt: row.updated_at,
     collectionId: row.collection_id, favoritedAt: row.favorited_at,
+    position: row.sort_position, archivedAt: row.archived_at,
   };
 }

@@ -70,8 +70,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0036_publication_preparation_retry', '0037_publication_governance',
           '0038_admin_only_direct_withdrawal', '0039_in_app_notifications', '0040_flat_collection_placement',
           '0041_verified_legacy_metadata_repair', '0042_remove_knowledge_topics',
-          '0061_document_share_notifications', '0062_private_notes_organization_and_trash')`);
-    if (migration.rows[0]?.count !== "30") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0061_document_share_notifications', '0062_private_notes_organization_and_trash',
+          '0063_private_notes_order_and_archive', '0064_private_note_live_version')`);
+    if (migration.rows[0]?.count !== "32") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -1195,7 +1196,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(store.listCollections(ids.manager, ids.organization)).resolves.toEqual([]);
     await expect(store.updateCollection(ids.manager, ids.organization, parent!.id, { title: "Taken" }, "org-steal"))
       .resolves.toEqual({ kind: "not-found" });
-    await expect(store.moveNote(ids.manager, ids.organization, note!.id, null)).resolves.toBeNull();
+    await expect(store.moveNote(ids.manager, ids.organization, note!.id, null, null)).resolves.toBeNull();
     await expect(store.trashCollection(ids.manager, ids.organization, parent!.id, "org-steal-trash")).resolves.toBeNull();
     await expect(repository.createDraft(ids.manager, ids.organization,
       { title: "Planted", body: "x", collectionId: child!.id }, content(), "org-plant")).resolves.toBeNull();
@@ -1283,6 +1284,150 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(store.purgeTrash(ids.manager, ids.organization, parentBatch, "org-purge-steal")).resolves.toBeNull();
     await expect(store.purgeTrash(ids.owner, ids.organization, parentBatch, "org-purge")).resolves.toEqual([]);
     await expect(store.listCollections(ids.owner, ids.organization)).resolves.toEqual([]);
+  }, 30_000);
+
+  it("orders and archives notes owner-only without moving their saved time (spec F03-ARR)", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+    const store = repository.privateOrganization;
+    const content = () => ({ sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain" as const, contentHash: "f".repeat(64) });
+    const shelf = await store.createCollection(ids.owner, ids.organization, { title: "Arrange shelf", parentId: null }, "arr-shelf");
+    const make = (title: string) => repository!.createDraft(ids.owner, ids.organization,
+      { title, body: title, collectionId: shelf!.id }, content(), `arr-${title}`);
+    const first = await make("First");
+    const second = await make("Second");
+    const third = await make("Third");
+    const savedAt = async (id: string) => (await pool!.query<{ updated_at: Date }>(
+      "SELECT updated_at FROM arden.draft_document WHERE draft_id = $1", [id])).rows[0]!.updated_at.toISOString();
+    const order = async () => (await pool!.query<{ title: string; sort_position: number | null }>(`SELECT title, sort_position
+      FROM arden.draft_document WHERE collection_id = $1 AND status = 'ACTIVE' AND trashed_at IS NULL AND archived_at IS NULL
+      ORDER BY sort_position ASC NULLS FIRST, created_at DESC, draft_id DESC`, [shelf!.id])).rows.map((row) => [row.title, row.sort_position]);
+    const firstSaved = await savedAt(first!.id);
+    const thirdSaved = await savedAt(third!.id);
+
+    // F03-ARR-AC1: unplaced notes are newest first; placing one renumbers the container from 1.
+    expect(await order()).toEqual([["Third", null], ["Second", null], ["First", null]]);
+    await expect(store.moveNote(ids.owner, ids.organization, first!.id, shelf!.id, 0)).resolves.toMatchObject({ position: 1, collectionId: shelf!.id });
+    expect(await order()).toEqual([["First", 1], ["Third", 2], ["Second", 3]]);
+    await expect(store.moveNote(ids.owner, ids.organization, first!.id, shelf!.id, 99)).resolves.toMatchObject({ position: 3 });
+    expect(await order()).toEqual([["Third", 1], ["Second", 2], ["First", 3]]);
+    expect(await savedAt(first!.id)).toBe(firstSaved);
+    await expect(repository.listDrafts(ids.owner, ids.organization, 100, null)).resolves.toMatchObject({
+      items: expect.arrayContaining([expect.objectContaining({ id: first!.id, position: 3 })]) });
+
+    // F03-ARR-AC4: another member cannot place, archive or see archived notes; RLS hides the rows.
+    await expect(store.moveNote(ids.manager, ids.organization, second!.id, null, 0)).resolves.toBeNull();
+    await expect(store.setNoteArchived(ids.manager, ids.organization, second!.id, true, "arr-steal")).resolves.toBeNull();
+
+    // F03-ARR-AC3: archive hides the note from the list without touching its saved time.
+    const archived = await store.setNoteArchived(ids.owner, ids.organization, third!.id, true, "arr-archive");
+    expect(archived).toMatchObject({ id: third!.id, archivedAt: expect.any(Date) });
+    expect(await savedAt(third!.id)).toBe(thirdSaved);
+    const listed = await repository.listDrafts(ids.owner, ids.organization, 100, null);
+    expect(listed!.items.map((item) => item.id)).not.toContain(third!.id);
+    await expect(store.setNoteFavorite(ids.owner, ids.organization, third!.id, true)).resolves.toBeNull();
+    await expect(store.listArchived(ids.owner, ids.organization)).resolves.toEqual({ hasMore: false, items: [
+      expect.objectContaining({ id: third!.id, title: "Third", collectionId: shelf!.id, collectionTitle: "Arrange shelf" })] });
+    await expect(store.listArchived(ids.manager, ids.organization)).resolves.toEqual({ hasMore: false, items: [] });
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE arden_runtime");
+      await client.query("SET LOCAL search_path TO arden, public");
+      await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [ids.manager, ids.organization]);
+      expect((await client.query("SELECT 1 FROM draft_document WHERE draft_id = $1", [third!.id])).rowCount).toBe(0);
+    } finally {
+      await client.query("ROLLBACK");
+      client.release();
+    }
+
+    // Trashing and purging its collection leaves the archived note archived; Unarchive then returns it to the root.
+    const batch = await store.trashCollection(ids.owner, ids.organization, shelf!.id, "arr-trash");
+    expect(batch!.itemCount).toBe(3);
+    await store.purgeTrash(ids.owner, ids.organization, batch!.batchId, "arr-purge");
+    await expect(store.listArchived(ids.owner, ids.organization)).resolves.toMatchObject({ items: [
+      expect.objectContaining({ id: third!.id, collectionId: null, collectionTitle: null })] });
+    await expect(store.setNoteArchived(ids.owner, ids.organization, third!.id, false, "arr-unarchive"))
+      .resolves.toMatchObject({ collectionId: null, position: null, archivedAt: null });
+
+    // An archived note can never also be in trash; moving it to trash clears the flag.
+    await expect(pool.query(`UPDATE arden.draft_document SET archived_at = now(), trashed_at = now(), trash_batch_id = gen_random_uuid()
+      WHERE draft_id = $1`, [third!.id])).rejects.toMatchObject({ code: "23514" });
+    await store.setNoteArchived(ids.owner, ids.organization, third!.id, true, "arr-archive-again");
+    await expect(store.trashNote(ids.owner, ids.organization, third!.id, "arr-trash-archived")).resolves.toMatchObject({ kind: "note" });
+    const row = await pool.query<{ archived_at: Date | null; trashed_at: Date | null }>(
+      "SELECT archived_at, trashed_at FROM arden.draft_document WHERE draft_id = $1", [third!.id]);
+    expect(row.rows[0]).toMatchObject({ archived_at: null, trashed_at: expect.any(Date) });
+    const audit = await pool.query<{ details_json: unknown }>(`SELECT details_json FROM arden.audit_event
+      WHERE organization_id = $1 AND event_type IN ('PRIVATE_DRAFT_ARCHIVED', 'PRIVATE_DRAFT_UNARCHIVED')`, [ids.organization]);
+    expect(audit.rows).toHaveLength(3);
+    expect(JSON.stringify(audit.rows)).not.toMatch(/Third|Arrange shelf/);
+  }, 30_000);
+
+  it("overwrites a note's open version, seals it on contribution and keeps sealed versions immutable (decision 0030)", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+    const object = (hash: string) => ({ sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain" as const, contentHash: hash.repeat(64) });
+    const first = object("1");
+    const note = await repository.createDraft(ids.owner, ids.organization, { title: "Live note", body: "one" }, first, "live-create");
+    const versions = async () => (await pool!.query<{ draft_version_id: string; version_no: number; source_uri: string; sealed: boolean }>(
+      `SELECT draft_version_id, version_no, source_uri, sealed_at IS NOT NULL AS sealed FROM arden.draft_version
+        WHERE draft_id = $1 ORDER BY version_no`, [note!.id])).rows;
+
+    // Saves overwrite the single open version; only the replaced object is reported for erasure.
+    const second = object("2");
+    const saved = await repository.updateDraft(ids.owner, ids.organization, note!.id, 1, { body: "two" }, second, "live-save-1");
+    expect(saved).toMatchObject({ kind: "updated", draft: { currentVersion: 2, versionId: note!.versionId, sourceUri: second.sourceUri },
+      replacedSourceUri: first.sourceUri });
+    const renamed = await repository.updateDraft(ids.owner, ids.organization, note!.id, 2, { title: "Live note renamed" }, null, "live-rename");
+    expect(renamed).toMatchObject({ kind: "updated", draft: { currentVersion: 3, versionId: note!.versionId }, replacedSourceUri: null });
+    expect(await versions()).toEqual([{ draft_version_id: note!.versionId, version_no: 3, source_uri: second.sourceUri, sealed: false }]);
+    await expect(repository.updateDraft(ids.owner, ids.organization, note!.id, 2, { body: "stale" }, object("9"), "live-stale"))
+      .resolves.toEqual({ kind: "conflict", currentVersion: 3 });
+
+    // Contributing seals the exact version; the next save starts a new open version and keeps the sealed object.
+    const source = await repository.getPrivateContributionSource(ids.owner, ids.organization, note!.versionId);
+    const contributed = await repository.createKnowledgeDraft(ids.owner, ids.organization, {
+      actorMembershipId: ids.ownerMembership, sourceVersionId: note!.versionId, classification: "INTERNAL", idempotencyKey: randomUUID(),
+      expectedSource: source!, copiedContent: object("2"), requestId: "live-contribute",
+    });
+    expect(contributed.kind).toBe("created");
+    expect((await versions())[0]).toMatchObject({ sealed: true });
+    const third = object("3");
+    const afterContribution = await repository.updateDraft(ids.owner, ids.organization, note!.id, 3, { body: "three" }, third, "live-save-2");
+    expect(afterContribution).toMatchObject({ kind: "updated", draft: { currentVersion: 4 }, replacedSourceUri: null });
+    if (afterContribution.kind !== "updated") return;
+    expect(afterContribution.draft.versionId).not.toBe(note!.versionId);
+    expect(await versions()).toEqual([
+      { draft_version_id: note!.versionId, version_no: 3, source_uri: second.sourceUri, sealed: true },
+      { draft_version_id: afterContribution.draft.versionId, version_no: 4, source_uri: third.sourceUri, sealed: false },
+    ]);
+
+    // The database itself refuses to change a sealed or contributed version, to delete any version, or to move back a number.
+    const runtime = async (sql: string, values: unknown[]) => {
+      const client = await pool!.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE arden_runtime");
+        await client.query("SET LOCAL search_path TO arden, public");
+        await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [ids.owner, ids.organization]);
+        return await client.query(sql, values);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    await expect(runtime("UPDATE draft_version SET content_hash = $2 WHERE draft_version_id = $1", [note!.versionId, "7".repeat(64)]))
+      .rejects.toMatchObject({ code: "55000" });
+    await expect(pool.query("UPDATE arden.draft_version SET sealed_at = NULL WHERE draft_version_id = $1", [note!.versionId]))
+      .rejects.toMatchObject({ code: "55000" });
+    await expect(runtime("UPDATE draft_version SET version_no = 1 WHERE draft_version_id = $1", [afterContribution.draft.versionId]))
+      .rejects.toMatchObject({ code: "55000" });
+    await expect(runtime("UPDATE draft_version SET draft_id = draft_id, created_by_membership_id = $2 WHERE draft_version_id = $1",
+      [afterContribution.draft.versionId, ids.managerMembership])).rejects.toMatchObject({ code: "42501" });
+    await expect(pool.query("DELETE FROM arden.draft_version WHERE draft_version_id = $1", [afterContribution.draft.versionId]))
+      .rejects.toMatchObject({ code: "55000" });
+    // Another member can neither see nor overwrite the owner's open version.
+    await expect(repository.updateDraft(ids.manager, ids.organization, note!.id, 4, { body: "x" }, object("8"), "live-steal"))
+      .resolves.toEqual({ kind: "not-found" });
   }, 30_000);
 });
 

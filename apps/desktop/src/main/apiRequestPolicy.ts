@@ -10,12 +10,12 @@ export type DesktopApiRequest = {
 const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const uuidPattern = new RegExp(`^${uuid}$`);
 const privateDraftPath = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts(?:/${uuid})?$`);
-// Decision 0029 private notes organization: collections, favorites and trash. No DELETE method.
+// Decision 0029 private notes organization: collections, favorites and trash; spec F03-ARR order and archive. No DELETE method.
 const privateCollectionCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections$`);
 const privateCollectionItem = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections/${uuid}$`);
-const privateFavoritePlacement = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/(drafts/${uuid}/(collection|favorite)|collections/${uuid}/favorite)$`);
+const privateFavoritePlacement = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/(drafts/${uuid}/(collection|favorite|archive)|collections/${uuid}/favorite)$`);
 const privateItemAction = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/((drafts|collections)/${uuid}/(duplicate|trash)|trash/${uuid}/(restore|purge))$`);
-const privateTrashCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/trash$`);
+const privateTrashCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/(trash|archive)$`);
 const sharedDraftPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts$`);
 const knowledgeCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/(options|drafts|submissions|reviews|published|reviewer-grants)$`);
 const reviewerGrantCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants$`);

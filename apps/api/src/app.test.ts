@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult, type RetryKnowledgePublicationResult, type GovernancePublication, type GovernanceInspectionView, type GovernanceDocumentView, type PublicationReport, type OpenGovernanceInspectionResult, type DirectWithdrawalResult, type ReportPublicationResult, type PublicationChangeInput, type RequestPublicationChangeResult } from "./db/repository.js";
+import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftUpdateResult, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult, type RetryKnowledgePublicationResult, type GovernancePublication, type GovernanceInspectionView, type GovernanceDocumentView, type PublicationReport, type OpenGovernanceInspectionResult, type DirectWithdrawalResult, type ReportPublicationResult, type PublicationChangeInput, type RequestPublicationChangeResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -26,6 +26,8 @@ const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const otherOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const draftId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const versionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const otherDraftA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1";
+const otherDraftB = "ffffffff-ffff-4fff-8fff-fffffffffff2";
 const sharedDraftId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const sharedVersionId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const createKey = "99999999-9999-4999-8999-999999999999";
@@ -1278,6 +1280,8 @@ describe("API auth and private draft routes", () => {
         { method: "PUT" as const, url: `${noteUrl}/favorite`, payload: { favorite: true } },
         { method: "POST" as const, url: `${noteUrl}/duplicate` },
         { method: "POST" as const, url: `${noteUrl}/trash` },
+        { method: "PUT" as const, url: `${noteUrl}/archive`, payload: { archived: true } },
+        { method: "PUT" as const, url: `${noteUrl}/collection`, payload: { collectionId: null, index: 0 } },
         { method: "POST" as const, url: `${base}/trash/${batchId}/restore` },
         { method: "POST" as const, url: `${base}/trash/${batchId}/purge` },
       ];
@@ -1286,7 +1290,7 @@ describe("API auth and private draft routes", () => {
         expect(response.statusCode, `${attempt.method} ${attempt.url}`).toBe(404);
         expect(response.json().error.code).toBe("RESOURCE_NOT_AVAILABLE");
       }
-      for (const url of [`${base}/collections`, `${base}/trash`]) {
+      for (const url of [`${base}/collections`, `${base}/trash`, `${base}/archive`]) {
         const response = await app.inject({ method: "GET", url, headers: other });
         expect(response.statusCode).toBe(200);
         expect(response.json().items).toEqual([]);
@@ -1326,6 +1330,97 @@ describe("API auth and private draft routes", () => {
       expect((await app.inject({ method: "POST", url: `${base}/collections`, headers, payload: { title: "Nested", parentId: collection.id } })).statusCode).toBe(404);
       const created = await app.inject({ method: "POST", url: `${base}/drafts`, headers, payload: { title: "New", body: "Body", collectionId: collection.id } });
       expect(created.statusCode).toBe(404);
+    });
+
+    it("places notes at an index of their collection order, clamping past the end (spec F03-ARR)", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const collection = await createCollection(headers, "Ordered");
+      const store = repository.privateOrganization;
+      for (const id of [otherDraftA, otherDraftB]) {
+        store.addNote({ id, title: id, collectionId: collection.id, content: () => ({ versionId, version: 1, ...repository.currentSource }) });
+      }
+      const placed = await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id, index: 1 } });
+      expect(placed.statusCode).toBe(200);
+      expect(placed.json()).toMatchObject({ id: draftId, collectionId: collection.id, position: 2, archivedAt: null });
+      expect(store.ordered(collection.id).map((note) => [note.id, note.position])).toEqual([[otherDraftB, 1], [draftId, 2], [otherDraftA, 3]]);
+      // Without an index the note goes last; an index past the end is clamped.
+      const last = await app.inject({ method: "PUT", url: `${base}/drafts/${otherDraftB}/collection`, headers, payload: { collectionId: collection.id } });
+      expect(last.json().position).toBe(3);
+      const clamped = await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id, index: 99 } });
+      expect(clamped.json().position).toBe(3);
+      for (const index of [-1, 1.5, "first", 2_000_000]) {
+        const invalid = await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id, index } });
+        expect(invalid.statusCode, String(index)).toBe(400);
+      }
+      const list = await app.inject({ method: "GET", url: `${base}/drafts`, headers });
+      expect(list.json().items.find((item: { id: string }) => item.id === draftId)).toMatchObject({ position: 3 });
+    });
+
+    it("overwrites an open version and erases its old content, but keeps a contributed version's content (decision 0030)", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const before = repository.currentSource;
+      const saved = await app.inject({ method: "PATCH", url: noteUrl, headers: { ...headers, "if-match": '"2"' }, payload: { body: "Autosaved body" } });
+      expect(saved.statusCode).toBe(200);
+      expect(saved.headers.etag).toBe('"3"');
+      expect(saved.json()).toMatchObject({ body: "Autosaved body", currentVersion: { id: versionId, version: 3 } });
+      await expect(storage.read(before.sourceUri, before.contentHash)).rejects.toThrow();
+      const stale = await app.inject({ method: "PATCH", url: noteUrl, headers: { ...headers, "if-match": '"2"' }, payload: { body: "Stale" } });
+      expect(stale.statusCode).toBe(412);
+
+      repository.sourceVersionSealed = true;
+      const contributed = repository.currentSource;
+      await app.inject({ method: "PATCH", url: noteUrl, headers: { ...headers, "if-match": '"3"' }, payload: { body: "After contribution" } });
+      await expect(storage.read(contributed.sourceUri, contributed.contentHash)).resolves.toBe("Autosaved body");
+      repository.sourceVersionSealed = false;
+    });
+
+    it("archives a note out of the tree and lists, and unarchives it to its collection or the root (spec F03-ARR)", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const collection = await createCollection(headers, "Projects");
+      await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id } });
+      await app.inject({ method: "PUT", url: `${noteUrl}/favorite`, headers, payload: { favorite: true } });
+
+      const archived = await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: true } });
+      expect(archived.statusCode).toBe(200);
+      expect(archived.headers["cache-control"]).toBe("no-store");
+      expect(archived.json().archivedAt).not.toBeNull();
+      const again = await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: true } });
+      expect(again.json().archivedAt).toBe(archived.json().archivedAt);
+      expect((await app.inject({ method: "GET", url: `${base}/drafts`, headers })).json().items).toEqual([]);
+      // Archived notes are outside the tree: no favorite, move or duplicate until unarchived.
+      expect((await app.inject({ method: "PUT", url: `${noteUrl}/favorite`, headers, payload: { favorite: false } })).statusCode).toBe(404);
+      expect((await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: null } })).statusCode).toBe(404);
+      expect((await app.inject({ method: "POST", url: `${noteUrl}/duplicate`, headers })).statusCode).toBe(404);
+      // Trashing the collection leaves the archived note archived.
+      const trashed = await app.inject({ method: "POST", url: `${base}/collections/${collection.id}/trash`, headers });
+      expect(trashed.json().itemCount).toBe(1);
+
+      const archive = await app.inject({ method: "GET", url: `${base}/archive`, headers });
+      expect(archive.statusCode).toBe(200);
+      expect(archive.headers["cache-control"]).toBe("no-store");
+      expect(archive.json()).toEqual({ hasMore: false, items: [expect.objectContaining({
+        id: draftId, title: "Review notes", collectionId: null, collectionTitle: null, archivedAt: archived.json().archivedAt })] });
+      expect((await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: "no" } })).statusCode).toBe(400);
+
+      const restored = await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: false } });
+      expect(restored.json()).toMatchObject({ id: draftId, collectionId: null, archivedAt: null, position: null });
+      expect(restored.json().favoritedAt).not.toBeNull();
+      expect((await app.inject({ method: "GET", url: `${base}/archive`, headers })).json().items).toEqual([]);
+      expect((await app.inject({ method: "GET", url: `${base}/drafts`, headers })).json().items).toHaveLength(1);
+      expect(repository.privateOrganization.audit.map((event) => event.eventType))
+        .toEqual(expect.arrayContaining(["PRIVATE_DRAFT_ARCHIVED", "PRIVATE_DRAFT_UNARCHIVED"]));
+      expect(JSON.stringify(repository.privateOrganization.audit)).not.toContain("Review notes");
+
+      // Delete from the Archived view is Move to trash, which clears the archive flag.
+      await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: true } });
+      const toTrash = await app.inject({ method: "POST", url: `${noteUrl}/trash`, headers });
+      expect(toTrash.statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: `${base}/archive`, headers })).json().items).toEqual([]);
+      await app.inject({ method: "POST", url: `${base}/trash/${toTrash.json().batchId}/restore`, headers });
+      expect((await app.inject({ method: "GET", url: `${base}/drafts`, headers })).json().items).toHaveLength(1);
     });
 
     it("hides a trashed note from get, patch, list and contribution, and restores it to the root when its collection is gone", async () => {
@@ -3262,17 +3357,24 @@ class MemoryRepository implements ArdenDataRepository {
       && !this.privateOrganization.hidden(draftId);
   }
 
-  async updateDraft(_userId: string, _organization: string, _draft: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }> {
+  async updateDraft(_userId: string, _organization: string, _draft: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null): Promise<DraftUpdateResult> {
     if (this.privateOrganization.hidden(draftId)) return { kind: "not-found" };
     if (expectedVersion !== this.currentVersion) return { kind: "conflict", currentVersion: this.currentVersion };
     this.currentVersion += 1;
+    // Decision 0030: an open version is overwritten; its previous content object becomes unreachable.
+    let replacedSourceUri: string | null = null;
     if (patch.body !== undefined) {
       this.currentBody = patch.body;
-      if (content) this.currentSource = content;
+      if (content) {
+        if (!this.sourceVersionSealed && content.sourceUri !== this.currentSource.sourceUri) replacedSourceUri = this.currentSource.sourceUri;
+        this.currentSource = content;
+      }
     }
     const draft = { ...this.note(), title: patch.title ?? this.note().title };
-    return { kind: "updated", draft };
+    return { kind: "updated", draft, replacedSourceUri };
   }
+  /** Set when the note's version was contributed (decision 0030). */
+  sourceVersionSealed = false;
 
   private note(): PrivateDraft {
     return {
@@ -3282,6 +3384,7 @@ class MemoryRepository implements ArdenDataRepository {
       createdAt: new Date("2026-10-05T09:00:00.000Z"), updatedAt: new Date("2026-10-05T09:00:00.000Z"),
       collectionId: this.privateOrganization.notes.get(draftId)?.collectionId ?? null,
       favoritedAt: this.privateOrganization.notes.get(draftId)?.favoritedAt ?? null,
+      position: this.privateOrganization.notes.get(draftId)?.position ?? null,
     };
   }
 }
