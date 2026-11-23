@@ -49,7 +49,7 @@ import {
 } from "../maintenance/maintenance-client";
 import { ApprovedReadersField, approvedReadersReady } from "./ApprovedReadersField";
 import { PublicationChangeDialog, publicationChangeSentMessage, type PublicationChangeType } from "./PublicationChangeDialog";
-import type { KnowledgeNavigationTarget } from "./knowledgeCitation";
+import type { KnowledgeReaderTarget, KnowledgeCitationReference } from "./knowledgeCitation";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
   .then((module) => ({ default: module.ArdenRichTextEditor })));
@@ -76,7 +76,7 @@ type Props = ContextControlProps & {
   onOpenReviews?: () => void;
   active: boolean;
   createdDraftId: string | null;
-  citationTarget?: KnowledgeNavigationTarget | null;
+  citationTarget?: KnowledgeReaderTarget | null;
   requestedReviewId?: string | null;
   onReviewTargetHandled?: () => void;
   onAssignedReviewCount?: (count: number) => void;
@@ -143,7 +143,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const [replacementPdf, setReplacementPdf] = useState<File | null>(null);
   const [review, setReview] = useState<KnowledgeReviewDetail | null>(null);
   const [document, setDocument] = useState<PublishedKnowledge | null>(null);
-  const [openedCitation, setOpenedCitation] = useState<KnowledgeNavigationTarget | null>(null);
+  const [openedCitation, setOpenedCitation] = useState<(KnowledgeCitationReference & { navigationId: string }) | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [newBody, setNewBody] = useState(() => serializeSemanticDocument(
     plainTextToSemanticDocument("", () => crypto.randomUUID()),
@@ -764,22 +764,30 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     if (!active || view !== "knowledge" || !citationTarget || openedCitationId.current === citationTarget.navigationId) return;
     openedCitationId.current = citationTarget.navigationId;
     let present = true;
-    let loading = true;
-    setBusy(true); setError("");
-    void loadPublishedKnowledge(platform, organizationId, citationTarget.versionId)
-      .then((loaded) => {
-        if (!present) return;
-        if (loaded.id !== citationTarget.versionId) throw new Error("citation-version-mismatch");
-        setLibraryTab(loaded.targetReaders?.mode === "ORGANIZATION" ? "organization"
-          : loaded.targetReaders == null ? "other" : "shared");
-        setOrganizationView("all"); setOpenedCitation(citationTarget); setDocument(loaded); setScreen("document");
-      })
-      .catch(() => {
-        if (!present) return;
-        setOpenedCitation(null);
-        setError("Source unavailable.");
-      })
-      .finally(() => { loading = false; if (present) setBusy(false); });
+    let loading = false;
+    const open = () => {
+      if (!present) return;
+      loading = true;
+      setBusy(true); setError("");
+      void loadPublishedKnowledge(platform, organizationId, citationTarget.versionId)
+        .then((loaded) => {
+          if (!present) return;
+          if (loaded.id !== citationTarget.versionId) throw new Error("citation-version-mismatch");
+          setLibraryTab(loaded.targetReaders?.mode === "ORGANIZATION" ? "organization"
+            : loaded.targetReaders == null ? "other" : "shared");
+          setOrganizationView("all");
+          setOpenedCitation("documentId" in citationTarget ? citationTarget : null);
+          setDocument(loaded); setScreen("document");
+        })
+        .catch(() => {
+          if (!present) return;
+          setOpenedCitation(null);
+          setError("Source unavailable.");
+        })
+        .finally(() => { loading = false; if (present) setBusy(false); });
+    };
+    if ("kind" in citationTarget && unsaved) setDiscardAction(() => open);
+    else open();
     return () => {
       present = false;
       if (loading) { openedCitationId.current = null; setBusy(false); }

@@ -10,6 +10,8 @@ type NotificationRow = {
   event_type: NotificationRecord["type"];
   resource_type: NotificationRecord["resourceType"];
   resource_id: string;
+  publication_title: string | null;
+  shared_by_name: string | null;
   created_at: Date;
   read_at: Date | null;
 };
@@ -50,7 +52,7 @@ export class PgNotificationStore implements NotificationStore {
           AND (n.event_type <> 'REVIEW_REQUESTED' OR n.resource_id = ANY($2::uuid[]))`,
       [organizationId, visibleReviewIds]);
       const rows = await client.query<NotificationRow>(`SELECT n.notification_id, n.event_type,
-          n.resource_type, n.resource_id, n.created_at, n.read_at
+          n.resource_type, n.resource_id, n.publication_title, n.shared_by_name, n.created_at, n.read_at
         FROM arden_notification n
         WHERE n.organization_id = $1
           AND ($2::boolean = false OR n.read_at IS NULL)
@@ -65,6 +67,9 @@ export class PgNotificationStore implements NotificationStore {
       const items: NotificationRecord[] = pageRows.map(row => ({
         id: row.notification_id, type: row.event_type, resourceType: row.resource_type,
         resourceId: row.resource_id, createdAt: row.created_at.toISOString(), readAt: row.read_at?.toISOString() ?? null,
+        ...(row.event_type === "DOCUMENT_SHARED_PERSONAL" || row.event_type === "DOCUMENT_SHARED_GROUP" ? {
+          publicationTitle: row.publication_title ?? undefined, sharedByName: row.shared_by_name ?? undefined,
+        } : {}),
       }));
       return { items, unreadCount: Number(count.rows[0]?.unread_count ?? 0),
         nextCursor: hasMore && last ? encodeNotificationCursor({ createdAt: last.created_at, id: last.notification_id }) : null };

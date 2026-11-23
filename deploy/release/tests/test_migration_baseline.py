@@ -328,6 +328,12 @@ class MigrationBaselineTests(unittest.TestCase):
         self.assertIsNotNone(expected)
         self.assertEqual(len(names), int(expected.group(1)),
                          "Update the repair inventory with every reviewed SECURITY DEFINER routine")
+        maintenance = repair[repair.index("expected_maintenance_signatures text[] := ARRAY["):]
+        maintenance = maintenance[:maintenance.index("];")]
+        signatures = set(re.findall(r"'([^']+)'", maintenance))
+        self.assertEqual(len(signatures), 13)
+        self.assertIn("list_closed_publication_reports()", signatures)
+        self.assertIn("list_closed_publication_reports(uuid)", signatures)
 
 if __name__ == "__main__":
     unittest.main()

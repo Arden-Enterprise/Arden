@@ -9,7 +9,7 @@ SELECT pg_advisory_xact_lock(hashtext('arden:migrations'));
 DO $repair_internal_execution$
 DECLARE
     item record;
-    -- Exact inventory after migrations 0001-0041 (34 routines). Any other count or name refuses.
+    -- Exact inventory after migrations 0001-0061 (48 routines). Any other count or name refuses.
     expected_names text[] := ARRAY[
         -- Reviewed baseline (0001-0022).
         'audience_snapshot_enforceable', 'claim_knowledge_index_job',
@@ -31,9 +31,25 @@ DECLARE
         'list_governance_publications', 'open_governance_inspection', 'use_governance_inspection',
         'responsible_publication_view', 'withdraw_publication_directly', 'list_publication_reports',
         'close_publication_report',
-        -- 0039 notification fan-out; 0040 trigger-only placement validator.
-        'notify_arden_notification',
+        -- 0039 notification fan-out; 0040 trigger-only placement validator;
+        -- 0061 approved reader-change share fan-out.
+        'notify_arden_notification', 'notify_arden_publication_share',
         'validate_collection_placement'];
+    -- Flow 4 includes overloaded routines: match their exact signatures.
+    expected_maintenance_signatures text[] := ARRAY[
+        'enqueue_maintenance_submission_notices()',
+        'list_closed_publication_reports()',
+        'list_closed_publication_reports(uuid)',
+        'list_maintenance_document_versions(uuid, uuid)',
+        'list_maintenance_eligible_reviewers(uuid)',
+        'list_unmapped_open_publication_reports(timestamp with time zone, uuid)',
+        'maintenance_actor_can_review_version(uuid)',
+        'maintenance_has_unmapped_open_reader_report(uuid)',
+        'maintenance_lock_document(uuid)',
+        'maintenance_membership_can_review_version(uuid, uuid)',
+        'maintenance_next_event_sequence(uuid)',
+        'maintenance_publication_proof(uuid, uuid)',
+        'maintenance_version_source(uuid)'];
 BEGIN
     IF current_database() <> '__EXPECTED_DATABASE__'
        OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user AND rolsuper)
@@ -43,20 +59,27 @@ BEGIN
         RAISE EXCEPTION 'Refusing an unverified internal-executor recovery target';
     END IF;
     IF (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-         WHERE n.nspname = 'arden' AND p.prosecdef) <> cardinality(expected_names)
+         WHERE n.nspname = 'arden' AND p.prosecdef) <> cardinality(expected_names) + cardinality(expected_maintenance_signatures)
        OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
                    WHERE n.nspname = 'arden' AND p.prosecdef
-                     AND (p.proname <> ALL(expected_names)
+                     AND ((p.proname <> ALL(expected_names)
+                           AND format('%s(%s)', p.proname, oidvectortypes(p.proargtypes))
+                               <> ALL(expected_maintenance_signatures))
                           OR p.proowner NOT IN ('postgres'::regrole, '__MIGRATION_ROLE__'::regrole)))
        OR EXISTS (SELECT 1 FROM unnest(expected_names) name
                    WHERE (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-                           WHERE n.nspname = 'arden' AND p.prosecdef AND p.proname = name) <> 1) THEN
+                           WHERE n.nspname = 'arden' AND p.prosecdef AND p.proname = name) <> 1)
+       OR EXISTS (SELECT 1 FROM unnest(expected_maintenance_signatures) signature
+                   WHERE (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                           WHERE n.nspname = 'arden' AND p.prosecdef
+                             AND format('%s(%s)', p.proname, oidvectortypes(p.proargtypes)) = signature) <> 1) THEN
         RAISE EXCEPTION 'Internal function inventory/owners changed; review before recovery';
     END IF;
     FOR item IN
         SELECT p.oid::regprocedure AS signature
           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-         WHERE n.nspname = 'arden' AND p.prosecdef AND p.proname = ANY(expected_names)
+         WHERE n.nspname = 'arden' AND p.prosecdef AND (p.proname = ANY(expected_names)
+                OR format('%s(%s)', p.proname, oidvectortypes(p.proargtypes)) = ANY(expected_maintenance_signatures))
            AND p.proowner = '__MIGRATION_ROLE__'::regrole
     LOOP
         EXECUTE format('ALTER FUNCTION %s OWNER TO postgres', item.signature);

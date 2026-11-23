@@ -2763,6 +2763,12 @@ class MemoryRepository implements ArdenDataRepository {
     return submissions?.filter(submission => submissionIds.includes(submission.id)).map(submission => submission.id) ?? null;
   }
 
+  async listReadableCurrentPublicationIds(userId: string, requestedOrganization: string,
+    publishedVersionIds: readonly string[]): Promise<string[] | null> {
+    if (!(await this.requireActiveMembership(userId, requestedOrganization))) return null;
+    return this.publication && publishedVersionIds.includes(this.publication.id) ? [this.publication.id] : [];
+  }
+
   governanceAdmin = false;
   governanceInspections = new Map<string, string>();
   publicationReports: PublicationReport[] = [];
