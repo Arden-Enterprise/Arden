@@ -17,6 +17,7 @@ import { PgIndexGenerationStore } from "./indexing/store.js";
 import { IndexingWorker, indexWorkerLeaseSeconds } from "./indexing/worker.js";
 import { NotificationOutboxWorker, notificationWorkerPollMilliseconds } from "./notifications/outbox.js";
 import { notificationRealtimeConfiguration } from "./notifications/realtime.js";
+import { PrivateTrashRetention, startPrivateTrashRetentionLoop } from "./private-notes/trash-retention.js";
 
 const databaseUrl = process.env.DATABASE_URL ??
   (process.env.NODE_ENV === "production"
@@ -142,6 +143,7 @@ try {
   throw new Error("Notification worker database role or schema is unavailable; verify ARDEN_NOTIFICATION_DATABASE_URL and its arden_notification_worker membership");
 }
 
+const repository = new ArdenRepository(pool, contentStorage);
 const app = buildApp({
   checkDatabase: checkRuntimeDatabase,
   auth: localFlow1TestMode
@@ -156,7 +158,7 @@ const app = buildApp({
   secureCookies: process.env.NODE_ENV === "production",
   sessionSigningKey: sessionSigningKey(process.env.ARDEN_SESSION_SIGNING_KEY,
     process.env.NODE_ENV === "production"),
-  repository: new ArdenRepository(pool, contentStorage),
+  repository,
   storage: contentStorage,
   invitationMailer,
   askArden,
@@ -215,6 +217,12 @@ const notificationWorker = notificationRealtime
     error: (fields, message) => app.log.error(fields, message),
   })
   : null;
+// Decision 0029: hourly in-process purge of private trash batches older than 30 days.
+const privateTrashRetention = new PrivateTrashRetention(repository.privateTrashRetention, contentStorage, {
+  info: (fields, message) => app.log.info(fields, message),
+  error: (fields, message) => app.log.error(fields, message),
+});
+let privateTrashRetentionLoop: { stop(): void } | undefined;
 let indexWorkerTimer: NodeJS.Timeout | undefined;
 let notificationWorkerTimer: NodeJS.Timeout | undefined;
 let stopping = false;
@@ -249,6 +257,7 @@ async function shutdown() {
   stopping = true;
   if (indexWorkerTimer) clearTimeout(indexWorkerTimer);
   if (notificationWorkerTimer) clearTimeout(notificationWorkerTimer);
+  privateTrashRetentionLoop?.stop();
   await app.close();
   invitationMailer?.close();
   await pool.end();
@@ -262,6 +271,9 @@ process.once("SIGTERM", () => void shutdown());
 await app.listen({ port, host });
 scheduleIndexWorker(250);
 scheduleNotificationWorker(250);
+privateTrashRetentionLoop = startPrivateTrashRetentionLoop(privateTrashRetention, {
+  error: (fields, message) => app.log.error(fields, message),
+});
 
 function localFlow1Origin(name: string, fallback: string): string {
   const origin = process.env[name] || fallback;

@@ -70,8 +70,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0036_publication_preparation_retry', '0037_publication_governance',
           '0038_admin_only_direct_withdrawal', '0039_in_app_notifications', '0040_flat_collection_placement',
           '0041_verified_legacy_metadata_repair', '0042_remove_knowledge_topics',
-          '0061_document_share_notifications')`);
-    if (migration.rows[0]?.count !== "29") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0061_document_share_notifications', '0062_private_notes_organization_and_trash')`);
+    if (migration.rows[0]?.count !== "30") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -202,6 +202,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM reader_selection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM draft_document WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
+          await client.query("DELETE FROM private_collection WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM private_workspace WHERE membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM audience_group_membership WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM audience WHERE organization_id = $1", [ids.organization]);
@@ -1177,6 +1178,111 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.getPublishedKnowledge(crossReader, ids.organization, crossPublication.id))
       .resolves.toMatchObject({ responsibleDepartmentName: "Synthetic department" });
     await expect(repository.getPublishedKnowledge(crossReader, randomUUID(), crossPublication.id)).resolves.toBeNull();
+  }, 30_000);
+
+  it("keeps collections, favorites and trash owner-only and purges expired trash into tombstones (decision 0029)", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+    const store = repository.privateOrganization;
+    const content = () => ({ sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain" as const, contentHash: "e".repeat(64) });
+    const parent = await store.createCollection(ids.owner, ids.organization, { title: "Owner parent", parentId: null }, "org-create-parent");
+    const child = await store.createCollection(ids.owner, ids.organization, { title: "Owner child", parentId: parent!.id }, "org-create-child");
+    expect(child).toMatchObject({ parentId: parent!.id });
+    const note = await repository.createDraft(ids.owner, ids.organization,
+      { title: "Organized", body: "Body", collectionId: child!.id }, content(), "org-create-note");
+    expect(note).toMatchObject({ collectionId: child!.id });
+
+    // F03-ORG-AC1: another active member and the Org Admin context see and change nothing.
+    await expect(store.listCollections(ids.manager, ids.organization)).resolves.toEqual([]);
+    await expect(store.updateCollection(ids.manager, ids.organization, parent!.id, { title: "Taken" }, "org-steal"))
+      .resolves.toEqual({ kind: "not-found" });
+    await expect(store.moveNote(ids.manager, ids.organization, note!.id, null)).resolves.toBeNull();
+    await expect(store.trashCollection(ids.manager, ids.organization, parent!.id, "org-steal-trash")).resolves.toBeNull();
+    await expect(repository.createDraft(ids.manager, ids.organization,
+      { title: "Planted", body: "x", collectionId: child!.id }, content(), "org-plant")).resolves.toBeNull();
+    // A direct runtime write cannot attach another owner's collection as a parent.
+    const managerCollection = await store.createCollection(ids.manager, ids.organization, { title: "Manager", parentId: null }, "org-manager");
+    await expect(store.createCollection(ids.manager, ids.organization, { title: "Cross", parentId: parent!.id }, "org-cross"))
+      .resolves.toBeNull();
+
+    // F03-ORG-AC2: cycles are rejected by the API check and by the database trigger.
+    await expect(store.updateCollection(ids.owner, ids.organization, parent!.id, { parentId: child!.id }, "org-cycle"))
+      .resolves.toEqual({ kind: "cycle" });
+    const runtime = async <T>(userId: string, work: (client: import("pg").PoolClient) => Promise<T>) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE arden_runtime");
+        await client.query("SET LOCAL search_path TO arden, public");
+        await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [userId, ids.organization]);
+        return await work(client);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    await expect(runtime(ids.owner, (client) => client.query(
+      "UPDATE private_collection SET parent_collection_id = $2 WHERE collection_id = $1", [parent!.id, child!.id])))
+      .rejects.toMatchObject({ code: "23514" });
+    await expect(runtime(ids.manager, async (client) => (await client.query(
+      "SELECT 1 FROM private_collection WHERE collection_id = ANY($1::uuid[])", [[parent!.id, child!.id]])).rowCount)).resolves.toBe(0);
+    await expect(runtime(ids.manager, (client) => client.query(
+      "UPDATE private_collection SET parent_collection_id = $2 WHERE collection_id = $1", [managerCollection!.id, parent!.id])))
+      .rejects.toMatchObject({ code: "23503" });
+
+    // F03-ORG-AC3/AC4: favorites and duplicate.
+    await expect(store.setNoteFavorite(ids.owner, ids.organization, note!.id, true)).resolves.toMatchObject({ favoritedAt: expect.any(Date) });
+    const source = await store.getNoteSource(ids.owner, ids.organization, note!.id);
+    const duplicate = await store.duplicateNote(ids.owner, ids.organization, source!, "Organized (copy)", content(), "org-dup");
+    expect(duplicate).toMatchObject({ title: "Organized (copy)", collectionId: child!.id, favoritedAt: null, currentVersion: 1 });
+
+    // F03-ORG-AC5: trash hides the subtree from reads, updates and contribution; restore returns it.
+    const entry = await store.trashCollection(ids.owner, ids.organization, child!.id, "org-trash");
+    expect(entry).toMatchObject({ kind: "collection", id: child!.id, fromCollectionTitle: "Owner parent", itemCount: 3 });
+    await expect(repository.getDraft(ids.owner, ids.organization, note!.id)).resolves.toBeNull();
+    await expect(repository.canUpdateDraft(ids.owner, ids.organization, note!.id)).resolves.toBe(false);
+    await expect(repository.updateDraft(ids.owner, ids.organization, note!.id, 1, { title: "x" }, null, "org-edit-trashed"))
+      .resolves.toEqual({ kind: "not-found" });
+    await expect(repository.getPrivateContributionSource(ids.owner, ids.organization, note!.versionId)).resolves.toBeNull();
+    expect((await repository.listDrafts(ids.owner, ids.organization, 100, null))?.items.some((item) => item.id === note!.id)).toBe(false);
+    await expect(store.trashNote(ids.owner, ids.organization, note!.id, "org-trash-again")).resolves.toBeNull();
+    await expect(store.listTrash(ids.manager, ids.organization)).resolves.toEqual([]);
+    await expect(store.restoreTrash(ids.manager, ids.organization, entry!.batchId, "org-restore-steal")).resolves.toBeNull();
+    await expect(store.trashCollection(ids.owner, ids.organization, parent!.id, "org-trash-parent")).resolves.toMatchObject({ itemCount: 1 });
+    const restored = await store.restoreTrash(ids.owner, ids.organization, entry!.batchId, "org-restore");
+    expect(restored?.collections).toEqual([expect.objectContaining({ id: child!.id, parentId: null })]);
+    expect(restored?.notes.map((item) => item.id).sort()).toEqual([note!.id, duplicate!.id].sort());
+
+    // F03-ORG-AC6: the retention context sees only trash older than 30 days and leaves tombstones.
+    const expired = await store.trashCollection(ids.owner, ids.organization, child!.id, "org-trash-expire");
+    const beforeRetention = await repository.privateTrashRetention.purgeExpired(new Date(), 100);
+    expect(beforeRetention.purgedBatches).toBe(0);
+    await pool.query(`UPDATE arden.draft_document SET trashed_at = trashed_at - interval '31 days' WHERE trash_batch_id = $1`, [expired!.batchId]);
+    await pool.query(`UPDATE arden.private_collection SET trashed_at = trashed_at - interval '31 days' WHERE trash_batch_id = $1`, [expired!.batchId]);
+    const purged = await repository.privateTrashRetention.purgeExpired(new Date(), 100);
+    expect(purged.purgedBatches).toBe(1);
+    expect(purged.content.map((item) => item.draftId)).toEqual(expect.arrayContaining([note!.id, duplicate!.id]));
+    await repository.privateTrashRetention.markContentErased(purged.content.map((item) => item.draftId));
+    const tombstones = await pool.query<{ status: string; title: string; content_purged_at: Date | null }>(`SELECT status, title, content_purged_at
+      FROM arden.draft_document WHERE draft_id = ANY($1::uuid[])`, [[note!.id, duplicate!.id]]);
+    expect(tombstones.rows).toEqual([
+      expect.objectContaining({ status: "PURGED", title: "", content_purged_at: expect.any(Date) }),
+      expect.objectContaining({ status: "PURGED", title: "", content_purged_at: expect.any(Date) }),
+    ]);
+    const versions = await pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM arden.draft_version WHERE draft_id = $1`, [note!.id]);
+    expect(versions.rows[0]?.count).toBe("1");
+    await expect(store.listTrash(ids.owner, ids.organization)).resolves.toEqual([expect.objectContaining({ kind: "collection", id: parent!.id })]);
+    await expect(store.restoreTrash(ids.owner, ids.organization, expired!.batchId, "org-restore-purged")).resolves.toBeNull();
+    const audit = await pool.query<{ details_json: unknown }>(`SELECT details_json FROM arden.audit_event
+      WHERE organization_id = $1 AND event_type LIKE 'PRIVATE_%' AND event_type NOT LIKE 'PRIVATE_DRAFT_CREATED'
+        AND event_type NOT LIKE 'PRIVATE_DRAFT_UPDATED'`, [ids.organization]);
+    expect(audit.rows.length).toBeGreaterThan(0);
+    expect(JSON.stringify(audit.rows)).not.toMatch(/Owner parent|Owner child|Organized/);
+
+    // Owner purge of the remaining parent batch.
+    const parentBatch = (await store.listTrash(ids.owner, ids.organization))![0]!.batchId;
+    await expect(store.purgeTrash(ids.manager, ids.organization, parentBatch, "org-purge-steal")).resolves.toBeNull();
+    await expect(store.purgeTrash(ids.owner, ids.organization, parentBatch, "org-purge")).resolves.toEqual([]);
+    await expect(store.listCollections(ids.owner, ids.organization)).resolves.toEqual([]);
   }, 30_000);
 });
 

@@ -1,6 +1,6 @@
 export type DesktopApiRequest = {
   path: string;
-  method: "GET" | "POST" | "PATCH";
+  method: "GET" | "POST" | "PATCH" | "PUT";
   body?: string;
   ifMatch?: string;
   idempotencyKey?: string;
@@ -10,6 +10,12 @@ export type DesktopApiRequest = {
 const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const uuidPattern = new RegExp(`^${uuid}$`);
 const privateDraftPath = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts(?:/${uuid})?$`);
+// Decision 0029 private notes organization: collections, favorites and trash. No DELETE method.
+const privateCollectionCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections$`);
+const privateCollectionItem = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections/${uuid}$`);
+const privateFavoritePlacement = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/(drafts/${uuid}/(collection|favorite)|collections/${uuid}/favorite)$`);
+const privateItemAction = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/((drafts|collections)/${uuid}/(duplicate|trash)|trash/${uuid}/(restore|purge))$`);
+const privateTrashCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/trash$`);
 const sharedDraftPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts$`);
 const knowledgeCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/(options|drafts|submissions|reviews|published|reviewer-grants)$`);
 const reviewerGrantCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants$`);
@@ -70,7 +76,7 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
   const request = value as Record<string, unknown>;
   if (Object.keys(request).some((key) => !["path", "method", "body", "ifMatch", "idempotencyKey", "timeoutMs"].includes(key))) return false;
   if (typeof request.path !== "string" || request.path.length > 2048 || !request.path.startsWith("/") || request.path.startsWith("//")) return false;
-  if (request.method !== "GET" && request.method !== "POST" && request.method !== "PATCH") return false;
+  if (request.method !== "GET" && request.method !== "POST" && request.method !== "PATCH" && request.method !== "PUT") return false;
   const pdfUpload = typeof request.path === "string" && (pdfKnowledgeDraft.test(request.path)
     || (request.method === "PATCH" && knowledgeDraftItem.test(request.path)));
   if (request.body !== undefined && (typeof request.body !== "string" || Buffer.byteLength(request.body, "utf8") >
@@ -133,6 +139,12 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     (collection && request.method === "POST" && Boolean(request.body) && !request.ifMatch) ||
     (!collection && request.method === "PATCH" && Boolean(request.body) && Boolean(request.ifMatch))
   );
+  const privateOrganizationRequest = !request.ifMatch && !request.idempotencyKey && !url.search && (
+    ((privateCollectionCollection.test(url.pathname) || privateTrashCollection.test(url.pathname)) && request.method === "GET" && request.body === undefined)
+    || (privateCollectionCollection.test(url.pathname) && request.method === "POST" && Boolean(request.body))
+    || (privateCollectionItem.test(url.pathname) && request.method === "PATCH" && Boolean(request.body))
+    || (privateFavoritePlacement.test(url.pathname) && request.method === "PUT" && Boolean(request.body))
+    || (privateItemAction.test(url.pathname) && request.method === "POST" && (request.body === undefined || request.body === "{}")));
   const sharedDraftCreate = sharedDraftPath.test(url.pathname) && request.method === "POST" &&
     Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   const knowledgeGet = (knowledgeCollection.test(url.pathname) || knowledgeDraftItem.test(url.pathname)
@@ -248,7 +260,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && !request.body && !request.ifMatch && !request.idempotencyKey && !url.search;
   const maintenanceWrite = maintenanceCommand.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
-  return (placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
+  return (privateOrganizationRequest || placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
     || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate

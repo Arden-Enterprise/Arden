@@ -24,6 +24,7 @@ import { controlledAnalysisAdapter, httpAnalysisAdapter } from "./maintenance/an
 import { MaintenanceCaseService } from "./maintenance/case-service.js";
 import { MaintenanceError } from "./maintenance/contracts.js";
 import { registerMaintenanceRoutes } from "./maintenance/routes.js";
+import { registerPrivateOrganizationRoutes, representNoteSummary, representPrivateNote } from "./private-notes/organization-routes.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -111,6 +112,8 @@ export function buildApp(dependencies: AppDependencies) {
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   registerNotificationRoutes(app, { repository: dependencies.repository,
     store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
+  registerPrivateOrganizationRoutes(app, { store: dependencies.repository.privateOrganization,
+    storage: dependencies.storage, requestActor, uuidPattern });
   const maintenanceMode = process.env.ARDEN_MAINTENANCE_ANALYSIS_ADAPTER;
   const maintenanceAdapter = maintenanceMode === "http" || maintenanceMode === "http-provider"
     ? httpAnalysisAdapter(process.env.ARDEN_AI_URL ?? "", process.env.ARDEN_AI_SERVICE_TOKEN ?? "",
@@ -2019,7 +2022,7 @@ export function buildApp(dependencies: AppDependencies) {
       const result = await dependencies.repository.listDrafts(context.userId, request.params.organizationId, limit, cursor);
       if (!result) return reply.code(404).send(resourceNotAvailable(request.id));
       return {
-        items: result.items.map((item) => ({ ...item, createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString() })),
+        items: result.items.map(representNoteSummary),
         nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
       };
     } catch (error) {
@@ -2269,22 +2272,7 @@ function hasTrustedOrigin(request: FastifyRequest, trustedOrigins: string[]): bo
 }
 
 async function representDraft(draft: PrivateDraft, storage: PrivateContentStorage) {
-  const body = await storage.read(draft.sourceUri, draft.contentHash);
-  return {
-    id: draft.id,
-    organizationId: draft.organizationId,
-    title: draft.title,
-    body,
-    currentVersion: {
-      id: draft.versionId,
-      version: draft.currentVersion,
-      mimeType: draft.mimeType,
-      contentHash: draft.contentHash,
-    },
-    version: draft.currentVersion,
-    createdAt: draft.createdAt.toISOString(),
-    updatedAt: draft.updatedAt.toISOString(),
-  };
+  return representPrivateNote(draft, await storage.read(draft.sourceUri, draft.contentHash));
 }
 
 const draftBodySchema = {
@@ -2294,12 +2282,14 @@ const draftBodySchema = {
   properties: {
     title: { type: "string", maxLength: 800 },
     body: { type: "string", maxLength: maxBodyBytes },
+    // Decision 0029: an optional active collection of the caller; otherwise 404.
+    collectionId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
   },
 };
 
 function normalizeWrite(value: DraftWrite): DraftWrite | null {
   if (!isValidText(value.title, 800, maxTitleCodePoints) || !isValidText(value.body, maxBodyBytes, maxBodyBytes)) return null;
-  return { title: value.title.trim() || "Untitled private note", body: value.body };
+  return { title: value.title.trim() || "Untitled private note", body: value.body, collectionId: value.collectionId ?? null };
 }
 
 function normalizePatch(value: DraftPatch): DraftPatch | null {

@@ -177,6 +177,49 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ ...request, path: "https://other.invalid/api/v1/me" }), false);
   });
 
+  it("allows exactly the decision 0029 private-notes organization routes and methods", () => {
+    const base = `/api/v1/organizations/${organizationId}/private-workspace`;
+    const id = sourcePrivateVersionId;
+    const allowed = [
+      { path: `${base}/collections`, method: "GET" },
+      { path: `${base}/collections`, method: "POST", body: JSON.stringify({ title: "Projects", parentId: null }) },
+      { path: `${base}/collections/${id}`, method: "PATCH", body: JSON.stringify({ parentId: id }) },
+      { path: `${base}/drafts/${id}/collection`, method: "PUT", body: JSON.stringify({ collectionId: null }) },
+      { path: `${base}/drafts/${id}/favorite`, method: "PUT", body: JSON.stringify({ favorite: true }) },
+      { path: `${base}/collections/${id}/favorite`, method: "PUT", body: JSON.stringify({ favorite: false }) },
+      { path: `${base}/drafts/${id}/duplicate`, method: "POST" },
+      { path: `${base}/collections/${id}/duplicate`, method: "POST", body: "{}" },
+      { path: `${base}/drafts/${id}/trash`, method: "POST" },
+      { path: `${base}/collections/${id}/trash`, method: "POST" },
+      { path: `${base}/trash`, method: "GET" },
+      { path: `${base}/trash/${id}/restore`, method: "POST" },
+      { path: `${base}/trash/${id}/purge`, method: "POST", body: "{}" },
+    ];
+    for (const request of allowed) assert.equal(validateDesktopApiRequest(request), true, `${request.method} ${request.path}`);
+    for (const request of allowed) {
+      assert.equal(validateDesktopApiRequest({ ...request, method: "DELETE" }), false);
+      assert.equal(validateDesktopApiRequest({ ...request, ifMatch: '"1"' }), false);
+      assert.equal(validateDesktopApiRequest({ ...request, idempotencyKey }), false);
+      assert.equal(validateDesktopApiRequest({ ...request, path: `${request.path}?x=1` }), false);
+    }
+    const denied = [
+      { path: `${base}/collections`, method: "PUT", body: "{}" },
+      { path: `${base}/collections/${id}`, method: "GET" },
+      { path: `${base}/collections/${id}`, method: "PUT", body: "{}" },
+      { path: `${base}/drafts/${id}`, method: "PUT", body: "{}" },
+      { path: `${base}/drafts/${id}/favorite`, method: "PUT" },
+      { path: `${base}/drafts/${id}/favorite`, method: "POST", body: "{}" },
+      { path: `${base}/drafts/${id}/trash`, method: "POST", body: JSON.stringify({ forever: true }) },
+      { path: `${base}/drafts/${id}/purge`, method: "POST" },
+      { path: `${base}/trash/${id}`, method: "GET" },
+      { path: `${base}/trash/${id}/restore`, method: "GET" },
+      { path: `${base}/trash/not-a-uuid/purge`, method: "POST" },
+      { path: `${base}/trash`, method: "POST" },
+    ];
+    for (const request of denied) assert.equal(validateDesktopApiRequest(request), false, `${request.method} ${request.path}`);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/me", method: "PUT", body: "{}" }), false);
+  });
+
   it("retains existing private-draft and session requests without broadening routes", () => {
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/me", method: "GET" }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/private-workspace/drafts?limit=100`, method: "GET" }), true);
