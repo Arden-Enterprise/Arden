@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { CitedAnswer } from "../ask-arden/CitedAnswer";
 import { askReaderQuestion, type ReaderAnswer } from "../shared/reader-question-api";
 import { Icon } from "../shared/Icon";
 import { useReaderOperation, type ReaderOperationOptions } from "./useReaderOperation";
@@ -32,9 +33,9 @@ export function ReaderQuestionPanel({ id, labelledBy, options, access }: { id: s
           ? <div className="reader-ai-notice is-warning"><Icon name="warning" size={15} /><p>{state.result.answer}</p></div>
           : <>
             <ReaderAiGenerated><span>From this version</span></ReaderAiGenerated>
-            <p className="reader-ai-answer-text">{state.result.answer}{state.result.citations.map((citation, index) =>
+            <div className="reader-ai-answer-text"><CitedAnswer body={state.result.answer} citations={[]} />{state.result.citations.map((citation, index) =>
               <button className="reader-ai-source" key={index} type="button" aria-label={`View answer source ${index + 1}`}
-                onClick={() => void operation.navigate(citation)}>{citation.page ? `p. ${citation.page}` : "Source"}</button>)}</p>
+                onClick={() => void operation.navigate(citation)}>{citation.page ? `p. ${citation.page}` : "Source"}</button>)}</div>
           </>}
         <p className="sr-only" role="status">Answer ready.</p>
       </div>}

@@ -24,7 +24,7 @@ and placement operations are separate, audited and revision-conditional; the old
 bulk `documentIds` writer is refused. Follow the runbook for exact routes and
 safe stale/uncertain outcomes.
 
-After notification0039, operator migrations0040/0041/0042 require an explicitly
+After notification0039, operator migrations0040–0043 require an explicitly
 approved backed-up cutover and a fresh rehearsal of the combined chain. The
 bounded metadata exception preserves ARD identity, fills only verified missing
 metadata of exact-hash sources, and audits before/after; it is not runtime editing

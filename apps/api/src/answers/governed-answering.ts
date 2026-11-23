@@ -142,7 +142,7 @@ export class GovernedAnswering {
           return { documentId: source.draftId, versionId: source.publishedVersionId, blockId: chunk.sourceBlockIds[0],
             page: citationPage(chunk.sourceBlockIds, chunk.parentSectionBlockId), excerpt: citation.quote,
             title: source.title, version: source.management?.version ?? "Version unavailable",
-            documentCode: source.documentCode ?? null, startOffset, endOffset: startOffset + Array.from(citation.quote).length,
+            documentCode: null, startOffset, endOffset: startOffset + Array.from(citation.quote).length,
             scope: source.targetReaders?.mode === "SELECTED_MEMBERS" ? "Selected readers"
               : source.targetScopeType === "ORGANIZATION" ? "Company-wide" : "Department", classification: source.classification };
         });

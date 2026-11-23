@@ -360,6 +360,12 @@
       "filename": "0060_maintenance_review_corrections.sql",
       "sha256": "12faec7e03c12945810e0c6cf6160271b1a729fc5485b97cc081c66b0f75477d",
       "rollout": "operator"
+    },
+    {
+      "id": "0061",
+      "filename": "0061_document_share_notifications.sql",
+      "sha256": "409706abd369261e13d06d7563ad8ee5c71c2458a58059ff28a166234d48b2c1",
+      "rollout": "operator"
     }
   ]
 }

@@ -1,12 +1,13 @@
-import { useRef, useState, useEffect } from "react";
+import { useId, useRef, useState, useEffect } from "react";
 import { Icon } from "../shared/Icon";
-import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { useWorkspaceNavigation } from "../shared/WorkspaceNavigationContext";
 import type { KnowledgeCitationReference } from "../knowledge/knowledgeCitation";
 import type { Platform } from "../shared/types";
 import { starterPrompts } from "./askArdenModel";
 import { ChatComposer } from "./ChatComposer";
 import { ChatMessages } from "./ChatMessages";
+import { ChatHistoryPopover } from "./ChatHistoryPopover";
+import { CitationSourcesPanel } from "./CitationSourcesPanel";
 import { NewChatDialog } from "./NewChatDialog";
 import { useArdenChat } from "./useArdenChat";
 
@@ -24,6 +25,8 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
   const [examplesVisible, setExamplesVisible] = useState(true);
   const [resetting, setResetting] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const historyButton = useRef<HTMLButtonElement>(null);
+  const historyId = useId(), sourcesId = useId();
   const navigation = useWorkspaceNavigation();
   const focusComposer = () => requestAnimationFrame(() => composerRef.current?.focus());
 
@@ -48,7 +51,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
 
   return <main id={active ? "arden-main" : undefined} className="workspace-page ask-arden-page" aria-labelledby="ask-arden-title" tabIndex={-1}>
     <h1 id="ask-arden-title" className="sr-only">Ask Arden</h1>
-    <div className={`ask-arden-stage${chat.empty ? " is-empty" : " is-thread"}`}
+    <div className={`ask-arden-stage${chat.empty ? " is-empty" : " is-thread"}${chat.sourcePanel ? " has-sources" : ""}`}
       onFocusCapture={(event) => { composerFocused.current = (event.target as Element) === composerRef.current; }}
       onBlurCapture={(event) => { if ((event.target as Element) === composerRef.current && event.relatedTarget) composerFocused.current = false; }}>
       <header className="ask-thread-header">
@@ -57,7 +60,15 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
           <Icon name={navigation.open ? "close" : "menu"} size={17} />
         </button>}
         <div className="ask-thread-title"><strong>{chat.empty ? "New chat" : chat.threadTitle}</strong></div>
-        <button type="button" className="island-link-button" disabled={chat.pending || chat.historyLoading} onClick={chat.openHistory}>History</button>
+        <span className="ask-history-anchor">
+          <button ref={historyButton} type="button" className={`island-link-button ask-history-trigger${chat.historyOpen ? " is-open" : ""}`}
+            aria-expanded={chat.historyOpen} aria-controls={chat.historyOpen ? historyId : undefined}
+            disabled={chat.pending && !chat.historyOpen} onClick={chat.toggleHistory}>History <Icon name="arrow-down" size={11} /></button>
+          {chat.historyOpen && <ChatHistoryPopover id={historyId} anchor={historyButton} items={chat.history}
+            loading={chat.historyLoading} error={chat.historyError} currentId={chat.currentId} openingId={chat.openingId}
+            onOpen={(id) => { void chat.openConversation(id, true).then((opened) => { if (opened) focusComposer(); }); }}
+            onRetry={() => void chat.loadHistory()} onClose={chat.closeHistory} />}
+        </span>
         {!chat.empty && <button type="button" className="island-link-button" disabled={chat.pending || chat.historyLoading}
           onClick={chat.reloadConversation}>Reload chat</button>}
         {!chat.empty && <button type="button" className="island-link-button" onClick={() => setResetting(true)}>New chat</button>}
@@ -79,18 +90,13 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
             </div>
           </div>}
 
-        </section> : <ChatMessages chat={chat} onOpenCitation={onOpenCitation} />}
+        </section> : <ChatMessages chat={chat} />}
       </div>
 
       {!chat.empty && <ChatComposer chat={chat} placement="dock" composerRef={composerRef} />}
+      {chat.sourcePanel && <CitationSourcesPanel id={sourcesId} citations={chat.sourcePanel.citations}
+        selected={chat.sourcePanel.selected} onOpenDocument={onOpenCitation} onClose={chat.closeSources} />}
     </div>
     {resetting && <NewChatDialog hasDraft={Boolean(chat.draft.trim())} onCancel={() => setResetting(false)} onConfirm={reset} />}
-    {chat.historyOpen && <KnowledgeDialog title="Chat history" onClose={chat.closeHistory}>
-      {chat.historyLoading ? <p role="status">Loading…</p> : chat.history.length ? <ul>{chat.history.map((item) => <li key={item.id}>
-        <button type="button" className="island-link-button" onClick={() => chat.openConversation(item.id)}>{item.title}</button>
-      </li>)}</ul> : <p>No saved chats.</p>}
-      {chat.error && <p role="alert">{chat.error}</p>}
-      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={chat.closeHistory}>Close</button></div>
-    </KnowledgeDialog>}
   </main>;
 }
