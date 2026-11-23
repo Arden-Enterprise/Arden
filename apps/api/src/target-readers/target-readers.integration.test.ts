@@ -81,6 +81,9 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     const migrated = await pool.query(`SELECT 1 FROM public.arden_schema_migrations
       WHERE migration_id = '0024_target_reader_selection'`);
     if (migrated.rowCount !== 1) throw new Error("Apply migration 0024 to the isolated test database first");
+    const shareNotifications = await pool.query(`SELECT 1 FROM public.arden_schema_migrations
+      WHERE migration_id = '0061_document_share_notifications'`);
+    if (shareNotifications.rowCount !== 1) throw new Error("Apply migration 0061 to the isolated test database first");
 
     await asSuperuser(async (client) => {
       await client.query(`INSERT INTO organization (organization_id, name, slug)
@@ -744,6 +747,11 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     it("T6.2: an approved reader change applies the approved readers to the current publication", async () => {
       if (!repository) throw new Error("Test database is unavailable");
       const { draftId, versionId } = await publish("Published then narrowed");
+      const activationNotifications = await asSuperuser((client) => client.query(`
+        SELECT notification_id FROM arden_notification
+         WHERE organization_id = $1 AND event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
+           AND resource_id = $2`, [ids.orgA, versionId]));
+      expect(activationNotifications.rows).toEqual([]);
       const before = await currentPointer(draftId);
       const readers = { mode: "SELECTED_MEMBERS" as const, departmentId: null,
         memberIds: [ids.engineerM, ids.outsiderM, ids.authorM].sort() };
@@ -755,6 +763,21 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       const after = await currentPointer(draftId);
       expect(after?.published_version_id).toBe(before?.published_version_id);
       expect(after?.reader_selection_id).not.toBe(before?.reader_selection_id);
+      const personalShareNotifications = await asSuperuser((client) => client.query<{
+        event_type: string; recipient_membership_id: string; publication_title: string; shared_by_name: string; has_outbox: boolean;
+      }>(`SELECT n.event_type, n.recipient_membership_id, n.publication_title, n.shared_by_name,
+                  EXISTS (SELECT 1 FROM arden_notification_outbox o WHERE o.notification_id = n.notification_id) AS has_outbox
+            FROM arden_notification n
+           WHERE n.organization_id = $1 AND n.event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
+             AND n.resource_type = 'PUBLICATION' AND n.resource_id = $2
+           ORDER BY n.recipient_membership_id`, [ids.orgA, versionId]));
+      expect(personalShareNotifications.rows).toHaveLength(2);
+      expect(personalShareNotifications.rows).toEqual(expect.arrayContaining([
+        { event_type: "DOCUMENT_SHARED_PERSONAL", recipient_membership_id: ids.engineerM,
+          publication_title: "Published then narrowed", shared_by_name: "Synthetic reader", has_outbox: true },
+        { event_type: "DOCUMENT_SHARED_PERSONAL", recipient_membership_id: ids.outsiderM,
+          publication_title: "Published then narrowed", shared_by_name: "Synthetic reader", has_outbox: true },
+      ]));
       // The version and content stay; only the readers changed, effective on the next request.
       const see = async (userId: string) => (await repository.getPublishedKnowledge(userId, ids.orgA, versionId))?.id ?? null;
       await expect(see(ids.engineer)).resolves.toBe(versionId);
@@ -770,11 +793,54 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(repository.decideReview(ids.author, ids.orgA, narrower.submission.id, "APPROVE",
         narrower.submission.snapshotVersionId, narrower.submission.contentHash, null, randomUUID(), "readers-narrow"))
         .resolves.toMatchObject({ kind: "decided" });
+      const afterNarrowingNotifications = await asSuperuser((client) => client.query<{
+        event_type: string; recipient_membership_id: string;
+      }>(`
+        SELECT event_type, recipient_membership_id FROM arden_notification
+         WHERE organization_id = $1 AND event_type IN ('DOCUMENT_SHARED_PERSONAL', 'DOCUMENT_SHARED_GROUP')
+           AND resource_type = 'PUBLICATION' AND resource_id = $2
+         ORDER BY recipient_membership_id`, [ids.orgA, versionId]));
+      expect(afterNarrowingNotifications.rows).toHaveLength(3);
+      expect(afterNarrowingNotifications.rows.every(row => row.event_type === "DOCUMENT_SHARED_PERSONAL")).toBe(true);
+      expect(afterNarrowingNotifications.rows.map(row => row.recipient_membership_id).sort())
+        .toEqual([ids.engineerM, ids.outsiderM, ids.outsiderM].sort());
       await expect(see(ids.engineer)).resolves.toBeNull();
       await expect(asRuntime(ids.author, ids.orgA, (client) => client.query(
         "SELECT apply_publication_change($1)", [requested.submission.id])))
         .rejects.toMatchObject({ code: "55000" });
       await expect(see(ids.engineer)).resolves.toBeNull();
+    });
+
+    it("emits a group-share event for the approved department reader selection", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const { draftId, versionId } = await publish("Published for group share");
+      await asSuperuser(async (client) => {
+        const selection = await client.query<{ selection_id: string }>(`INSERT INTO reader_selection
+          (organization_id, reader_mode) VALUES ($1, 'ORGANIZATION') RETURNING selection_id`, [ids.orgA]);
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query("UPDATE published_knowledge_version SET reader_selection_id = $2 WHERE published_version_id = $1",
+          [versionId, selection.rows[0]!.selection_id]);
+        await client.query("UPDATE knowledge_current_publication SET reader_selection_id = $2 WHERE published_version_id = $1",
+          [versionId, selection.rows[0]!.selection_id]);
+      });
+      const requested = await ask(draftId, { type: "READER_CHANGE", reason: "Share with Sales",
+        targetReaders: { mode: "DEPARTMENT", departmentId: ids.sales } });
+      if (requested.kind !== "requested") throw new Error("Request failed");
+      await expect(repository.decideReview(ids.author, ids.orgA, requested.submission.id, "APPROVE",
+        requested.submission.snapshotVersionId, requested.submission.contentHash, null, randomUUID(), "group-share-approve"))
+        .resolves.toMatchObject({ kind: "decided", submission: { approvedTargetReaders: { mode: "DEPARTMENT", departmentId: ids.sales } } });
+      const groupNotifications = await asSuperuser((client) => client.query<{
+        event_type: string; recipient_membership_id: string; publication_title: string; shared_by_name: string;
+      }>(`SELECT event_type, recipient_membership_id, publication_title, shared_by_name FROM arden_notification
+           WHERE organization_id = $1 AND resource_id = $2
+           ORDER BY recipient_membership_id`, [ids.orgA, versionId]));
+      expect(groupNotifications.rows).toHaveLength(2);
+      expect(groupNotifications.rows).toEqual(expect.arrayContaining([
+        { event_type: "DOCUMENT_SHARED_GROUP", recipient_membership_id: ids.reviewerM,
+          publication_title: "Published for group share", shared_by_name: "Synthetic reader" },
+        { event_type: "DOCUMENT_SHARED_GROUP", recipient_membership_id: ids.outsiderM,
+          publication_title: "Published for group share", shared_by_name: "Synthetic reader" },
+      ]));
     });
 
     it("T6.2: refuses to approve a request whose publication is no longer current", async () => {

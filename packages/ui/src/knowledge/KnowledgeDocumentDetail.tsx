@@ -5,6 +5,7 @@ import { clearHighlight, paintHighlight, quoteRanges } from "./citationHighlight
 import { useReaderSummary, type ReaderSummaryOptions } from "./useReaderSummary";
 import { ReaderSummaryPanel } from "./ReaderSummaryPanel";
 import { ReaderQuestionPanel } from "./ReaderQuestionPanel";
+import { ardenAiMark, ReaderAiPanel, readerAiPanelId, readerAiTabId, type ReaderAiTask } from "./ReaderAiPanel";
 import { useReaderAccess } from "./useReaderAccess";
 
 const citationHighlightName = "arden-citation";
@@ -77,18 +78,49 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
   onVersionChange?: (versionId: string) => void;
   summaryOptions?: ReaderSummaryOptions;
 }) {
-  const [panel, setPanel] = useState<"summary" | "question" | null>(null);
-  const [questionMounted, setQuestionMounted] = useState(false), questionButton = useRef<HTMLButtonElement>(null);
+  const [aiOpen, setAiOpen] = useState(false);
+  const [panel, setPanel] = useState<ReaderAiTask | null>(null);
+  const [questionMounted, setQuestionMounted] = useState(false);
   const access = useReaderAccess(summaryOptions);
-  const summary = useReaderSummary(summaryOptions ? { ...summaryOptions, visible: panel === "summary" } : undefined, access);
-  const summaryId = useId(), summaryButton = useRef<HTMLButtonElement>(null);
-  const closeSummary = () => { summary.close(); setPanel(null); summaryButton.current?.focus(); };
-  const closeQuestion = () => { setQuestionMounted(false); setPanel(null); questionButton.current?.focus(); };
+  const summary = useReaderSummary(summaryOptions ? { ...summaryOptions, visible: aiOpen && panel === "summary" } : undefined, access);
+  const aiId = useId(), aiButton = useRef<HTMLButtonElement>(null);
   const readerRef = useRef<HTMLDivElement>(null);
   const [informationCollapsed, setInformationCollapsed] = useState(readInformationCollapsed);
+  // While Arden AI is open the information island steps aside for the document; the saved preference is untouched.
+  const [informationOverride, setInformationOverride] = useState<boolean | null>(null);
+  const informationHidden = informationOverride ?? informationCollapsed;
+  const chooseTask = (task: ReaderAiTask) => {
+    if (task === "summary") {
+      if (panel === "summary" && summary.state.status !== "closed") return;
+      setPanel("summary"); if (summary.state.status === "closed") void summary.open();
+      return;
+    }
+    if (panel === "question") return;
+    setQuestionMounted(true); setPanel("question");
+  };
+  const closeAi = () => {
+    summary.close(); setQuestionMounted(false); setPanel(null); setAiOpen(false); setInformationOverride(null);
+    aiButton.current?.focus();
+  };
+  const toggleAi = () => {
+    if (aiOpen) { closeAi(); return; }
+    setAiOpen(true); setInformationOverride(true);
+  };
+  const latestToggleAi = useRef(toggleAi); latestToggleAi.current = toggleAi;
+  const hasAi = Boolean(summaryOptions);
+  useEffect(() => {
+    if (!hasAi) return;
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "j") {
+        event.preventDefault(); latestToggleAi.current();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasAi]);
   const toggleInformation = (collapsed: boolean) => {
-    setInformationCollapsed(collapsed);
-    writeInformationCollapsed(collapsed);
+    if (aiOpen) setInformationOverride(collapsed);
+    else { setInformationCollapsed(collapsed); writeInformationCollapsed(collapsed); }
     // Keep focus on the control that now toggles the panel back.
     requestAnimationFrame(() => readerRef.current?.querySelector<HTMLButtonElement>(collapsed ? ".knowledge-reader-expand" : ".knowledge-reader-collapse")?.focus());
   };
@@ -129,8 +161,7 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
   if (!activeVersion) return null;
 
   return <div ref={readerRef} className="knowledge-reader-page" onKeyDown={event => {
-    if (event.key === "Escape" && panel === "question") { event.stopPropagation(); closeQuestion(); return; }
-    if (event.key === "Escape" && panel === "summary") { event.stopPropagation(); closeSummary(); }
+    if (event.key === "Escape" && aiOpen) { event.stopPropagation(); closeAi(); }
   }}>
     <button type="button" className="knowledge-reader-back" onClick={onBack}>
       <Icon name="arrow" size={12} />Home
@@ -146,8 +177,8 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
       {visibleFocus.page && <small>Page {visibleFocus.page}</small>}
     </div>}
 
-    <div className={`knowledge-reader-layout${informationCollapsed ? " is-information-collapsed" : ""}`}>
-      <aside id="knowledge-reader-information" hidden={informationCollapsed} className="island knowledge-reader-information" aria-labelledby="document-information-title">
+    <div className={`knowledge-reader-layout${informationHidden ? " is-information-collapsed" : ""}${aiOpen ? " is-ai-open" : ""}`}>
+      <aside id="knowledge-reader-information" hidden={informationHidden} className="island knowledge-reader-information" aria-labelledby="document-information-title">
         <div className="knowledge-reader-section-title">
           <Icon name="document" size={14} />
           <h2 id="document-information-title">Document information</h2>
@@ -180,31 +211,30 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
 
       <article className="island knowledge-reader-surface" aria-label={`${metadata.title}, version ${activeVersion.label}`}>
         <header className="knowledge-reader-surface-bar">
-          {informationCollapsed && <button type="button" className="island-icon-button knowledge-reader-expand" aria-expanded="false" aria-controls="knowledge-reader-information"
+          {informationHidden && <button type="button" className="island-icon-button knowledge-reader-expand" aria-expanded="false" aria-controls="knowledge-reader-information"
             aria-label="Show document information" title="Show document information" onClick={() => toggleInformation(false)}><Icon name="sidebar" size={14} /></button>}
           <Icon name="pdf" size={14} />
           <h1 title={metadata.title}>{metadata.title}</h1>
           {activeVersion.label && <small>v{activeVersion.label}</small>}
           {(surfaceActions || summaryOptions) && <div className="knowledge-reader-surface-actions">
-            {summaryOptions && <button ref={summaryButton} type="button" className="secondary-button reader-ai-summary-trigger"
-              aria-expanded={panel === "summary" && summary.state.status !== "closed"} aria-controls={summaryId}
-              onClick={() => {
-                if (panel === "summary" && summary.state.status !== "closed") return;
-                setPanel("summary"); if (summary.state.status === "closed") void summary.open();
-              }}>Summary</button>}
-            {summaryOptions && <button ref={questionButton} type="button" className="secondary-button"
-              aria-expanded={panel === "question"} onClick={() => {
-                if (panel === "question") return;
-                setQuestionMounted(true); setPanel("question");
-              }}>Ask this document</button>}
+            {summaryOptions && <button ref={aiButton} type="button" className="reader-ai-trigger"
+              aria-expanded={aiOpen} aria-controls={aiOpen ? aiId : undefined} aria-keyshortcuts="Control+J"
+              title="Arden AI (Ctrl J)" onClick={toggleAi}>
+              <img src={ardenAiMark} alt="" width={16} height={16} />Arden AI<kbd aria-hidden="true">Ctrl J</kbd>
+            </button>}
             {surfaceActions}</div>}
         </header>
-        {panel === "summary" && <ReaderSummaryPanel id={summaryId} summary={summary} onClose={closeSummary} />}
-        {questionMounted && summaryOptions?.active && <ReaderQuestionPanel
-          options={{ ...summaryOptions, visible: panel === "question" }} access={access} onClose={closeQuestion}
-          key={JSON.stringify([summaryOptions.platform, summaryOptions.context])} />}
         <div className="knowledge-reader-content">{content}</div>
       </article>
+
+      {summaryOptions && aiOpen && <ReaderAiPanel id={aiId} title={metadata.title} versionLabel={activeVersion.label}
+        task={panel} onTask={chooseTask} onClose={closeAi}>
+        {panel === "summary" && <ReaderSummaryPanel id={readerAiPanelId(aiId, "summary")}
+          labelledBy={readerAiTabId(aiId, "summary")} summary={summary} />}
+        {questionMounted && summaryOptions.active && <ReaderQuestionPanel id={readerAiPanelId(aiId, "question")}
+          labelledBy={readerAiTabId(aiId, "question")} options={{ ...summaryOptions, visible: panel === "question" }} access={access}
+          key={JSON.stringify([summaryOptions.platform, summaryOptions.context])} />}
+      </ReaderAiPanel>}
     </div>
   </div>;
 }

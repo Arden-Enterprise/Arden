@@ -140,6 +140,26 @@ Do not enable Realtime until its exact JWT verifier, roles, policies, TLS/WSS pr
 namespace and CSP are verified for the target environment. Decision 0024's inspection
 notification deferral remains in force.
 
+### Share notification refinement — 22 November 2026
+
+The current user clarified that sharing is separate from publication and selected the
+approved Change readers workflow. The local `feat/document-share-notifications`
+follow-up adds distinct personal (`DOCUMENT_SHARED_PERSONAL`) and group
+(`DOCUMENT_SHARED_GROUP`) notifications after reviewer approval of a reader change on
+an existing publication. `SELECTED_MEMBERS` maps to personal; `DEPARTMENT` and
+`ORGANIZATION` map to group. Every active approved recipient who passes the frozen
+audience receives the event, except the requesting author. The message includes the
+sharer's name and publication title, with no body/excerpt; Core returns them only while
+current RLS permits reading. Migration 0043 is operator-class and adds a separate
+trigger executor to the exact owner-repair list. A future Share button can integrate by
+submitting the corresponding reviewer-approved reader selection; no button is included
+in this change. Publication activation does not create a share event. Migration,
+disposable-database rehearsal, Realtime validation, publication, merge and deployment
+remain pending.
+The local verification checkpoint is recorded in [F21](../product/in-app-notifications.md):
+workspace tests/build and migration/release checks pass; PostgreSQL integration cases
+are skipped because `ARDEN_TEST_DATABASE_URL` is unset.
+
 ## Minimal reader lifecycle refinement — review preparation, 15 November 2026
 
 After the focus/panel diagnosis, the maintainer approved the

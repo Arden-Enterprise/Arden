@@ -267,6 +267,10 @@ No commit/push/PR, shared migration/index change or deployment occurred here.
 
 ### RA-04 reader integration specification — 14 November
 
+> UI placement superseded on 20 November 2026 by the
+> [Reader AI side panel](#reader-ai-side-panel--accepted-20-november-2026); the
+> state, authorization and verification requirements below still apply.
+
 The maintainer authorized the next sequential slice after RA-03. Keep the existing
 Island reader and add one Summary action to its viewer bar, with an inline expandable
 panel above the source. Preserve document information, Back, download and the PDF/text
@@ -636,3 +640,40 @@ RA-05-A/B/C and RA-05-D's local fixture/visual gate are verified. Genuine native
 signed-in paired, real provider/grounding quality, staging integration/migration
 reconciliation, proxy timeouts and release remain open. No paid request, shared
 data/index write, commit/push/PR/merge or deployment. RA-06 has not started.
+
+## Reader AI side panel — accepted 20 November 2026
+
+Decision: `accepted` (UI placement only; supersedes the RA-04 viewer-bar Summary toggle
+and the RA-05 Ask this document toggle with their inline panels above the source).
+Originator and decision owner: the requesting maintainer, from a Claude Design canvas
+drafted on 19 November 2026; approved on 20 November 2026 after an in-chat comparison of
+the replaced contract, its unchanged backend/permission behavior and the UI/test impact.
+Record author: Claude Code at the maintainer's direction. No other contributor was
+consulted; the earlier RA-04/RA-05 UI notes remain the history of the replaced layout.
+
+- One violet **Arden AI** viewer-bar action with the shipped Arden mark
+  (`arden-logo-white.png`) and Ctrl J opens a side island beside the document.
+  Opening it starts nothing: a task choice offers Summarize, Ask a question and a
+  disabled Explain a selection labelled Coming later (RA-06 is not delivered).
+- After a choice the island shows Summary / Ask tabs (Arrow, Home and End move between
+  them) and a disabled Explain tab. Choosing Summary is the on-request generation;
+  switching tabs keeps each task's retained state exactly as the separate panels did.
+- Document information steps aside while the island is open without changing the
+  saved collapse preference; Show document information still works. Below 980px of
+  reader width the island stacks above the document.
+- **Close Arden AI** (and Escape) discards both tasks, ignores late replies and returns
+  focus to Arden AI. This replaces the per-panel Close; reopening shows the task
+  choice again. Context, version and access changes behave as before.
+- Summary keeps the server's ordered points, kind labels and citation buttons (now
+  compact `p. N` / Source chips after the sentence). Ask keeps standalone questions,
+  the fixed insufficient-evidence copy (now a warning notice), plain-text answers and
+  the "Answer to" label; Enter sends and Shift+Enter adds a line.
+- Unchanged: routes, payloads, exact-version authorization, access rechecks, retries,
+  deadlines and the absence of storage, cache or chat history.
+
+Evidence (local, `feat/reader-ai-side-panel` from staging `af28915`): UI typecheck and
+all 49 UI test files (383 tests) pass, including a new Ctrl J/information regression.
+The synthetic `reader-summary-preview.html` harness was inspected at 1440, 1024 and
+390 px: side placement, Summary, Ask with Enter, insufficient evidence, Escape focus
+return and no horizontal overflow. Genuine Electron, signed-in paired and provider
+checks remain the release gates recorded above; no commit, PR or deployment.

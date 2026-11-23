@@ -269,7 +269,6 @@ export type PublishedKnowledge = {
   validUntil: Date | null;
 };
 export type AuthorizedAiSource = {
-  documentCode?: string | null;
   management?: KnowledgeMetadata | null;
   chunks: unknown;
   generationId: string;
@@ -556,7 +555,6 @@ type PublishedKnowledgeRow = ReaderSelectionColumns & {
   valid_until: Date | null;
 };
 type AuthorizedAiSourceRow = ReaderSelectionColumns & {
-  document_code: string | null;
   management: KnowledgeMetadata | null;
   chunks: unknown;
   generation_id: string;
@@ -676,6 +674,9 @@ export interface ArdenDataRepository {
   listKnowledgeSubmissions(userId: string, organizationId: string): Promise<SharedKnowledgeSubmission[] | null>;
   listOwnedKnowledgeSubmissionIds(userId: string, organizationId: string,
     submissionIds: readonly string[]): Promise<string[] | null>;
+  /** Current publication IDs allowed by the caller's active audience and Target Readers policy. */
+  listReadableCurrentPublicationIds(userId: string, organizationId: string,
+    publishedVersionIds: readonly string[]): Promise<string[] | null>;
   retryKnowledgePublication(userId: string, organizationId: string, submissionId: string):
     Promise<RetryKnowledgePublicationResult>;
   listGovernancePublications(userId: string, organizationId: string): Promise<GovernancePublication[] | null>;
@@ -1891,6 +1892,23 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
+  /** Recheck current publication access for share notifications through the same RLS policies as the library. */
+  async listReadableCurrentPublicationIds(userId: string, organizationId: string,
+    publishedVersionIds: readonly string[]): Promise<string[] | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      const ids = [...new Set(publishedVersionIds)];
+      if (ids.length === 0) return [];
+      const result = await client.query<{ published_version_id: string }>(`
+        SELECT pv.published_version_id
+          FROM knowledge_current_publication cp
+          JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
+         WHERE cp.organization_id = $1 AND pv.published_version_id = ANY($2::uuid[])`,
+      [organizationId, ids]);
+      return result.rows.map(row => row.published_version_id);
+    });
+  }
+
   /** Decision 0023 catalog. Null when the actor is not a current Organization Admin (0037 re-checks it). */
   async listGovernancePublications(userId: string, organizationId: string): Promise<GovernancePublication[] | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
@@ -2482,7 +2500,7 @@ export class ArdenRepository implements ArdenDataRepository {
       const result = await client.query<AuthorizedAiSourceRow>(`
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
-               pv.classification, kb.scope_type AS target_scope_type, pv.document_code, pv.management,
+               pv.classification, kb.scope_type AS target_scope_type, pv.management,
                ${readerSelectionColumns("pv.reader_selection_id")},
                CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
                  (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
@@ -2497,7 +2515,7 @@ export class ArdenRepository implements ArdenDataRepository {
          LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null, versionScope]);
       if (result.rows.length > 500) throw new Error("Authorized source count exceeds the request budget");
       return result.rows.map((row) => ({
-        documentCode: row.document_code, management: withoutTopic(row.management),
+        management: withoutTopic(row.management),
         generationId: row.generation_id,
         chunks: row.chunks,
         snapshotVersionId: row.snapshot_version_id,

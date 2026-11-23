@@ -17,7 +17,8 @@ export type GenerationResponse = { contractVersion: 2; requestId: string; status
   answer: string; citations: Array<{ chunkId: string; quote: string }>; usedEvidence: string[] };
 export type PublicCitation = { documentId: string; versionId: string; blockId?: string; page?: number;
   excerpt: string; title: string; version: string; scope: string; classification: string;
-  documentCode: string | null; startOffset: number; endOffset: number };
+  /** Decision 0021: always null. The key stays because installed clients still require it. */
+  documentCode: null; startOffset: number; endOffset: number };
 export type StoredAnswer = { status: "ANSWERED" | "INSUFFICIENT_EVIDENCE"; answer: string; citations: PublicCitation[] };
 
 export class GovernedAnswerError extends Error {
@@ -99,7 +100,7 @@ export function evidenceMatchesManifest(evidence: Evidence, source: Pick<Authori
 }
 export function sourceLabel(source: AuthorizedAiSource): string {
   const metadata = source.management;
-  return [source.documentCode, source.title, metadata?.version ? `Version ${metadata.version}` : null,
+  return [source.title, metadata?.version ? `Version ${metadata.version}` : null,
     metadata?.type, metadata?.effectiveDate ? `Effective ${metadata.effectiveDate}` : null,
     metadata?.expirationDate ? `Expires ${metadata.expirationDate}` : null].filter(Boolean).join(" · ").slice(0, 800);
 }
@@ -120,6 +121,6 @@ export function parsePublicCitations(value: unknown): PublicCitation[] {
     return { documentId: text(row.documentId, 36, uuid), versionId: text(row.versionId, 36, uuid),
       ...(row.blockId === undefined ? {} : { blockId: text(row.blockId, 200) }), ...(page === undefined ? {} : { page }),
       excerpt, title: text(row.title, 1_000), version: text(row.version, 100), scope: text(row.scope, 100),
-      classification: String(row.classification), documentCode: row.documentCode === null ? null : text(row.documentCode, 100), startOffset, endOffset };
+      classification: String(row.classification), documentCode: null, startOffset, endOffset };
   });
 }

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, askArden, listAiConversations, loadAiConversation, type AiConversation,
   type AiConversationSummary, type AiVersionScope } from "../shared/api-client";
 import type { Platform } from "../shared/types";
-import { answerMessage, type AskArdenMessage } from "./askArdenModel";
+import { answerMessage, type AnswerCitation, type AskArdenMessage } from "./askArdenModel";
 
 export type ArdenChat = ReturnType<typeof useArdenChat>;
 
@@ -14,6 +14,10 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<AiConversationSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const [sources, setSources] = useState<{ messageId: string; citation: AnswerCitation } | null>(null);
+  const sourcesOpener = useRef<HTMLElement | null>(null);
   const [versionScope, setVersionScope] = useState<AiVersionScope>("CURRENT");
   const conversation = useRef<{ id: string; revision: number }>({ id: crypto.randomUUID(), revision: 0 });
   const retryRequest = useRef<{ query: string; scope: AiVersionScope; id: string; conversationId: string; revision: number } | null>(null);
@@ -25,12 +29,14 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     conversation.current = { id: crypto.randomUUID(), revision: 0 };
     retryRequest.current = null;
     setMessages([]); setDraft(""); setError(null); setPending(false);
-    setHistoryOpen(false); setHistoryLoading(false); setHistory([]); setVersionScope("CURRENT");
+    setHistoryOpen(false); setHistoryLoading(false); setHistory([]); setHistoryError(null); setOpeningId(null);
+    setSources(null); setVersionScope("CURRENT");
     return () => { requestGeneration.current++; };
   }, [organizationId]);
 
   const showConversation = (saved: AiConversation) => {
     conversation.current = { id: saved.id, revision: saved.revision };
+    setSources(null);
     setMessages(saved.turns.flatMap((turn) => [
       { id: `${turn.id}-question`, role: "member" as const, body: turn.question },
       { id: turn.id, role: "assistant" as const, body: turn.answer, citations: turn.citations,
@@ -39,34 +45,60 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     setVersionScope(saved.turns.at(-1)?.versionScope ?? "CURRENT");
   };
 
-  const openConversation = async (id: string) => {
-    if (!organizationId || pending) return;
+  /** Opens a saved chat from History, or reloads the current one; an error stays where the request started. */
+  const openConversation = async (id: string, fromHistory = false): Promise<boolean> => {
+    if (!organizationId || pending) return false;
     const generation = ++requestGeneration.current;
     // Reloading the open chat keeps an unsent follow-up; switching chats starts from an empty draft.
     const sameChat = id === conversation.current.id;
-    setHistoryLoading(true); setError(null);
+    setHistoryLoading(true); setOpeningId(fromHistory ? id : null);
+    if (fromHistory) setHistoryError(null); else setError(null);
     try {
       const saved = await loadAiConversation(platform, organizationId, id);
-      if (generation !== requestGeneration.current) return;
-      showConversation(saved); if (!sameChat) setDraft(""); retryRequest.current = null; setHistoryOpen(false);
+      if (generation !== requestGeneration.current) return false;
+      showConversation(saved); if (!sameChat) setDraft(""); setError(null); retryRequest.current = null; setHistoryOpen(false);
+      return true;
     } catch (cause) {
-      if (generation === requestGeneration.current) setError(cause instanceof ApiError ? cause.message : "Chat could not be opened.");
-    } finally { if (generation === requestGeneration.current) setHistoryLoading(false); }
+      if (generation !== requestGeneration.current) return false;
+      const message = cause instanceof ApiError ? cause.message : "Chat could not be opened.";
+      if (fromHistory) setHistoryError(message); else setError(message);
+      return false;
+    } finally { if (generation === requestGeneration.current) { setHistoryLoading(false); setOpeningId(null); } }
   };
 
-  const openHistory = async () => {
-    if (!organizationId || pending) return;
+  const loadHistory = async () => {
+    if (!organizationId) return;
     const generation = ++requestGeneration.current;
-    setHistoryOpen(true); setHistoryLoading(true); setError(null);
+    setHistoryLoading(true); setHistoryError(null);
     try {
       const saved = await listAiConversations(platform, organizationId);
       if (generation === requestGeneration.current) setHistory(saved);
     } catch (cause) {
-      if (generation === requestGeneration.current) setError(cause instanceof ApiError ? cause.message : "History is unavailable.");
+      if (generation === requestGeneration.current) setHistoryError(cause instanceof ApiError ? cause.message : "History is unavailable.");
     } finally { if (generation === requestGeneration.current) setHistoryLoading(false); }
   };
 
-  const closeHistory = () => { requestGeneration.current++; setHistoryOpen(false); setHistoryLoading(false); };
+  const openHistory = () => {
+    if (!organizationId || pending) return;
+    setHistoryOpen(true); void loadHistory();
+  };
+
+  const closeHistory = () => { requestGeneration.current++; setHistoryOpen(false); setHistoryLoading(false); setOpeningId(null); };
+
+  /** Shows an answer's sources beside the chat; Open in document stays the governed reader path. */
+  const showSources = (messageId: string, citation: AnswerCitation) => {
+    sourcesOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSources({ messageId, citation });
+  };
+  const closeSources = () => {
+    const opener = sourcesOpener.current;
+    sourcesOpener.current = null;
+    setSources(null);
+    requestAnimationFrame(() => { if (opener?.isConnected) opener.focus(); });
+  };
+  const sourceMessage = sources ? messages.find((message) => message.id === sources.messageId) : undefined;
+  const sourcePanel = sources && sourceMessage?.citations?.length
+    ? { citations: sourceMessage.citations, selected: sources.citation } : null;
 
   const submit = async () => {
     const query = draft.trim();
@@ -127,6 +159,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     setDraft("");
     setMessages([]);
     setError(null);
+    setSources(null);
     pendingQuestion.current = null;
     conversation.current = { id: crypto.randomUUID(), revision: 0 }; retryRequest.current = null;
   };
@@ -144,10 +177,13 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
 
   return {
     draft, setDraft, messages, pending, error, versionScope, setVersionScope, history, historyOpen, historyLoading,
+    historyError, openingId, sourcePanel,
     empty: messages.length === 0,
+    currentId: messages.length ? conversation.current.id : null,
     threadTitle: messages.find((message) => message.role === "member")?.body ?? "New conversation",
     canAsk: Boolean(organizationId),
-    submit, reset, stopWaiting, openHistory, closeHistory, openConversation,
+    submit, reset, stopWaiting, openHistory, closeHistory, openConversation, loadHistory, showSources, closeSources,
+    toggleHistory: () => { if (historyOpen) closeHistory(); else openHistory(); },
     reloadConversation: () => openConversation(conversation.current.id),
   };
 }

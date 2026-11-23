@@ -4,7 +4,7 @@ import { CreateKnowledge } from "./CreateKnowledge";
 import { KnowledgeEditor } from "./KnowledgeEditor";
 import { KnowledgeLibrary, sampleDocuments, type SampleKnowledgeDocument } from "./KnowledgeLibrary";
 import { KnowledgeDocumentDetail } from "./KnowledgeDocumentDetail";
-import type { KnowledgeNavigationTarget } from "./knowledgeCitation";
+import type { KnowledgeReaderTarget, KnowledgeCitationReference } from "./knowledgeCitation";
 import { KnowledgeReview } from "./KnowledgeReview";
 import { createKnowledgePreview, reduceKnowledgePreview } from "./knowledgePreviewModel";
 import type { CreatedKnowledgeDraft } from "../shared/api-client";
@@ -22,7 +22,7 @@ export type KnowledgeFeaturePageProps = ContextControlProps & {
   createdDraft?: CreatedKnowledgeDraft | null;
   onAssignedReviewCount?: (count: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
-  citationTarget?: KnowledgeNavigationTarget | null;
+  citationTarget?: KnowledgeReaderTarget | null;
   requestedReviewId?: string | null;
   onReviewTargetHandled?: () => void;
   onNavigate?: (view: KnowledgeFeatureView) => void;
@@ -54,19 +54,19 @@ function SampleKnowledgeFeaturePage({ view, active = true, organizationName = "F
   const [knowledgeScreen, setKnowledgeScreen] = useState<"library" | "create" | "editor">("library");
   const [localView, setLocalView] = useState<{ from: KnowledgeFeatureView; to: KnowledgeFeatureView } | null>(null);
   const [openedDocument, setOpenedDocument] = useState<SampleKnowledgeDocument | null>(null);
-  const [openedCitation, setOpenedCitation] = useState<KnowledgeNavigationTarget | null>(null);
+  const [openedCitation, setOpenedCitation] = useState<(KnowledgeCitationReference & { navigationId: string }) | null>(null);
   const openedCitationId = useRef<string | null>(null);
   const effectiveView = localView?.from === view ? localView.to : view;
   useEffect(() => { if (createdDraft) setKnowledgeScreen("library"); }, [createdDraft?.id]);
   useEffect(() => {
     if (!active || view !== "knowledge" || !citationTarget || openedCitationId.current === citationTarget.navigationId) return;
     openedCitationId.current = citationTarget.navigationId;
-    const source = sampleDocuments.find((document) => document.id === citationTarget.documentId);
+    const source = sampleDocuments.find((document) => document.id === ("documentId" in citationTarget ? citationTarget.documentId : citationTarget.versionId));
     if (!source) return;
     const versionExists = source.versions.some((version) => version.id === citationTarget.versionId);
     if (!versionExists) return;
     setOpenedDocument({ ...source, activeVersionId: citationTarget.versionId });
-    setOpenedCitation(citationTarget);
+    setOpenedCitation("documentId" in citationTarget ? citationTarget : null);
     setKnowledgeScreen("library");
   }, [active, citationTarget, view]);
   const goTo = (target: KnowledgeFeatureView) => {

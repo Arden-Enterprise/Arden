@@ -8,6 +8,7 @@ import * as api from "../src/shared/reader-question-api";
 import * as summaryApi from "../src/shared/reader-summary-api";
 import { ApiError } from "../src/shared/api-client";
 import { deferred, readerContext, readerId, readerSummaryFixture } from "./readerSummary.test-support";
+import { chooseReaderTask } from "./readerAi.test-support";
 
 function answer(): api.ReaderAnswer {
   return { requestId: readerId(7), documentId: readerContext.documentId, versionId: readerContext.versionId,
@@ -21,8 +22,8 @@ function fixture() {
     activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE" as const, effectiveDate: "2026-11-01" }] },
   summaryOptions: options, content: createElement("p", null, "Original document"), onBack: vi.fn() };
   const view = render(createElement(KnowledgeDocumentDetail, props));
-  fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
-  const submit = () => { fireEvent.change(screen.getByRole("textbox", { name: "Your question" }), { target: { value: "Who may read?" } }); fireEvent.click(screen.getByRole("button", { name: "Answer" })); };
+  chooseReaderTask("question");
+  const submit = () => { fireEvent.change(screen.getByRole("textbox", { name: "Your question" }), { target: { value: "Who may read?" } }); fireEvent.click(screen.getByRole("button", { name: "Send question" })); };
   return { options, props, ask, access, view, submit };
 }
 function tabVisibility() {
@@ -36,28 +37,28 @@ describe("Ask this document reader", () => {
   it("shares one hidden-tab return check across both retained panels", async () => {
     const h = fixture(); h.submit(); await screen.findByText("Approved readers only.");
     const summary = vi.spyOn(summaryApi, "generateReaderSummary").mockImplementation(async (_p, context, id) => readerSummaryFixture(id, context));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     const pending = deferred<void>(); h.access.mockReturnValue(pending.promise);
     const visibility = tabVisibility(); visibility("hidden"); visibility("visible");
-    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    chooseReaderTask("question");
     expect(screen.queryByText("Approved readers only.")).toBeNull();
     expect(h.access).toHaveBeenCalledOnce();
     await act(async () => pending.resolve()); await screen.findByText("Approved readers only.");
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     expect(screen.getByText("Only approved readers can use this guidance.")).toBeTruthy();
     expect(h.access).toHaveBeenCalledOnce(); expect(summary).toHaveBeenCalledOnce(); expect(h.ask).toHaveBeenCalledOnce();
   });
   it("does not close or erase the question when selecting the active Ask panel again", async () => {
     const h = fixture(); h.submit(); await screen.findByText("Approved readers only.");
-    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    chooseReaderTask("question");
     expect(screen.getByText("Approved readers only.")).toBeTruthy();
     expect((screen.getByRole("textbox", { name: "Your question" }) as HTMLTextAreaElement).value).toBe("Who may read?");
     expect(h.ask).toHaveBeenCalledOnce(); expect(h.access).not.toHaveBeenCalled();
   });
   it("only requests after a nonblank question and reauthorizes source navigation", async () => {
     const h = fixture(); expect(h.ask).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Answer" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Send question" }).hasAttribute("disabled")).toBe(true);
     h.submit(); await screen.findByText("Approved readers only.");
     expect(h.ask).toHaveBeenCalledWith("web", readerContext, "Who may read?", expect.any(AbortSignal));
     expect(screen.getByText("Original document")).toBeTruthy();
@@ -67,9 +68,9 @@ describe("Ask this document reader", () => {
   it("discards late output after Escape, restores focus and clears the question on reopen", async () => {
     const h = fixture(), pending = deferred<api.ReaderAnswer>(); h.ask.mockReturnValue(pending.promise); h.submit();
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Your question" }), { key: "Escape" });
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Ask this document" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Arden AI" }));
     await act(async () => pending.resolve(answer())); expect(screen.queryByText("Approved readers only.")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    chooseReaderTask("question");
     expect((screen.getByRole("textbox", { name: "Your question" }) as HTMLTextAreaElement).value).toBe("");
     expect(h.ask).toHaveBeenCalledOnce();
   });
@@ -99,22 +100,22 @@ describe("Ask this document reader", () => {
   });
   it("renders answer as plain text and never imports a previous answer into a new question", async () => {
     const h = fixture(); h.ask.mockResolvedValue({ ...answer(), answer: "<img src=x onerror=alert(1)>" }); h.submit();
-    await screen.findByText("<img src=x onerror=alert(1)>"); expect(h.view.container.querySelector("img")).toBeNull();
+    await screen.findByText("<img src=x onerror=alert(1)>"); expect(h.view.container.querySelector("img[src=x]")).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: "Your question" }), { target: { value: "And the previous secret?" } });
-    fireEvent.click(screen.getByRole("button", { name: "Answer" })); await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Send question" })); await act(async () => {});
     expect(h.ask.mock.calls[1][2]).toBe("And the previous secret?"); expect(h.ask.mock.calls[1]).toHaveLength(4);
   });
   it("switches panels repeatedly without regenerating or rechecking the same visible reader", async () => {
     const h = fixture(); h.submit(); await screen.findByText("Approved readers only.");
     const summary = vi.spyOn(summaryApi, "generateReaderSummary").mockImplementation(async (_p, context, requestId) => readerSummaryFixture(requestId, context));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     expect(screen.queryByRole("textbox", { name: "Your question" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    chooseReaderTask("question");
     expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
     await screen.findByText("Approved readers only.");
     expect((screen.getByRole("textbox", { name: "Your question" }) as HTMLTextAreaElement).value).toBe("Who may read?");
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     expect(screen.getByText("Only approved readers can use this guidance.")).toBeTruthy();
     expect(screen.queryByText("Updating…")).toBeNull();
     expect(summary).toHaveBeenCalledOnce(); expect(h.ask).toHaveBeenCalledOnce();
@@ -123,41 +124,47 @@ describe("Ask this document reader", () => {
   it("keeps in-flight Summary across panel switches without starting another generation", async () => {
     const h = fixture(), pending = deferred<ReturnType<typeof readerSummaryFixture>>();
     const summary = vi.spyOn(summaryApi, "generateReaderSummary").mockReturnValue(pending.promise);
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
-    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    chooseReaderTask("summary");
+    chooseReaderTask("question");
     await act(async () => pending.resolve(readerSummaryFixture(readerId(7))));
     expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     expect(summary).toHaveBeenCalledOnce(); expect(h.access).not.toHaveBeenCalled();
   });
   it("does not revive retained Q&A after access is revoked while viewing Summary", async () => {
     const h = fixture(); h.submit(); await screen.findByText("Approved readers only.");
     vi.spyOn(summaryApi, "generateReaderSummary").mockImplementation(async (_p, context, requestId) => readerSummaryFixture(requestId, context));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     h.access.mockRejectedValue(new ApiError(404, "revoked"));
     const visibility = tabVisibility(); visibility("hidden"); visibility("visible");
-    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    chooseReaderTask("question");
     await screen.findByText("This document is unavailable.");
     expect(screen.queryByText("Approved readers only.")).toBeNull();
     expect(h.options.onAccessLost).toHaveBeenCalledOnce(); expect(h.ask).toHaveBeenCalledOnce();
   });
-  it("explicit Close discards only that panel, while reader context changes discard both", async () => {
+  it("Close Arden AI discards both tasks and returns to the task choice; context changes discard both too", async () => {
     const h = fixture(); h.submit(); await screen.findByText("Approved readers only.");
     const summary = vi.spyOn(summaryApi, "generateReaderSummary").mockImplementation(async (_p, context, requestId) => readerSummaryFixture(requestId, context));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
-    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
-    await screen.findByText("Approved readers only.");
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Arden AI" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Arden AI" }));
+    fireEvent.click(screen.getByRole("button", { name: "Arden AI" }));
+    expect(screen.queryByRole("tab", { name: "Summary" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Explain a selection/ }).hasAttribute("disabled")).toBe(true);
+    chooseReaderTask("question");
+    expect(screen.queryByText("Approved readers only.")).toBeNull();
+    expect((screen.getByRole("textbox", { name: "Your question" }) as HTMLTextAreaElement).value).toBe("");
+    h.submit(); await screen.findByText("Approved readers only.");
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
-    expect(summary).toHaveBeenCalledTimes(2); expect(h.ask).toHaveBeenCalledOnce();
+    expect(summary).toHaveBeenCalledTimes(2); expect(h.ask).toHaveBeenCalledTimes(2);
     h.view.rerender(createElement(KnowledgeDocumentDetail, { ...h.props,
       summaryOptions: { ...h.options, context: { ...readerContext, versionId: readerId(90) } } }));
     expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
+    chooseReaderTask("question");
     expect(screen.queryByText("Approved readers only.")).toBeNull();
     expect((screen.getByRole("textbox", { name: "Your question" }) as HTMLTextAreaElement).value).toBe("");
   });
