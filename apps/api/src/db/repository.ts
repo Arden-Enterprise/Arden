@@ -269,7 +269,6 @@ export type PublishedKnowledge = {
   validUntil: Date | null;
 };
 export type AuthorizedAiSource = {
-  documentCode?: string | null;
   management?: KnowledgeMetadata | null;
   chunks: unknown;
   generationId: string;
@@ -556,7 +555,6 @@ type PublishedKnowledgeRow = ReaderSelectionColumns & {
   valid_until: Date | null;
 };
 type AuthorizedAiSourceRow = ReaderSelectionColumns & {
-  document_code: string | null;
   management: KnowledgeMetadata | null;
   chunks: unknown;
   generation_id: string;
@@ -2502,7 +2500,7 @@ export class ArdenRepository implements ArdenDataRepository {
       const result = await client.query<AuthorizedAiSourceRow>(`
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
-               pv.classification, kb.scope_type AS target_scope_type, pv.document_code, pv.management,
+               pv.classification, kb.scope_type AS target_scope_type, pv.management,
                ${readerSelectionColumns("pv.reader_selection_id")},
                CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
                  (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
@@ -2517,7 +2515,7 @@ export class ArdenRepository implements ArdenDataRepository {
          LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null, versionScope]);
       if (result.rows.length > 500) throw new Error("Authorized source count exceeds the request budget");
       return result.rows.map((row) => ({
-        documentCode: row.document_code, management: withoutTopic(row.management),
+        management: withoutTopic(row.management),
         generationId: row.generation_id,
         chunks: row.chunks,
         snapshotVersionId: row.snapshot_version_id,

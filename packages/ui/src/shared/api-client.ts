@@ -244,7 +244,6 @@ export type AskArdenAnswer = {
     version: string;
     scope: string;
     classification: KnowledgeClassification;
-    documentCode?: string | null;
     startOffset?: number;
     endOffset?: number;
   }>;

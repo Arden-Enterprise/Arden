@@ -10,7 +10,7 @@ function citationMeta(citation: AnswerCitation): string {
 
 /**
  * Compact inline source chip. Hover or keyboard focus shows the cited passages; activating the chip,
- * or a passage in the card, opens the governed reader at that passage.
+ * or a passage in the card, selects that passage (Ask Arden shows it in the Sources panel).
  */
 export function CitationChip({ sources, onOpen, onActiveChange }: {
   sources: CitedSource[];
@@ -88,8 +88,7 @@ export function CitationChip({ sources, onOpen, onActiveChange }: {
         key={`${citation.versionId}:${citation.blockId ?? ""}:${index}`} onClick={() => { setOpen(false); onOpen?.(citation); }}>
         <span className="ask-citation-passage-title">
           <Icon name="document" size={12} />
-          <strong>{citation.documentCode ? `${citation.documentCode} · ` : ""}{citation.title}</strong>
-          <Icon name="open-external" size={11} />
+          <strong>{citation.title}</strong>
         </span>
         <small>{citationMeta(citation)}</small>
         <q>{citation.excerpt}</q>

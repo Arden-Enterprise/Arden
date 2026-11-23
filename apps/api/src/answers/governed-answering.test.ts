@@ -5,7 +5,7 @@ import type { ArdenDataRepository, AuthorizedAiSource } from "../db/repository.j
 import type { AskArdenClient } from "./ai-client.js";
 import { MemoryConversationStore } from "./conversation.test-support.js";
 import { GovernedAnswering } from "./governed-answering.js";
-import { parseGenerationResponse, parseRetrievalResponse, type Evidence, type GenerationRequest,
+import { parseGenerationResponse, parsePublicCitations, parseRetrievalResponse, type Evidence, type GenerationRequest,
   type GenerationResponse, type RetrievalRequest, type RetrievalResponse } from "./governed-contracts.js";
 
 function fixture() {
@@ -17,7 +17,7 @@ function fixture() {
     sourceBlockIds: ["pdf-page-2"], parentSectionBlockId: null, label: "Untrusted label" };
   const source: AuthorizedAiSource = { ...evidence, publishedVersionId: randomUUID(), draftId: randomUUID(),
     title: "Access guide", versionNo: 27, classification: "INTERNAL", targetScopeType: "ORGANIZATION",
-    targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] }, documentCode: "NS-IT-001",
+    targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
     management: { type: "Guide", version: "2.1", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "" },
     chunks: [{ ...evidence }] };
   const store = new MemoryConversationStore();
@@ -46,10 +46,11 @@ describe("governed answering handoffs", () => {
     const f = fixture();
     const result = await f.engine.answer(f.user, f.org, f.input);
     expect(result).toMatchObject({ revision: 1, conversationId: f.input.conversationId, citations: [{
-      title: "Access guide", version: "2.1", documentCode: "NS-IT-001", page: 2, startOffset: 10,
+      title: "Access guide", version: "2.1", documentCode: null, page: 2, startOffset: 10,
       versionId: f.source.publishedVersionId,
     }] });
-    expect(f.generate.mock.calls[0]![0].evidence[0]!.label).toContain("Version 2.1");
+    // Decision 0021: sources are named by title, so the model never sees or repeats a Document Code.
+    expect(f.generate.mock.calls[0]![0].evidence[0]!.label).toMatch(/^Access guide · Version 2\.1/);
     expect((await f.store.load(f.user, f.org, f.input.conversationId))?.turns).toHaveLength(1);
   });
 
@@ -171,5 +172,15 @@ describe("v2 runtime contracts", () => {
       organizationId: f.org, query: "MFA?", history: [], evidence: [f.evidence] };
     const response = { contractVersion: 2, requestId: request.requestId, status: "INSUFFICIENT_EVIDENCE", answer: "Insufficient.", citations: [], usedEvidence: [] };
     expect(() => parseGenerationResponse(response, request)).toThrow("INVALID_EVIDENCE");
+  });
+});
+
+describe("stored answer citations", () => {
+  it("drops a Document Code saved before decision 0021 so older chats show titles", () => {
+    const excerpt = "All team members must use MFA.";
+    const [citation] = parsePublicCitations([{ documentId: randomUUID(), versionId: randomUUID(), excerpt,
+      title: "Access guide", version: "2.1", scope: "Company-wide", classification: "INTERNAL",
+      documentCode: "ARD-7098B0251CA744F0", startOffset: 0, endOffset: Array.from(excerpt).length }]);
+    expect(citation).toMatchObject({ title: "Access guide", documentCode: null });
   });
 });
