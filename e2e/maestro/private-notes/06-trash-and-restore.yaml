@@ -1,0 +1,41 @@
+# F03-ORG-AC5: move a note to trash; it leaves the tree and is listed in
+# Trash with its 30-day countdown; Restore puts it back.
+url: http://127.0.0.1:5180/?preview=1
+name: Private Notes - move to trash and restore
+tags:
+  - private-notes
+  - f03-org
+---
+- runFlow: subflows/login-demo.yaml
+
+- runFlow:
+    file: subflows/create-root-note.yaml
+    env:
+      NAME: QA Old draft
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Old draft
+- tapOn: "Move to trash"
+- extendedWaitUntil:
+    notVisible:
+      id: "More actions for QA Old draft"
+    timeout: 5000
+
+- runFlow: subflows/open-trash.yaml
+- assertVisible: "QA Old draft"
+- assertVisible: ".*Deletes in 30 days.*"
+- assertVisible: "Restore"
+- assertVisible: "Delete permanently"
+- takeScreenshot: 06-in-trash
+
+- tapOn:
+    text: "Restore"
+    rightOf: "QA Old draft"
+- extendedWaitUntil:
+    visible:
+      id: "More actions for QA Old draft"
+    timeout: 5000
+# Trash no longer lists it.
+- assertNotVisible: ".*Deletes in 30 days.*"
+- takeScreenshot: 06-restored

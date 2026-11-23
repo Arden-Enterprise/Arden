@@ -1,0 +1,11 @@
+# Create a top-level collection named ${NAME} from the Private Notes header.
+# Icon-only button: Maestro web exposes aria-label as resource-id -> `id:`.
+url: http://127.0.0.1:5180/?preview=1
+name: Subflow - create a collection
+---
+- tapOn:
+    id: "New collection"
+- runFlow:
+    file: name-new-item.yaml
+    env:
+      NAME: ${NAME}

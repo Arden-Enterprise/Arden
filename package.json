@@ -21,7 +21,8 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:remote": "node --test tools/remote/workflow.test.mjs",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "e2e:private-notes": "pwsh -NoProfile -File e2e/maestro/private-notes/run.ps1"
   },
   "devDependencies": {
     "concurrently": "10.0.5",

@@ -1,0 +1,13 @@
+# Open the sidebar row "···" menu for ${TITLE}.
+# When the item is selected the note header "···" has the same accessible
+# name; index 0 is the sidebar row because the sidebar precedes the main
+# content in DOM order.
+url: http://127.0.0.1:5180/?preview=1
+name: Subflow - open the row action menu
+---
+- tapOn:
+    id: "More actions for ${TITLE}"
+    index: 0
+- extendedWaitUntil:
+    visible: "Move to trash"
+    timeout: 5000

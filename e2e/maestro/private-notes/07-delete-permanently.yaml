@@ -1,0 +1,51 @@
+# F03-ORG-AC6: delete a trashed note permanently after confirming; it never
+# comes back in the tree or Trash.
+url: http://127.0.0.1:5180/?preview=1
+name: Private Notes - delete permanently with confirmation
+tags:
+  - private-notes
+  - f03-org
+---
+- runFlow: subflows/login-demo.yaml
+
+- runFlow:
+    file: subflows/create-root-note.yaml
+    env:
+      NAME: QA Scratch
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Scratch
+- tapOn: "Move to trash"
+
+- runFlow: subflows/open-trash.yaml
+- assertVisible: "QA Scratch"
+- tapOn:
+    text: "Delete permanently"
+    rightOf: "QA Scratch"
+
+# A confirmation dialog appears; nothing is deleted yet. Cancel keeps the item.
+- extendedWaitUntil:
+    visible: "Cancel"
+    timeout: 5000
+- tapOn: "Cancel"
+- assertVisible: "QA Scratch"
+
+# Confirm. The dialog's confirm button is expected to repeat
+# "Delete permanently". The confirm renders in the top status island, which comes
+# before the Trash list in DOM order, so it is index 0.
+- tapOn:
+    text: "Delete permanently"
+    rightOf: "QA Scratch"
+- extendedWaitUntil:
+    visible: "Cancel"
+    timeout: 5000
+- tapOn:
+    text: "Delete permanently"
+    index: 0
+- extendedWaitUntil:
+    notVisible: "QA Scratch"
+    timeout: 5000
+- assertNotVisible:
+    id: "More actions for QA Scratch"
+- takeScreenshot: 07-deleted-permanently

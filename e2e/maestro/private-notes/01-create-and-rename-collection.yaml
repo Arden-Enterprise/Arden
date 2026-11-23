@@ -1,0 +1,33 @@
+# F03-ORG-AC2: create a collection and rename it.
+url: http://127.0.0.1:5180/?preview=1
+name: Private Notes - create and rename a collection
+tags:
+  - private-notes
+  - f03-org
+---
+- runFlow: subflows/login-demo.yaml
+
+- runFlow:
+    file: subflows/create-collection.yaml
+    env:
+      NAME: QA Projects
+- assertVisible: "QA Projects"
+# A new collection offers "+" to add a note inside it.
+- assertVisible:
+    id: "Add a note to QA Projects"
+
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Projects
+- tapOn: "Rename"
+- runFlow:
+    file: subflows/name-new-item.yaml
+    env:
+      NAME: QA Projects 2026
+- assertVisible: "QA Projects 2026"
+# Full-match: the old title must be gone, not just a prefix of the new one.
+- assertNotVisible: "QA Projects"
+- assertVisible:
+    id: "Add a note to QA Projects 2026"
+- takeScreenshot: 01-collection-renamed
