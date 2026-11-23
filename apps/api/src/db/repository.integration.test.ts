@@ -183,9 +183,6 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM knowledge_collection_document WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_collection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = $1", [ids.organization]);
-          // Derived release lineage deliberately retains publication references in production.
-          // Remove only this fixture's lineage before removing its immutable publications.
-          await client.query("DELETE FROM knowledge_ai_release WHERE organization_id = $1", [ids.organization]);
           await client.query(`DELETE FROM published_knowledge_version
             WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
           await client.query(`DELETE FROM knowledge_index_job WHERE generation_id IN
@@ -834,7 +831,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const revised = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
       created.draft.id, configured.draft.currentVersion, { title: "Replacement candidate",
-        management: { type: "Guide", version: "2.0", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "Updated guidance." } }, null,
+        management: { type: "Guide", version: "2.0", expirationDate: null, changeNote: "Updated guidance." } }, null,
       "integration-flow3-revise");
     expect(revised).toMatchObject({ kind: "updated", draft: { currentVersion: 3 } });
     if (revised.kind !== "updated") return;

@@ -10,7 +10,7 @@ import { useReaderAccess } from "./useReaderAccess";
 
 const citationHighlightName = "arden-citation";
 
-export type ReaderDocumentStatus = "EFFECTIVE" | "EXPIRING" | "UPCOMING" | "EXPIRED";
+export type ReaderDocumentStatus = "EFFECTIVE" | "EXPIRING" | "EXPIRED";
 
 export type ReaderDocumentVersion = {
   id: string;
@@ -18,8 +18,6 @@ export type ReaderDocumentVersion = {
   status: ReaderDocumentStatus | "PUBLISHED";
   /** Whole days until the expiration date, for EXPIRING. */
   expiresInDays?: number;
-  /** Retained for sample history; the reader no longer shows effective dates. */
-  effectiveDate?: string;
 };
 
 export type ReaderDocumentMetadata = {
@@ -48,7 +46,6 @@ function writeInformationCollapsed(collapsed: boolean): void {
 }
 
 function statusLabel(version: ReaderDocumentVersion): string {
-  if (version.status === "UPCOMING") return "Upcoming";
   if (version.status === "EXPIRED") return "Expired";
   if (version.status === "EXPIRING") {
     const days = version.expiresInDays ?? 0;

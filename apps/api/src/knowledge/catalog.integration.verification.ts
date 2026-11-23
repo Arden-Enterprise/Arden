@@ -35,7 +35,7 @@ async function publishCollectionFixture(readers: TargetReadersInput) {
       mimeType: "text/plain", contentHash: "a".repeat(64) }, requestId: "collection-create" });
   if (draft.kind !== "created") throw new Error("Collection draft fixture failed");
   const saved = await repo.updateKnowledgeDraft(owner, org, draft.draft.id, 1, {
-    management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" }, targetReaders: readers,
+    management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" }, targetReaders: readers,
   }, null, "collection-save");
   if (saved.kind !== "updated") throw new Error("Collection save fixture failed");
   const submitted = await repo.submitKnowledgeDraft(owner, org, draft.draft.id, 2, randomUUID(), "collection-submit");
@@ -93,7 +93,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         await client.query("DELETE FROM published_knowledge_version WHERE shared_draft_id IN (SELECT shared_draft_id FROM shared_draft WHERE organization_id = $1)", [org]);
         await client.query("DELETE FROM knowledge_index_job WHERE generation_id IN (SELECT generation_id FROM knowledge_index_generation WHERE organization_id = $1)", [org]);
         await client.query("DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)", [org]);
-        for (const table of ["knowledge_ai_release", "knowledge_collection_placement", "knowledge_collection_document", "knowledge_collection", "knowledge_current_publication", "knowledge_index_generation",
+        for (const table of ["knowledge_collection_placement", "knowledge_collection_document", "knowledge_collection", "knowledge_current_publication", "knowledge_index_generation",
           "shared_submission", "shared_draft_audience", "shared_draft", "selected_reader", "reader_selection", "knowledge_base",
           "audit_event", "audience_group_membership", "audience", "reviewer_grant"]) {
           await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
@@ -149,8 +149,8 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     if (draft.kind !== "created") throw new Error("Draft fixture failed");
     draftId = draft.draft.id;
     await expect(repo.submitKnowledgeDraft(owner, org, draftId, 1, randomUUID(), "incomplete")).resolves.toEqual({ kind: "not-ready" });
-    const metadata = { type: "Guide" as const, version: "1.0", effectiveDate: "2027-01-01", expirationDate: null, changeNote: "" };
-    await expect(repo.updateKnowledgeDraft(owner, org, draftId, 1, { management: { ...metadata, expirationDate: "2026-01-01" } }, null, "invalid-date"))
+    const metadata = { type: "Guide" as const, version: "1.0", expirationDate: null, changeNote: "" };
+    await expect(repo.updateKnowledgeDraft(owner, org, draftId, 1, { management: { ...metadata, expirationDate: "2026-02-29" } }, null, "invalid-date"))
       .resolves.toEqual({ kind: "invalid-metadata" });
     const saved = await repo.updateKnowledgeDraft(owner, org, draftId, 1, { management: metadata, targetReaders: { mode: "ORGANIZATION" } }, null, "save");
     expect(saved.kind).toBe("updated");
@@ -175,7 +175,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
     const publicationId = await activateFixture();
     const publication = await repo.getPublishedKnowledge(member, org, publicationId);
     // Decision 0021: no Document Code is returned.
-    expect(publication).toMatchObject({ management: { version: "1.0", effectiveDate: "2027-01-01" } });
+    expect(publication).toMatchObject({ management: { version: "1.0" } });
     expect(publication).not.toHaveProperty("documentCode");
     const collection = await catalog.write(owner, org, "collections", null, null, { name: "Engineering handbook", description: "",
       status: "ACTIVE", cover: "production", allowedTypes: ["Guide"] }, "curate");
@@ -217,7 +217,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
           mimeType: "text/plain", contentHash: "b".repeat(64) }, requestId: "create-topic-free" });
       if (created.kind !== "created") throw new Error("Draft fixture failed");
       const id = created.draft.id;
-      const management = { type: "Guide" as const, version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" };
+      const management = { type: "Guide" as const, version: "1.0", expirationDate: null, changeNote: "" };
       const targetReaders = mode === "ORGANIZATION" ? { mode } : mode === "DEPARTMENT" ? { mode, departmentId: department }
         : { mode, memberIds: [memberId, colleagueId] };
       expect(await repo.updateKnowledgeDraft(owner, org, id, 1, { management, targetReaders }, null, "save-topic-free"))
@@ -301,7 +301,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         mimeType: "text/plain", contentHash: "c".repeat(64) }, requestId: "legacy-create" });
     if (created.kind !== "created") throw new Error("Draft fixture failed");
     const id = created.draft.id;
-    const metadata = { type: "Guide" as const, version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" };
+    const metadata = { type: "Guide" as const, version: "1.0", expirationDate: null, changeNote: "" };
     await repo.updateKnowledgeDraft(owner, org, id, 1, { management: metadata, targetReaders: { mode: "ORGANIZATION" } }, null, "legacy-save");
     // Trusted fixture setup only: simulate a draft saved by the previous application.
     await pool!.query("UPDATE arden.shared_draft SET management = management || jsonb_build_object('topicId', $1::text) WHERE shared_draft_id = $2", [topic.id, id]);
@@ -558,7 +558,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         (organization_id, shared_draft_id, collection_id) VALUES ($1, $2, $3)`, [org, source.draftId, folder.id]));
       for (const [revision, type] of [[2, "Guide"], [3, "Procedure"]] as const) {
         const saved = await repo.updateKnowledgeDraft(owner, org, source.draftId, revision, { management: {
-          type, version: `${revision}.0`, effectiveDate: null, expirationDate: null, changeNote: "Updated controlled guidance" },
+          type, version: `${revision}.0`, expirationDate: null, changeNote: "Updated controlled guidance" },
         }, null, "folder-version-save");
         if (saved.kind !== "updated") throw new Error("Replacement save failed");
         const submitted = await repo.submitKnowledgeDraft(owner, org, source.draftId, revision + 1, randomUUID(), "folder-version-submit");

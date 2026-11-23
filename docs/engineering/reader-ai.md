@@ -100,11 +100,11 @@ and retains headings in the full text. Chunk overlap is valid; omission/reorderi
 substitution, changed compiler identity or source hash is not. Older incompatible
 compiler outputs are unavailable, never automatically re-indexed by this operation.
 
-Resolve only the exact requested currently applicable or announced publication in
-the existing `COMPARE` eligibility pool, under runtime RLS and current Target Readers.
-This uses the pool as an eligibility check, not a request to compare/switch versions.
-Expired/withdrawn/superseded ineligible evidence remains unavailable for AI; the human
-file-reader path is not broadened or narrowed. Reauthorize before snapshot transfer
+Resolve only the exact requested current indexed publication through the no-argument
+eligibility helper under runtime RLS and current Target Readers (ADR0030).
+There is no temporal/compare pool or fallback to a superseded version.
+Expired/withdrawn/superseded ineligible evidence remains unavailable for AI;
+citations resolve through the current-publication reader path. Reauthorize before snapshot transfer
 and after preparation. Do not expose this internal full-text payload through a public
 browser endpoint. No shared DB migration, provider/runtime factory, cache or model
 configuration is needed by RA-02.

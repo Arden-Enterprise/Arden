@@ -5,9 +5,9 @@ import type { AskArdenClient } from "./ai-client.js";
 import type { Conversation, ConversationStore, ConversationTurn } from "./conversation-store.js";
 import { citationPage } from "./citation-page.js";
 import { evidenceMatchesManifest, GovernedAnswerError, parseGenerationResponse, parseRetrievalResponse, sourceLabel,
-  type DialogueTurn, type Evidence, type EvidenceReference, type PublicCitation, type StoredAnswer, type VersionScope } from "./governed-contracts.js";
+  type DialogueTurn, type Evidence, type EvidenceReference, type PublicCitation, type StoredAnswer } from "./governed-contracts.js";
 
-type AnswerInput = { conversationId: string; requestId: string; expectedRevision: number; query: string; versionScope: VersionScope };
+type AnswerInput = { conversationId: string; requestId: string; expectedRevision: number; query: string };
 type AnswerRepository = Pick<ArdenDataRepository, "conversations" | "getTargetReaderActor" | "listAuthorizedAiSources">;
 export type ConversationView = Omit<Conversation, "turns"> & { turns: Array<Omit<ConversationTurn, "evidence" | "status"> & {
   status: ConversationTurn["status"] | "UNAVAILABLE" }> };
@@ -36,20 +36,20 @@ export class GovernedAnswering {
     return this.repository.conversations;
   }
 
-  private async sources(user: string, organization: string, scope: VersionScope,
+  private async sources(user: string, organization: string,
     references?: EvidenceReference[]): Promise<AuthorizedAiSource[]> {
     const actor = await this.repository.getTargetReaderActor(user, organization);
     if (!actor || actor.status !== "ACTIVE") throw new GovernedAnswerError("NOT_FOUND");
     const sources = await this.repository.listAuthorizedAiSources(user, organization,
       references ? [...new Set(references.map((reference) => reference.generationId))] : undefined,
-      references ? [...new Set(references.map((reference) => reference.chunkId))] : undefined, scope);
+      references ? [...new Set(references.map((reference) => reference.chunkId))] : undefined);
     if (!sources) throw new GovernedAnswerError("NOT_FOUND");
     return sources.filter((source) => canRead(actor, { organizationId: organization, readers: source.targetReaders }));
   }
 
-  async referencesAvailable(user: string, organization: string, references: EvidenceReference[], scope: VersionScope): Promise<boolean> {
+  async referencesAvailable(user: string, organization: string, references: EvidenceReference[]): Promise<boolean> {
     if (references.length > 64) return false;
-    const sources = await this.sources(user, organization, scope, references);
+    const sources = await this.sources(user, organization, references);
     return references.every((reference) => sources.some((source) => source.generationId === reference.generationId
       && source.publishedVersionId === reference.publishedVersionId && source.snapshotVersionId === reference.snapshotVersionId
       && source.snapshotContentHash === reference.snapshotContentHash && Array.isArray(source.chunks)
@@ -58,12 +58,12 @@ export class GovernedAnswering {
 
   async load(user: string, organization: string, id: string): Promise<ConversationView | null> {
     // Even an empty transcript needs a current organization membership.
-    await this.sources(user, organization, "COMPARE", []);
+    await this.sources(user, organization, []);
     const conversation = await this.store.load(user, organization, id);
     if (!conversation) return null;
     const turns = [];
     for (const turn of conversation.turns) {
-      const available = await this.referencesAvailable(user, organization, turn.evidence, "COMPARE");
+      const available = await this.referencesAvailable(user, organization, turn.evidence);
       const { evidence: _references, ...visible } = turn;
       turns.push({ ...visible, status: available ? turn.status : "UNAVAILABLE" as const,
         answer: available ? turn.answer : "This answer is no longer available.", citations: available ? turn.citations : [] });
@@ -71,14 +71,14 @@ export class GovernedAnswering {
     return { ...conversation, turns };
   }
 
-  private async context(user: string, organization: string, conversation: Conversation, scope: VersionScope):
+  private async context(user: string, organization: string, conversation: Conversation):
     Promise<{ history: DialogueTurn[]; references: EvidenceReference[] }> {
     const history: DialogueTurn[] = [], references: EvidenceReference[] = [];
     let characters = 0;
     for (const turn of conversation.turns.slice(-4).reverse()) {
       const combined = uniqueReferences([...references, ...turn.evidence]);
       if (characters + turn.question.length + turn.answer.length > 24_000 || combined.length > 48) continue;
-      if (!await this.referencesAvailable(user, organization, turn.evidence, scope)) continue;
+      if (!await this.referencesAvailable(user, organization, turn.evidence)) continue;
       history.unshift({ question: turn.question, answer: turn.answer });
       references.splice(0, references.length, ...combined);
       characters += turn.question.length + turn.answer.length;
@@ -90,20 +90,20 @@ export class GovernedAnswering {
     conversationId: string; revision: number; turnId: string }> {
     const ai = this.ai;
     if (!ai) throw new Error("AI provider is unavailable");
-    const before = await this.sources(user, organization, input.versionScope);
+    const before = await this.sources(user, organization);
     await this.store.ensure(user, organization, input.conversationId, input.query);
     const conversation = await this.store.load(user, organization, input.conversationId);
     if (!conversation) throw new GovernedAnswerError("NOT_FOUND");
     const replay = conversation.turns.find((turn) => turn.requestId === input.requestId);
     if (replay) {
-      if (replay.question !== input.query || replay.versionScope !== input.versionScope
+      if (replay.question !== input.query
         || replay.sequence !== input.expectedRevision + 1) throw new GovernedAnswerError("CONFLICT");
-      if (!await this.referencesAvailable(user, organization, replay.evidence, "COMPARE")) throw unavailable();
+      if (!await this.referencesAvailable(user, organization, replay.evidence)) throw unavailable();
       return { status: replay.status, answer: replay.answer, citations: replay.citations,
         conversationId: input.conversationId, revision: conversation.revision, turnId: replay.id };
     }
     if (conversation.revision !== input.expectedRevision) throw new GovernedAnswerError("CONFLICT");
-    const context = await this.context(user, organization, conversation, input.versionScope);
+    const context = await this.context(user, organization, conversation);
     let answer: StoredAnswer = { status: "INSUFFICIENT_EVIDENCE",
       answer: "I could not find enough authorized knowledge in this scope to answer that question.", citations: [] };
     let allReferences = context.references;
@@ -122,8 +122,8 @@ export class GovernedAnswering {
           snapshotVersionId: chunk.snapshotVersionId, snapshotContentHash: chunk.snapshotContentHash, chunkId: chunk.chunkId };
       });
       allReferences = uniqueReferences([...context.references, ...references]);
-      if (allReferences.length > 64 || !await this.referencesAvailable(user, organization, allReferences, input.versionScope)) throw unavailable();
-      const current = await this.sources(user, organization, input.versionScope, references);
+      if (allReferences.length > 64 || !await this.referencesAvailable(user, organization, allReferences)) throw unavailable();
+      const current = await this.sources(user, organization, references);
       const evidence = retrieval.evidence.map((chunk): Evidence => {
         const source = current.find((source) => source.generationId === chunk.generationId);
         if (!source || !evidenceMatchesManifest(chunk, source)) throw unavailable();
@@ -134,7 +134,7 @@ export class GovernedAnswering {
           requestId: input.requestId, organizationId: organization, query: retrieval.standaloneQuery,
           history: context.history, evidence };
         const generated = parseGenerationResponse(await ai.generate(request), request);
-        if (!await this.referencesAvailable(user, organization, allReferences, input.versionScope)) throw unavailable();
+        if (!await this.referencesAvailable(user, organization, allReferences)) throw unavailable();
         const citations: PublicCitation[] = generated.citations.map((citation) => {
           const chunk = evidence.find((chunk) => chunk.chunkId === citation.chunkId)!;
           const source = current.find((source) => source.generationId === chunk.generationId)!;
@@ -149,10 +149,10 @@ export class GovernedAnswering {
         answer = { status: generated.status, answer: generated.answer, citations };
       }
     }
-    if (!await this.referencesAvailable(user, organization, allReferences, input.versionScope)) throw unavailable();
+    if (!await this.referencesAvailable(user, organization, allReferences)) throw unavailable();
     const saved = await this.store.append(user, organization, input.conversationId, input.expectedRevision,
-      { ...answer, id: randomUUID(), requestId: input.requestId, question: input.query, versionScope: input.versionScope, evidence: allReferences });
-    if (!await this.referencesAvailable(user, organization, allReferences, input.versionScope)) throw unavailable();
+      { ...answer, id: randomUUID(), requestId: input.requestId, question: input.query, evidence: allReferences });
+    if (!await this.referencesAvailable(user, organization, allReferences)) throw unavailable();
     return { ...answer, conversationId: input.conversationId, revision: saved.sequence, turnId: saved.id };
   }
 }

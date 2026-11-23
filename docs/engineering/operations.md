@@ -305,3 +305,18 @@ unordered function is no longer executable by the worker. Existing publications 
 republished or repaired; review any pre-existing stale pointer separately. Core and web must be
 released together for the expanded state contract. A live schema upgrade still requires a separate
 reviewed backup, compatibility/recovery plan and explicit authorization; this guide is not consent.
+
+## Published-date AI contraction (0063)
+
+Migration0063 is operator-only under [ADR0030](../decisions/0030-published-date-ai-sources.md).
+It removes the chat scope column and obsolete temporal lineage, replaces the
+eligibility policies/helper and maintenance publication proof, and clears retired
+Effective Date keys from mutable drafts. Frozen metadata, publications, chat turns,
+evidence, files and generation IDs remain. The trusted routine inventory becomes47.
+Rehearse a full backup restore, rollback and upgrade with old chat/publication data,
+then test real runtime workflows after the ownership handoff. Do not edit applied
+SQL or transfer trusted executors. Core/web/desktop must roll out together: older
+clients send a retired field, and older Core expects the removed column/helper.
+No reindex or AI service contract change is needed. Recovery uses matching reviewed
+code/schema or the protected pre-upgrade backup. This local implementation is not
+approval or evidence of applying0063 on a shared environment.

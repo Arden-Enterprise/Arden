@@ -9,7 +9,7 @@ import type { ReaderSourceResponse } from "../reader-ai/contracts.js";
 import { ReaderSourcePreparation } from "../reader-ai/source-preparation.js";
 import { ReaderSummary } from "../reader-ai/summary.js";
 import { ReaderQuestion } from "../reader-ai/question.js";
-import type { EvidenceReference, VersionScope } from "./governed-contracts.js";
+import type { EvidenceReference } from "./governed-contracts.js";
 
 const databaseUrl = process.env.ARDEN_TEST_DATABASE_URL;
 const pool = databaseUrl ? new Pool({ connectionString: databaseUrl, max: 4 }) : null;
@@ -22,7 +22,7 @@ const date = (days: number) => new Date(Date.now() + days * 86_400_000).toISOStr
 // All publication tests share the worker queue and are deliberately registered in
 // one suite, not raced in independent files against a common disposable database.
 export function registerGovernedAnsweringVerification() {
-describe.skipIf(!pool)("governed AI temporal sources and private history with real RLS", () => {
+describe.skipIf(!pool)("governed AI published sources and private history with real RLS", () => {
   beforeAll(async () => {
     const identity = await pool!.query("SELECT current_database() AS name, rolsuper FROM pg_roles WHERE rolname = current_user");
     if (!identity.rows[0]?.name.startsWith("arden_test_") || !identity.rows[0]?.rolsuper) throw new Error("Disposable superuser fixture database required");
@@ -34,7 +34,7 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
       await pool!.query("INSERT INTO arden.user_account(user_id,email,full_name) VALUES ($1,$2,'AI reader')", [user, `${user}@example.test`]);
       await pool!.query("INSERT INTO arden.organization_membership(membership_id,organization_id,user_id) VALUES ($1,$2,$3)", [membership, org, user]);
     }
-    const draft = await repo!.createNewKnowledgeDraft(owner, org, { actorMembershipId: ownerMembership, title: "Temporal guide",
+    const draft = await repo!.createNewKnowledgeDraft(owner, org, { actorMembershipId: ownerMembership, title: "Published guide",
       classification: "INTERNAL", idempotencyKey: randomUUID(), content: { sourceUri: "arden-private-object://ai-fixture",
         mimeType: "text/plain", contentHash: "a".repeat(64) }, requestId: "ai-create" });
     if (draft.kind !== "created") throw new Error("Draft fixture failed");
@@ -50,7 +50,7 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
         await client.query("SET LOCAL search_path TO arden, public");
         // Synthetic fixture only; no production cleanup path uses trigger suppression.
         await client.query("SET LOCAL session_replication_role = replica");
-        for (const table of ["ai_turn_evidence", "ai_conversation_turn", "ai_conversation", "knowledge_ai_release"])
+        for (const table of ["ai_turn_evidence", "ai_conversation_turn", "ai_conversation"])
           await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
         await client.query("DELETE FROM knowledge_index_job WHERE generation_id IN (SELECT generation_id FROM knowledge_index_generation WHERE organization_id=$1)", [org]);
         await client.query("DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id=$1)", [org]);
@@ -73,9 +73,9 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
     await pool.end();
   });
 
-  async function publish(effectiveDate: string, readers: TargetReadersInput = { mode: "ORGANIZATION" }, expirationDate: string | null = null) {
+  async function publish(readers: TargetReadersInput = { mode: "ORGANIZATION" }, expirationDate: string | null = null) {
     const updated = await repo!.updateKnowledgeDraft(owner, org, draftId, version, {
-      management: { type: "Guide", version: `${version}.0`, effectiveDate, expirationDate,
+      management: { type: "Guide", version: `${version}.0`, expirationDate,
         changeNote: version > 1 ? "Updated guidance." : "" }, targetReaders: readers,
     }, null, "ai-update");
     if (updated.kind !== "updated") throw new Error(`Update fixture failed: ${updated.kind}`);
@@ -102,49 +102,59 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
       snapshotVersionId: job.snapshotVersionId, snapshotContentHash: job.snapshotContentHash, chunkId: chunk.chunkId };
     return reference;
   }
-  const sources = async (user: string, scope: VersionScope) =>
-    (await repo!.listAuthorizedAiSources(user, org, undefined, undefined, scope))!.filter(source => source.draftId === draftId);
+  const sources = async (user: string) =>
+    (await repo!.listAuthorizedAiSources(user, org, undefined, undefined))!.filter(source => source.draftId === draftId);
 
-  it("selects currently applicable versus announced sources; denies fallback after expiry/ACL and after withdrawal", async () => {
-    const baseline = await publish(date(-20));
-    const announced = await publish(date(20));
+  it("removes legacy scope storage and entry points without changing conversation tables", async () => {
+    const result = await pool!.query(`SELECT
+      to_regclass('arden.knowledge_ai_release') IS NULL AS retired_lineage,
+      to_regprocedure('arden.maintain_knowledge_ai_release()') IS NULL AS retired_trigger,
+      to_regprocedure('arden.eligible_ai_publications(text)') IS NULL AS retired_selector,
+      to_regprocedure('arden.eligible_ai_publications()') IS NOT NULL AS current_sources,
+      NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='arden'
+          AND table_name='ai_conversation_turn' AND column_name='version_scope') AS retired_column,
+      to_regclass('arden.ai_turn_evidence') IS NOT NULL AS evidence_preserved`);
+    expect(Object.values(result.rows[0])).toEqual([true, true, true, true, true, true]);
+  });
+
+  it("uses the latest published version; denies fallback after expiry/ACL and after withdrawal", async () => {
+    const baseline = await publish();
+    const latest = await publish();
     // Reader preparation resolves exactly the requested eligible version; no default substitution.
-    expect((await repo!.readerSources.resolve(member, org, baseline.publishedVersionId))?.source.generationId).toBe(baseline.generationId);
-    expect((await repo!.readerSources.resolve(member, org, announced.publishedVersionId))?.source.generationId).toBe(announced.generationId);
-    expect(await repo!.readerSources.resolve(member, randomUUID(), announced.publishedVersionId)).toBeNull();
+    expect(await repo!.readerSources.resolve(member, org, baseline.publishedVersionId)).toBeNull();
+    expect((await repo!.readerSources.resolve(member, org, latest.publishedVersionId))?.source.generationId).toBe(latest.generationId);
+    expect(await repo!.readerSources.resolve(member, randomUUID(), latest.publishedVersionId)).toBeNull();
     expect(await repo!.readerSources.resolve(member, org, randomUUID())).toBeNull();
-    expect((await sources(member, "CURRENT")).map(s => s.publishedVersionId)).toEqual([baseline.publishedVersionId]);
-    expect((await sources(member, "UPCOMING")).map(s => s.publishedVersionId)).toEqual([announced.publishedVersionId]);
-    expect((await sources(member, "COMPARE")).map(s => s.publishedVersionId).sort()).toEqual([baseline.publishedVersionId, announced.publishedVersionId].sort());
-    // Exact older applicable citation/file route remains readable, not all old versions.
-    expect(await repo!.getPublishedKnowledge(member, org, baseline.publishedVersionId)).not.toBeNull();
-    const restricted = await publish(date(-1), { mode: "SELECTED_MEMBERS", memberIds: [memberId, otherId] });
-    expect(await sources(owner, "CURRENT")).toEqual([]); // Org Admin is not an automatic reader.
+    expect((await sources(member)).map(s => s.publishedVersionId)).toEqual([latest.publishedVersionId]);
+    // Superseded versions are not revived for citations or file reads.
+    expect(await repo!.getPublishedKnowledge(member, org, baseline.publishedVersionId)).toBeNull();
+    const restricted = await publish({ mode: "SELECTED_MEMBERS", memberIds: [memberId, otherId] });
+    expect(await sources(owner)).toEqual([]); // Org Admin is not an automatic reader.
     expect(await repo!.readerSources.resolve(owner, org, restricted.publishedVersionId)).toBeNull();
     expect(await repo!.readerSources.resolve(member, org, restricted.publishedVersionId)).not.toBeNull();
     expect(await repo!.readerSources.resolve(member, org, baseline.publishedVersionId)).toBeNull();
-    expect((await sources(member, "CURRENT")).map(s => s.publishedVersionId)).toEqual([restricted.publishedVersionId]);
+    expect((await sources(member)).map(s => s.publishedVersionId)).toEqual([restricted.publishedVersionId]);
     expect(await repo!.getPublishedKnowledge(owner, org, baseline.publishedVersionId)).toBeNull();
-    const expired = await publish(date(-4), { mode: "ORGANIZATION" }, date(-2));
+    const expired = await publish({ mode: "ORGANIZATION" }, date(-2));
     expect(await repo!.readerSources.resolve(member, org, expired.publishedVersionId)).toBeNull();
-    expect(await sources(member, "CURRENT")).toEqual([]); // no resurrection of a readable older policy
+    expect(await sources(member)).toEqual([]); // no resurrection of a readable older policy
     await pool!.query("DELETE FROM arden.knowledge_current_publication WHERE shared_draft_id=$1", [draftId]);
     expect(await repo!.readerSources.resolve(member, org, restricted.publishedVersionId)).toBeNull();
-    expect(await sources(member, "COMPARE")).toEqual([]);
-    await publish(date(30));
-    expect(await sources(member, "CURRENT")).toEqual([]); // new release epoch has no inherited baseline
+    expect(await sources(member)).toEqual([]);
+    await publish();
+    expect(await sources(member)).toHaveLength(1); // a new publication is usable immediately
     expect(await repo!.getPublishedKnowledge(member, org, baseline.publishedVersionId)).toBeNull();
   }, 30_000);
 
   it("persists private turns atomically under runtime RLS, rejects stale evidence and serializes writers", async () => {
-    const ref = await publish(date(-1));
+    const ref = await publish();
     const conversations = repo!.conversations, id = randomUUID();
     await conversations.ensure(member, org, id, "My private question");
     expect(await conversations.load(owner, org, id)).toBeNull();
     expect(await conversations.list(owner, org)).toEqual([]);
     await expect(conversations.ensure(owner, org, id, "Cannot take over")).rejects.toMatchObject({ code: "NOT_FOUND" });
     const turn = { id: randomUUID(), requestId: randomUUID(), question: "MFA?", answer: "Use MFA.",
-      status: "ANSWERED" as const, versionScope: "CURRENT" as const, citations: [], evidence: [ref] };
+      status: "ANSWERED" as const, citations: [], evidence: [ref] };
     const attempts = await Promise.allSettled([conversations.append(member, org, id, 0, turn),
       conversations.append(member, org, id, 0, { ...turn, id: randomUUID(), requestId: randomUUID() })]);
     expect(attempts.filter(result => result.status === "fulfilled")).toHaveLength(1);
@@ -171,7 +181,7 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
   }, 30_000);
 
   it("withholds exact-document Q&A after real runtime membership revocation without storing turns", async () => {
-    const ref = await publish(date(-1)), requestId = randomUUID();
+    const ref = await publish(), requestId = randomUUID();
     const historyBefore = await repo!.conversations.list(member, org);
     const record = await repo!.readerSources.resolve(member, org, ref.publishedVersionId);
     if (!record) throw new Error("Reader source fixture unavailable");
@@ -200,7 +210,7 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
   }, 30_000);
 
   it("withholds Reader Summary after real runtime membership revocation during fake generation", async () => {
-    const ref = await publish(date(-1)), requestId = randomUUID();
+    const ref = await publish(), requestId = randomUUID();
     const historyBefore = await repo!.conversations.list(member, org);
     const record = await repo!.readerSources.resolve(member, org, ref.publishedVersionId);
     if (!record) throw new Error("Reader source fixture unavailable");

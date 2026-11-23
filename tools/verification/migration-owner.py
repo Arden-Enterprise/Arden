@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy" / "release
 from management import migration_role_name, migration_role_probe_sql, valid_migration_role_probe
 
 
-REVIEWED_BASELINE_DEFINER_COUNT = 35
+REVIEWED_BASELINE_DEFINER_COUNT = 34
 REVIEWED_MAINTENANCE_DEFINERS = {
     "enqueue_maintenance_submission_notices()",
     "list_closed_publication_reports()",
@@ -41,7 +41,7 @@ def verify_full_schema(container):
             raise RuntimeError("Full-schema ownership rehearsal failed")
         return result.stdout.strip()
 
-    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "62":
+    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "63":
         raise ValueError("Review the full-schema ownership fixture when migrations change")
     sql(f"CREATE ROLE {role} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS "
         "NOCREATEDB NOCREATEROLE NOREPLICATION")

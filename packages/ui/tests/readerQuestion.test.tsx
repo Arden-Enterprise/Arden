@@ -19,7 +19,7 @@ function fixture() {
   const ask = vi.spyOn(api, "askReaderQuestion").mockResolvedValue(answer());
   const access = vi.spyOn(summaryApi, "checkReaderSummaryAccess").mockResolvedValue();
   const props = { metadata: { title: "Guide", documentCode: "ARD-001", summary: "", ownerDepartment: "HR",
-    activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE" as const, effectiveDate: "2026-11-01" }] },
+    activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE" as const }] },
   summaryOptions: options, content: createElement("p", null, "Original document"), onBack: vi.fn() };
   const view = render(createElement(KnowledgeDocumentDetail, props));
   chooseReaderTask("question");

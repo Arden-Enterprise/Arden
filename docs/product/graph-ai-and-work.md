@@ -87,18 +87,18 @@ Owner Department filters. Topics were removed by [ADR0027](../decisions/0027-rem
 Use original Arden artwork for collection covers, not reference-company assets.
 
 Required **at submission**, not draft save: Title, Type,
-Content (editor or text-extractable PDF), business Version, Effective Date and
+Content (editor or text-extractable PDF), business Version and
 explicit Target Readers. Types: Policy & Standard, Procedure, Guide, Reference,
-Lessons Learned. Expiration Date is optional and cannot precede Effective Date.
+Lessons Learned. Expiration Date is optional and inclusive through that UTC calendar day.
 An update to previously published knowledge requires a Change Note. Business
 Version is not the technical save revision. Document Code is retired
 ([ADR 0021](../decisions/0021-reader-email-search-and-no-document-code.md), 14 November 2026): documents are
 identified by title, version and link, and the explicit Target Readers picker finds members by name or email.
 Owner Department follows the author's primary department. Author, Published Date,
 Last Updated and current-version identity are system-owned. Published Date means
-availability; Effective Date means applicability. An upcoming Effective Date alone
-does not prevent authorized reading. Applicability is Upcoming / Effective /
-Expired, separate from submission/preparation states. Do not introduce a separate
+availability; there is no separate Effective Date input or upcoming-publication
+AI mode ([ADR0030](../decisions/0030-published-date-ai-sources.md)). Reader validity
+is Current / Expiring soon / Expired, separate from submission/preparation states. Do not introduce a separate
 Superseded reader status.
 
 Remove Classification, Team/Project permission tags, redundant Category/Location/
@@ -148,6 +148,12 @@ Path requested in ARD-50: left navigation → dominant central graph → search/
 
 ## F13 Grounded agent
 
+The [Company/Personal context contract](../engineering/knowledge-source-contexts.md)
+records the 23 November refinement: Ask Arden uses permitted Company publications;
+the sidebar in Private is planned to use only owner-private knowledge. There is no
+reader-scope picker. Private PDF ingestion/indexing/answering remain implementation
+work; a renamed workspace does not imply those paths are available.
+
 Path: user asks with explicit permitted context → Core calculates allowed versions → retrieval → permitted evidence/context → generation → validated answer/citations with final access recheck. ARD-52 is the umbrella; later branch ADR 0012 changes its older architecture wording.
 
 | Acceptance ID | Complete path to verify | Evidence / remaining |
@@ -172,9 +178,9 @@ imported into reader Q&A; no live-provider/release acceptance is implied.
 
 The maintainer-approved combined F13/F14 implementation is specified by
 [GA-v2](../engineering/governed-hybrid-answering.md), including hybrid retrieval,
-staged evidence authorization, applicable-version selection and owner-private
+staged evidence authorization, current-publication selection and owner-private
 history. It is in progress, not a deployment receipt. ADR 0021 records the explicit
-currently-applicable default and forward-only lineage boundary.
+current-publication default; ADR0030 retires its temporal modes and lineage.
 
 Path: start conversation → exchange grounded messages → reopen history → revalidate changed access/version availability → continue or show unavailable evidence. Related work: ARD-59.
 

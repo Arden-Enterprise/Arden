@@ -41,7 +41,7 @@ describe("agent panel", () => {
     const view = render(<AgentPanel open {...panelProps} />);
     ask(screen.getByRole("complementary", { name: "Ask Arden" }), "Which bin?");
     expect(await screen.findByText("Use bin B.")).toBeTruthy();
-    expect(send.mock.calls[0]).toMatchObject(["web", "org", "Which bin?", { versionScope: "CURRENT" }]);
+    expect(send.mock.calls[0]).toMatchObject(["web", "org", "Which bin?", { }]);
     view.rerender(<AgentPanel open={false} {...panelProps} />);
     expect(view.container.querySelector("#arden-agent-panel")?.getAttribute("data-state")).toBe("closed");
     view.rerender(<AgentPanel open {...panelProps} />);

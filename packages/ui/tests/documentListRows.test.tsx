@@ -11,7 +11,7 @@ const base: api.PublishedKnowledge = { id: "v1", draftId: "d1", title: "Employee
   classification: "INTERNAL", targetReaders: { mode: "ORGANIZATION", departmentId: null }, responsibleDepartmentId: "hr",
   responsibleDepartmentName: "HR", audienceIds: [], contentHash: "hash", body: "", mimeType: "text/plain",
   publishedAt: "2026-11-12T00:00:00Z", validFrom: "2026-11-12T00:00:00Z", validUntil: null,
-  management: { type: "Reference", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" } };
+  management: { type: "Reference", version: "1.0", expirationDate: null, changeNote: "" } };
 const item = (id: string, management: Partial<NonNullable<api.PublishedKnowledge["management"]>>): api.PublishedKnowledge =>
   ({ ...base, id, draftId: `d-${id}`, title: `Document ${id}`, management: { ...base.management!, ...management } });
 
@@ -35,12 +35,12 @@ describe("document list rows", () => {
 
   it("uses the reader's status chips, never violet text", () => {
     vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-22T12:00:00Z"));
-    renderRegister([item("current", {}), item("upcoming", { effectiveDate: "2026-12-01" }),
+    renderRegister([item("current", {}), item("another", {}),
       item("soon", { expirationDate: "2026-11-25" }), item("expired", { expirationDate: "2026-11-01" })]);
     const chip = (id: string) => within(screen.getByRole("button", { name: `Read Document ${id}` }).closest("[role=row]") as HTMLElement)
-      .getByText(/Current|Upcoming|Expires|Expired/);
+      .getByText(/Current|Expires|Expired/);
     expect(chip("current").className).toContain("island-chip knowledge-reader-status library-row-status is-effective");
-    expect(chip("upcoming").className).toContain("is-upcoming");
+    expect(chip("another").className).toContain("is-effective");
     expect(chip("soon").textContent).toBe("Expires in 3 days");
     expect(chip("soon").className).toContain("is-expiring");
     expect(chip("expired").className).toContain("is-expired");

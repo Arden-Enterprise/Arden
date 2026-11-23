@@ -20,18 +20,20 @@ describe("business document metadata", () => {
   it("validates calendar dates and the optional inclusive expiration date", () => {
     expect(isCalendarDate("2026-02-29")).toBe(false);
     expect(isCalendarDate("2028-02-29")).toBe(true);
-    const value = { ...emptyKnowledgeMetadata(), effectiveDate: "2026-11-12", expirationDate: "2026-11-11" };
+    const value = { ...emptyKnowledgeMetadata(), expirationDate: "2026-02-29" };
     expect(validKnowledgeMetadata(value)).toBe(false);
     value.expirationDate = "2026-11-12";
     expect(validKnowledgeMetadata(value)).toBe(true);
     expect(validityStatus(value, "2026-11-12")).toEqual({ status: "Expiring soon", daysLeft: 0 });
     expect(validityStatus(value, "2026-11-13")).toEqual({ status: "Expired", daysLeft: 0 });
-    expect(validityStatus(value, "2026-11-11").status).toBe("Upcoming");
+    expect(validityStatus(value, "2026-11-11").status).toBe("Expiring soon");
   });
   it("requires change notes only for updates and never invents legacy dates", () => {
     expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), true)).toContain("Add a change note.");
     expect(metadataSubmissionErrors(emptyKnowledgeMetadata(), false)).not.toContain("Add a change note.");
     expect(validityStatus(null, "2026-11-12")).toEqual({ status: "Current", daysLeft: null });
+    const legacy = { ...emptyKnowledgeMetadata(), effectiveDate: "2099-01-01" };
+    expect(validityStatus(legacy, "2026-11-12")).toEqual({ status: "Current", daysLeft: null });
   });
   it("is in force from approval and warns 30 days before the optional expiration", () => {
     const value = { ...emptyKnowledgeMetadata(), expirationDate: "2026-12-31" };

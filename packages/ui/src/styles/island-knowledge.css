@@ -229,7 +229,6 @@
 .knowledge-reader-page { display: grid; gap: 14px; min-width: 0; }
 .knowledge-reader-status { border: 1px solid transparent; }
 .knowledge-reader-status.is-effective { color: var(--arden-success); border-color: color-mix(in srgb, var(--arden-success) 34%, transparent); background: color-mix(in srgb, var(--arden-success) 12%, transparent); }
-.knowledge-reader-status.is-upcoming { color: var(--arden-info); border-color: color-mix(in srgb, var(--arden-info) 34%, transparent); background: color-mix(in srgb, var(--arden-info) 12%, transparent); }
 .knowledge-reader-status.is-expiring { color: var(--arden-warning); border-color: color-mix(in srgb, var(--arden-warning) 34%, transparent); background: color-mix(in srgb, var(--arden-warning) 12%, transparent); }
 .knowledge-reader-unset { color: var(--arden-text-muted); }
 .knowledge-reader-version { font-variant-numeric: tabular-nums; }

@@ -14,7 +14,7 @@ const catalog: api.KnowledgeCatalog = { canManage: true, collections: [folder] }
 const source: api.PublishedKnowledge = { id: "exact-version", draftId: "logical-document", title: "Access request guide", classification: "INTERNAL",
   targetReaders: { mode: "ORGANIZATION", departmentId: null }, responsibleDepartmentId: "hr", audienceIds: [], contentHash: "hash",
   publishedAt: "2026-11-19T00:00:00Z", validFrom: "2026-11-19T00:00:00Z", validUntil: null,
-  management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" } };
+  management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" } };
 let restore: () => void;
 beforeEach(() => { restore = installTestDialogs(); });
 afterEach(() => { cleanup(); restore(); vi.restoreAllMocks(); });
