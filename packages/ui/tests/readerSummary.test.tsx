@@ -7,6 +7,7 @@ import type { ReaderSummaryOptions } from "../src/knowledge/useReaderSummary";
 import * as api from "../src/shared/reader-summary-api";
 import { ApiError } from "../src/shared/api-client";
 import { deferred, readerContext, readerId, readerSummaryFixture } from "./readerSummary.test-support";
+import { chooseReaderTask } from "./readerAi.test-support";
 import { PdfViewer } from "../src/knowledge/PdfDocument";
 import type { KnowledgeCitationReference } from "../src/knowledge/knowledgeCitation";
 
@@ -26,13 +27,26 @@ function tabVisibility() {
 beforeEach(() => { localStorage.clear(); vi.stubGlobal("matchMedia", () => ({ matches: true })); });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 describe("exact-version on-request Summary reader", () => {
+  it("opens Arden AI with Ctrl J, hides information only while open and keeps the saved preference", () => {
+    const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props));
+    expect(screen.getByRole("heading", { name: "Document information" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+    expect(screen.getByRole("button", { name: "Arden AI" }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByRole("heading", { name: "Document information" })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Summarize/ })).toBeTruthy();
+    expect(h.generation).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "j", ctrlKey: true });
+    expect(screen.queryByRole("complementary", { name: "Arden AI" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Document information" })).toBeTruthy();
+    expect(localStorage.getItem("arden.reader.informationCollapsed")).toBeNull();
+  });
   it("ignores visible-only blur/focus and repeated selection of the active panel", async () => {
     const h = fixture(); render(createElement(StrictMode, null, createElement(KnowledgeDocumentDetail, h.props)));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     for (let index = 0; index < 3; index++) {
       fireEvent.blur(window); fireEvent.focus(window);
-      fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+      chooseReaderTask("summary");
     }
     expect(screen.getByText("Only approved readers can use this guidance.")).toBeTruthy();
     expect(h.generation).toHaveBeenCalledOnce(); expect(h.check).not.toHaveBeenCalled();
@@ -44,27 +58,28 @@ describe("exact-version on-request Summary reader", () => {
       return createElement(KnowledgeDocumentDetail, { ...h.props, summaryOptions: { ...h.options, onCitation: setCitation },
         content: createElement(PdfViewer, { url: "blob:synthetic", title: "Synthetic source", page: citation?.page }) });
     }
-    render(createElement(Reader)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    render(createElement(Reader)); chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     fireEvent.click(screen.getByRole("button", { name: /View source for point 1/ })); await act(async () => {});
     const pdf = screen.getByLabelText("PDF preview: Synthetic source, page 2");
     fireEvent.blur(window); fireEvent.focus(window);
-    fireEvent.click(screen.getByRole("button", { name: "Hide document information" }));
+    // Arden AI moves document information aside; showing and hiding it again must not remount the PDF.
     fireEvent.click(screen.getByRole("button", { name: "Show document information" }));
+    fireEvent.click(screen.getByRole("button", { name: "Hide document information" }));
     expect(screen.getByLabelText("PDF preview: Synthetic source, page 2")).toBe(pdf);
     expect(pdf.getAttribute("data")).toBe("blob:synthetic#page=2");
     expect(h.check).toHaveBeenCalledOnce(); expect(h.generation).toHaveBeenCalledOnce();
   });
   it("keeps a shared return check running while switching panels", async () => {
     const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     const pending = deferred<void>(); h.check.mockReturnValue(pending.promise);
     const visibility = tabVisibility(); visibility("hidden"); visibility("visible");
     expect(screen.getByText("Updating…")).toBeTruthy();
     const signal = h.check.mock.calls[0][2];
-    fireEvent.click(screen.getByRole("button", { name: "Ask this document" }));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("question");
+    chooseReaderTask("summary");
     expect(signal.aborted).toBe(false); expect(h.check).toHaveBeenCalledOnce();
     await act(async () => pending.resolve()); await screen.findByText("Only approved readers can use this guidance.");
     expect(h.generation).toHaveBeenCalledOnce();
@@ -73,7 +88,7 @@ describe("exact-version on-request Summary reader", () => {
     vi.useFakeTimers();
     const interval = vi.spyOn(globalThis, "setInterval"), clear = vi.spyOn(globalThis, "clearInterval");
     const h = fixture(); h.generation.mockRejectedValueOnce(new ApiError(429, "private", "SUMMARY_COOLDOWN", 2, true));
-    render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    render(createElement(KnowledgeDocumentDetail, h.props)); chooseReaderTask("summary");
     await act(async () => {});
     const retry = screen.getByRole("button", { name: "Retry in 2s" });
     expect(retry.hasAttribute("disabled")).toBe(true); fireEvent.click(retry); expect(h.generation).toHaveBeenCalledOnce();
@@ -83,23 +98,23 @@ describe("exact-version on-request Summary reader", () => {
     expect(h.generation).toHaveBeenCalledOnce(); expect(screen.getByRole("button", { name: "Retry" }).hasAttribute("disabled")).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: "Retry" })); await act(async () => {});
     expect(h.generation).toHaveBeenCalledTimes(2); expect(screen.getByText("Only approved readers can use this guidance.")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Arden AI" }));
     expect(clear).toHaveBeenCalledWith(interval.mock.results[0].value);
   });
   it("cleans an unexpired countdown when the panel is closed", async () => {
     vi.useFakeTimers();
     const interval = vi.spyOn(globalThis, "setInterval"), clear = vi.spyOn(globalThis, "clearInterval");
     const h = fixture(); h.generation.mockRejectedValueOnce(new ApiError(429, "Wait", "SUMMARY_COOLDOWN", 60));
-    render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    render(createElement(KnowledgeDocumentDetail, h.props)); chooseReaderTask("summary");
     await act(async () => {}); expect(screen.getByRole("button", { name: "Retry in 60s" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close Arden AI" }));
     expect(clear).toHaveBeenCalledWith(interval.mock.results[0].value);
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(h.generation).toHaveBeenCalledOnce();
   });
   it("keeps temporary source failures retryable but does not retry a configuration failure", async () => {
     const h = fixture(); h.generation.mockRejectedValueOnce(new ApiError(503, "private", "SUMMARY_SOURCE_UNAVAILABLE", undefined, true));
-    render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    render(createElement(KnowledgeDocumentDetail, h.props)); chooseReaderTask("summary");
     await screen.findByText("Summary is unavailable. Please retry shortly.");
     h.generation.mockRejectedValueOnce(new ApiError(503, "private-key", "SUMMARY_PROVIDER_AUTH", undefined, false));
     fireEvent.click(screen.getByRole("button", { name: "Retry" })); await screen.findByText("Summary is unavailable.");
@@ -108,7 +123,7 @@ describe("exact-version on-request Summary reader", () => {
   it("starts only on request, keeps the source and Back, and rechecks before navigating", async () => {
     const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props));
     expect(h.generation).not.toHaveBeenCalled(); expect(screen.queryByText("AI-generated")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     expect(screen.getByText("AI-generated")).toBeTruthy(); expect(screen.getByText("Original document")).toBeTruthy();
     const pending = deferred<void>(); h.check.mockReturnValue(pending.promise);
@@ -122,7 +137,7 @@ describe("exact-version on-request Summary reader", () => {
   it("Close and Escape remain usable while loading and discard late output without regeneration", async () => {
     const h = fixture(), pending = deferred<ReturnType<typeof readerSummaryFixture>>(); h.generation.mockReturnValue(pending.promise);
     render(createElement(KnowledgeDocumentDetail, h.props));
-    const trigger = screen.getByRole("button", { name: "Summary" }); fireEvent.click(trigger);
+    chooseReaderTask("summary"); const trigger = screen.getByRole("button", { name: "Arden AI" });
     expect(screen.getByText("Preparing summary…")).toBeTruthy(); fireEvent.keyDown(trigger, { key: "Escape" });
     expect(document.activeElement).toBe(trigger); expect(screen.queryByText("Preparing summary…")).toBeNull();
     await act(async () => pending.resolve(readerSummaryFixture(readerId(4))));
@@ -130,7 +145,7 @@ describe("exact-version on-request Summary reader", () => {
   });
   it.each(["version", "document", "organization", "hash", "inactive"])("does not retain output after %s changes, including late replies", async mode => {
     const h = fixture(), pending = deferred<ReturnType<typeof readerSummaryFixture>>(); h.generation.mockReturnValue(pending.promise);
-    const view = render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    const view = render(createElement(KnowledgeDocumentDetail, h.props)); chooseReaderTask("summary");
     const options = { ...h.options, context: { ...h.options.context } };
     if (mode === "version") options.context.versionId = readerId(9);
     if (mode === "document") options.context.documentId = readerId(9);
@@ -143,16 +158,16 @@ describe("exact-version on-request Summary reader", () => {
   });
   it.each([401, 403, 404, 422, 429, 503])("handles %s with concise safe copy and only permitted manual retry", async status => {
     const h = fixture(); h.generation.mockRejectedValue(new ApiError(status, "private diagnostic payload"));
-    render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    render(createElement(KnowledgeDocumentDetail, h.props)); chooseReaderTask("summary");
     await screen.findByRole("alert"); expect(screen.queryByText("private diagnostic payload")).toBeNull();
     expect(screen.queryByRole("button", { name: /^Retry/ }) !== null).toBe(status === 429 || status === 503);
     if (status === 429) expect(screen.getByRole("button", { name: "Retry in 60s" }).hasAttribute("disabled")).toBe(true);
     expect(h.options.onAccessLost).toHaveBeenCalledTimes(status === 401 || status === 403 || status === 404 ? 1 : 0);
     if (status === 503) { h.generation.mockImplementation(async (_p, context, id) => readerSummaryFixture(id, context)); fireEvent.click(screen.getByRole("button", { name: "Retry" })); await screen.findByText("Only approved readers can use this guidance."); }
-    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Close Arden AI" })).toBeTruthy();
   });
   it("withholds a completed result after actual hidden-tab return and revoked access", async () => {
-    const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props)); chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     const visibility = tabVisibility(); visibility("hidden"); expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
     h.check.mockRejectedValue(new ApiError(404, "denied")); visibility("visible");
@@ -160,7 +175,7 @@ describe("exact-version on-request Summary reader", () => {
     expect(h.generation).toHaveBeenCalledTimes(1); expect(screen.queryByRole("button", { name: /View source for point/ })).toBeNull();
   });
   it("retries an access check, not paid generation, after a connection failure", async () => {
-    const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props)); chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance."); h.check.mockRejectedValueOnce(new ApiError(0, "offline"));
     const visibility = tabVisibility(); visibility("hidden"); visibility("visible"); await screen.findByRole("alert");
     fireEvent.click(screen.getByRole("button", { name: "Retry" })); await screen.findByText("Only approved readers can use this guidance.");
@@ -168,7 +183,7 @@ describe("exact-version on-request Summary reader", () => {
   });
   it("discards a ready result and its citation on version change without auto-generation", async () => {
     const h = fixture(), view = render(createElement(KnowledgeDocumentDetail, h.props));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     fireEvent.click(screen.getByRole("button", { name: /View source for point 1/ }));
     await act(async () => {});
@@ -182,18 +197,18 @@ describe("exact-version on-request Summary reader", () => {
   });
   it.each(["close", "unmount"])("does not revive a citation after %s during access checking", async mode => {
     const h = fixture(), view = render(createElement(KnowledgeDocumentDetail, h.props));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     const pending = deferred<void>(); h.check.mockReturnValue(pending.promise);
     fireEvent.click(screen.getByRole("button", { name: /View source for point 1/ }));
-    if (mode === "close") fireEvent.click(screen.getByRole("button", { name: "Close" })); else view.unmount();
+    if (mode === "close") fireEvent.click(screen.getByRole("button", { name: "Close Arden AI" })); else view.unmount();
     await act(async () => pending.resolve());
     expect(vi.mocked(h.options.onCitation).mock.calls.every(([citation]) => citation === null)).toBe(true);
     expect(screen.queryByText("AI-generated")).toBeNull();
   });
   it("checks once on visibility return and ignores the duplicate focus event", async () => {
     const h = fixture(); render(createElement(KnowledgeDocumentDetail, h.props));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     const visibility = vi.spyOn(document, "visibilityState", "get"); visibility.mockReturnValue("hidden");
     fireEvent(document, new Event("visibilitychange"));
@@ -210,7 +225,7 @@ describe("exact-version on-request Summary reader", () => {
   });
   it("withholds generation completed in a hidden tab until access is checked on return", async () => {
     const h = fixture(), pending = deferred<ReturnType<typeof readerSummaryFixture>>(); h.generation.mockReturnValue(pending.promise);
-    render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    render(createElement(KnowledgeDocumentDetail, h.props)); chooseReaderTask("summary");
     const visibility = tabVisibility(); visibility("hidden");
     await act(async () => pending.resolve(readerSummaryFixture(readerId(4))));
     expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
@@ -220,20 +235,20 @@ describe("exact-version on-request Summary reader", () => {
   });
   it.each(["inactive", "version"])("does not resurrect a discarded result when returning from %s to the original context", async mode => {
     const h = fixture(), view = render(createElement(KnowledgeDocumentDetail, h.props));
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     const options = { ...h.options, context: { ...h.options.context } };
     if (mode === "inactive") options.active = false; else options.context.versionId = readerId(90);
     view.rerender(createElement(KnowledgeDocumentDetail, { ...h.props, summaryOptions: options }));
     view.rerender(createElement(KnowledgeDocumentDetail, h.props));
     expect(screen.queryByText("Only approved readers can use this guidance.")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Summary" }));
+    chooseReaderTask("summary");
     await screen.findByText("Only approved readers can use this guidance.");
     expect(h.generation).toHaveBeenCalledTimes(2);
   });
   it("renders generated strings as text, never model-supplied HTML", async () => {
     const h = fixture(); h.generation.mockImplementation(async (_p, context, id) => { const value = readerSummaryFixture(id, context); value.points[0].text = '<img src=x onerror="alert(1)">'; return value; });
-    const view = render(createElement(KnowledgeDocumentDetail, h.props)); fireEvent.click(screen.getByRole("button", { name: "Summary" }));
-    await screen.findByText('<img src=x onerror="alert(1)">'); expect(view.container.querySelector("img")).toBeNull();
+    const view = render(createElement(KnowledgeDocumentDetail, h.props)); chooseReaderTask("summary");
+    await screen.findByText('<img src=x onerror="alert(1)">'); expect(view.container.querySelector("img[src=x]")).toBeNull();
   });
 });
