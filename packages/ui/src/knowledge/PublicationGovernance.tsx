@@ -1,12 +1,13 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, dismissPublicationReport, listClosedPublicationReports, listGovernancePublications, listPublicationReports, loadGovernanceInspection,
-  loadResponsiblePublication, openGovernanceInspection, reportPublicationProblem, withdrawPublication,
+  loadResponsiblePublication, openGovernanceInspection, withdrawPublication,
   type GovernanceDocument, type GovernanceInspection, type GovernancePublication, type GovernanceReaderMode,
   type PublicationReport } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { importOpenMaintenanceReports } from "../maintenance/maintenance-client";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import { KnowledgeDialog } from "./KnowledgeDialog";
+import { libraryDateLabel } from "./libraryDisplay";
 import { PdfDocument } from "./PdfDocument";
 
 const ArdenDocumentView = lazy(() => import("./ArdenRichTextEditor").then((module) => ({ default: module.ArdenDocumentView })));
@@ -207,7 +208,7 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
         <div className="governance-report-copy">
           <strong>{report.title}</strong>
           <p>{report.message}</p>
-          <small>{report.reporterName} · {new Date(report.createdAt).toLocaleDateString()}
+          <small>{report.reporterName} · {libraryDateLabel(report.createdAt)}
             {!report.stillCurrent && " · A newer version is published"}</small>
         </div>
         {closed && report.resolution && <span className="island-chip has-dot tone-strong">{report.resolution === "DISMISSED" ? "Dismissed" : "Withdrawn"}</span>}
@@ -266,14 +267,14 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
     {items === null ? <div className="island island-empty" role="status">Loading documents…</div>
       : shown.length ? <IslandTable label="Published documents" minWidth={760}
         columns="minmax(220px, 2fr) minmax(120px, 1fr) minmax(150px, 1.1fr) 80px 110px minmax(190px, auto)"
-        headers={["DOCUMENT", "DEPARTMENT", "SHARED WITH", "VERSION", "PUBLISHED", ""]}>
+        headers={["DOCUMENT", "DEPARTMENT", "SHARED WITH", "VERSION", "PUBLISHED", <span className="sr-only">Actions</span>]}>
         {shown.map((item) => <IslandRow key={item.documentId}>
           <IslandCell className="island-row-cell is-name"><strong>{item.title}</strong>
             {item.openReports > 0 && <span className="island-chip is-danger">{item.openReports} reported</span>}</IslandCell>
           <IslandCell className="island-row-cell">{departmentName(item.responsibleDepartmentId)}</IslandCell>
           <IslandCell className="island-row-cell">{governanceReadersLabel(item.readerMode, item.readerDepartmentId, departmentName)}</IslandCell>
           <IslandCell className="island-row-cell">{item.versionLabel ?? (item.snapshotVersionNo ? `v${item.snapshotVersionNo}` : "—")}</IslandCell>
-          <IslandCell className="island-row-cell">{new Date(item.publishedAt).toLocaleDateString()}</IslandCell>
+          <IslandCell className="island-row-cell">{libraryDateLabel(item.publishedAt)}</IslandCell>
           <IslandCell className="island-row-cell governance-row-actions">
             {item.readable ? <span className="island-meta">Readable in Library</span>
               : <button type="button" className="secondary-button" onClick={() => setInspectTarget({ documentId: item.documentId, title: item.title })}>Inspect</button>}
@@ -303,23 +304,4 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
     {withdrawing && <WithdrawPublicationDialog target={withdrawing} platform={platform} organizationId={organizationId}
       onClose={() => setWithdrawing(null)} onDone={() => { setWithdrawing(null); setMessage("Publication withdrawn"); reload(); }} />}
   </div>;
-}
-
-/** Decision 0023: a reader reports a problem with the document they are reading. */
-export function ReportProblemButton({ platform, organizationId, publishedVersionId, title, onReported }: {
-  platform: Platform; organizationId: string; publishedVersionId: string; title: string; onReported: (message: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  return <>
-    <button type="button" className="secondary-button" onClick={() => setOpen(true)}>Report a problem</button>
-    {open && <ReasonDialog title="Report a problem" label="What is wrong?" submitLabel="Send report"
-      placeholder="For example: the figures in section 2 are out of date."
-      effect={<><p><strong>{title}</strong></p><p>The reviewers responsible for this document and your administrators
-        will see your report and your name. Other readers won’t.</p></>}
-      onClose={() => setOpen(false)}
-      onSubmit={async (message) => {
-        await reportPublicationProblem(platform, organizationId, publishedVersionId, message);
-        setOpen(false); onReported("Report sent");
-      }} />}
-  </>;
 }

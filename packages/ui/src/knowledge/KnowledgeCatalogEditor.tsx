@@ -51,7 +51,7 @@ function CollectionManager({ platform, organizationId, catalog: suppliedCatalog,
   };
   if (!catalog.canManage || !suppliedCatalog.canManage) return <p role="status">Collection management is unavailable.</p>;
   return <section className="island km-catalog" aria-labelledby="km-catalog-title">
-    <header className="km-section-heading"><div><h2 id="km-catalog-title" ref={heading} tabIndex={-1}>Manage collections</h2><p>Organization documents only.</p></div>
+    <header className="km-section-heading"><div><h2 id="km-catalog-title" ref={heading} tabIndex={-1}>Manage collections</h2></div>
       <button type="button" className="secondary-button" disabled={busy || editing || !!moving} onClick={onClose}>Back</button></header>
     {message && <p role="status" className="island-note">{message}</p>}
     <div className="km-catalog-layout">

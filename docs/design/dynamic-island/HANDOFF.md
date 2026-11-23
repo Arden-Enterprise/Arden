@@ -72,6 +72,9 @@ Tabs: Members · Departments · **Audiences** · Invitations · Reviewer access.
   now normalizes to `audienceIds`. (Optional follow-up: make the API list route use
   `representSharedDraft` so list and detail share one shape.)
 - Handover removed from navigation (route/component still exist; remove later if unused).
+  Removed on 22 November 2026 at the maintainer's request: the unreachable Knowledge Handover
+  sample page and its view, and the sample-mode `MemberDirectory` table (the session-preview
+  Administration Members tab and the setup wizard's Members step). Live Administration is unchanged.
 - Collapsed sidebar footer no longer stretches/overflows.
 
 ## 6. Reader Summary addition — 14 November 2026, local only
@@ -97,6 +100,9 @@ and signed-in paired-service acceptance remain open; do not equate a build with 
 
 ## 7. Ask this document — 14 November 2026, local only
 
+> Sections 6–7 describe the replaced layout. Since 20 November 2026 one Arden AI
+> action opens a side island with Summary / Ask tabs; see section 8.
+
 RA-05 adds a second viewer-bar toggle; Summary and Q&A panels are mutually exclusive.
 The inline question panel keeps the original document visible and reuses Island
 fields/buttons, existing AI/source accents and type hierarchy. No new art/fonts or
@@ -111,3 +117,17 @@ the same read-only probe as Summary.
 Local browser/fixture checks do not constitute signed-in paired/provider or native
 acceptance. The maintainer explicitly moved genuine Electron and signed-in paired
 checks to mandatory pre-release gates; they are not dropped or recorded as passed.
+
+## 8. Arden AI side island — 20 November 2026, local only
+
+Accepted by the requesting maintainer from the Arden Reader AI design canvas. The
+viewer bar has one violet Arden AI action (shipped Arden mark, Ctrl J) beside
+Download. It opens a 320–380px side island: header with the mark, "Uses only {title}
+· v{version}" and Close; a task choice (Summarize, Ask a question, disabled Explain a
+selection · Coming later); then Summary / Ask tabs with a disabled Explain tab. Summary
+shows AI-generated points with compact page/source chips; Ask shows the submitted
+question, the answer or an amber insufficient-evidence notice, and a bottom composer.
+Document information steps aside while it is open; below 980px the island stacks
+above the document. Close and Escape discard both tasks and return focus to Arden AI.
+The governing contract is the
+[Reader AI side panel](../../engineering/reader-ai.md#reader-ai-side-panel--accepted-20-november-2026).

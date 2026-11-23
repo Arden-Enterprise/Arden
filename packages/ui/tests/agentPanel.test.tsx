@@ -18,6 +18,24 @@ const ask = (panel: HTMLElement, text: string) => {
 };
 
 describe("agent panel", () => {
+  it("opens a source in the panel's Sources view and keeps Open in document for the reader", async () => {
+    const citation = { documentId: "doc-1", versionId: "ver-1", blockId: "b1", page: 3, excerpt: "Sort paper into bin B.",
+      title: "Synthetic Waste Guide", version: "2.0", scope: "Company-wide", classification: "INTERNAL" as const };
+    vi.spyOn(api, "askArden").mockResolvedValue({ ...answer, answer: "**Paper** goes into bin B.", citations: [citation] });
+    const onOpenCitation = vi.fn();
+    render(<AgentPanel open {...panelProps} onOpenCitation={onOpenCitation} />);
+    const panel = screen.getByRole("complementary", { name: "Ask Arden" });
+    ask(panel, "Where does paper go?");
+    expect((await within(panel).findByText("Paper")).tagName).toBe("STRONG");
+    fireEvent.click(within(panel).getByRole("button", { name: /^Source:/ }));
+    expect(onOpenCitation).not.toHaveBeenCalled();
+    const sources = within(panel).getByRole("complementary", { name: "Sources" });
+    fireEvent.click(within(sources).getByRole("button", { name: "Open Synthetic Waste Guide at this passage" }));
+    expect(onOpenCitation).toHaveBeenCalledWith(citation);
+    fireEvent.click(within(sources).getByRole("button", { name: "Close sources" }));
+    expect(within(panel).queryByRole("complementary", { name: "Sources" })).toBeNull();
+  });
+
   it("answers through Ask Arden and keeps the conversation while closed", async () => {
     const send = vi.spyOn(api, "askArden").mockResolvedValue(answer);
     const view = render(<AgentPanel open {...panelProps} />);

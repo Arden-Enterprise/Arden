@@ -244,7 +244,6 @@ export type AskArdenAnswer = {
     version: string;
     scope: string;
     classification: KnowledgeClassification;
-    documentCode?: string | null;
     startOffset?: number;
     endOffset?: number;
   }>;
@@ -467,12 +466,6 @@ export function loadResponsiblePublication(platform: Platform, organizationId: s
 export async function withdrawPublication(platform: Platform, organizationId: string, documentId: string, reason: string): Promise<void> {
   await request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/withdrawal`,
     { method: "POST", body: JSON.stringify({ reason }) });
-}
-
-export async function reportPublicationProblem(platform: Platform, organizationId: string, publishedVersionId: string,
-  message: string): Promise<void> {
-  await request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}/reports`,
-    { method: "POST", body: JSON.stringify({ message }) });
 }
 
 export async function listPublicationReports(platform: Platform, organizationId: string): Promise<PublicationReport[]> {

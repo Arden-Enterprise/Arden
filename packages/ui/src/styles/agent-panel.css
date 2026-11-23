@@ -78,3 +78,9 @@
   .arden-app-shell .agent-panel { transform: none; transition: opacity var(--arden-motion-quick) ease; }
 }
 @keyframes agent-message-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* Sources view inside the narrow Ask Arden panel: covers the chat until Close or Escape. */
+.arden-app-shell .agent-panel .ask-sources-panel {
+  position: absolute; inset: 0; z-index: 6; grid-column: auto; grid-row: auto; width: auto;
+  border-left: 0; background: var(--arden-surface-base); box-shadow: none;
+}

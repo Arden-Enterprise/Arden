@@ -28,7 +28,10 @@ export function useHomePublications(platform: Platform, organizationId: string) 
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     const current = () => live.current && request === generation.current;
-    setViews(previous => Object.fromEntries(sources.map(source => [source, { ...previous[source], status: "loading" }])) as Record<HomeSource, HomeSourceState>);
+    // A background refresh keeps a ready list on screen until its replacement arrives; only a view
+    // with nothing to show yet waits as "loading". A failed refresh still clears it (below).
+    setViews(previous => Object.fromEntries(sources.map(source => [source, previous[source].status === "ready"
+      ? previous[source] : { ...previous[source], status: "loading" }])) as Record<HomeSource, HomeSourceState>);
     await Promise.all(sources.map(async source => {
       try {
         const items = homeSourceItems(await listPublishedKnowledge(platform, organizationId, scopes[source]), source);

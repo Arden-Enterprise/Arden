@@ -61,8 +61,3 @@ export function findQuoteInSegments(segments: readonly string[], quote: string):
   }
   return null;
 }
-
-/** True when the quote, or its opening, appears in the text. */
-export function textContainsQuote(text: string, quote: string): boolean {
-  return findQuoteInSegments([text], quote) !== null;
-}

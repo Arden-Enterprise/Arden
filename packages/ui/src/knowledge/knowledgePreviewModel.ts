@@ -130,18 +130,3 @@ export function reduceKnowledgePreview(state: KnowledgePreviewState, action: Kno
 export function formatSampleVersion(version: number): string {
   return `v${Math.floor(version / 10)}.${version % 10}`;
 }
-
-export type HandoverOutcome = "retain" | "transfer" | "revise" | "archive";
-export type SampleHandoverDocument = { id: string; title: string; scope: "Department" | "Company-wide"; outcome: HandoverOutcome; owner: string };
-
-export function createSampleHandover(): SampleHandoverDocument[] {
-  return [
-    { id: "sample-migration", title: "Migration decision log", scope: "Company-wide", outcome: "transfer", owner: "Tuan Le" },
-    { id: "sample-dependency", title: "Service dependency map", scope: "Department", outcome: "retain", owner: "Organization owner" },
-    { id: "sample-cutover", title: "Cutover runbook", scope: "Department", outcome: "revise", owner: "" },
-  ];
-}
-
-export function handoverReady(documents: SampleHandoverDocument[]): boolean {
-  return documents.length > 0 && documents.every((document) => (document.outcome !== "transfer" && document.outcome !== "revise") || Boolean(document.owner.trim()));
-}

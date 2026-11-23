@@ -620,7 +620,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const memberName = serverSession ? serverSession.actor.fullName?.trim() || "Signed-in member" : previewMember?.name;
   const liveAdmin = activeMembership?.roleCodes.includes("ORG_ADMIN") ?? false;
   const isUnassignedMember = Boolean(serverSession && activeMembership && needsDepartmentAssignment(activeMembership));
-  const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue" || activeView === "knowledge-handover";
+  const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue";
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
   // Demo sessions always have the in-memory notes; signed-in members need a private workspace in this organization.
   const canUsePrivateNotes = !isUnassignedMember && (!serverSession || Boolean(activeMembership?.canUsePrivateWorkspace));

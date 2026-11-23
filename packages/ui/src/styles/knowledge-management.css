@@ -5,7 +5,7 @@
 .km-home-navigation .knowledge-library-tabs { margin: 0; flex-wrap: wrap; }
 .km-private-entry { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .km-home-source > .km-section-heading { flex-wrap: wrap; }
-.km-home-source > .km-section-heading > p { margin: 0; }
+.km-home-source > .km-source-views { justify-content: flex-end; }
 .km-home-source .island-seg { flex-wrap: wrap; }
 .km-home-source .island-seg button[aria-pressed="true"] { color: var(--arden-text-primary); background: var(--arden-accent-subtle); }
 .km-library section { min-width: 0; }
@@ -31,11 +31,7 @@
 .km-register-bar, .km-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .km-register-bar { justify-content: space-between; }
 .km-register-bar select { min-height: 34px; max-width: 220px; padding: 6px 10px; border: 1px solid var(--arden-border-strong); border-radius: 8px; background: var(--arden-surface-raised); color: var(--arden-text-primary); font-size: 12px; }
-.km-filter-chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--arden-border-strong); border-radius: 7px; color: var(--arden-text-primary); background: var(--arden-surface-raised); font-size: 12px; }
 .km-release { padding: 1px 5px; border-radius: 3px; color: var(--arden-violet); background: var(--arden-surface-hover); font-size: 10px; }
-.km-applicability { color: var(--arden-text-secondary); font-size: 12px; }
-.km-applicability.is-upcoming { color: var(--arden-violet); }
-.km-applicability.is-expired, .km-applicability.is-expiring-soon { color: var(--arden-warning); }
 .km-no-expiry { color: var(--arden-text-muted); }
 .km-catalog { padding: 22px; container: collection-manager / inline-size; }
 .km-catalog-layout { display: grid; grid-template-columns: minmax(170px, 1fr) minmax(0, 2.5fr); gap: 30px; }

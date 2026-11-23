@@ -12,13 +12,12 @@ export function KnowledgeHomeBrowse({ source, state, catalog, catalogError, quer
   const organization = source === "organization";
   const register = organizationView === "all" || Boolean(query.trim() || filters.type || filters.ownerId || filters.collectionId);
   return <section className="km-home-source" role="tabpanel" aria-labelledby={`home-tab-${source}`}>
-    <header className="km-section-heading"><p className="island-meta">{organization ? "Shared with everyone in this organization."
-      : source === "shared" ? "Shared with your department or with you." : "Readable documents with sharing details not recorded."}</p>
-      {organization && <div className="island-seg" role="group" aria-label="Organization views">
+    {organization && <header className="km-section-heading km-source-views">
+      <div className="island-seg" role="group" aria-label="Organization views">
         <button type="button" aria-pressed={!register} onClick={() => { onFilters(emptyLibraryFilters()); onOrganizationView("overview"); }}>Overview</button>
         <button type="button" aria-pressed={register && !filters.collectionId} onClick={() => { onFilters({ ...filters, collectionId: "" }); onOrganizationView("all"); }}>All documents</button>
         <button type="button" aria-pressed={register && filters.collectionId === "unassigned"} onClick={() => { onFilters({ ...filters, collectionId: "unassigned" }); onOrganizationView("all"); }}>Unassigned</button>
-      </div>}</header>
+      </div></header>}
     {state.status === "error" ? <div className="island island-empty" role="alert"><h3>Documents unavailable</h3><p>Couldn’t load this view.</p>
       <button type="button" className="secondary-button" onClick={onRetry}>Try again</button></div>
       : state.status === "loading" ? <div className="island island-empty" role="status">Loading documents…</div>

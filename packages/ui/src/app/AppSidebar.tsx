@@ -59,7 +59,7 @@ export const adminNavigation: NavigationItem = { label: "Administration", shortL
 /** Server-backed sessions expose Ask Arden through the authenticated Core API and restrict destinations with connected server workflows. */
 export function navigationDisabled(item: NavigationItem, _authenticated: boolean, isUnassigned?: boolean): boolean {
   if (item.planned) return true;
-  if (isUnassigned && (item.view === "personal-workspace" || item.view === "review-queue" || item.view === "knowledge-handover")) {
+  if (isUnassigned && (item.view === "personal-workspace" || item.view === "review-queue")) {
     return true;
   }
   return false;

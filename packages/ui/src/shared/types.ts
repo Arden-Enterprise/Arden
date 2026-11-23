@@ -1,6 +1,6 @@
 export type Platform = "web" | "desktop";
 
-export type WorkspaceView = "ask-arden" | "personal-workspace" | "organization-access" | "knowledge" | "review-queue" | "knowledge-handover";
+export type WorkspaceView = "ask-arden" | "personal-workspace" | "organization-access" | "knowledge" | "review-queue";
 
 export type PrivateNote = {
   id: string;
@@ -20,13 +20,4 @@ export type PrivateCollection = {
   title: string;
   parentId: string | null;
   favoritedAt: string | null;
-};
-
-export type PaneContent = {
-  eyebrow: string;
-  title: string;
-  description: string;
-  suggestions: string[];
-  boundaryTitle: string;
-  boundaryBody: string;
 };

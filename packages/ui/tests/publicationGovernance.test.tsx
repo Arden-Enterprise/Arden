@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installTestDialogs } from "./dialogTestSupport";
 import * as api from "../src/shared/api-client";
-import { GovernanceDocumentsPanel, PublicationReportsPanel, ReportProblemButton } from "../src/knowledge/PublicationGovernance";
+import { GovernanceDocumentsPanel, PublicationReportsPanel } from "../src/knowledge/PublicationGovernance";
 
 vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({ ArdenDocumentView: ({ body }: { body: string }) => createElement("p", null, body) }));
 
@@ -210,24 +210,5 @@ describe("decision 0023 reported problems", () => {
     expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Withdraw" })).toBeNull();
     expect(list).toHaveBeenCalledWith("web", "org");
-  });
-});
-
-describe("decision 0023 reader report", () => {
-  it("requires a description and sends the report", async () => {
-    const send = vi.spyOn(api, "reportPublicationProblem").mockResolvedValue();
-    const reported = vi.fn();
-    render(createElement(ReportProblemButton, { platform: "web", organizationId: "org", publishedVersionId: "version",
-      title: "Salary bands", onReported: reported }));
-    fireEvent.click(screen.getByRole("button", { name: "Report a problem" }));
-    const dialog = screen.getByRole("dialog", { name: "Report a problem" });
-    expect(within(dialog).getByText(/Other readers won’t/)).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Send report" }));
-    expect(send).not.toHaveBeenCalled();
-    fireEvent.change(within(dialog).getByRole("textbox", { name: /What is wrong/ }), { target: { value: "Out of date" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Send report" }));
-    await waitFor(() => expect(send).toHaveBeenCalledWith("web", "org", "version", "Out of date"));
-    expect(reported).toHaveBeenCalledWith("Report sent");
-    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

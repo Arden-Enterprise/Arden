@@ -51,6 +51,3 @@ export function DepartmentEditor({ organization, onChange }: {
     </section>
   );
 }
-
-// Retained for existing setup imports; the member workflow now includes invitations and reviewed assignments.
-export { MemberDirectory as MemberEditor } from "./MemberDirectory";

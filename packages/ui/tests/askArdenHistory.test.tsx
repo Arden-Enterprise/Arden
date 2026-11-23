@@ -24,7 +24,7 @@ describe("persisted Ask Arden history", () => {
       conversationId: "saved", revision: 2, turnId: "turn2" });
     render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
     fireEvent.click(screen.getByRole("button", { name: "History", exact: true }));
-    fireEvent.click(await screen.findByRole("button", { name: "MFA discussion" }));
+    fireEvent.click(await screen.findByRole("button", { name: /^MFA discussion/ }));
     expect(await screen.findByText("Unavailable", { exact: true })).toBeTruthy();
     expect(screen.queryByLabelText("Sources")).toBeNull();
     fireEvent.change(screen.getByRole("combobox", { name: "Knowledge version scope" }), { target: { value: "UPCOMING" } });
@@ -62,7 +62,7 @@ describe("persisted Ask Arden history", () => {
     fireEvent.click(screen.getByRole("button", { name: "History", exact: true }));
     const dialog = await screen.findByRole("dialog");
     expect(await within(dialog).findByRole("alert")).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Close", exact: true }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close history" }));
     expect((prompt() as HTMLTextAreaElement).value).toBe("Unsent question");
   });
 });
