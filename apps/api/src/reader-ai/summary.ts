@@ -6,12 +6,14 @@ export { ReaderAdmission as SummaryAdmission } from "./admission.js";
 import type { ReaderSourceResponse } from "./contracts.js";
 import type { ReaderSourceClient, ReaderSourcePreparation } from "./source-preparation.js";
 import { parseReaderSummary, ReaderSummaryError, type SummaryKind } from "./summary-contracts.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 
 export interface ReaderAiClient extends ReaderSourceClient {
   summarizeReaderSource(source: ReaderSourceResponse): Promise<unknown>;
 }
 export type PublicReaderSummary = { requestId: string; status: "COMPLETED"; documentId: string; versionId: string;
-  points: Array<{ kind: SummaryKind; text: string; citations: PublicCitation[] }> };
+  points: Array<{ kind: SummaryKind; text: string; citations: PublicCitation[] }>;
+  usageRequestId: string; usageEvents: ProviderUsageEvent[] };
 type Completed = { result: PublicReaderSummary; source: ReaderSourceResponse };
 export type SummaryStage = "ACCESS" | "ADMISSION" | "SOURCE" | "GENERATION" | "VALIDATION" | "FINAL_ACCESS" | "JOIN";
 type Observe = (stage: SummaryStage, joinedOperationId?: string) => void;
@@ -34,7 +36,7 @@ export class ReaderSummary {
         const completed = await pending.work;
         observe("FINAL_ACCESS", pending.requestId);
         await this.sources.revalidate(user, organization, publication, completed.source);
-        return { ...structuredClone(completed.result), requestId };
+        return { ...structuredClone(completed.result), requestId, usageRequestId: pending.requestId };
       } finally { pending.waiters--; }
     }
     observe("ADMISSION");
@@ -70,7 +72,8 @@ export class ReaderSummary {
       const result = parseReaderSummary(output, source);
       observe("FINAL_ACCESS");
       const metadata = await this.sources.revalidate(user, organization, publication, source);
-      return { source, result: { requestId, status: "COMPLETED", documentId: metadata.draftId, versionId: publication,
+      return { source, result: { requestId, usageRequestId: requestId, usageEvents: result.usageEvents,
+        status: "COMPLETED", documentId: metadata.draftId, versionId: publication,
         points: result.points.map(point => ({ kind: point.kind, text: point.text,
           citations: point.citations.map(citation => {
             const chunk = source.chunks.find(item => item.chunkId === citation.chunkId)!;

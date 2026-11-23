@@ -92,7 +92,8 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
     const chunk = { chunkId: createHash("sha256").update(job.generationId).digest("hex"), ordinal: 0,
       contentHash: createHash("sha256").update(text).digest("hex"), startOffset: 0, endOffset: text.length,
       sourceBlockIds: ["body"], parentSectionBlockId: null };
-    const manifest: IndexGenerationManifest = { contractVersion: 1, jobId: job.jobId, generationId: job.generationId,
+    const manifest: IndexGenerationManifest = { contractVersion: 1, usageContractVersion: 1, usageEvents: [],
+      jobId: job.jobId, generationId: job.generationId,
       snapshotVersionId: job.snapshotVersionId, snapshotContentHash: job.snapshotContentHash, compilerVersion: "semantic-markdown-v1",
       chunkingVersion: "langchain-section-token-v1", embeddingModel: "text-embedding-3-small", embeddingDimensions: 1536,
       markdownContentHash: createHash("sha256").update(text).digest("hex"),
@@ -179,12 +180,14 @@ describe.skipIf(!pool)("governed AI temporal sources and private history with re
     const gate = new ReaderSourcePreparation(repo!, repo!.readerSources, { read: unused, readPdf: unused }, null);
     const text = "Use MFA for every sign-in.", chunk = record.manifest.chunks[0];
     const ai = {
-      retrieve: async (input: { requestId: string; query: string }) => ({ contractVersion: 2 as const, requestId: input.requestId,
+      retrieve: async (input: { requestId: string; query: string }) => ({ contractVersion: 2 as const,
+        usageContractVersion: 1 as const, usageEvents: [], requestId: input.requestId,
         standaloneQuery: input.query, retrievalMode: "HYBRID" as const, evidence: [{ chunkId: chunk.chunkId,
           contentHash: chunk.contentHash, content: text, startOffset: chunk.startOffset, endOffset: chunk.endOffset,
           sourceBlockIds: chunk.sourceBlockIds, parentSectionBlockId: chunk.parentSectionBlockId, label: "fixture",
           generationId: ref.generationId, snapshotVersionId: ref.snapshotVersionId, snapshotContentHash: ref.snapshotContentHash }] }),
-      generate: async () => ({ contractVersion: 2 as const, requestId, status: "ANSWERED" as const, answer: "Use MFA.",
+      generate: async () => ({ contractVersion: 2 as const, usageContractVersion: 1 as const, usageEvents: [],
+        requestId, status: "ANSWERED" as const, answer: "Use MFA.",
         usedEvidence: [chunk.chunkId], citations: [{ chunkId: chunk.chunkId, quote: text }] }),
     };
     expect((await new ReaderQuestion(gate, ai).answer(member, org, ref.publishedVersionId, requestId, "How to sign in?")).citations[0].versionId).toBe(ref.publishedVersionId);

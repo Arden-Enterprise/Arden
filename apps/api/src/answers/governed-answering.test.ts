@@ -22,16 +22,19 @@ function fixture() {
     chunks: [{ ...evidence }] };
   const store = new MemoryConversationStore();
   let permitted = true;
-  const repository: Pick<ArdenDataRepository, "conversations" | "getTargetReaderActor" | "listAuthorizedAiSources"> = {
+  const repository: Pick<ArdenDataRepository, "conversations" | "getTargetReaderActor" | "listAuthorizedAiSources" | "recordAiUsageEvents"> = {
     conversations: store,
     getTargetReaderActor: vi.fn<ArdenDataRepository["getTargetReaderActor"]>(async (actor, organization) => actor === user && organization === org
       ? { membershipId: membership, organizationId: org, status: "ACTIVE", departmentIds: [] } : null),
     listAuthorizedAiSources: vi.fn<ArdenDataRepository["listAuthorizedAiSources"]>(async (_actor, _org, generations) => permitted
       && (!generations || generations.includes(source.generationId)) ? [source] : []),
+    recordAiUsageEvents: vi.fn(async () => true),
   };
   const retrieve = vi.fn(async (value: RetrievalRequest): Promise<RetrievalResponse> => ({ contractVersion: 2,
-    requestId: value.requestId, standaloneQuery: value.query, retrievalMode: "HYBRID", evidence: [evidence] }));
+    usageContractVersion: 1, usageEvents: [], requestId: value.requestId, standaloneQuery: value.query,
+    retrievalMode: "HYBRID", evidence: [evidence] }));
   const generate = vi.fn(async (value: GenerationRequest): Promise<GenerationResponse> => ({ contractVersion: 2,
+    usageContractVersion: 1, usageEvents: [],
     requestId: value.requestId, status: "ANSWERED", answer: "MFA is required.",
     citations: [{ chunkId: evidence.chunkId, quote: "All team members must use MFA." }],
     usedEvidence: value.evidence.map(chunk => chunk.chunkId) }));
@@ -57,7 +60,8 @@ describe("governed answering handoffs", () => {
   it("stops before generation when selected evidence is revoked during retrieval", async () => {
     const f = fixture();
     f.retrieve.mockImplementationOnce(async value => { f.revoke(); return { contractVersion: 2, requestId: value.requestId,
-      standaloneQuery: value.query, retrievalMode: "HYBRID", evidence: [f.evidence] }; });
+      usageContractVersion: 1, usageEvents: [], standaloneQuery: value.query,
+      retrievalMode: "HYBRID", evidence: [f.evidence] }; });
     await expect(f.engine.answer(f.user, f.org, f.input)).rejects.toMatchObject({ code: "ACCESS_CHANGED" });
     expect(f.generate).not.toHaveBeenCalled();
     expect((await f.store.load(f.user, f.org, f.input.conversationId))?.revision).toBe(0);
@@ -68,11 +72,13 @@ describe("governed answering handoffs", () => {
     const other: Evidence = { ...f.evidence, chunkId: "c".repeat(64) };
     f.source.chunks = [f.evidence, other];
     f.retrieve.mockImplementationOnce(async value => ({ contractVersion: 2, requestId: value.requestId,
-      standaloneQuery: value.query, retrievalMode: "HYBRID", evidence: [f.evidence, other] }));
+      usageContractVersion: 1, usageEvents: [], standaloneQuery: value.query,
+      retrievalMode: "HYBRID", evidence: [f.evidence, other] }));
     f.generate.mockImplementationOnce(async value => {
       // Only the uncited chunk disappears. Cited evidence still exists.
       f.source.chunks = [f.evidence];
       return { contractVersion: 2, requestId: value.requestId, status, answer: "Derived from both inputs.",
+        usageContractVersion: 1, usageEvents: [],
         citations: status === "ANSWERED" ? [{ chunkId: f.evidence.chunkId, quote: "All team members must use MFA." }] : [],
         usedEvidence: [f.evidence.chunkId, other.chunkId] };
     });
@@ -148,7 +154,8 @@ describe("governed answering handoffs", () => {
   it("validates output even for injected ports, including all-used-input equality", async () => {
     const f = fixture();
     f.generate.mockImplementationOnce(async value => ({ contractVersion: 2, requestId: value.requestId,
-      status: "ANSWERED", answer: "forged", citations: [{ chunkId: f.evidence.chunkId, quote: "not a source quote" }], usedEvidence: [] }));
+      status: "ANSWERED", answer: "forged", usageContractVersion: 1, usageEvents: [],
+      citations: [{ chunkId: f.evidence.chunkId, quote: "not a source quote" }], usedEvidence: [] }));
     await expect(f.engine.answer(f.user, f.org, f.input)).rejects.toMatchObject({ code: "INVALID_EVIDENCE" });
   });
 });
@@ -162,7 +169,8 @@ describe("v2 runtime contracts", () => {
   });
   it("rejects unknown properties, raw text hash/offset mismatches and undeclared evidence", () => {
     const f = fixture();
-    const valid = { contractVersion: 2, requestId: f.input.requestId, standaloneQuery: "MFA?", retrievalMode: "HYBRID", evidence: [f.evidence] };
+    const valid = { contractVersion: 2, usageContractVersion: 1 as const, usageEvents: [], requestId: f.input.requestId,
+      standaloneQuery: "MFA?", retrievalMode: "HYBRID" as const, evidence: [f.evidence] };
     expect(parseRetrievalResponse(valid, f.input.requestId).evidence).toHaveLength(1);
     for (const value of [{ ...valid, extra: true }, { ...valid, evidence: [{ ...f.evidence, content: "modified" }] },
       { ...valid, evidence: [f.evidence, f.evidence] }, { ...valid, requestId: randomUUID() }]) {
@@ -170,7 +178,8 @@ describe("v2 runtime contracts", () => {
     }
     const request: GenerationRequest = { contractVersion: 2, purpose: "PUBLISHED_CHAT", requestId: f.input.requestId,
       organizationId: f.org, query: "MFA?", history: [], evidence: [f.evidence] };
-    const response = { contractVersion: 2, requestId: request.requestId, status: "INSUFFICIENT_EVIDENCE", answer: "Insufficient.", citations: [], usedEvidence: [] };
+    const response = { contractVersion: 2, usageContractVersion: 1, usageEvents: [], requestId: request.requestId,
+      status: "INSUFFICIENT_EVIDENCE", answer: "Insufficient.", citations: [], usedEvidence: [] };
     expect(() => parseGenerationResponse(response, request)).toThrow("INVALID_EVIDENCE");
   });
 });

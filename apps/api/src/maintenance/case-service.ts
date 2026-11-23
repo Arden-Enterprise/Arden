@@ -4,6 +4,7 @@ import {
   type HistoryPage, type IntakeInput, type LegacyReport, type NotificationRecord, type PublicationSubmission, MaintenanceError, assertUuid, commandHash, intakeHash, legacyRequestKey,
 } from "./contracts.js";
 import { maintenanceSourceTextLimit, type AnalysisAdapter, type AnalysisFinding, type AnalysisRun } from "./analysis.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { compareLines, type DiffRow } from "./diff.js";
 import { type PublicationProof } from "./publication-proof.js";
 import { projectCase, type CaseAccess } from "./policy.js";
@@ -50,6 +51,7 @@ export interface MaintenanceTx {
   latestAnalysis(caseId: string): Promise<AnalysisRun | null>;
   claimAnalysis(caseId: string, fence: string): Promise<AnalysisRun | null>;
   commitAnalysis(caseId: string, fence: string, state: "succeeded" | "failed", findings: AnalysisFinding[]): Promise<boolean>;
+  recordAiUsageEvents?(requestId: string, events: ProviderUsageEvent[]): Promise<void>;
   failActiveAnalysis(caseId: string): Promise<void>;
   expireStaleAnalysis(caseId: string): Promise<void>;
 }
@@ -548,13 +550,14 @@ export class MaintenanceCaseService {
       return prepared ?? { runId: "", state: "failed", findings: [], versionIds: [], startedByMembershipId: "", fence: null, attempt: 0 };
     }
     const fence = prepared.fence;
-    let result: { findings: AnalysisFinding[] } | null = null;
+    let result: { findings: AnalysisFinding[]; usageEvents: ProviderUsageEvent[] } | null = null;
     try {
-      const response = await this.adapter({ contractVersion: 1, caseId, versionIds: prepared.versionIds, sources });
+      const response = await this.adapter({ contractVersion: 1, requestId: prepared.runId,
+        caseId, versionIds: prepared.versionIds, sources });
       const valid = response.contractVersion === 1 && response.state === "succeeded"
         && response.findings.length >= 1 && response.findings.length <= 4
         && response.findings.every((item) => prepared.versionIds.includes(item.versionId) && item.summary.trim().length > 0 && item.summary.length <= 350);
-      result = valid ? { findings: response.findings } : null;
+      result = valid ? { findings: response.findings, usageEvents: response.usageEvents } : null;
     } catch {
       result = null;
     }
@@ -568,6 +571,7 @@ export class MaintenanceCaseService {
       const sourcesReady = sources.every((source) => source && row && source.documentId === row.documentId && source.text !== null);
       const stillAssigned = Boolean(row && row.assigneeMembershipId === actor.membershipId && row.assigneeMembershipId === prepared.startedByMembershipId
         && await tx.hasReviewerGrant(row.publishedVersionId));
+      if (result?.usageEvents.length) await tx.recordAiUsageEvents?.(prepared.runId, result.usageEvents);
       await tx.commitAnalysis(caseId, fence, result && sourcesReady && stillAssigned ? "succeeded" : "failed", result && sourcesReady && stillAssigned ? result.findings : []);
       const saved = await tx.latestAnalysis(caseId);
       if (!saved) throw new MaintenanceError("DENIED");

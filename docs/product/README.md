@@ -19,7 +19,7 @@ Each group document distinguishes current main, branch-only alternatives, observ
 | F03 | Owner-private notes | [Identity and access](identity-and-access.md#f03-private-notes) | API/UI slices exist; privacy/conflict/platform acceptance required |
 | F04 | Published audiences and reader access | [Identity and access](identity-and-access.md#f04-published-audiences) | Decision 0010/code/migration foundation; database rehearsal boundary |
 | F05 | Reviewer authority and organization administration | [Identity and access](identity-and-access.md#f05-reviewer-and-organization-authority) | Main/branch review-authority conflict; see G1/G3 below |
-| F06 | Installation System Admin | [Identity and access](identity-and-access.md#f06-installation-administration) | API foundation; System Admin UI/rehearsal pending in main inventory |
+| F06 | Installation System Admin | [Identity and access](identity-and-access.md#f06-installation-administration) | Least-privilege Console/API implementation on `feat/system-console-least-privilege`; PostgreSQL/runtime-role rehearsal and rollout pending |
 | F07 | Create a shared draft or contribute a separate copy | [Knowledge lifecycle](knowledge-lifecycle.md#f07-creation-and-contribution) | Main slices; preserve private original |
 | F08 | Canonical document versions and import | [Knowledge lifecycle](knowledge-lifecycle.md#f08-content-versions-and-import) | Semantic Document contract is branch-only; import breadth not certified |
 | F09 | Immutable submission and review decisions | [Knowledge lifecycle](knowledge-lifecycle.md#f09-submission-and-review) | Material main/branch contract conflict G1/G3 |

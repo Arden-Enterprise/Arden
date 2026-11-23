@@ -32,6 +32,8 @@ function manifest() {
   }];
   return {
     contractVersion: 1,
+    usageContractVersion: 1,
+    usageEvents: [],
     jobId: job.jobId,
     generationId: job.generationId,
     snapshotVersionId: job.snapshotVersionId,

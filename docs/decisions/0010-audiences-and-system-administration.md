@@ -1,9 +1,9 @@
 # 0010: Audience access and Arden system administration
 
-Status: partially superseded for Organization Admin review authority and review outcomes by [decision 0011](0011-permission-aware-publication-and-semantic-documents.md), for Organization Admin governance access (metadata catalog, audited inspection, direct withdrawal) by [0023](0023-organization-admin-governance-access.md), and for classification routing, primary-department responsibility and reviewer scopes by [0013](0013-audience-breadth-review-levels.md), [0014](0014-author-owns-shared-drafts.md) and [0015](0015-organization-wide-reviewer-grants.md). Original text below is historical where superseded.
+Status: partially superseded for Organization Admin review authority and review outcomes by [decision 0011](0011-permission-aware-publication-and-semantic-documents.md), for Organization Admin governance access (metadata catalog, audited inspection, direct withdrawal) by [0023](0023-organization-admin-governance-access.md), for classification routing, primary-department responsibility and reviewer scopes by [0013](0013-audience-breadth-review-levels.md), [0014](0014-author-owns-shared-drafts.md) and [0015](0015-organization-wide-reviewer-grants.md), and for System Admin scope/capabilities by the 2026-11-23 refinement below. Original text below is historical where superseded.
 Date: 2026-10-20
 Decision owner/approval: task owner explicitly approved the audience and Arden System Admin boundaries
-Implementation: partial — canonical APIs and migration foundation implemented; database rehearsal and System Admin UI remain
+Implementation: partial — System Console, APIs and additive migration are implemented on `feat/system-console-least-privilege`; PostgreSQL rehearsal, rollout and deployment remain unverified
 Supersedes: [0004 role-tagged published audiences](0004-role-tagged-published-audiences.md), the custom-role audience portions of [0005 organization membership](0005-mainflow-1-organization-membership.md), and [0009 custom-role scopes](0009-custom-role-scope-and-owner-defaults.md)
 
 ## Context and requirement
@@ -63,6 +63,10 @@ is outside every customer organization and must not become a content superuser.
 
 ### Arden System Admin
 
+The original installation-administration bullets in this section are historical where they grant
+organization lifecycle, global account state, installation configuration or general support
+capabilities. The following accepted refinement is the current contract.
+
 - The user-facing name is **Arden System Admin**; the code capability is `INSTANCE_ADMIN` to avoid
   confusing it with organization roles.
 - An instance administrator belongs to the Arden operations team and has no organization membership
@@ -76,6 +80,46 @@ is outside every customer organization and must not become a content superuser.
   cannot be revoked.
 - Emergency content recovery, if ever required, is a separate future break-glass decision and is not
   part of `INSTANCE_ADMIN`.
+
+#### Least-privilege refinement (2026-11-23)
+
+Decision provenance: the requesting user explicitly approved the implementation plan in the current
+Arden task on 2026-11-23. The requester is the decision owner and brainstorm originator for this
+refinement; exact identity is not included in this public record. The implementation contributor
+prepared this record after inspecting staging checkout `d47ddc5abe136bae38c7d662135af555f175f10f` and fetched main
+`9fa3d34a19a559318eff87b4487f2113e6ee5a49`. This approval explicitly refines the two superseded points above while retaining
+the existing audience, review, ownership and no-content-bypass contracts.
+
+- A System Admin is a dedicated, verified Arden profile with no organization membership. Profile
+  registration creates no organization or admin capability.
+- `INSTANCE_ADMIN` permits read-only System Console reports. `MANAGE_SYSTEM_ADMINS` is a separate
+  capability for listing, granting, revoking and changing that capability. New grants default to
+  monitoring-only. The Console has no admin-grant UI.
+- Every protected request rechecks current Arden account status, current system-administrator status,
+  current manager capability where required, and the absence of all organization memberships. Token
+  claims and UI state do not authorize these requests.
+- System Admins can view organization status and approved aggregate reports only. They cannot create,
+  edit, suspend or reactivate organizations; manage global account state; access configuration,
+  tenant content, raw tenant data, private originals, review, publication, impersonation or service
+  controls.
+- Granting/activating System Admin and creating organization membership serialize on one database
+  lock. Database triggers enforce the no-membership invariant for account activation, System Admin
+  lifecycle changes and membership writes. All manager changes are audited; the last active
+  administrator and last active manager are protected.
+- A one-time operator bootstrap selects an active eligible account and establishes the first manager.
+  Later grants use the manager-only API. Migration operators must inspect current admins/memberships
+  and complete the documented handoff before choosing the initial manager.
+- System Console queries return explicit aggregates and anonymous quality references. They do not
+  expose tenant content fields, individual names, prompts, answers, document text, raw document IDs
+  or error text. Health reports return sanitized status/latency and queue counts only.
+- AI usage and cost are estimates from a versioned service contract and price book. Missing usage or
+  price data is incomplete, never a zero-cost assertion. Feedback is a minimal positive/negative
+  marker; Flow 4 maintenance cases are the canonical document-error source.
+
+Implementation evidence: see [F06 acceptance coverage](../product/identity-and-access.md#f06-installation-administration),
+[migration 0063](../../apps/api/migrations/0063_system_console_least_privilege.sql) and the paired
+Arden-AI contract changes. Synthetic application tests do not replace PostgreSQL runtime-role,
+concurrency, migration, live provider, web browser or native desktop acceptance.
 
 ## Boundaries and consequences
 

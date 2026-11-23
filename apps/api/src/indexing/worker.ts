@@ -29,6 +29,7 @@ export class IndexingWorker {
           : (() => { throw new WorkerFailure("UNSUPPORTED_SNAPSHOT_MIME_TYPE", false); })();
       const request = buildIndexGenerationRequest(job, snapshot);
       const manifest = await this.ai.index(request, job);
+      await this.store.recordUsage(job, this.workerId, manifest.usageEvents);
       const publishedVersionId = await this.store.complete(job, this.workerId, manifest);
       this.logger.info({ jobId: job.jobId, generationId: job.generationId, publishedVersionId },
         "Knowledge index generation activated");

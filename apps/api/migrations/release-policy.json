@@ -372,6 +372,12 @@
       "filename": "0062_private_notes_organization_and_trash.sql",
       "sha256": "1a5f690352b0d94c58fbc26f245ed21a0e0af2f4abd1c0da44b397da06c7323e",
       "rollout": "operator"
+    },
+    {
+      "id": "0063",
+      "filename": "0063_system_console_least_privilege.sql",
+      "sha256": "7e96b251087cee68f338cadb2e8d1217a3d5c7eeb7504c6a05232d50afec3899",
+      "rollout": "operator"
     }
   ]
 }

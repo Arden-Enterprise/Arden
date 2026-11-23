@@ -38,8 +38,9 @@ export type OrganizationMembership = {
   canUsePrivateWorkspace: boolean;
 };
 export type CurrentSession = {
-  actor: { id: string; email?: string; fullName?: string | null };
+  actor: { id: string; email?: string; fullName?: string | null; emailVerified?: boolean };
   account: { passwordSetupRequired: boolean };
+  canAccessSystemConsole?: boolean;
   sessionExpiresAt?: string;
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
@@ -229,6 +230,7 @@ export type ReviewerGrant = {
   status: "ACTIVE" | "INACTIVE";
 };
 export type AskArdenAnswer = {
+  requestId?: string;
   conversationId?: string;
   revision?: number;
   turnId?: string;
@@ -255,6 +257,22 @@ export type AiConversation = AiConversationSummary & { turns: Array<{
   status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE"; versionScope: AiVersionScope;
   citations: AskArdenAnswer["citations"];
 }> };
+
+export type SystemConsoleQuery = { from: string; to: string; search?: string; status?: string; page?: number; pageSize?: number; organizationId?: string };
+export type SystemConsoleReport = Record<string, unknown>;
+export function getSystemConsoleReport(platform: Platform, report: "overview" | "organizations" | "knowledge" |
+  "ai-usage" | "contributions" | "feedback" | "quality" | "health", query: SystemConsoleQuery): Promise<SystemConsoleReport> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return request(platform, `/api/v1/system/${report === "overview" || report === "organizations" || report === "health"
+    ? report : `reports/${report}`}?${params}`);
+}
+export function getSystemConsoleOrganization(platform: Platform, organizationId: string,
+  query: SystemConsoleQuery): Promise<SystemConsoleReport> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return request(platform, `/api/v1/system/organizations/${organizationId}?${params}`);
+}
 
 function knowledgePath(organizationId: string): string {
   return `/api/v1/organizations/${organizationId}/knowledge`;
@@ -514,6 +532,12 @@ export function askArden(platform: Platform, organizationId: string, query: stri
     method: "POST", body: JSON.stringify({ query, ...conversation }),
   });
 }
+export function submitAiAnswerFeedback(platform: Platform, organizationId: string, requestId: string,
+  rating: "POSITIVE" | "NEGATIVE"): Promise<void> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/feedback`, {
+    method: "POST", body: JSON.stringify({ requestId, rating }),
+  });
+}
 export async function listAiConversations(platform: Platform, organizationId: string): Promise<AiConversationSummary[]> {
   const result = await request<{ items: AiConversationSummary[] }>(platform,
     `/api/v1/organizations/${organizationId}/ai/conversations`);
@@ -628,13 +652,20 @@ export async function signOut(platform: Platform): Promise<void> {
  * Retrieves the current authenticated user session and organizations from the server.
  */
 export async function currentSession(platform: Platform): Promise<CurrentSession> {
-  const session = await request<Omit<CurrentSession, "account"> & {
+  const load = () => request<Omit<CurrentSession, "account" | "canAccessSystemConsole"> & {
     account?: { passwordSetupRequired?: boolean };
+    canAccessSystemConsole?: boolean;
     pendingInvitationToken?: string | null;
   }>(platform, "/api/v1/me");
+  let session = await load();
+  if (session.actor.emailVerified === true) {
+    await request(platform, "/api/v1/account/profile", { method: "POST", body: "{}" });
+    session = await load();
+  }
   return {
     ...session,
     account: { passwordSetupRequired: session.account?.passwordSetupRequired === true },
+    canAccessSystemConsole: session.canAccessSystemConsole === true,
     ...(session.pendingInvitationToken ? { pendingInvitationToken: session.pendingInvitationToken } : {}),
   };
 }

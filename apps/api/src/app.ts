@@ -11,6 +11,7 @@ import type { InvitationMailer } from "./email/smtp-mailer.js";
 import { allKnowledgeClassifications, defaultKnowledgeClassification, type KnowledgeClassification } from "./knowledge/policy.js";
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
+import { registerSystemConsoleRoutes } from "./system-console/routes.js";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { registerAnswerRoutes } from "./answers/routes.js";
 import { registerReaderSummaryRoutes } from "./reader-ai/routes.js";
@@ -110,6 +111,11 @@ export function buildApp(dependencies: AppDependencies) {
   registerReaderSummaryRoutes(app, dependencies.repository, dependencies.storage, dependencies.readerAi ?? null, requestActor, uuidPattern);
   registerReaderQuestionRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null, requestActor, uuidPattern);
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
+  registerSystemConsoleRoutes(app, dependencies.repository.systemConsole, requestActor, uuidPattern, async () => ({
+    auth: await probeSystemDependency(process.env.SUPABASE_URL, "/auth/v1/health"),
+    ardenAi: await probeSystemDependency(process.env.ARDEN_AI_URL, "/health/ready",
+      process.env.ARDEN_AI_SERVICE_TOKEN ? { authorization: `Bearer ${process.env.ARDEN_AI_SERVICE_TOKEN}` } : undefined),
+  }));
   registerNotificationRoutes(app, { repository: dependencies.repository,
     store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
   registerPrivateOrganizationRoutes(app, { store: dependencies.repository.privateOrganization,
@@ -597,10 +603,12 @@ export function buildApp(dependencies: AppDependencies) {
     if (!context) return;
     try {
       const memberships = await dependencies.repository.listMemberships(context.userId);
+      const canAccessSystemConsole = await dependencies.repository.systemConsole?.canAccess(context.userId) ?? false;
       const pendingInvitationToken = readPendingInvitationCookie(request.headers.cookie, dependencies.secureCookies);
       return {
-        actor: { id: context.userId, email: context.email, fullName: context.fullName },
+        actor: { id: context.userId, email: context.email, fullName: context.fullName, emailVerified: context.emailVerified },
         account: { passwordSetupRequired: Boolean(context.passwordSetupRequired) },
+        canAccessSystemConsole,
         ...(context.sessionExpiresAt ? { sessionExpiresAt: new Date(context.sessionExpiresAt * 1000).toISOString() } : {}),
         ...(dependencies.testActor ? { testMode: true } : {}),
         ...(pendingInvitationToken ? { pendingInvitationToken } : {}),
@@ -615,6 +623,21 @@ export function buildApp(dependencies: AppDependencies) {
       };
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Membership lookup failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.post("/api/v1/account/profile", async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    if (!context.emailVerified || !isNormalizedEmail(context.email)) {
+      return reply.code(403).send(safeError("VERIFIED_ACCOUNT_REQUIRED", "A verified Auth session is required.", request.id));
+    }
+    try {
+      await dependencies.repository.registerAccountProfile(context.userId, context.email, context.fullName);
+      return reply.code(204).send();
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Account profile registration failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
   });
@@ -644,6 +667,9 @@ export function buildApp(dependencies: AppDependencies) {
       reply.header("Location", `/api/v1/organizations/${organization.organizationId}`);
       return reply.code(201).send({ organization });
     } catch (error) {
+      if (isCheckViolation(error)) {
+        return reply.code(409).send(safeError("SYSTEM_ADMIN_ORG_MEMBERSHIP_CONFLICT", "This account cannot join an organization.", request.id));
+      }
       if (isUniqueViolation(error)) {
         return reply.code(409).send(safeError("ORGANIZATION_CONFLICT", "An organization with these details could not be created.", request.id));
       }
@@ -889,6 +915,9 @@ export function buildApp(dependencies: AppDependencies) {
       reply.header("set-cookie", clearPendingInvitationCookie(dependencies.secureCookies));
       return reply.code(204).send();
     } catch (error) {
+      if (isCheckViolation(error)) {
+        return reply.code(409).send(safeError("SYSTEM_ADMIN_ORG_MEMBERSHIP_CONFLICT", "This account cannot join an organization.", request.id));
+      }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation acceptance failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
@@ -2481,8 +2510,29 @@ function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
 }
 
+function isCheckViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "23514";
+}
+
 function resourceNotAvailable(requestId: string) {
   return safeError("RESOURCE_NOT_AVAILABLE", "This resource is not available.", requestId);
+}
+
+async function probeSystemDependency(baseUrl: string | undefined, path: string,
+  headers?: Record<string, string>): Promise<{ status: string; latencyMs: number | null }> {
+  if (!baseUrl?.trim()) return { status: "not_configured", latencyMs: null };
+  const startedAt = Date.now();
+  try {
+    const base = new URL(baseUrl);
+    if (!(base.protocol === "https:" || base.protocol === "http:") || base.username || base.password) {
+      return { status: "unavailable", latencyMs: null };
+    }
+    const response = await fetch(new URL(path, base.origin), { method: "GET", headers, signal: AbortSignal.timeout(1_500) });
+    await response.body?.cancel().catch(() => undefined);
+    return { status: response.ok ? "ok" : "unavailable", latencyMs: Date.now() - startedAt };
+  } catch {
+    return { status: "unavailable", latencyMs: Date.now() - startedAt };
+  }
 }
 
 function authUnavailable(reply: FastifyReply, request: FastifyRequest) {

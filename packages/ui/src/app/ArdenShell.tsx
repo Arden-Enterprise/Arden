@@ -21,6 +21,7 @@ import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
 import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { SettingsDialog } from "../settings";
 import { NotificationProvider } from "../notifications/NotificationProvider";
+import { SystemConsolePage } from "../system-console/SystemConsolePage";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
@@ -64,7 +65,7 @@ const initialCollections: PrivateCollection[] = [
   { id: "sample-discovery", title: "Discovery", parentId: null, favoritedAt: null },
 ];
 
-type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
+type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link" | "system-console";
 
 /**
  * Extracts a 43-character invitation token from the URL path `/invite/:token`.
@@ -235,6 +236,13 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       setEntryView("password-setup");
       return;
     }
+    if (current.canAccessSystemConsole && current.memberships.length === 0) {
+      setInvitationToken(null);
+      clearRecoveryTokens();
+      setRecoveryTokens(null);
+      setEntryView("system-console");
+      return;
+    }
     if (invitationToken) {
       if (typeof window !== "undefined") {
         try { window.history.replaceState(null, "", "/"); } catch {}
@@ -258,6 +266,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         if (current.account?.passwordSetupRequired === true) return acceptServerSession(current);
         const pathToken = typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
         const activeMemberships = current.memberships.filter((membership) => membership.status === "active");
+        if (current.canAccessSystemConsole && current.memberships.length === 0) return acceptServerSession(current);
         if (!pathToken && activeMemberships.length > 0) {
           setInvitationToken(null);
           return acceptServerSession(current);
@@ -423,6 +432,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
   if (entryView === "password-setup" && serverSession) {
     return <SetPasswordPage platform={platform} email={serverSession.actor.email} onComplete={acceptServerSession} />;
+  }
+
+  if (entryView === "system-console" && serverSession?.canAccessSystemConsole && serverSession.memberships.length === 0) {
+    return <SystemConsolePage platform={platform} onSignOut={finishSignOut} />;
   }
 
   if (entryView === "sign-in") {

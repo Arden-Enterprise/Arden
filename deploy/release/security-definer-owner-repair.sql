@@ -9,7 +9,7 @@ SELECT pg_advisory_xact_lock(hashtext('arden:migrations'));
 DO $repair_internal_execution$
 DECLARE
     item record;
-    -- Exact inventory after migrations 0001-0062 (48 routines). Any other count or name refuses.
+    -- Exact inventory after migrations 0001-0063 (52 routines). Any other count or name refuses.
     expected_names text[] := ARRAY[
         -- Reviewed baseline (0001-0022).
         'audience_snapshot_enforceable', 'claim_knowledge_index_job',
@@ -32,9 +32,10 @@ DECLARE
         'responsible_publication_view', 'withdraw_publication_directly', 'list_publication_reports',
         'close_publication_report',
         -- 0039 notification fan-out; 0040 trigger-only placement validator;
-        -- 0061 approved reader-change share fan-out.
+        -- 0061 approved reader-change share fan-out; 0063 least-privilege System Console.
         'notify_arden_notification', 'notify_arden_publication_share',
-        'validate_collection_placement'];
+        'validate_collection_placement', 'record_index_ai_usage', 'system_admin_lifecycle_counts',
+        'guard_system_admin_membership', 'system_console_report'];
     -- Flow 4 includes overloaded routines: match their exact signatures.
     expected_maintenance_signatures text[] := ARRAY[
         'enqueue_maintenance_submission_notices()',

@@ -22,6 +22,7 @@ export function WorkspaceSelectPage({
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [showAccountReady, setShowAccountReady] = useState(false);
 
   const isLive = memberships !== undefined;
   const choices = memberships?.filter((item) => item.status === "active") ?? [];
@@ -44,6 +45,30 @@ export function WorkspaceSelectPage({
       setCreating(false);
     }
   };
+
+  if (hasNoWorkspaces && showAccountReady) {
+    return (
+      <AuthLayout wide>
+        <section className="auth-card auth-workspace-card" aria-labelledby="account-ready-title">
+          <div className="auth-card-main">
+            <span className="auth-eyebrow">ARDEN ACCOUNT</span>
+            <h1 id="account-ready-title">Account setup complete</h1>
+            <p className="auth-helper-text" style={{ textAlign: "center", margin: "8px 0 20px" }}>
+              No organization was created or joined. An authorized Arden operator assigns system-level access separately. Sign in again after access is assigned.
+            </p>
+            <div className="auth-footer-links" style={{ justifyContent: "center" }}>
+              <button type="button" className="auth-text-link" onClick={() => setShowAccountReady(false)}>
+                Create an organization instead
+              </button>
+              <button type="button" className="auth-text-link" onClick={onBack}>
+                Sign out
+              </button>
+            </div>
+          </div>
+        </section>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout wide>
@@ -81,6 +106,13 @@ export function WorkspaceSelectPage({
                 <button type="submit" className="auth-primary" disabled={creating}>
                   {creating ? "Creating organization…" : "Create organization"}
                 </button>
+                {hasNoWorkspaces && (
+                  <div className="auth-footer-links" style={{ justifyContent: "center" }}>
+                    <button type="button" className="auth-text-link" onClick={() => setShowAccountReady(true)}>
+                      Continue without creating an organization
+                    </button>
+                  </div>
+                )}
                 <div className="auth-footer-links" style={{ justifyContent: "center" }}>
                   {showCreate && choices.length > 0 ? (
                     <button

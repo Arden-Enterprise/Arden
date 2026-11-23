@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, askArden, listAiConversations, loadAiConversation, type AiConversation,
+import { ApiError, askArden, listAiConversations, loadAiConversation, submitAiAnswerFeedback, type AiConversation,
   type AiConversationSummary, type AiVersionScope } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { answerMessage, type AnswerCitation, type AskArdenMessage } from "./askArdenModel";
@@ -14,6 +14,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<AiConversationSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [feedback, setFeedback] = useState<Record<string, "POSITIVE" | "NEGATIVE" | "SAVING">>({});
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [sources, setSources] = useState<{ messageId: string; citation: AnswerCitation } | null>(null);
@@ -30,7 +31,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     retryRequest.current = null;
     setMessages([]); setDraft(""); setError(null); setPending(false);
     setHistoryOpen(false); setHistoryLoading(false); setHistory([]); setHistoryError(null); setOpeningId(null);
-    setSources(null); setVersionScope("CURRENT");
+    setSources(null); setFeedback({}); setVersionScope("CURRENT");
     return () => { requestGeneration.current++; };
   }, [organizationId]);
 
@@ -39,7 +40,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     setSources(null);
     setMessages(saved.turns.flatMap((turn) => [
       { id: `${turn.id}-question`, role: "member" as const, body: turn.question },
-      { id: turn.id, role: "assistant" as const, body: turn.answer, citations: turn.citations,
+      { id: turn.id, requestId: turn.requestId, role: "assistant" as const, body: turn.answer, citations: turn.citations,
         insufficientEvidence: turn.status === "INSUFFICIENT_EVIDENCE", unavailable: turn.status === "UNAVAILABLE" },
     ]));
     setVersionScope(saved.turns.at(-1)?.versionScope ?? "CURRENT");
@@ -160,6 +161,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     setMessages([]);
     setError(null);
     setSources(null);
+    setFeedback({});
     pendingQuestion.current = null;
     conversation.current = { id: crypto.randomUUID(), revision: 0 }; retryRequest.current = null;
   };
@@ -175,6 +177,18 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     }
   };
 
+  const rateAnswer = async (messageId: string, requestId: string, rating: "POSITIVE" | "NEGATIVE") => {
+    if (!organizationId || feedback[messageId]) return;
+    setFeedback((current) => ({ ...current, [messageId]: "SAVING" }));
+    try {
+      await submitAiAnswerFeedback(platform, organizationId, requestId, rating);
+      setFeedback((current) => ({ ...current, [messageId]: rating }));
+    } catch {
+      setFeedback((current) => { const next = { ...current }; delete next[messageId]; return next; });
+      setError("Feedback could not be saved. Please try again.");
+    }
+  };
+
   return {
     draft, setDraft, messages, pending, error, versionScope, setVersionScope, history, historyOpen, historyLoading,
     historyError, openingId, sourcePanel,
@@ -182,7 +196,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     currentId: messages.length ? conversation.current.id : null,
     threadTitle: messages.find((message) => message.role === "member")?.body ?? "New conversation",
     canAsk: Boolean(organizationId),
-    submit, reset, stopWaiting, openHistory, closeHistory, openConversation, loadHistory, showSources, closeSources,
+    submit, reset, stopWaiting, openHistory, closeHistory, openConversation, loadHistory, showSources, closeSources, feedback, rateAnswer,
     toggleHistory: () => { if (historyOpen) closeHistory(); else openHistory(); },
     reloadConversation: () => openConversation(conversation.current.id),
   };

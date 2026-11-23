@@ -2,7 +2,7 @@
 
 Accepted contract: [decision 0010](../decisions/0010-audiences-and-system-administration.md).
 
-Implementation status (2026-10-20): Phases 0-3 and the Phase 4 authorization/bootstrap/API foundation are implemented in application code and additive migration 0017. The separate System Administration UI remains pending until the database/RLS denial rehearsal passes. Typecheck and synthetic API/UI/desktop tests pass. PostgreSQL migration/RLS rehearsal is pending because Docker/PostgreSQL was unavailable. Phase 5 intentionally remains a later contraction after a verified compatibility window; legacy role-backed columns and shadow writes are not part of the public product/API contract.
+Implementation status (2026-11-23): Phases 0-3 and the 0017 audience foundation remain as previously recorded. The approved least-privilege System Admin refinement adds dedicated account registration, a one-time first-manager bootstrap, manager-only lifecycle APIs, narrow report aggregates, AI telemetry and the shared web/desktop System Console in migration 0062. Application implementation and unit/request tests are local to `feat/system-console-least-privilege`; PostgreSQL migration, runtime-role, concurrency and live provider rehearsals remain pending. The current migration/operator inventory must include 0062 before any deployment. Phase 5 remains separate; legacy audience-role compatibility is not changed by this work.
 
 ## Safety and rollout rules
 
@@ -90,17 +90,34 @@ Exit criteria:
 
 ## Phase 4 - Instance administration foundation
 
-- Add central `INSTANCE_ADMIN` authorization independent of organization context.
-- Implement controlled first-admin bootstrap without a permanent unauthenticated endpoint.
-- Add `/api/v1/system/*` read/mutation contracts for administrator lifecycle and organization/account
-  operational state, starting with the smallest required set.
-- Enforce no content joins, no impersonation, last-admin protection and system audit.
-- Build the separate System Administration surface after API denial tests pass.
+Decision 0010 was refined by the requesting user on 2026-11-23. The current Phase 4 deliverable is
+the limited read-only monitoring Console and separately protected manager API, not general
+organization/account lifecycle, installation configuration or service control.
+
+- `INSTANCE_ADMIN` authorizes read-only reports; `MANAGE_SYSTEM_ADMINS` separately gates administrator
+  listing, grant, revoke and manager-capability changes. New grants are monitoring-only.
+- Allow a verified Auth session to register its Arden profile without organization membership or
+  admin privilege. No-workspace onboarding can finish without creating an organization. A one-time
+  operator command assigns both capabilities to the selected first admin; subsequent assignments
+  use the manager-only API.
+- Recheck active Arden account, current capability, and absence of all memberships on every request.
+  Serialize grant/activation and membership creation; enforce the invariant in API and PostgreSQL.
+- Provide only aggregate Overview, organization status/details, five reports and sanitized health.
+  Do not expose content reads, raw document/user data, organization mutation or service controls.
+- Protect the last active admin and last manager; audit grant, revoke and manager changes.
+- Coordinate Core and Arden-AI usage contract v1, idempotent provider event writes, versioned price
+  book, answer feedback and Flow 4 maintenance analysis telemetry.
+- Build one read-only System Console for web and desktop with 7/30/90/custom date selection and
+  maximum 50-row pagination.
 
 Exit criteria:
 
-- Instance admins can perform approved operational actions but cannot read organization content.
+- A monitor can read only the approved report surface; only managers can call admin-lifecycle APIs.
 - Org Admin and ordinary sessions cannot enumerate or mutate system administration.
+- No active System Admin has an organization membership, including through concurrent create/accept
+  flows. The last active admin and manager remain protected.
+- Runtime-role PostgreSQL tests establish the actual SELECT/write boundary; synthetic tests alone do
+  not complete this phase.
 
 ## Phase 5 - Contract legacy RBAC storage
 

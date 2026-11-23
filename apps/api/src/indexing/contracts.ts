@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { parseUsageEvents, usageContractVersion, type ProviderUsageEvent } from "../answers/usage-contracts.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const sha256Pattern = /^[0-9a-f]{64}$/;
@@ -50,6 +51,7 @@ export type ChunkManifestEntry = {
 
 export type IndexGenerationManifest = {
   contractVersion: 1;
+  usageContractVersion: 1;
   jobId: string;
   generationId: string;
   snapshotVersionId: string;
@@ -61,6 +63,7 @@ export type IndexGenerationManifest = {
   markdownContentHash: string;
   chunksDigest: string;
   chunks: ChunkManifestEntry[];
+  usageEvents: ProviderUsageEvent[];
 };
 
 export class IndexContractError extends Error {
@@ -101,7 +104,7 @@ export function parseIndexGenerationManifest(value: unknown, job: IndexGeneratio
   const manifest = objectValue(value, "manifest");
   exactKeys(manifest, ["contractVersion", "jobId", "generationId", "snapshotVersionId",
     "snapshotContentHash", "compilerVersion", "chunkingVersion", "embeddingModel",
-    "embeddingDimensions", "markdownContentHash", "chunksDigest", "chunks"]);
+    "embeddingDimensions", "markdownContentHash", "chunksDigest", "chunks", "usageContractVersion", "usageEvents"]);
   if (manifest.contractVersion !== 1 || manifest.jobId !== job.jobId
     || manifest.generationId !== job.generationId || manifest.snapshotVersionId !== job.snapshotVersionId
     || manifest.snapshotContentHash !== job.snapshotContentHash) {
@@ -113,6 +116,11 @@ export function parseIndexGenerationManifest(value: unknown, job: IndexGeneratio
   const embeddingDimensions = positiveInteger(manifest.embeddingDimensions, "embeddingDimensions");
   const markdownContentHash = sha256(manifest.markdownContentHash, "markdownContentHash");
   const chunksDigest = sha256(manifest.chunksDigest, "chunksDigest");
+  try { usageContractVersion(manifest.usageContractVersion); }
+  catch { throw new IndexContractError("Unsupported provider usage contract"); }
+  let usageEvents: ProviderUsageEvent[];
+  try { usageEvents = parseUsageEvents(manifest.usageEvents, ["INDEX_EMBEDDING"]); }
+  catch { throw new IndexContractError("Invalid provider usage events"); }
   if (!Array.isArray(manifest.chunks) || manifest.chunks.length === 0 || manifest.chunks.length > maxManifestChunks) {
     throw new IndexContractError("Manifest chunks must be a bounded non-empty array");
   }
@@ -144,6 +152,8 @@ export function parseIndexGenerationManifest(value: unknown, job: IndexGeneratio
     markdownContentHash,
     chunksDigest,
     chunks,
+    usageContractVersion: 1,
+    usageEvents,
   };
 }
 

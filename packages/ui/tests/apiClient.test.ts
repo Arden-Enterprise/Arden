@@ -12,7 +12,7 @@ const createdDraft = {
   title: "Review notes", body: "Exact private text", classification: "CONFIDENTIAL", status: "ACTIVE",
   currentVersion: { id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", version: 1, mimeType: "text/plain", contentHash: "a".repeat(64) },
 };
-const me = { actor: { id: actorId }, account: { passwordSetupRequired: false }, memberships: [{
+const me = { actor: { id: actorId }, account: { passwordSetupRequired: false }, canAccessSystemConsole: false, memberships: [{
   organization: { id: organizationId, name: "Synthetic Org" },
   status: "active", roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
 }] };
@@ -74,7 +74,39 @@ describe("Supabase session transport", () => {
     await expect(currentSession("web")).resolves.toEqual({
       ...legacySession,
       account: { passwordSetupRequired: false },
+      canAccessSystemConsole: false,
     });
+  });
+
+  it("registers an Arden profile from a verified Auth session and refreshes System Console eligibility", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const verifiedSession = { actor: { id: actorId, email: "system@example.test", emailVerified: true }, memberships: [] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ...verifiedSession, canAccessSystemConsole: false }, { status: 200 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(Response.json({ ...verifiedSession, canAccessSystemConsole: true }, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(currentSession("web")).resolves.toMatchObject({
+      actor: verifiedSession.actor, memberships: [], canAccessSystemConsole: true,
+      account: { passwordSetupRequired: false },
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "https://arden.example.test/api/v1/me", expect.objectContaining({ credentials: "include" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "https://arden.example.test/api/v1/account/profile", expect.objectContaining({
+      method: "POST", body: "{}",
+    }));
+    expect(fetchMock).toHaveBeenNthCalledWith(3, "https://arden.example.test/api/v1/me", expect.objectContaining({ credentials: "include" }));
+  });
+
+  it("does not register an Arden profile from an unverified Auth session", async () => {
+    vi.stubGlobal("window", { location: { origin: "https://arden.example.test" } });
+    const unverifiedSession = { actor: { id: actorId, email: "system@example.test", emailVerified: false }, memberships: [] };
+    const fetchMock = vi.fn().mockResolvedValueOnce(Response.json(unverifiedSession, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await currentSession("web");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalledWith("https://arden.example.test/api/v1/account/profile", expect.anything());
   });
 
   it("submits registration through the sign-up endpoint on web", async () => {

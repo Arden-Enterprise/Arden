@@ -8,7 +8,7 @@ import { ReaderSummaryError } from "./summary-contracts.js";
 import { ReaderQuestion } from "./question.js";
 
 export function registerReaderQuestionRoutes(app: FastifyInstance,
-  repository: Pick<ArdenDataRepository, "getTargetReaderActor" | "getPublishedKnowledge" | "readerSources">,
+  repository: Pick<ArdenDataRepository, "getTargetReaderActor" | "getPublishedKnowledge" | "readerSources" | "recordAiAnswerResult" | "recordAiUsageEvents">,
   storage: Pick<PrivateContentStorage, "read" | "readPdf">, ai: AskArdenClient | null,
   actor: (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>, uuidPattern: string) {
   const sources = repository.readerSources ? new ReaderSourcePreparation(repository, repository.readerSources, storage, null) : null;
@@ -29,8 +29,16 @@ export function registerReaderQuestionRoutes(app: FastifyInstance,
       if (!context) return;
       try {
         if (!engine) throw new ReaderSummaryError("UNAVAILABLE");
-        return await engine.answer(context.userId, request.params.organizationId, request.params.publishedVersionId,
+        const answer = await engine.answer(context.userId, request.params.organizationId, request.params.publishedVersionId,
           request.body.requestId, request.body.query);
+        const recordedUsage = await repository.recordAiUsageEvents(context.userId, request.params.organizationId,
+          answer.requestId, answer.usageEvents);
+        if (!recordedUsage) throw new Error("AI usage metadata was not recorded");
+        const recorded = await repository.recordAiAnswerResult(context.userId, request.params.organizationId,
+          answer.requestId, "READER_QUESTION", answer.status, answer.citations.length);
+        if (!recorded) throw new Error("Answer result metadata was not recorded");
+        const { usageEvents: _usageEvents, ...publicAnswer } = answer;
+        return publicAnswer;
       } catch (error) {
         const missing = error instanceof ReaderSourceError && error.code === "NOT_FOUND";
         const unsupported = error instanceof ArdenAiAnswerError && error.code === "AI_SERVICE_HTTP_422";

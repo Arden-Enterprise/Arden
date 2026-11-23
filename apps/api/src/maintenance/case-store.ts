@@ -5,6 +5,7 @@ import type {
 import { publicationProofFromPointer, type PublicationPointer } from "./publication-proof.js";
 import type { AnalysisFinding, AnalysisRun, AnalysisState } from "./analysis.js";
 import type { MaintenancePort, MaintenanceTx } from "./case-service.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { visibleVersionText } from "./version-text.js";
 
 type MemberTransaction = <T>(userId: string, organizationId: string, work: (client: PoolClient) => Promise<T>) => Promise<T>;
@@ -412,6 +413,29 @@ class PgMaintenanceTx implements MaintenanceTx {
       RETURNING run_id, state, findings, version_ids, started_by_membership_id, fence, attempt`,
     [this.organizationId, caseId, fence]);
     return result.rows[0] ? mapAnalysis(result.rows[0]) : null;
+  }
+
+  async recordAiUsageEvents(requestId: string, events: ProviderUsageEvent[]): Promise<void> {
+    for (const event of events) {
+      if (event.operation !== "MAINTENANCE_ANALYSIS") throw new Error("Invalid maintenance usage operation");
+      await this.client.query(`INSERT INTO ai_usage_event(organization_id, request_id, idempotency_key,
+        operation, provider, model, input_tokens, output_tokens, latency_ms, usage_complete,
+        estimated_cost_micro_usd, price_book_version)
+        SELECT $1, $2, $2::text || ':' || $3, $4, $5, $6, $7, $8, $9, $10,
+          CASE WHEN $10 AND price.price_book_version IS NOT NULL THEN
+            ceil(($7::numeric * price.input_micro_usd_per_million_tokens
+              + $8::numeric * price.output_micro_usd_per_million_tokens) / 1000000)::bigint END,
+          price.price_book_version
+        FROM (SELECT 1) seed LEFT JOIN LATERAL (
+          SELECT pb.price_book_version, pb.input_micro_usd_per_million_tokens,
+            pb.output_micro_usd_per_million_tokens
+          FROM ai_price_book pb WHERE pb.provider=$5 AND pb.model=$6
+            AND pb.effective_from<=now() AND (pb.effective_until IS NULL OR pb.effective_until>now())
+          ORDER BY pb.effective_from DESC LIMIT 1) price ON true
+        ON CONFLICT (idempotency_key) DO NOTHING`, [this.organizationId, requestId, event.eventId,
+        event.operation, event.provider, event.model, event.inputTokens, event.outputTokens,
+        event.latencyMs, event.usageComplete]);
+    }
   }
 
   async commitAnalysis(caseId: string, fence: string, state: "succeeded" | "failed", findings: Array<{ versionId: string; summary: string }>): Promise<boolean> {

@@ -28,6 +28,8 @@ function makeJob(patch: Partial<IndexGenerationJob> = {}): IndexGenerationJob {
 function makeManifest(job: IndexGenerationJob): IndexGenerationManifest {
   return {
     contractVersion: 1,
+      usageContractVersion: 1,
+      usageEvents: [],
     jobId: job.jobId,
     generationId: job.generationId,
     snapshotVersionId: job.snapshotVersionId,
@@ -48,6 +50,7 @@ class FakeStore implements IndexGenerationStore {
   failure: { code: string; retryable: boolean } | null = null;
   constructor(private readonly job: IndexGenerationJob | null) {}
   async claim() { return this.job; }
+  async recordUsage() {}
   async complete() { this.completed = true; return "10000000-0000-4000-8000-000000000007"; }
   async fail(_job: IndexGenerationJob, _workerId: string, code: string, retryable: boolean) {
     this.failure = { code, retryable };

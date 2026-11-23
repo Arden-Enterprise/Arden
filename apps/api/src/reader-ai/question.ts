@@ -4,10 +4,12 @@ import type { ReaderSourcePreparation } from "./source-preparation.js";
 import { ReaderSourceError } from "./contracts.js";
 import { readerCitation } from "./citation.js";
 import { ReaderAdmission } from "./admission.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 
 export const insufficientDocumentEvidence = "This document does not provide enough information to answer that question.";
 export type PublicReaderAnswer = { requestId: string; documentId: string; versionId: string;
-  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE"; answer: string; citations: PublicCitation[] };
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE"; answer: string; citations: PublicCitation[];
+  usageEvents: ProviderUsageEvent[] };
 export interface ReaderQuestionClient {
   retrieve(request: RetrievalRequest): Promise<unknown>;
   generate(request: GenerationRequest): Promise<unknown>;
@@ -45,7 +47,7 @@ export class ReaderQuestion {
       if (!evidence.length) {
         const metadata = await recheck();
         return { requestId, documentId: metadata.draftId, versionId: publication, status: "INSUFFICIENT_EVIDENCE",
-          answer: insufficientDocumentEvidence, citations: [] };
+          answer: insufficientDocumentEvidence, citations: [], usageEvents: retrieval.usageEvents };
       }
       const request: GenerationRequest = { contractVersion: 2, purpose: "READER_QUESTION", requestId,
         organizationId: organization, query, history: [], evidence };
@@ -57,7 +59,8 @@ export class ReaderQuestion {
         return readerCitation(metadata, publication, chunk, citation.quote);
       });
       return { requestId, documentId: metadata.draftId, versionId: publication, status: generated.status,
-        answer: generated.status === "ANSWERED" ? generated.answer : insufficientDocumentEvidence, citations };
+        answer: generated.status === "ANSWERED" ? generated.answer : insufficientDocumentEvidence, citations,
+        usageEvents: [...retrieval.usageEvents, ...generated.usageEvents] };
     } finally { lease.release(); }
   }
 }

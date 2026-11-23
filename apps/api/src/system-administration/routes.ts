@@ -9,9 +9,11 @@ function failure(reply: FastifyReply, error: unknown) {
   if (error.code === "SYSTEM_ADMINISTRATION_UNAVAILABLE") {
     return reply.code(404).send({ error: { code: error.code, message: "The resource is not available." } });
   }
-  if (error.code === "SYSTEM_ADMINISTRATOR_LAST_ACTIVE") {
+  if (error.code === "SYSTEM_ADMINISTRATOR_LAST_ACTIVE" || error.code === "SYSTEM_ADMINISTRATOR_LAST_MANAGER") {
     return reply.code(409).send({ error: { code: error.code,
-      message: "The last active Arden System Admin cannot be revoked." } });
+      message: error.code === "SYSTEM_ADMINISTRATOR_LAST_MANAGER"
+        ? "The last System Admin manager cannot be removed or demoted."
+        : "The last active Arden System Admin cannot be revoked." } });
   }
   return reply.code(409).send({ error: { code: error.code,
     message: "The System Admin assignment could not be changed." } });
@@ -46,4 +48,14 @@ export function registerSystemAdministrationRoutes(app: FastifyInstance,
       body: { type: "object", additionalProperties: false, properties: {} } },
   }, (request, reply) => run(request, reply,
     (service, actorUserId) => service.revoke(actorUserId, request.params.userId, request.id)));
+
+  app.patch<{ Params: { userId: string }; Body: { canManageSystemAdmins: boolean } }>(`${root}/:userId`, {
+    schema: {
+      params: { type: "object", additionalProperties: false, required: ["userId"],
+        properties: { userId: { type: "string", pattern: uuid } } },
+      body: { type: "object", additionalProperties: false, required: ["canManageSystemAdmins"],
+        properties: { canManageSystemAdmins: { type: "boolean" } } },
+    },
+  }, (request, reply) => run(request, reply, (service, actorUserId) =>
+    service.setManagerCapability(actorUserId, request.params.userId, request.body.canManageSystemAdmins, request.id)));
 }

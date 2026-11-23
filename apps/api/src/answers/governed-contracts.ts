@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AuthorizedAiSource } from "../db/repository.js";
+import { parseUsageEvents, usageContractVersion, type ProviderUsageEvent, type UsageOperation } from "./usage-contracts.js";
 
 export type VersionScope = "CURRENT" | "UPCOMING" | "COMPARE";
 export type DialogueTurn = { question: string; answer: string };
@@ -11,10 +12,12 @@ export type RetrievalRequest = { contractVersion: 2; purpose: "PUBLISHED_CHAT" |
   organizationId: string; query: string; allowedGenerationIds: string[]; history: DialogueTurn[];
   sourceHints: Array<{ generationId: string; label: string }> };
 export type RetrievalResponse = { contractVersion: 2; requestId: string; standaloneQuery: string;
-  retrievalMode: "HYBRID" | "SEMANTIC" | "LEXICAL"; evidence: Evidence[] };
+  retrievalMode: "HYBRID" | "SEMANTIC" | "LEXICAL"; evidence: Evidence[];
+  usageContractVersion: 1; usageEvents: ProviderUsageEvent[] };
 export type GenerationRequest = Omit<RetrievalRequest, "allowedGenerationIds" | "sourceHints"> & { evidence: Evidence[] };
 export type GenerationResponse = { contractVersion: 2; requestId: string; status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
-  answer: string; citations: Array<{ chunkId: string; quote: string }>; usedEvidence: string[] };
+  answer: string; citations: Array<{ chunkId: string; quote: string }>; usedEvidence: string[];
+  usageContractVersion: 1; usageEvents: ProviderUsageEvent[] };
 export type PublicCitation = { documentId: string; versionId: string; blockId?: string; page?: number;
   excerpt: string; title: string; version: string; scope: string; classification: string;
   /** Decision 0021: always null. The key stays because installed clients still require it. */
@@ -45,7 +48,7 @@ function integer(value: unknown): number {
   return value;
 }
 export function parseRetrievalResponse(value: unknown, requestId: string): RetrievalResponse {
-  const row = record(value, ["contractVersion", "requestId", "standaloneQuery", "retrievalMode", "evidence"]);
+  const row = record(value, ["contractVersion", "usageContractVersion", "usageEvents", "requestId", "standaloneQuery", "retrievalMode", "evidence"]);
   if (row.contractVersion !== 2 || row.requestId !== requestId
     || (row.retrievalMode !== "HYBRID" && row.retrievalMode !== "SEMANTIC" && row.retrievalMode !== "LEXICAL")) return invalid();
   const evidence = array(row.evidence, 8).map((value): Evidence => {
@@ -65,11 +68,14 @@ export function parseRetrievalResponse(value: unknown, requestId: string): Retri
   });
   if (new Set(evidence.map((chunk) => chunk.chunkId)).size !== evidence.length
     || evidence.reduce((sum, chunk) => sum + chunk.content.length, 0) > 64_000) return invalid();
-  return { contractVersion: 2, requestId, standaloneQuery: text(row.standaloneQuery, 4_000),
+  usageContractVersion(row.usageContractVersion);
+  const usageEvents = parseUsageEvents(row.usageEvents, ["CHAT_RETRIEVAL", "READER_QUESTION_RETRIEVAL"]);
+  return { contractVersion: 2, usageContractVersion: 1, usageEvents, requestId,
+    standaloneQuery: text(row.standaloneQuery, 4_000),
     retrievalMode: row.retrievalMode as RetrievalResponse["retrievalMode"], evidence };
 }
 export function parseGenerationResponse(value: unknown, request: GenerationRequest): GenerationResponse {
-  const row = record(value, ["contractVersion", "requestId", "status", "answer", "citations", "usedEvidence"]);
+  const row = record(value, ["contractVersion", "usageContractVersion", "usageEvents", "requestId", "status", "answer", "citations", "usedEvidence"]);
   if (row.contractVersion !== 2 || row.requestId !== request.requestId
     || (row.status !== "ANSWERED" && row.status !== "INSUFFICIENT_EVIDENCE")) return invalid();
   const usedEvidence = array(row.usedEvidence, 8).map((id) => text(id, 64, hash));
@@ -82,8 +88,12 @@ export function parseGenerationResponse(value: unknown, request: GenerationReque
     return { chunkId, quote };
   });
   if ((row.status === "ANSWERED") !== Boolean(citations.length)) return invalid();
-  return { contractVersion: 2, requestId: request.requestId, status: row.status,
-    answer: text(row.answer, 12_000), citations, usedEvidence };
+  usageContractVersion(row.usageContractVersion);
+  const allowed: UsageOperation[] = request.purpose === "READER_QUESTION"
+    ? ["READER_QUESTION_GENERATION"] : ["CHAT_GENERATION"];
+  const usageEvents = parseUsageEvents(row.usageEvents, allowed);
+  return { contractVersion: 2, usageContractVersion: 1, usageEvents, requestId: request.requestId,
+    status: row.status, answer: text(row.answer, 12_000), citations, usedEvidence };
 }
 export function evidenceMatchesManifest(evidence: Evidence, source: Pick<AuthorizedAiSource,
   "generationId" | "snapshotVersionId" | "snapshotContentHash" | "chunks">): boolean {

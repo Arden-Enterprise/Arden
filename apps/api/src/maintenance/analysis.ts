@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { parseUsageEvents } from "../answers/usage-contracts.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 
 export type AnalysisState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export const maintenanceSourceTextLimit = 8_000;
@@ -10,6 +12,7 @@ export type AnalysisFinding = {
 
 export type AnalysisRequest = {
   contractVersion: 1;
+  requestId: string;
   caseId: string;
   versionIds: string[];
   sources?: { versionId: string; text: string }[];
@@ -19,6 +22,7 @@ export type AnalysisResult = {
   contractVersion: 1;
   state: "succeeded";
   findings: AnalysisFinding[];
+  usageEvents: ProviderUsageEvent[];
 };
 
 export type AnalysisRun = {
@@ -46,7 +50,7 @@ export function httpAnalysisAdapter(baseUrl: string, serviceToken: string, mode:
       throw new Error("Maintenance analysis evidence is unavailable or too large.");
     }
     const body = provider
-      ? { contractVersion: 2, caseId: request.caseId, sources }
+      ? { contractVersion: 2, requestId: request.requestId, caseId: request.caseId, sources }
       : { contractVersion: 1, caseId: request.caseId, versionIds: request.versionIds };
     const response = await fetch(new URL(provider ? "/v2/maintenance-analyses" : "/v1/maintenance-analyses", baseUrl), {
       method: "POST",
@@ -56,11 +60,15 @@ export function httpAnalysisAdapter(baseUrl: string, serviceToken: string, mode:
       redirect: "error",
     });
     if (!response.ok) throw new Error("Maintenance analysis is unavailable.");
-    const result = await response.json() as { contractVersion?: unknown; state?: unknown; findings?: unknown };
+    const result = await response.json() as { contractVersion?: unknown; state?: unknown; findings?: unknown;
+      usageContractVersion?: unknown; usageEvents?: unknown };
     if (result.contractVersion !== body.contractVersion || result.state !== "succeeded" || !Array.isArray(result.findings)
-      || result.findings.length < 1 || result.findings.length > 4) {
+      || result.findings.length < 1 || result.findings.length > 4
+      || (provider && result.usageContractVersion !== 1)) {
       throw new Error("Maintenance analysis returned an invalid result.");
     }
+    const usageEvents = provider ? parseUsageEvents(result.usageEvents, ["MAINTENANCE_ANALYSIS"]) : [];
+    if (usageEvents.length > 1) throw new Error("Maintenance analysis returned invalid usage metadata.");
     return {
       contractVersion: 1,
       state: "succeeded",
@@ -78,6 +86,7 @@ export function httpAnalysisAdapter(baseUrl: string, serviceToken: string, mode:
         }
         return { versionId: finding.versionId, summary: finding.summary };
       }),
+      usageEvents,
     };
   };
 }
@@ -86,6 +95,7 @@ export function httpAnalysisAdapter(baseUrl: string, serviceToken: string, mode:
 export const controlledAnalysisAdapter: AnalysisAdapter = async (request) => ({
   contractVersion: 1,
   state: "succeeded",
+  usageEvents: [],
   findings: request.versionIds.slice(0, 4).map((versionId) => ({
     versionId,
     summary: "The selected version was compared with the reported evidence.",

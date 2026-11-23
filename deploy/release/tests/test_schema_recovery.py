@@ -20,7 +20,7 @@ class SchemaRecoveryInventoryTests(unittest.TestCase):
         self.assertIn("0030_knowledge_management_catalog.sql", migration_names)
         self.assertIn("0031_deduplicate_reviewer_grants.sql", migration_names)
         self.assertIn("0032_governed_ai_sources_and_conversations.sql", migration_names)
-        self.assertEqual(self.paths[-1].name, "0062_private_notes_organization_and_trash.sql")
+        self.assertEqual(self.paths[-1].name, "0063_system_console_least_privilege.sql")
         module.validate_migration_inventory(self.paths)
 
     def test_previous_inventory_missing_catalog_is_rejected(self):
@@ -31,7 +31,7 @@ class SchemaRecoveryInventoryTests(unittest.TestCase):
 
     def test_unreviewed_future_migration_is_rejected(self):
         with self.assertRaises(ValueError):
-            module.validate_migration_inventory(self.paths + [Path("0063_unreviewed.sql")])
+            module.validate_migration_inventory(self.paths + [Path("0064_unreviewed.sql")])
 
     def test_missing_or_duplicate_history_is_rejected(self):
         for paths in (self.paths[:10] + self.paths[11:],

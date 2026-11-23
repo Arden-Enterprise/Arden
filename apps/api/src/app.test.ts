@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +18,7 @@ import { parseSemanticDocument } from "@arden/domain";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { evidenceManifest, evidenceText, MemoryConversationStore } from "./answers/conversation.test-support.js";
 import type { RetrievalRequest, RetrievalResponse, GenerationRequest, GenerationResponse } from "./answers/governed-contracts.js";
+import type { ProviderUsageEvent } from "./answers/usage-contracts.js";
 import { validateSelection, type ReaderActor, type SelectionFacts, type TargetReadersInput } from "./target-readers/policy.js";
 import { resolveApprovedReaders, sameReaders } from "./target-readers/narrowing.js";
 
@@ -119,6 +121,9 @@ describe("API auth and private draft routes", () => {
     });
     expect(response.statusCode).toBe(200);
     expect(askArden.lastRequest?.allowedGenerationIds).toEqual([generationId]);
+    expect(repository.recordedUsageEvents).toHaveLength(2);
+    expect(repository.recordedUsageEvents.map(item => item.events[0]?.operation)).toEqual(["CHAT_RETRIEVAL", "CHAT_GENERATION"]);
+    expect(response.json().usageEvents).toBeUndefined();
     expect(response.json()).toMatchObject({ status: "ANSWERED", citations: [{
       documentId: sharedDraftId, versionId, blockId: "pdf-page-2", page: 2, title: "Security policy",
       version: "Version unavailable", scope: "Company-wide", classification: "INTERNAL",
@@ -214,8 +219,9 @@ describe("API auth and private draft routes", () => {
     const response = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      actor: { id: ownerId, email: "owner@example.test", fullName: "Owner" },
+      actor: { id: ownerId, email: "owner@example.test", fullName: "Owner", emailVerified: true },
       account: { passwordSetupRequired: false },
+      canAccessSystemConsole: false,
       sessionExpiresAt: expect.any(String),
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
@@ -2649,7 +2655,7 @@ class MemoryAudienceGroupStore implements AudienceGroupStore {
 }
 
 class MemorySystemAdministrationStore implements SystemAdministrationStore {
-  private administrators: SystemAdministrator[] = [{ userId: ownerId, status: "ACTIVE", grantedByUserId: null,
+  private administrators: SystemAdministrator[] = [{ userId: ownerId, status: "ACTIVE", canManageSystemAdmins: true, grantedByUserId: null,
     grantedAt: new Date("2026-10-20T00:00:00.000Z"), revokedByUserId: null, revokedAt: null }];
 
   private authorize(actorUserId: string) {
@@ -2665,7 +2671,7 @@ class MemorySystemAdministrationStore implements SystemAdministrationStore {
 
   async grant(actorUserId: string, targetUserId: string) {
     this.authorize(actorUserId);
-    const administrator = { userId: targetUserId, status: "ACTIVE" as const,
+    const administrator = { userId: targetUserId, status: "ACTIVE" as const, canManageSystemAdmins: false,
       grantedByUserId: actorUserId, grantedAt: new Date("2026-10-20T00:00:00.000Z"),
       revokedByUserId: null, revokedAt: null };
     this.administrators.push(administrator);
@@ -2684,6 +2690,17 @@ class MemorySystemAdministrationStore implements SystemAdministrationStore {
     Object.assign(administrator, revoked);
     return revoked;
   }
+
+  async setManagerCapability(actorUserId: string, targetUserId: string, enabled: boolean) {
+    this.authorize(actorUserId);
+    const administrator = this.administrators.find(item => item.userId === targetUserId && item.status === "ACTIVE");
+    if (!administrator) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
+    if (!enabled && administrator.canManageSystemAdmins && this.administrators.filter(item => item.status === "ACTIVE" && item.canManageSystemAdmins).length === 1) {
+      throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_LAST_MANAGER");
+    }
+    administrator.canManageSystemAdmins = enabled;
+    return administrator;
+  }
 }
 
 class FakeAskArdenClient implements AskArdenClient {
@@ -2694,6 +2711,8 @@ class FakeAskArdenClient implements AskArdenClient {
   async retrieve(request: RetrievalRequest): Promise<RetrievalResponse> {
     this.lastRequest = request;
     return { contractVersion: 2, requestId: request.requestId, standaloneQuery: request.query, retrievalMode: "HYBRID",
+      usageContractVersion: 1, usageEvents: [{ eventId: randomUUID(), operation: "CHAT_RETRIEVAL", provider: "OPENAI",
+        model: "gpt-6-luna", inputTokens: 10, outputTokens: 0, latencyMs: 4, usageComplete: true }],
       evidence: [{ generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
         chunkId: "b".repeat(64), content: evidenceText, ...evidenceManifest,
         sourceBlockIds: this.sourceBlockIds, parentSectionBlockId: null, label: "" }] };
@@ -2701,7 +2720,10 @@ class FakeAskArdenClient implements AskArdenClient {
   async generate(request: GenerationRequest): Promise<GenerationResponse> {
     this.onAnswer?.();
     return { contractVersion: 2, requestId: request.requestId, status: "ANSWERED", answer: "MFA is required by the security policy.",
-      citations: [{ chunkId: "b".repeat(64), quote: evidenceText }], usedEvidence: request.evidence.map((chunk) => chunk.chunkId) };
+      usageContractVersion: 1, usageEvents: [{ eventId: randomUUID(), operation: "CHAT_GENERATION", provider: "OPENAI",
+        model: "gpt-6-luna", inputTokens: 14, outputTokens: 8, latencyMs: 9, usageComplete: true }],
+      citations: [{ chunkId: "b".repeat(64), quote: evidenceText }],
+      usedEvidence: request.evidence.map((chunk) => chunk.chunkId) };
   }
 }
 
@@ -2725,6 +2747,7 @@ class MemoryRepository implements ArdenDataRepository {
   reviewerGrant: ReviewerGrantRecord | null = null;
   publication: PublishedKnowledge | null = null;
   authorizedAiSources: AuthorizedAiSource[] = [];
+  recordedUsageEvents: Array<{ userId: string; organizationId: string; requestId: string; events: ProviderUsageEvent[] }> = [];
   /** TargetReaderPolicy actors. Both synthetic users belong to the same organization. */
   readerActors = new Map<string, ReaderActor>([
     [ownerId, { membershipId: ownerId, organizationId, status: "ACTIVE", departmentIds: [salesDepartmentId] }],
@@ -2754,6 +2777,14 @@ class MemoryRepository implements ArdenDataRepository {
     return (userId === ownerId || userId === otherId) && requestedOrganization === organizationId
       ? { membershipId: userId, organizationId, userId } : null;
   }
+
+  async registerAccountProfile() { return true; }
+  async recordAiAnswerResult() { return true; }
+  async recordAiUsageEvents(userId: string, organizationId: string, requestId: string, events: ProviderUsageEvent[]) {
+    this.recordedUsageEvents.push({ userId, organizationId, requestId, events });
+    return true;
+  }
+  async submitAiAnswerFeedback() { return true; }
 
   async listMemberships(userId: string): Promise<MembershipSummary[]> {
     if (userId !== ownerId) return [];

@@ -21,7 +21,8 @@ let org = "", department = "", ownerMembership = "", draftId = "";
 async function activateFixture(): Promise<string> {
   const indexing = new PgIndexGenerationStore(pool!); const worker = randomUUID();
   const job = await indexing.claim(worker, 90); if (!job) throw new Error("No index fixture job");
-  return indexing.complete(job, worker, { contractVersion: 1, jobId: job.jobId, generationId: job.generationId,
+  return indexing.complete(job, worker, { contractVersion: 1, usageContractVersion: 1, usageEvents: [],
+    jobId: job.jobId, generationId: job.generationId,
     snapshotVersionId: job.snapshotVersionId, snapshotContentHash: job.snapshotContentHash, compilerVersion: "semantic-markdown-v1",
     chunkingVersion: "langchain-section-token-v1", embeddingModel: "text-embedding-3-small", embeddingDimensions: 1536,
     markdownContentHash: "d".repeat(64), chunksDigest: "e".repeat(64), chunks: [{ chunkId: "f".repeat(64), ordinal: 0,

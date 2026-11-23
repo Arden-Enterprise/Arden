@@ -4,9 +4,11 @@ import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledg
 import { PgConversationStore, type ConversationStore } from "../answers/conversation-store.js";
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
 import type { VersionScope } from "../answers/governed-contracts.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
+import { PgSystemConsoleStore, type SystemConsoleStore } from "../system-console/store.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
 import { PgPrivateOrganizationStore, isActiveCollection, lockTree, type PrivateOrganizationStore,
@@ -68,6 +70,7 @@ export type PrivateContributionSource = {
   sourceUri: string;
   mimeType: string;
   contentHash: string;
+  contentSizeBytes?: number | null;
 };
 export type SharedKnowledgeDraft = {
   management?: (KnowledgeMetadata & { schemaVersion?: number }) | null;
@@ -88,6 +91,7 @@ export type SharedKnowledgeDraft = {
   sourceUri: string;
   mimeType: string;
   contentHash: string;
+  contentSizeBytes?: number | null;
   currentVersion: number;
   hasPendingSubmission: boolean;
   createdAt: Date;
@@ -352,6 +356,7 @@ type SharedDraftRow = ReaderSelectionColumns & {
   content_uri: string;
   mime_type: string;
   content_hash: string;
+  content_size_bytes: number | null;
   current_version_no: number;
   has_pending_submission: boolean;
   created_at: Date;
@@ -370,7 +375,7 @@ const sharedDraftSelect = `
          EXISTS (SELECT 1 FROM shared_submission pending
                  WHERE pending.shared_draft_id = d.shared_draft_id
                    AND pending.status = 'PENDING_REVIEW') AS has_pending_submission,
-         v.shared_draft_version_id, v.content_uri, v.mime_type, v.content_hash,
+         v.shared_draft_version_id, v.content_uri, v.mime_type, v.content_hash, v.content_size_bytes,
          ARRAY(SELECT a.role_id::text FROM shared_draft_audience a
                WHERE a.shared_draft_id = d.shared_draft_id ORDER BY a.role_id) AS audience_role_ids,
          (SELECT rs.revision FROM reader_selection rs
@@ -398,6 +403,7 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
     sourceUri: row.content_uri,
     mimeType: row.mime_type,
     contentHash: row.content_hash,
+    contentSizeBytes: row.content_size_bytes,
     currentVersion: row.current_version_no,
     hasPendingSubmission: row.has_pending_submission,
     createdAt: row.created_at,
@@ -639,16 +645,23 @@ export interface ArdenDataRepository {
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
   readonly systemAdministration?: SystemAdministrationStore;
+  readonly systemConsole?: SystemConsoleStore;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
+  recordAiAnswerResult(userId: string, organizationId: string, requestId: string,
+    resultType: "CHAT" | "READER_QUESTION", answerStatus: "ANSWERED" | "INSUFFICIENT_EVIDENCE", citationCount: number): Promise<boolean>;
+  recordAiUsageEvents(userId: string, organizationId: string, requestId: string,
+    events: ProviderUsageEvent[]): Promise<boolean>;
+  submitAiAnswerFeedback(userId: string, organizationId: string, requestId: string, rating: "POSITIVE" | "NEGATIVE"): Promise<boolean>;
   createOrganization(userId: string, email: string, fullName: string | null, setup: OrganizationSetup, requestId: string): Promise<CreatedOrganization>;
   createInvitation(userId: string, organizationId: string, departmentId: string | null | undefined, email: string, tokenHash: string, expiresAt: Date, requestId: string): Promise<CreatedInvitation | null>;
   rotateInvitation(userId: string, organizationId: string, invitationId: string, tokenHash: string, requestId: string): Promise<CreatedInvitation | null>;
   revokeInvitation(userId: string, organizationId: string, invitationId: string, requestId: string): Promise<boolean>;
   getInvitationByToken(tokenHash: string): Promise<{ invitationId: string; organizationName: string; email: string; expiresAt: Date } | null>;
   acceptInvitation(userId: string, email: string, fullName: string | null, emailVerified: boolean, tokenHash: string, requestId: string): Promise<boolean>;
+  registerAccountProfile(userId: string, email: string, fullName: string | null): Promise<boolean>;
   getOrganizationAdministration(userId: string, organizationId: string): Promise<OrganizationAdminData | null>;
   getKnowledgeOptions(userId: string, organizationId: string): Promise<KnowledgeOptions | null>;
   createDepartment(userId: string, organizationId: string, name: string, requestId: string): Promise<boolean>;
@@ -774,6 +787,7 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly knowledgeCatalog: KnowledgeCatalogStore;
   readonly audienceGroups: AudienceGroupStore;
   readonly systemAdministration: SystemAdministrationStore;
+  readonly systemConsole: SystemConsoleStore;
   readonly maintenance: MaintenancePort;
   readonly privateOrganization: PgPrivateOrganizationStore;
   /** System-only retention capability for the in-process 30-day purge loop. */
@@ -785,7 +799,8 @@ export class ArdenRepository implements ArdenDataRepository {
     this.knowledgeCatalog = new PgKnowledgeCatalogStore((user, org, work) => this.withActorContext(user, org, work),
       (user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
-    this.systemAdministration = new PgSystemAdministrationStore((user, work) => this.withSystemAdmin(user, work));
+    this.systemAdministration = new PgSystemAdministrationStore((user, work) => this.withSystemAdminManager(user, work));
+    this.systemConsole = new PgSystemConsoleStore((user, work) => this.withSystemAdmin(user, work));
     this.maintenance = new PgMaintenanceStore((user, org, work) => this.withActorContext(user, org, work), content);
     this.privateOrganization = new PgPrivateOrganizationStore((user, org, work) => this.withActorContext(user, org, work),
       (work) => this.withPrivateTrashRetention(work));
@@ -802,6 +817,65 @@ export class ArdenRepository implements ArdenDataRepository {
          WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
       const membershipId = result.rows[0]?.membership_id;
       return membershipId ? { membershipId, organizationId, userId } : null;
+    });
+  }
+
+  async recordAiAnswerResult(userId: string, organizationId: string, requestId: string,
+    resultType: "CHAT" | "READER_QUESTION", answerStatus: "ANSWERED" | "INSUFFICIENT_EVIDENCE", citationCount: number) {
+    return this.withActorContext(userId, organizationId, async client => {
+      const membershipId = await this.activeActorMembership(client, userId, organizationId);
+      if (!membershipId) return false;
+      const created = await client.query(`INSERT INTO ai_answer_result(
+        request_id, organization_id, owner_membership_id, result_type, answer_status, citation_count)
+        VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (request_id) DO NOTHING RETURNING request_id`,
+      [requestId, organizationId, membershipId, resultType, answerStatus, citationCount]);
+      if (created.rowCount) return true;
+      const existing = await client.query(`SELECT 1 FROM ai_answer_result WHERE request_id = $1
+        AND organization_id = $2 AND owner_membership_id = $3 AND result_type = $4
+        AND answer_status = $5 AND citation_count = $6`,
+      [requestId, organizationId, membershipId, resultType, answerStatus, citationCount]);
+      return Boolean(existing.rowCount);
+    });
+  }
+
+  async recordAiUsageEvents(userId: string, organizationId: string, requestId: string,
+    events: ProviderUsageEvent[]) {
+    return this.withActorContext(userId, organizationId, async client => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return false;
+      for (const event of events) {
+        await client.query(`INSERT INTO ai_usage_event(organization_id, request_id, idempotency_key,
+          operation, provider, model, input_tokens, output_tokens, latency_ms, usage_complete,
+          estimated_cost_micro_usd, price_book_version)
+          SELECT $1, $2, $2::text || ':' || $3, $4, $5, $6, $7, $8, $9, $10,
+            CASE WHEN $10 AND price.price_book_version IS NOT NULL THEN
+              ceil(($7::numeric * price.input_micro_usd_per_million_tokens
+                + $8::numeric * price.output_micro_usd_per_million_tokens) / 1000000)::bigint END,
+            price.price_book_version
+          FROM (SELECT 1) seed LEFT JOIN LATERAL (
+            SELECT pb.price_book_version, pb.input_micro_usd_per_million_tokens,
+              pb.output_micro_usd_per_million_tokens
+            FROM ai_price_book pb WHERE pb.provider=$5 AND pb.model=$6
+              AND pb.effective_from<=now() AND (pb.effective_until IS NULL OR pb.effective_until>now())
+            ORDER BY pb.effective_from DESC LIMIT 1) price ON true
+          ON CONFLICT (idempotency_key) DO NOTHING`, [organizationId, requestId, event.eventId,
+          event.operation, event.provider, event.model, event.inputTokens, event.outputTokens,
+          event.latencyMs, event.usageComplete]);
+      }
+      return true;
+    });
+  }
+
+  async submitAiAnswerFeedback(userId: string, organizationId: string, requestId: string, rating: "POSITIVE" | "NEGATIVE") {
+    return this.withActorContext(userId, organizationId, async client => {
+      const membershipId = await this.activeActorMembership(client, userId, organizationId);
+      if (!membershipId) return false;
+      const result = await client.query(`INSERT INTO ai_answer_feedback(
+        request_id, organization_id, membership_id, rating)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (request_id, membership_id) DO UPDATE
+          SET rating = EXCLUDED.rating, updated_at = now()
+        RETURNING feedback_id`, [requestId, organizationId, membershipId, rating]);
+      return Boolean(result.rowCount);
     });
   }
 
@@ -857,6 +931,7 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query("SET LOCAL ROLE arden_runtime");
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', '', true)", [userId]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
       const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
       await client.query(`
         INSERT INTO user_account (user_id, email, full_name)
@@ -1347,6 +1422,7 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query(`SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', '', true),
                                  set_config('arden.invitation_token_hash', $2, true)`, [userId, tokenHash]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
       const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
       await client.query(`
         INSERT INTO user_account (user_id, email, full_name)
@@ -1445,14 +1521,20 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query(`SELECT set_config('arden.actor_id', $1, true),
         set_config('arden.organization_id', '', true), set_config('arden.org_admin', 'false', true),
-        set_config('arden.instance_admin', 'false', true)`, [userId]);
-      const administrator = await client.query(`SELECT 1 FROM system_administrator
-        WHERE user_id = $1 AND status = 'ACTIVE'`, [userId]);
+        set_config('arden.instance_admin', 'true', true),
+        set_config('arden.manage_system_admins', 'false', true),
+        set_config('arden.system_admin_target_id', $1, true)`, [userId]);
+      const administrator = await client.query<{ can_manage_system_admins: boolean }>(`SELECT sa.can_manage_system_admins
+        FROM system_administrator sa JOIN user_account ua ON ua.user_id = sa.user_id
+        WHERE sa.user_id = $1 AND sa.status = 'ACTIVE' AND ua.status = 'ACTIVE'
+          AND NOT EXISTS (SELECT 1 FROM organization_membership om WHERE om.user_id = sa.user_id)`, [userId]);
       if (!administrator.rowCount) {
         await client.query("ROLLBACK");
         return null;
       }
-      await client.query("SELECT set_config('arden.instance_admin', 'true', true)");
+      await client.query(`SELECT set_config('arden.instance_admin', 'true', true),
+        set_config('arden.manage_system_admins', $1, true), set_config('arden.system_admin_target_id', '', true)`,
+      [administrator.rows[0]?.can_manage_system_admins ? "true" : "false"]);
       const result = await work(client);
       await client.query("COMMIT");
       return result;
@@ -1462,6 +1544,34 @@ export class ArdenRepository implements ArdenDataRepository {
     } finally {
       client.release();
     }
+  }
+
+  private async withSystemAdminManager<T>(userId: string, work: (client: PoolClient) => Promise<T>): Promise<T | null> {
+    return this.withSystemAdmin(userId, async client => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
+      await client.query("SELECT set_config('arden.system_admin_target_id', $1, true)", [userId]);
+      const manager = await client.query(`SELECT 1 FROM system_administrator sa
+        JOIN user_account ua ON ua.user_id = sa.user_id
+        WHERE sa.user_id = $1 AND sa.status = 'ACTIVE' AND sa.can_manage_system_admins
+          AND ua.status = 'ACTIVE'
+          AND NOT EXISTS (SELECT 1 FROM organization_membership om WHERE om.user_id = sa.user_id)`, [userId]);
+      await client.query("SELECT set_config('arden.manage_system_admins', $1, true)",
+        [manager.rowCount ? "true" : "false"]);
+      await client.query("SELECT set_config('arden.system_admin_target_id', '', true)");
+      return manager.rowCount ? work(client) : null;
+    });
+  }
+
+  async registerAccountProfile(userId: string, email: string, fullName: string | null): Promise<boolean> {
+    return this.withActorContext(userId, null, async client => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
+      const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
+      await client.query(`INSERT INTO user_account (user_id, email, full_name)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name, updated_at = now()`,
+      [userId, email, profileName]);
+      return true;
+    });
   }
 
   async listDrafts(userId: string, organizationId: string, limit: number, cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null> {
@@ -1601,9 +1711,9 @@ export class ArdenRepository implements ArdenDataRepository {
       }
 
       await client.query(`
-        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash)
-        VALUES ($1, 1, $2, $3, $4)`, [draftId, input.copiedContent.sourceUri,
-        input.copiedContent.mimeType, input.copiedContent.contentHash]);
+        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
+        VALUES ($1, 1, $2, $3, $4, $5)`, [draftId, input.copiedContent.sourceUri,
+        input.copiedContent.mimeType, input.copiedContent.contentHash, input.copiedContent.contentSizeBytes ?? null]);
       await this.appendAudit(client, organizationId, source.ownerMembershipId,
         "SHARED_DRAFT_CREATED", draftId, 1, input.requestId);
       const created = await this.findSharedDraftByCreateRequest(client, source.ownerMembershipId, organizationId, input.idempotencyKey);
@@ -1648,8 +1758,9 @@ export class ArdenRepository implements ArdenDataRepository {
           ? { kind: "replayed", draft: raced.draft } : { kind: "idempotency-conflict" };
       }
       await client.query(`
-        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash)
-        VALUES ($1, 1, $2, $3, $4)`, [draftId, input.content.sourceUri, input.content.mimeType, input.content.contentHash]);
+        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
+        VALUES ($1, 1, $2, $3, $4, $5)`, [draftId, input.content.sourceUri, input.content.mimeType,
+        input.content.contentHash, input.content.contentSizeBytes ?? null]);
       await this.appendAudit(client, organizationId, input.actorMembershipId,
         "SHARED_DRAFT_CREATED", draftId, 1, input.requestId);
       const created = await this.findSharedDraftByCreateRequest(client, input.actorMembershipId, organizationId, input.idempotencyKey);
@@ -1799,10 +1910,11 @@ export class ArdenRepository implements ArdenDataRepository {
             SELECT $1, $2, unnest($3::uuid[])`, [draftId, organizationId, next.audienceRoleIds]);
         }
       }
-      const object = content ?? { sourceUri: current.sourceUri, mimeType: current.mimeType, contentHash: current.contentHash };
-      await client.query(`INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash)
-        VALUES ($1, $2, $3, $4, $5)`, [draftId, expectedVersion + 1,
-        object.sourceUri, object.mimeType, object.contentHash]);
+      const object = content ?? { sourceUri: current.sourceUri, mimeType: current.mimeType,
+        contentHash: current.contentHash, contentSizeBytes: current.contentSizeBytes };
+      await client.query(`INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
+        VALUES ($1, $2, $3, $4, $5, $6)`, [draftId, expectedVersion + 1,
+        object.sourceUri, object.mimeType, object.contentHash, object.contentSizeBytes ?? null]);
       const membership = await client.query<{ membership_id: string }>(`
         SELECT membership_id FROM organization_membership WHERE user_id = $1 AND organization_id = $2
           AND status = 'ACTIVE'`, [userId, organizationId]);
@@ -2674,9 +2786,10 @@ export class ArdenRepository implements ArdenDataRepository {
       const created = draft.rows[0];
       if (!created) throw new Error("Draft insert returned no row");
       const versionResult = await client.query<{ draft_version_id: string }>(`
-        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id)
-        VALUES ($1, 1, $2, $3, $4, $5)
-        RETURNING draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash, membershipId]);
+        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id)
+        VALUES ($1, 1, $2, $3, $4, $5, $6)
+        RETURNING draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash,
+        content.contentSizeBytes ?? null, membershipId]);
       const versionId = versionResult.rows[0]?.draft_version_id;
       if (!versionId) throw new Error("Draft version insert returned no row");
       await this.appendAudit(client, organizationId, membershipId, "PRIVATE_DRAFT_CREATED", created.draft_id, 1, requestId);
@@ -2730,13 +2843,14 @@ export class ArdenRepository implements ArdenDataRepository {
         source_uri: string;
         mime_type: string;
         content_hash: string;
+        content_size_bytes: number | null;
         current_version_no: number;
         created_at: Date;
         updated_at: Date;
         collection_id: string | null;
         favorited_at: Date | null;
       }>(`
-        SELECT om.membership_id, d.title, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash,
+        SELECT om.membership_id, d.title, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash, v.content_size_bytes,
                d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at
           FROM draft_document d
           JOIN private_workspace w ON w.workspace_id = d.workspace_id
@@ -2755,15 +2869,17 @@ export class ArdenRepository implements ArdenDataRepository {
         sourceUri: current.source_uri,
         mimeType: current.mime_type,
         contentHash: current.content_hash,
+        contentSizeBytes: current.content_size_bytes,
       };
       await client.query(`
         UPDATE draft_document
            SET title = $2, current_version_no = $3, updated_at = now()
          WHERE draft_id = $1`, [draftId, title, version]);
       const versionResult = await client.query<{ draft_version_id: string }>(`
-        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash, current.membership_id]);
+        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash,
+        source.contentSizeBytes ?? null, current.membership_id]);
       const versionId = versionResult.rows[0]?.draft_version_id;
       if (!versionId) throw new Error("Draft version insert returned no row");
       await this.appendAudit(client, organizationId, current.membership_id, "PRIVATE_DRAFT_UPDATED", draftId, version, requestId);
@@ -2794,9 +2910,9 @@ export class ArdenRepository implements ArdenDataRepository {
   private async findPrivateContributionSource(client: PoolClient, userId: string, organizationId: string, sourceVersionId: string): Promise<PrivateContributionSource | null> {
     const result = await client.query<{
       draft_version_id: string; membership_id: string; title: string;
-      source_uri: string; mime_type: string; content_hash: string;
+      source_uri: string; mime_type: string; content_hash: string; content_size_bytes: number | null;
     }>(`
-      SELECT v.draft_version_id, om.membership_id, d.title, v.source_uri, v.mime_type, v.content_hash
+      SELECT v.draft_version_id, om.membership_id, d.title, v.source_uri, v.mime_type, v.content_hash, v.content_size_bytes
         FROM draft_version v
         JOIN draft_document d ON d.draft_id = v.draft_id
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
@@ -2815,6 +2931,7 @@ export class ArdenRepository implements ArdenDataRepository {
       sourceUri: row.source_uri,
       mimeType: row.mime_type,
       contentHash: row.content_hash,
+      contentSizeBytes: row.content_size_bytes,
     } : null;
   }
 
@@ -2956,7 +3073,8 @@ export class ArdenRepository implements ArdenDataRepository {
 }
 
 export type DraftCursor = { updatedAt: string; draftId: string };
-export type StoredContentFields = { sourceUri: string; mimeType: "text/plain" | "application/pdf"; contentHash: string };
+export type StoredContentFields = { sourceUri: string; mimeType: "text/plain" | "application/pdf";
+  contentHash: string; contentSizeBytes?: number | null };
 
 function organizationSlug(name: string): string {
   const base = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()

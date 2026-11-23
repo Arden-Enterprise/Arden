@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from "pg";
 import type { IndexGenerationJob, IndexGenerationManifest } from "./contracts.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { assertIndexGenerationJob, IndexGenerationSupersededError } from "./contracts.js";
 
 type ClaimedJobRow = {
@@ -17,6 +18,7 @@ type ClaimedJobRow = {
 
 export interface IndexGenerationStore {
   claim(workerId: string, leaseSeconds: number): Promise<IndexGenerationJob | null>;
+  recordUsage(job: IndexGenerationJob, workerId: string, events: ProviderUsageEvent[]): Promise<void>;
   complete(job: IndexGenerationJob, workerId: string, manifest: IndexGenerationManifest): Promise<string>;
   fail(job: IndexGenerationJob, workerId: string, errorCode: string, retryable: boolean): Promise<"PENDING" | "FAILED">;
 }
@@ -57,6 +59,14 @@ export class PgIndexGenerationStore implements IndexGenerationStore {
       const id = result.rows[0]?.published_version_id;
       if (!id) throw new Error("Index activation returned no publication id");
       return id;
+    });
+  }
+
+  async recordUsage(job: IndexGenerationJob, workerId: string, events: ProviderUsageEvent[]): Promise<void> {
+    if (!events.length) return;
+    await this.transaction(async client => {
+      await client.query("SELECT record_index_ai_usage($1, $2, $3::jsonb)",
+        [job.jobId, workerId, JSON.stringify(events)]);
     });
   }
 

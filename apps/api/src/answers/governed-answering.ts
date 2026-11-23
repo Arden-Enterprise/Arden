@@ -8,7 +8,7 @@ import { evidenceMatchesManifest, GovernedAnswerError, parseGenerationResponse, 
   type DialogueTurn, type Evidence, type EvidenceReference, type PublicCitation, type StoredAnswer, type VersionScope } from "./governed-contracts.js";
 
 type AnswerInput = { conversationId: string; requestId: string; expectedRevision: number; query: string; versionScope: VersionScope };
-type AnswerRepository = Pick<ArdenDataRepository, "conversations" | "getTargetReaderActor" | "listAuthorizedAiSources">;
+type AnswerRepository = Pick<ArdenDataRepository, "conversations" | "getTargetReaderActor" | "listAuthorizedAiSources" | "recordAiUsageEvents">;
 export type ConversationView = Omit<Conversation, "turns"> & { turns: Array<Omit<ConversationTurn, "evidence" | "status"> & {
   status: ConversationTurn["status"] | "UNAVAILABLE" }> };
 const unavailable = () => new GovernedAnswerError("ACCESS_CHANGED");
@@ -113,6 +113,9 @@ export class GovernedAnswering {
         requestId: input.requestId, organizationId: organization, query: input.query,
         allowedGenerationIds: before.map((source) => source.generationId), history: context.history,
         sourceHints: before.map((source) => ({ generationId: source.generationId, label: sourceLabel(source) })) }), input.requestId);
+      if (!await this.repository.recordAiUsageEvents(user, organization, input.requestId, retrieval.usageEvents)) {
+        throw new Error("AI retrieval usage could not be recorded");
+      }
       const references: EvidenceReference[] = retrieval.evidence.map((chunk) => {
         const source = before.find((source) => source.generationId === chunk.generationId);
         if (!source) throw unavailable();
@@ -134,6 +137,9 @@ export class GovernedAnswering {
           requestId: input.requestId, organizationId: organization, query: retrieval.standaloneQuery,
           history: context.history, evidence };
         const generated = parseGenerationResponse(await ai.generate(request), request);
+        if (!await this.repository.recordAiUsageEvents(user, organization, input.requestId, generated.usageEvents)) {
+          throw new Error("AI generation usage could not be recorded");
+        }
         if (!await this.referencesAvailable(user, organization, allReferences, input.versionScope)) throw unavailable();
         const citations: PublicCitation[] = generated.citations.map((citation) => {
           const chunk = evidence.find((chunk) => chunk.chunkId === citation.chunkId)!;

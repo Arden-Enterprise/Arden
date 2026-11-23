@@ -1,11 +1,13 @@
 import type { ReaderSourceResponse } from "./contracts.js";
+import { parseUsageEvents, usageContractVersion, type ProviderUsageEvent } from "../answers/usage-contracts.js";
 
 export type SummaryKind = "KEY_POINT" | "STEP" | "CONDITION" | "EXCEPTION";
 export type SummaryPoint = { kind: SummaryKind; text: string; citations: Array<{ chunkId: string; quote: string }> };
 export type ReaderSummaryResponse = Pick<ReaderSourceResponse, "contractVersion" | "purpose" | "requestId"
   | "organizationId" | "publishedVersionId" | "generationId" | "snapshotVersionId" | "snapshotContentHash"
   | "markdownContentHash" | "chunksDigest"> & { status: "COMPLETED"; points: SummaryPoint[];
-    coverage: Array<{ startOffset: number; endOffset: number }>; usedChunkIds: string[] };
+    coverage: Array<{ startOffset: number; endOffset: number }>; usedChunkIds: string[];
+    usageContractVersion: 1; usageEvents: ProviderUsageEvent[] };
 
 export class ReaderSummaryError extends Error {
   constructor(readonly code: "INVALID_SUMMARY" | "UNSUPPORTED" | "BUSY" | "UNAVAILABLE" | "TIMEOUT" | "PROVIDER_BUSY" | "PROVIDER_AUTH",
@@ -26,7 +28,7 @@ function boundedText(value: unknown, maximum: number): string {
 export function parseReaderSummary(value: unknown, source: ReaderSourceResponse): ReaderSummaryResponse {
   const identity = ["contractVersion", "purpose", "requestId", "organizationId", "publishedVersionId", "generationId",
     "snapshotVersionId", "snapshotContentHash", "markdownContentHash", "chunksDigest"] as const;
-  const row = record(value, [...identity, "status", "points", "coverage", "usedChunkIds"]);
+  const row = record(value, [...identity, "status", "points", "coverage", "usedChunkIds", "usageContractVersion", "usageEvents"]);
   if (identity.some(key => row[key] !== source[key]) || row.status !== "COMPLETED") return invalid();
   if (!Array.isArray(row.coverage) || !row.coverage.length || row.coverage.length > 8) return invalid();
   let end = 0;
@@ -56,7 +58,9 @@ export function parseReaderSummary(value: unknown, source: ReaderSourceResponse)
     });
     return { kind, text: boundedText(point.text, 350), citations };
   });
-  return { contractVersion: 1, purpose: "READER_SUMMARY", requestId: source.requestId,
+  usageContractVersion(row.usageContractVersion);
+  const usageEvents = parseUsageEvents(row.usageEvents, ["READER_SUMMARY"]);
+  return { contractVersion: 1, purpose: "READER_SUMMARY", usageContractVersion: 1, usageEvents, requestId: source.requestId,
     organizationId: source.organizationId, publishedVersionId: source.publishedVersionId, generationId: source.generationId,
     snapshotVersionId: source.snapshotVersionId, snapshotContentHash: source.snapshotContentHash,
     markdownContentHash: source.markdownContentHash, chunksDigest: source.chunksDigest,

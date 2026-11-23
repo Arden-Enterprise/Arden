@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { CitedAnswer } from "../ask-arden/CitedAnswer";
+import { ApiError, submitAiAnswerFeedback } from "../shared/api-client";
 import { askReaderQuestion, type ReaderAnswer } from "../shared/reader-question-api";
 import { Icon } from "../shared/Icon";
 import { useReaderOperation, type ReaderOperationOptions } from "./useReaderOperation";
@@ -9,15 +10,28 @@ import { ReaderAiGenerated } from "./ReaderAiPanel";
 export function ReaderQuestionPanel({ id, labelledBy, options, access }: { id: string; labelledBy: string;
   options: ReaderOperationOptions; access: ReaderAccessSession }) {
   const fieldId = useId(), [query, setQuery] = useState(""), [submitted, setSubmitted] = useState("");
+  const [feedback, setFeedback] = useState<"POSITIVE" | "NEGATIVE" | "SAVING" | null>(null);
+  const [feedbackError, setFeedbackError] = useState(false);
   const operation = useReaderOperation<ReaderAnswer, string>(options, access, {
     label: "Document Q&A", busyRetrySeconds: 10,
     run: (config, input, signal) => askReaderQuestion(config.platform, config.context, input, signal),
   });
   const { state } = operation, waiting = state.status === "loading" || state.status === "checking";
+  const rateAnswer = async (rating: "POSITIVE" | "NEGATIVE") => {
+    if (!state.result || feedback) return;
+    setFeedback("SAVING"); setFeedbackError(false);
+    try {
+      await submitAiAnswerFeedback(options.platform, options.context.organizationId, state.result.requestId, rating);
+      setFeedback(rating);
+    } catch (error) {
+      setFeedback(null);
+      setFeedbackError(!(error instanceof ApiError && error.status === 404));
+    }
+  };
   if (options.visible === false) return null;
   const submit = () => {
     if (!query.trim() || waiting) return;
-    options.onCitation(null); setSubmitted(query); void operation.open(query);
+    options.onCitation(null); setSubmitted(query); setFeedback(null); setFeedbackError(false); void operation.open(query);
   };
   const showQuestion = Boolean(submitted) && state.status !== "closed";
   return <section id={id} role="tabpanel" className="reader-ai-body reader-ai-ask" aria-labelledby={labelledBy}>
@@ -37,6 +51,13 @@ export function ReaderQuestionPanel({ id, labelledBy, options, access }: { id: s
               <button className="reader-ai-source" key={index} type="button" aria-label={`View answer source ${index + 1}`}
                 onClick={() => void operation.navigate(citation)}>{citation.page ? `p. ${citation.page}` : "Source"}</button>)}</div>
           </>}
+        <div className="ask-answer-feedback" aria-label="Rate this answer">
+          <span>{feedbackError ? "Feedback could not be saved." : feedback === "POSITIVE" || feedback === "NEGATIVE" ? "Thanks for your feedback." : "Was this helpful?"}</span>
+          <button type="button" disabled={Boolean(feedback)} aria-pressed={feedback === "POSITIVE"}
+            onClick={() => void rateAnswer("POSITIVE")}>{feedback === "SAVING" ? "Saving…" : "Yes"}</button>
+          <button type="button" disabled={Boolean(feedback)} aria-pressed={feedback === "NEGATIVE"}
+            onClick={() => void rateAnswer("NEGATIVE")}>No</button>
+        </div>
         <p className="sr-only" role="status">Answer ready.</p>
       </div>}
     </div>

@@ -11,6 +11,17 @@ export function ChatMessages({ chat }: { chat: ArdenChat }) {
       <div className="ask-message-body">{message.role === "assistant" && message.citations?.length
         ? <CitedAnswer body={message.body} citations={message.citations} onOpen={(citation) => chat.showSources(message.id, citation)} />
         : <p>{message.body}</p>}</div>
+      {message.role === "assistant" && message.requestId && !message.unavailable && <div className="ask-answer-feedback" aria-label="Rate this answer">
+        <span>Was this helpful?</span>
+        <button type="button" disabled={Boolean(chat.feedback[message.id])}
+          aria-pressed={chat.feedback[message.id] === "POSITIVE"} onClick={() => void chat.rateAnswer(message.id, message.requestId!, "POSITIVE")}>
+          {chat.feedback[message.id] === "SAVING" ? "Saving…" : "Yes"}
+        </button>
+        <button type="button" disabled={Boolean(chat.feedback[message.id])}
+          aria-pressed={chat.feedback[message.id] === "NEGATIVE"} onClick={() => void chat.rateAnswer(message.id, message.requestId!, "NEGATIVE")}>
+          No
+        </button>
+      </div>}
     </article>)}
     {chat.pending && <div className="ask-answer-pending" role="status"><span />Searching documents…</div>}
   </section>;

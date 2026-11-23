@@ -66,6 +66,9 @@ const audienceGroupRemovePath = new RegExp(`^/api/v1/organizations/${uuid}/audie
 const audienceGroupDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/deactivate$`);
 const systemAdministratorCollection = /^\/api\/v1\/system\/administrators$/;
 const systemAdministratorRevoke = new RegExp(`^/api/v1/system/administrators/${uuid}/revoke$`);
+const systemAdministratorCapability = new RegExp(`^/api/v1/system/administrators/${uuid}$`);
+const systemConsoleRead = new RegExp(`^/api/v1/system/(overview|organizations|organizations/${uuid}|reports/(knowledge|ai-usage|contributions|feedback|quality)|health)$`);
+const aiAnswerFeedback = new RegExp(`^/api/v1/organizations/${uuid}/ai/feedback$`);
 const invitationPreview = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}$/;
 const notificationCollection = new RegExp(`^/api/v1/organizations/${uuid}/notifications$`);
 const notificationRead = new RegExp(`^/api/v1/organizations/${uuid}/notifications/${uuid}/read$`);
@@ -206,6 +209,14 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const systemAdministrationRevoke = systemAdministratorRevoke.test(url.pathname) && request.method === "POST"
     && request.body === "{}" && !request.ifMatch && !request.idempotencyKey;
+  const systemAdministrationCapability = systemAdministratorCapability.test(url.pathname) && request.method === "PATCH"
+    && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
+  const systemConsoleQueryKeys = new Set(["from", "to", "search", "status", "page", "pageSize", "organizationId"]);
+  const systemConsoleGet = systemConsoleRead.test(url.pathname) && request.method === "GET"
+    && !request.body && !request.ifMatch && !request.idempotencyKey
+    && [...url.searchParams.keys()].every(key => systemConsoleQueryKeys.has(key));
+  const aiFeedback = aiAnswerFeedback.test(url.pathname) && request.method === "POST"
+    && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const adminPost = (adminCreatePath.test(url.pathname) || adminMemberDepartmentPath.test(url.pathname))
     && request.method === "POST" && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const adminAction = ((adminInvitationActionPath.test(url.pathname) && !request.body)
@@ -213,7 +224,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && request.method === "POST" && !request.ifMatch && !request.idempotencyKey;
   const accountPost = (url.pathname === "/api/v1/auth/sign-up" || url.pathname === "/api/v1/organizations"
     || url.pathname === "/api/v1/invitations/accept" || url.pathname === "/api/v1/auth/password"
-    || url.pathname === "/api/v1/auth/change-password") && request.method === "POST"
+    || url.pathname === "/api/v1/auth/change-password" || url.pathname === "/api/v1/account/profile") && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const invitationGet = invitationPreview.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
@@ -265,9 +276,10 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || maintenanceImportPost || maintenanceList || maintenanceCreate || maintenanceRead || maintenanceWrite
-    || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke
+    || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke || systemAdministrationCapability
+    || systemConsoleGet || aiFeedback
     || notificationsGet || notificationReadRequest || notificationReadAllRequest)
-    && (!url.search || queryAllowed || catalogQuery || notificationsGet || publicationScopeQuery || maintenanceList || maintenanceRead || closedReports);
+    && (!url.search || queryAllowed || catalogQuery || notificationsGet || publicationScopeQuery || maintenanceList || maintenanceRead || closedReports || systemConsoleGet);
 }
 
 function notificationQuery(url: URL): boolean {

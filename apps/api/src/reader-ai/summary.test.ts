@@ -28,6 +28,7 @@ function harness() {
     targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] }, publishedAt: new Date(0), validFrom: new Date(0), validUntil: null };
   const repository = { getTargetReaderActor: vi.fn(async () => ({ membershipId: id(11), organizationId: org,
     status: "ACTIVE" as const, departmentIds: [] })), getPublishedKnowledge: vi.fn(async () => publication as PublishedKnowledge | null),
+    recordAiUsageEvents: vi.fn(async () => true),
     readerSources: { resolve: vi.fn(async () => record as ReaderSourceRecord | null) } };
   const storage = { read: vi.fn(async () => input.request.snapshot.snapshotContent!), readPdf: vi.fn(async () => Buffer.alloc(0)) };
   const ai = { prepareReaderSource: vi.fn(async (_request: ReaderSourceRequest) => structuredClone(input.response) as unknown),
@@ -260,7 +261,8 @@ describe("Summary reliability: per-document admission and in-flight recovery", (
     expect(h.ai.summarizeReaderSource).toHaveBeenCalledOnce(); expect(h.storage.read).toHaveBeenCalledOnce();
     expect(a.requestId).toBe(h.input.response.requestId); expect(b.requestId).toBe(id(99));
     expect(b.points).toEqual(a.points); expect(b.points).not.toBe(a.points);
-    expect(() => parsePublicReaderSummary(b, { organizationId: h.input.response.organizationId,
+    const { usageRequestId: _usageRequestId, usageEvents: _usageEvents, ...publicSummary } = b;
+    expect(() => parsePublicReaderSummary(publicSummary, { organizationId: h.input.response.organizationId,
       documentId: h.record.documentId, versionId: h.record.publishedVersionId,
       contentHash: h.record.source.snapshotContentHash }, id(99))).not.toThrow();
     await expect(h.run()).rejects.toMatchObject({ code: "BUSY", reason: "COOLDOWN" });

@@ -86,7 +86,8 @@ export function registerHomeHttpVerification(context: () => Context) {
       const store = new PgIndexGenerationStore(context().pool), worker = randomUUID();
       const job = await store.claim(worker, 90);
       if (!job) throw new Error("Missing approved worker job");
-      const manifest: IndexGenerationManifest = { contractVersion: 1, jobId: job.jobId, generationId: job.generationId,
+      const manifest: IndexGenerationManifest = { contractVersion: 1, usageContractVersion: 1, usageEvents: [],
+        jobId: job.jobId, generationId: job.generationId,
         snapshotVersionId: job.snapshotVersionId, snapshotContentHash: job.snapshotContentHash,
         compilerVersion: "semantic-markdown-v1", chunkingVersion: "langchain-section-token-v1",
         embeddingModel: "text-embedding-3-small", embeddingDimensions: 1536,
@@ -140,7 +141,8 @@ export function registerHomeHttpVerification(context: () => Context) {
         async summarizeReaderSource(source) {
           summaryCalls++; await duringSummary?.();
           const { compilerVersion: _compiler, chunkingVersion: _chunker, markdown: _markdown, chunks: _chunks, ...identity } = source;
-          return { ...identity, status: "COMPLETED", coverage: [{ startOffset: 0, endOffset: text.length }],
+          return { ...identity, usageContractVersion: 1, usageEvents: [], status: "COMPLETED",
+            coverage: [{ startOffset: 0, endOffset: text.length }],
             usedChunkIds: source.chunks.map(chunk => chunk.chunkId), points: [{ kind: "KEY_POINT", text,
               citations: [{ chunkId: source.chunks[0].chunkId, quote: text }] }] };
         },
@@ -152,13 +154,15 @@ export function registerHomeHttpVerification(context: () => Context) {
           const manifest = manifests.get(request.allowedGenerationIds[0]);
           if (!manifest) throw new Error("Unexpected retrieval generation");
           const { ordinal: _ordinal, ...chunk } = manifest.chunks[0];
-          return { contractVersion: 2, requestId: request.requestId, standaloneQuery: request.query, retrievalMode: "HYBRID",
+          return { contractVersion: 2, usageContractVersion: 1, usageEvents: [], requestId: request.requestId,
+            standaloneQuery: request.query, retrievalMode: "HYBRID",
             evidence: [{ ...chunk, content: text, label: "synthetic", generationId: manifest.generationId,
               snapshotVersionId: manifest.snapshotVersionId, snapshotContentHash: manifest.snapshotContentHash }] };
         },
         async generate(request) {
           await duringAnswer?.();
-          return { contractVersion: 2, requestId: request.requestId, status: "ANSWERED", answer: text,
+          return { contractVersion: 2, usageContractVersion: 1, usageEvents: [], requestId: request.requestId,
+            status: "ANSWERED", answer: text,
             usedEvidence: request.evidence.map(item => item.chunkId), citations: [{ chunkId: request.evidence[0].chunkId, quote: text }] };
         },
       };

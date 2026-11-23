@@ -260,6 +260,9 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/administrators", method: "POST", body: JSON.stringify({ userId: sourcePrivateVersionId }) }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}/revoke`, method: "POST", body: "{}" }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}/revoke`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}`, method: "PATCH", body: JSON.stringify({ canManageSystemAdmins: true }) }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/reports/ai-usage?from=2026-01-01&to=2026-01-31", method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/health?secret=1", method: "GET" }), false);
   });
 
   it("allows only a single explicit publication scope on the published list", () => {
