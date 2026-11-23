@@ -764,24 +764,30 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     if (!active || view !== "knowledge" || !citationTarget || openedCitationId.current === citationTarget.navigationId) return;
     openedCitationId.current = citationTarget.navigationId;
     let present = true;
-    let loading = true;
-    setBusy(true); setError("");
-    void loadPublishedKnowledge(platform, organizationId, citationTarget.versionId)
-      .then((loaded) => {
-        if (!present) return;
-        if (loaded.id !== citationTarget.versionId) throw new Error("citation-version-mismatch");
-        setLibraryTab(loaded.targetReaders?.mode === "ORGANIZATION" ? "organization"
-          : loaded.targetReaders == null ? "other" : "shared");
-        setOrganizationView("all");
-        setOpenedCitation("documentId" in citationTarget ? citationTarget : null);
-        setDocument(loaded); setScreen("document");
-      })
-      .catch(() => {
-        if (!present) return;
-        setOpenedCitation(null);
-        setError("Source unavailable.");
-      })
-      .finally(() => { loading = false; if (present) setBusy(false); });
+    let loading = false;
+    const open = () => {
+      if (!present) return;
+      loading = true;
+      setBusy(true); setError("");
+      void loadPublishedKnowledge(platform, organizationId, citationTarget.versionId)
+        .then((loaded) => {
+          if (!present) return;
+          if (loaded.id !== citationTarget.versionId) throw new Error("citation-version-mismatch");
+          setLibraryTab(loaded.targetReaders?.mode === "ORGANIZATION" ? "organization"
+            : loaded.targetReaders == null ? "other" : "shared");
+          setOrganizationView("all");
+          setOpenedCitation("documentId" in citationTarget ? citationTarget : null);
+          setDocument(loaded); setScreen("document");
+        })
+        .catch(() => {
+          if (!present) return;
+          setOpenedCitation(null);
+          setError("Source unavailable.");
+        })
+        .finally(() => { loading = false; if (present) setBusy(false); });
+    };
+    if ("kind" in citationTarget && unsaved) setDiscardAction(() => open);
+    else open();
     return () => {
       present = false;
       if (loading) { openedCitationId.current = null; setBusy(false); }

@@ -103,7 +103,8 @@ The new share-notification migration is 0061; applied migration history is uncha
 Share targets carry the currently authorized publication ID. Opening a notice loads
 that exact publication through the existing reader authorization and selects the
 Organization or Shared with me tab from the returned reader policy. Revoked targets
-remain redacted and cannot open document content.
+remain redacted and cannot open document content. Notification navigation also
+uses the discard confirmation when a contribution or review note is unsaved.
 
 The release inventory has 61 operator-reviewed/history entries. The ownership
 rehearsal expects 48 trusted routines and the recovery inventory explicitly matches

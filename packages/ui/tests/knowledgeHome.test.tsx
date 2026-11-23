@@ -10,7 +10,11 @@ import { emptyLibraryFilters, filterLibrary } from "../src/knowledge/KnowledgeLi
 
 vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({ ArdenDocumentView: () => createElement("p", null, "Exact document content"), ArdenRichTextEditor: () => null }));
 vi.mock("../src/shared/WorkspaceTopbar", () => ({ WorkspaceTopbar: ({ search }: { search?: ReactNode }) => search ?? null }));
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => {
+  cleanup(); vi.restoreAllMocks();
+  Reflect.deleteProperty(HTMLDialogElement.prototype, "showModal");
+  Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
+});
 
 const common: api.PublishedKnowledge = { id: "common-version", draftId: "common-doc", title: "Common working guide", classification: "INTERNAL",
   targetReaders: { mode: "ORGANIZATION", departmentId: null }, responsibleDepartmentId: "finance", responsibleDepartmentName: "Finance",
@@ -41,6 +45,25 @@ const tab = (name: RegExp) => screen.getByRole("tab", { name });
 const read = (title: string) => screen.queryByRole("button", { name: `Read ${title}` });
 
 describe("Home source contract", () => {
+  it("keeps an unsaved contribution when cancelling a share notification navigation", async () => {
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", { configurable: true,
+      value: function (this: HTMLDialogElement) { this.open = true; } });
+    Object.defineProperty(HTMLDialogElement.prototype, "close", { configurable: true,
+      value: function (this: HTMLDialogElement) { this.open = false; } });
+    setup();
+    const page = render(createElement(ServerKnowledgeFeaturePage, props));
+    fireEvent.click(await screen.findByRole("button", { name: "Create from PDF" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved contribution" } });
+    const target = { kind: "publication" as const, versionId: selected.id, navigationId: "guarded-share" };
+    page.rerender(createElement(ServerKnowledgeFeaturePage, { ...props, citationTarget: target }));
+    expect(await screen.findByRole("heading", { name: "Discard changes?" })).toBeTruthy();
+    expect(api.loadPublishedKnowledge).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Keep working" }));
+    expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("Unsaved contribution");
+    page.rerender(createElement(ServerKnowledgeFeaturePage, { ...props, citationTarget: { ...target, navigationId: "confirmed-share" } }));
+    fireEvent.click(await screen.findByRole("button", { name: "Discard changes" }));
+    await waitFor(() => expect(api.loadPublishedKnowledge).toHaveBeenCalledWith("web", "org", selected.id));
+  });
   it.each([department, selected])("opens a share notification at its exact document and returns to Shared: $title", async (publication) => {
     setup();
     render(createElement(ServerKnowledgeFeaturePage, { ...props, citationTarget: {
