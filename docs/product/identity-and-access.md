@@ -84,6 +84,24 @@ Scope: an actor's own organization-scoped notes; sharing creates a different obj
 | F03-AC2 | Unsaved navigation, failed save, stale version and concurrent edits produce explicit states without silent overwrite/loss; one note's draft does not overwrite another. | UI/API/conflict evidence must be linked per changed behavior. |
 | F03-AC3 | Switching identity, session expiry or membership revocation removes inaccessible data/context from web and desktop; contribution does not expose the original. | End-to-end acceptance not certified by this inventory. |
 
+### F03-ORG Collections, favorites and trash
+
+- Spec revision/date: 1 / 2026-11-23. Decision state: accepted ([ADR 0029](../decisions/0029-private-notes-organization-and-trash.md)). Originator and decision owner: requesting project maintainer (canvas review and answers on 2026-11-23). Record author: coding agent. Linear ARD-83. Baseline `origin/staging` 990ee1c.
+- Delivery: in progress on `feat/private-notes-collections`; not merged or deployed. Evidence 2026-11-23 (local, uncommitted): migrations 0001–0062 applied with `db:migrate --local-full` to a disposable `arden_test_*` PostgreSQL 17 database; the F03-ORG RLS integration case (owner-only access, cycle trigger, trash/restore, retention purge to tombstones) passes; full API suite with PostgreSQL 607 passed, 1 failed (the KM catalog validator-grant case, which fails identically on unmodified staging 990ee1c), 1 skipped; UI 515 passed; 8/8 Maestro web flows pass in demo mode. Not obtained: production-ownership handoff rehearsal, real-backend browser E2E, Electron. API contract: [private notes organization API](../features/private-notes-organization/API.md).
+
+Scope: Private Notes becomes a tree inside the main sidebar (no second sidebar): Favorites first, then collections (nestable), then notes without a collection. Hover `···` on a row and the note header `···` offer Add to/Remove from favorites, Duplicate, Rename, Move to and Move to trash. A collection row also offers `+` (new note inside); the Private Notes header offers New collection and New note. The note header has a star toggle; the sidebar shows no star. The account button at the bottom-left opens a menu with Settings, Trash and Log out. Trash lists batches with Restore and Delete permanently and states the 30-day retention. Out of scope: sharing collections, AI over private notes, file upload.
+
+| Acceptance ID | Complete path to verify | Evidence / remaining |
+| --- | --- | --- |
+| F03-ORG-AC1 | Collections, favorites and trash are owner-only: another member, Org Admin or System Admin gets 404 and sees no metadata. | Pending: API tests and RLS integration test. |
+| F03-ORG-AC2 | Create, rename, nest and move collections; move notes between collections and root; moving a collection into itself or a descendant is rejected. | Pending. |
+| F03-ORG-AC3 | Favorite/unfavorite a note or collection; it appears in Favorites at the top and stays in its collection; state survives reload. | Pending. |
+| F03-ORG-AC4 | Duplicate a note (new content object, "(copy)" title) and a collection (whole subtree). | Pending. |
+| F03-ORG-AC5 | Move to trash hides the item and its subtree; trashed notes cannot be opened, edited or contributed; Restore returns them (to root if the parent is gone). | Pending. |
+| F03-ORG-AC6 | Delete permanently, and the hourly job for batches older than 30 days, erase content objects and leave only a tombstone; purged items never appear again. | Pending. |
+| F03-ORG-AC7 | Rename keeps the existing If-Match conflict handling (F03-AC2); network or server failure in any action shows an explicit error and leaves the tree consistent after refresh. | Pending. |
+| F03-ORG-AC8 | Sidebar tree, menus, account menu and Trash page work by keyboard and on narrow widths in web and desktop. | Pending; desktop allow-list update required. |
+
 ## F04 Published audiences
 
 Scope: organization/department managed audiences and Org Admin-managed groups; readership remains distinct from administration and review. Main decision 0010 supersedes the older configurable role-based reader model.
