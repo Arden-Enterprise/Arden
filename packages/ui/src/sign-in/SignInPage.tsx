@@ -11,6 +11,7 @@ import {
   type CurrentSession,
 } from "../shared/api-client";
 import { AuthLayout } from "./AuthLayout";
+import { GoogleMark } from "./GoogleMark";
 import { NewPasswordField, accountPasswordRequirementMessage } from "./NewPasswordField";
 import { UnconfirmedEmailDialog } from "./UnconfirmedEmailDialog";
 import { VisiblePasswordField } from "./VisiblePasswordField";
@@ -479,7 +480,7 @@ export function SignInPage({
                 onClick={handleGoogle}
                 disabled={busy !== null}
               >
-                <i className="auth-google-mark fi fi-brands-google" aria-hidden="true" />
+                <GoogleMark />
                 {busy === "google" ? "Opening Google..." : "Continue with Google"}
               </button>
             </>

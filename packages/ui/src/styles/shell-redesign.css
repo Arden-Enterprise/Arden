@@ -86,7 +86,7 @@
   .topbar-breadcrumb li + li::before { content: none; }
   .topbar-menu-button { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border: 1px solid var(--arden-line); border-radius: 5px; color: var(--arden-text-primary); background: transparent; font-size: 20px; }
   .topbar-actions { width: auto; gap: 8px; }
-  .topbar-search, .arden-app-shell .preview-state { display: none; }
+  .arden-app-shell .preview-state { display: none; }
   .context-toggle { width: 36px; min-height: 36px; padding: 0; justify-content: center; }
   .context-toggle span { display: none; }
 }

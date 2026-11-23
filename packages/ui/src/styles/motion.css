@@ -7,16 +7,8 @@
   --arden-shadow-hover: 0 9px 22px rgb(8 10 12 / 24%), inset 0 1px rgb(255 255 255 / 6%);
 }
 
-.my-work-spotlight,
-.knowledge-featured,
-.private-ownership-card {
-  box-shadow: var(--arden-shadow-raised);
-}
-
-.my-work-status-strip > div,
 .knowledge-readiness,
-.knowledge-upload,
-.activity-card {
+.knowledge-upload {
   box-shadow: inset 0 1px rgb(255 255 255 / 4%);
 }
 
@@ -29,7 +21,6 @@
 }
 
 .workspace-search,
-.sign-in-card input,
 .knowledge-metadata input,
 .knowledge-metadata select,
 .organization-field input,
@@ -45,7 +36,6 @@
   box-shadow: 0 0 0 3px var(--arden-accent-subtle);
 }
 
-.sign-in-card input:focus,
 .knowledge-metadata input:focus,
 .knowledge-metadata select:focus,
 .organization-field input:focus,
@@ -58,13 +48,8 @@
 .secondary-button,
 .context-toggle,
 .sidebar-nav-item,
-.my-work-queue-row,
-.my-work-published-row,
 .knowledge-row,
-.knowledge-featured,
-.workspace-membership,
 .note-list > button,
-.organization-department-nav > button,
 .organization-tabs button,
 .knowledge-scope-options label,
 .maintenance-queue-row {
@@ -82,53 +67,32 @@
     box-shadow var(--arden-motion-quick) ease;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .knowledge-featured:hover:not(:disabled),
-  .workspace-membership:hover:not(:disabled) {
-    box-shadow: var(--arden-shadow-hover);
-  }
-}
-
 button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item):active:not(:disabled) {
   transform: scale(.97);
 }
 
-button:is(.my-work-queue-row, .my-work-published-row, .knowledge-row, .knowledge-featured,
-  .workspace-membership, .maintenance-queue-row):active:not(:disabled),
 .note-list > button:active:not(:disabled) {
   transform: scale(.985);
 }
 
-.my-work-queue-row:focus-visible,
 .knowledge-row:focus-visible,
-.knowledge-featured:focus-visible,
-.workspace-membership:focus-visible,
 .note-list > button:focus-visible {
   border-color: var(--arden-accent);
   background: var(--arden-elevated);
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  .sign-in-welcome-copy,
-  .sign-in-card,
   .workspace-page-header,
-  .my-work-content .my-work-status-strip,
-  .my-work-spotlight,
-  .my-work-content .my-work-activity-grid,
   .knowledge-feature-page > :nth-child(2),
   .knowledge-feature-page > :nth-child(3) {
     animation: arden-rise-in 280ms var(--arden-motion-ease) both;
   }
 
-  .my-work-content .my-work-status-strip,
   .knowledge-feature-page > :nth-child(2) { animation-delay: 45ms; }
-  .my-work-spotlight,
   .knowledge-feature-page > :nth-child(3) { animation-delay: 90ms; }
-  .my-work-content .my-work-activity-grid { animation-delay: 135ms; }
 
   .knowledge-action-message,
   .organization-feedback,
-  .sign-in-message,
   .organization-notice.is-success,
   .maintenance-enter {
     animation: arden-rise-in 240ms var(--arden-motion-ease) both;

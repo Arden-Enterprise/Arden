@@ -14,6 +14,7 @@ import type { Platform } from "../shared/types";
 import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
 import { ServerAudienceGroupPanel } from "./ServerAudienceGroupPanel";
 import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
+import { libraryDateLabel } from "../knowledge/libraryDisplay";
 import { Icon } from "../shared/Icon";
 import { IslandFilterMenu } from "../shared/IslandFilterMenu";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
@@ -374,7 +375,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                 return <IslandRow key={invitation.id}>
                   <IslandCell className="island-row-cell is-name"><strong className="island-row-title" title={invitation.email}>{invitation.email}</strong></IslandCell>
                   <IslandCell>{departmentName(invitation.departmentId)}</IslandCell>
-                  <IslandCell className="island-row-cell is-number">{state === "PENDING" || state === "EXPIRED" ? new Date(invitation.expiresAt).toLocaleDateString() : "—"}</IslandCell>
+                  <IslandCell className="island-row-cell is-number">{state === "PENDING" || state === "EXPIRED" ? libraryDateLabel(invitation.expiresAt) : "—"}</IslandCell>
                   <IslandCell><span className={`island-chip has-dot ${invitationTone[state]}`}>{titleCase(state)}</span></IslandCell>
                   <IslandCell className="island-row-actions">{state === "PENDING" ? <><button type="button" className="secondary-button" disabled={busy} onClick={() => void perform(async () => {
                     const result = await resendOrganizationInvitation(platform, organizationId, invitation.id);

@@ -29,13 +29,3 @@ export function KnowledgeRow({ title, details, status, tone = "jade", icon = "do
   return onClick ? <button type="button" className="knowledge-row" onClick={onClick}>{content}</button> : <div className="knowledge-row">{content}</div>;
 }
 
-export function KnowledgeConnections() {
-  return <div className="knowledge-connections" role="img" aria-label="Sample connections between the gateway runbook, a decision, an incident, a guide and a draft">
-    <img className="knowledge-connection-lines" src={new URL("./assets/connections.svg", import.meta.url).href} alt="" />
-    <span className="knowledge-node-runbook" /><span className="knowledge-label-runbook">Runbook</span>
-    <img className="knowledge-node-decision" src={new URL("./assets/decision.svg", import.meta.url).href} alt="" /><span className="knowledge-label-decision">Decision</span>
-    <img className="knowledge-node-incident" src={new URL("./assets/incident.svg", import.meta.url).href} alt="" /><span className="knowledge-label-incident">Incident</span>
-    <span className="knowledge-node-guide" /><span className="knowledge-label-guide">Guide</span>
-    <img className="knowledge-node-draft" src={new URL("./assets/draft.svg", import.meta.url).href} alt="" /><span className="knowledge-label-draft">Draft</span>
-  </div>;
-}

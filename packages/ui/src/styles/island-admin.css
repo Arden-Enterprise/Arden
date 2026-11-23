@@ -16,7 +16,6 @@
 .organization-live-admin .admin-feedback { margin: 0; padding: 10px 12px; border: 1px solid var(--arden-success-border); border-radius: 10px; color: var(--arden-success); background: var(--arden-success-subtle); }
 .organization-live-admin .admin-feedback.is-error { border-color: var(--arden-danger-border); color: var(--arden-danger); background: var(--arden-danger-subtle); }
 .organization-live-admin .admin-feedback.is-warning { border-color: var(--arden-warning-border); color: var(--arden-warning); background: var(--arden-warning-subtle); }
-.organization-live-admin .admin-inline-success { margin: 0; color: var(--arden-success); font-size: 13px; }
 .organization-live-admin .admin-loading { padding: 12px 18px; }
 .organization-live-admin .admin-skeleton-row { border-bottom-color: var(--arden-border); }
 .organization-live-admin .admin-skeleton-row > span, .organization-live-admin .admin-skeleton-row > div > span { background: var(--arden-surface-raised); }
@@ -45,7 +44,6 @@
 .admin-grant-tags { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .admin-grant-scope .island-seg { width: 100%; }
 .admin-grant-scope .island-seg > button { flex: 1; }
-.organization-live-admin .admin-scope-preview { margin: 0; padding: 12px 14px; border: 1px solid var(--arden-border); border-radius: 12px; color: var(--arden-text-secondary); background: var(--arden-surface-raised); font-size: 13px; }
 .organization-live-admin .admin-grant-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .arden-app-shell .admin-grant-form { border-color: #1c1c22; border-radius: 10px; background: #141418; box-shadow: none; }
 .arden-app-shell .admin-grant-form .organization-field select,

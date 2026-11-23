@@ -38,6 +38,8 @@ describe("Settings Framework & Dialog", () => {
 
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByRole("button", { name: /account/i })).toBeTruthy();
+    // Opening starts on the dialog, not the active section, so no section shows a focus ring on open.
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
     expect(screen.getByRole("heading", { name: /account settings/i })).toBeTruthy();
     expect(screen.getByText("Lan Nguyen")).toBeTruthy();
   });

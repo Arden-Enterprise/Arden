@@ -5,14 +5,14 @@ import { AccessRules } from "./AccessRules";
 import { DepartmentEditor } from "./OrganizationEditors";
 import { OrganizationDialog } from "./OrganizationDialog";
 import { InviteMemberDialog, InvitationsPanel } from "./InvitationsPanel";
-import { EffectiveAccessPreview, MemberDirectory } from "./MemberDirectory";
+import { EffectiveAccessPreview } from "./EffectiveAccessPreview";
 import { validateOrganization, type OrganizationPreview } from "./previewModel";
 import { AudienceConfigurationPanel } from "./AudienceConfigurationPanel";
 
-type AccessTab = "organization" | "departments" | "members" | "invitations" | "audiences" | "policies" | "audit";
+type AccessTab = "organization" | "departments" | "invitations" | "audiences" | "policies" | "audit";
 const tabs: { id: AccessTab; label: string }[] = [
   { id: "organization", label: "Organization" }, { id: "departments", label: "Departments" },
-  { id: "members", label: "Members" }, { id: "invitations", label: "Invitations" },
+  { id: "invitations", label: "Invitations" },
   { id: "audiences", label: "Audiences" }, { id: "policies", label: "Policies" }, { id: "audit", label: "Audit" },
 ];
 
@@ -53,20 +53,19 @@ export function OrganizationAccessPage({ organization, onChange, onDirtyChange, 
   const selectedMember = organization.members.find((member) => member.id === selectedAccessMember) ?? organization.members[0];
   const pendingCount = (organization.invitations ?? []).filter((invitation) => invitation.status === "pending").length;
   const waitingCount = organization.members.filter((member) => member.status === "pending-assignment").length;
-  const title = tab === "members" ? "Departments & members" : "Organization & access";
+  const title = "Organization & access";
   return <main id="arden-main" className="workspace-page" aria-labelledby="organization-access-title" tabIndex={-1}>
     <WorkspaceTopbar breadcrumb={`${organization.name} / Administration`} previewLabel="SESSION PREVIEW · SYNTHETIC DATA" contextOpen={contextOpen} onToggleContext={onToggleContext} />
     <WorkspacePageContent className="organization-access-content" header={<WorkspacePageHeader
       className="organization-access-heading" eyebrow="ORGANIZATION / GOVERNANCE" title={title}
       titleId="organization-access-title"
-      action={<button type="button" className="primary-button" onClick={() => tab === "members" || tab === "invitations" ? setShowInvite(true) : setTab("departments")}>{tab === "members" || tab === "invitations" ? "Invite member" : "Manage departments"}</button>}
+      action={<button type="button" className="primary-button" onClick={() => tab === "invitations" ? setShowInvite(true) : setTab("departments")}>{tab === "invitations" ? "Invite member" : "Manage departments"}</button>}
     />}>
-      <nav className="organization-tabs" aria-label="Organization and access sections">{tabs.map((item) => <button key={item.id} type="button" className={tab === item.id ? "is-active" : ""} aria-current={tab === item.id ? "page" : undefined} onClick={() => setTab(item.id)}>{item.label}{item.id === "invitations" && pendingCount > 0 ? ` · ${pendingCount}` : item.id === "members" && waitingCount > 0 ? ` · ${waitingCount} waiting` : ""}</button>)}</nav>
+      <nav className="organization-tabs" aria-label="Organization and access sections">{tabs.map((item) => <button key={item.id} type="button" className={tab === item.id ? "is-active" : ""} aria-current={tab === item.id ? "page" : undefined} onClick={() => setTab(item.id)}>{item.label}{item.id === "invitations" && pendingCount > 0 ? ` · ${pendingCount}` : ""}</button>)}</nav>
       <div className="organization-tab-panel">
         <div hidden={tab !== "audiences"}><AudienceConfigurationPanel onDirtyChange={onDirtyChange} members={organization.members} /></div>
         {tab === "audiences" && <><div className="organization-access-selector"><label className="organization-field"><span>Preview effective access for</span><select value={selectedMember?.id ?? ""} onChange={(event) => setSelectedAccessMember(event.target.value)}>{organization.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}</select></label>{selectedMember && onPreviewAccess && <button type="button" className="secondary-button" onClick={() => onPreviewAccess(selectedMember.id)}>Check member access</button>}</div><EffectiveAccessPreview organization={organization} member={selectedMember} /></>}
         {tab === "departments" && <section className="organization-surface"><DepartmentEditor organization={organization} onChange={onChange} /></section>}
-        {tab === "members" && <MemberDirectory organization={organization} onChange={onChange} onPreviewAccess={onPreviewAccess} onDirtyChange={onDirtyChange} />}
         {tab === "invitations" && <section className="organization-surface"><InvitationsPanel organization={organization} onChange={onChange} onPreviewInvitation={onPreviewInvitation} onInvite={() => setShowInvite(true)} /></section>}
         {tab === "organization" && <section className="organization-surface organization-editor-stack"><span className="meta-label organization-jade">INSTALLATION CONTEXT</span><h2>{organization.name}</h2><div className="organization-review-summary"><div><span className="meta-label">DEPARTMENTS</span><strong>{organization.departments.length}</strong></div><div><span className="meta-label">MEMBERS</span><strong>{organization.members.length}</strong></div><div><span className="meta-label">INVITATIONS</span><strong>{pendingCount} pending</strong></div></div><div className="organization-row-actions"><button type="button" className="secondary-button" onClick={() => setShowMetadata(true)}>Edit organization</button>{onOpenSetup && <button type="button" className="secondary-button" onClick={onOpenSetup}>Review setup</button>}</div><div className="organization-notice is-info"><strong>Session preview</strong><span>Configuration is synthetic and held in memory. These forms do not modify a server or create an audit record.</span></div></section>}
         {tab === "policies" && <section className="organization-surface"><AccessRules /></section>}

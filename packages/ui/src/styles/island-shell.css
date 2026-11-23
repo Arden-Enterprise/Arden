@@ -339,7 +339,6 @@
   min-height: var(--arden-control-md); padding: 0 12px; border: 1px solid var(--arden-danger); border-radius: 8px; color: var(--arden-on-accent);
   background: var(--arden-danger); font-size: 13px; font-weight: 600;
 }
-.arden-app-shell .admin-text-danger { min-height: var(--arden-control-sm); border-radius: 8px; color: var(--arden-danger); font-weight: 600; }
 .arden-app-shell .workspace-search {
   height: var(--arden-control-md); padding: 0 10px; border: 1px solid var(--arden-border-strong); border-radius: 8px; background: var(--arden-bg-sidebar);
 }
@@ -441,7 +440,7 @@
 .island-row-cell { display: grid; min-width: 0; color: var(--arden-text-secondary); line-height: 1.35; }
 .island-row-cell > .island-chip { justify-self: start; }
 .island-row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.island-row-actions .secondary-button, .island-row-actions .admin-text-danger { min-height: var(--arden-control-sm); min-width: 68px; padding: 0 10px; font-size: 12px; justify-content: center; text-align: center; }
+.island-row-actions .secondary-button { min-height: var(--arden-control-sm); min-width: 68px; padding: 0 10px; font-size: 12px; justify-content: center; text-align: center; }
 .island-list-footer { display: flex; align-items: center; gap: 12px; padding: 10px 14px 8px; color: var(--arden-text-secondary); font-size: 12px; }
 .island-empty { display: grid; justify-items: center; gap: 8px; padding: 32px 14px; color: var(--arden-text-secondary); text-align: center; }
 .island-empty h3 { margin: 0; color: var(--arden-text-primary); font-size: 15px; }
