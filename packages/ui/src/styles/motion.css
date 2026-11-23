@@ -24,8 +24,7 @@
   box-shadow: inset 2px 0 var(--arden-accent);
 }
 
-.workspace-topbar,
-.knowledge-pane-redesign {
+.workspace-topbar {
   box-shadow: 0 1px 0 rgb(255 255 255 / 3%);
 }
 
@@ -43,7 +42,7 @@
 .workspace-search:focus-within {
   border-color: var(--arden-accent);
   background: var(--arden-elevated);
-  box-shadow: 0 0 0 3px rgb(231 185 112 / 10%);
+  box-shadow: 0 0 0 3px var(--arden-accent-subtle);
 }
 
 .sign-in-card input:focus,
@@ -52,7 +51,7 @@
 .organization-field input:focus,
 .organization-field select:focus {
   border-color: var(--arden-accent);
-  box-shadow: 0 0 0 3px rgb(231 185 112 / 10%);
+  box-shadow: 0 0 0 3px var(--arden-accent-subtle);
 }
 
 .primary-button,
@@ -67,48 +66,37 @@
 .note-list > button,
 .organization-department-nav > button,
 .organization-tabs button,
-.knowledge-scope-options label {
-  transition: transform var(--arden-motion-calm) var(--arden-motion-ease),
+.knowledge-scope-options label,
+.maintenance-queue-row {
+  transition: transform var(--arden-motion-quick) var(--arden-motion-ease),
     background-color var(--arden-motion-quick) ease,
     border-color var(--arden-motion-quick) ease,
     color var(--arden-motion-quick) ease,
     box-shadow var(--arden-motion-calm) var(--arden-motion-ease);
 }
 
-@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
-  .primary-button:hover:not(:disabled),
-  .secondary-button:hover:not(:disabled),
-  .context-toggle:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: var(--arden-shadow-hover);
-  }
+.maintenance-section-switch > button,
+.maintenance-queue .island-seg > button {
+  transition: background-color var(--arden-motion-quick) ease,
+    color var(--arden-motion-quick) ease,
+    box-shadow var(--arden-motion-quick) ease;
+}
 
-  .sidebar-nav-item:hover:not(:disabled) {
-    transform: translateX(3px);
-  }
-
-  .my-work-queue-row:hover:not(:disabled),
-  .my-work-published-row:hover:not(:disabled),
-  button.knowledge-row:hover:not(:disabled),
-  .note-list > button:hover:not(:disabled),
-  .organization-department-nav > button:hover:not(:disabled) {
-    transform: translateX(3px);
-    box-shadow: var(--arden-shadow-hover);
-  }
-
+@media (hover: hover) and (pointer: fine) {
   .knowledge-featured:hover:not(:disabled),
   .workspace-membership:hover:not(:disabled) {
-    transform: translateY(-3px);
     box-shadow: var(--arden-shadow-hover);
   }
 }
 
-button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item,
-  .my-work-queue-row, .my-work-published-row, .knowledge-row, .knowledge-featured,
-  .workspace-membership):active:not(:disabled),
+button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item):active:not(:disabled) {
+  transform: scale(.97);
+}
+
+button:is(.my-work-queue-row, .my-work-published-row, .knowledge-row, .knowledge-featured,
+  .workspace-membership, .maintenance-queue-row):active:not(:disabled),
 .note-list > button:active:not(:disabled) {
-  transform: translateY(1px);
-  box-shadow: none;
+  transform: scale(.985);
 }
 
 .my-work-queue-row:focus-visible,
@@ -128,8 +116,7 @@ button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item
   .my-work-spotlight,
   .my-work-content .my-work-activity-grid,
   .knowledge-feature-page > :nth-child(2),
-  .knowledge-feature-page > :nth-child(3),
-  .knowledge-pane-redesign:not(.is-collapsed) {
+  .knowledge-feature-page > :nth-child(3) {
     animation: arden-rise-in 280ms var(--arden-motion-ease) both;
   }
 
@@ -142,7 +129,8 @@ button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item
   .knowledge-action-message,
   .organization-feedback,
   .sign-in-message,
-  .organization-notice.is-success {
+  .organization-notice.is-success,
+  .maintenance-enter {
     animation: arden-rise-in 240ms var(--arden-motion-ease) both;
   }
 
@@ -161,6 +149,11 @@ button:is(.primary-button, .secondary-button, .context-toggle, .sidebar-nav-item
 @keyframes arden-dialog-in {
   from { opacity: 0; transform: translateY(10px) scale(.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes arden-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {

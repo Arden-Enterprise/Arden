@@ -83,7 +83,8 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
               ? `${item.sharedByName ?? "A colleague"} shared “${item.publicationTitle ?? "a document"}” with ${targetLabel}.`
               : "This notification's item is no longer available.";
             return { id: item.id, type: item.type, message,
-              createdAt: item.createdAt, readAt: item.readAt, ...(visible ? { target: { view: "knowledge" } } : {}) };
+              createdAt: item.createdAt, readAt: item.readAt,
+              ...(visible ? { target: { view: "knowledge", publicationId: item.resourceId } } : {}) };
           }
           return { id: item.id, type: item.type, message: messages[item.type], createdAt: item.createdAt, readAt: item.readAt };
         }),

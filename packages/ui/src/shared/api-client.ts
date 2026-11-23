@@ -3,7 +3,7 @@ import type { KnowledgeMetadata, PublicationScope, KnowledgeType } from "@arden/
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
   departmentId: string | null; memberIds: string[] };
-export type NotificationTarget = { view: "review-queue"; id: string } | { view: "knowledge" };
+export type NotificationTarget = { view: "review-queue"; id: string } | { view: "knowledge"; publicationId?: string };
 export type NotificationItem = {
   id: string;
   type: "REVIEW_REQUESTED" | "REVIEW_APPROVED" | "REVIEW_REJECTED" | "PUBLICATION_ACTIVE"
@@ -440,6 +440,7 @@ export type PublicationReport = {
   createdAt: string; stillCurrent: boolean;
   /** The actor is the responsible reviewer and can open the responsible view. */
   canView: boolean;
+  resolution?: "DISMISSED" | "WITHDRAWN" | null;
 };
 
 export async function listGovernancePublications(platform: Platform, organizationId: string): Promise<GovernancePublication[]> {
@@ -476,6 +477,14 @@ export async function reportPublicationProblem(platform: Platform, organizationI
 
 export async function listPublicationReports(platform: Platform, organizationId: string): Promise<PublicationReport[]> {
   return (await request<{ items: PublicationReport[] }>(platform, `${knowledgePath(organizationId)}/reports`)).items;
+}
+
+export async function listClosedPublicationReports(platform: Platform, organizationId: string, cursor?: string): Promise<{
+  items: PublicationReport[]; nextCursor: string | null;
+}> {
+  const query = new URLSearchParams({ disposition: "closed" });
+  if (cursor) query.set("cursor", cursor);
+  return request(platform, `${knowledgePath(organizationId)}/reports?${query}`);
 }
 
 export async function dismissPublicationReport(platform: Platform, organizationId: string, reportId: string): Promise<void> {

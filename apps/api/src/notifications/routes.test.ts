@@ -137,9 +137,9 @@ describe("notification routes", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().items).toEqual([
       expect.objectContaining({ type: "DOCUMENT_SHARED_PERSONAL",
-        message: "Ava Patel shared “Contract review procedure” with you.", target: { view: "knowledge" } }),
+        message: "Ava Patel shared “Contract review procedure” with you.", target: { view: "knowledge", publicationId: sharedPublicationId } }),
       expect.objectContaining({ type: "DOCUMENT_SHARED_GROUP",
-        message: "Ava Patel shared “Contract review procedure” with your group.", target: { view: "knowledge" } }),
+        message: "Ava Patel shared “Contract review procedure” with your group.", target: { view: "knowledge", publicationId: sharedPublicationId } }),
     ]);
     expect(allowed.repository.listReadableCurrentPublicationIds).toHaveBeenCalledWith(userId, organizationId, [sharedPublicationId]);
 

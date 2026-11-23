@@ -317,17 +317,23 @@ class MigrationBaselineTests(unittest.TestCase):
         for forbidden in ("DISABLE ROW LEVEL SECURITY", "NO FORCE", "ALTER ROLE", "INSERT INTO", "DELETE FROM", "CREATE POLICY"):
             self.assertNotIn(forbidden, repair)
 
-    def test_recovery_inventory_matches_the_ci_ownership_count(self):
+    def test_recovery_inventory_matches_the_reviewed_baseline_count(self):
         root = Path(__file__).resolve().parents[3]
         repair = (root / "deploy" / "release" / "security-definer-owner-repair.sql").read_text(encoding="utf-8")
         inventory = repair[repair.index("expected_names text[] := ARRAY["):repair.index("];", repair.index("expected_names"))]
         names = re.findall(r"'([a-z0-9_]+)'", inventory)
         self.assertEqual(len(names), len(set(names)))
         verifier = (root / "tools" / "verification" / "migration-owner.py").read_text(encoding="utf-8")
-        expected = re.search(r'preserved != "(\d+)"', verifier)
+        expected = re.search(r"REVIEWED_BASELINE_DEFINER_COUNT = (\d+)", verifier)
         self.assertIsNotNone(expected)
         self.assertEqual(len(names), int(expected.group(1)),
                          "Update the repair inventory with every reviewed SECURITY DEFINER routine")
+        maintenance = repair[repair.index("expected_maintenance_signatures text[] := ARRAY["):]
+        maintenance = maintenance[:maintenance.index("];")]
+        signatures = set(re.findall(r"'([^']+)'", maintenance))
+        self.assertEqual(len(signatures), 13)
+        self.assertIn("list_closed_publication_reports()", signatures)
+        self.assertIn("list_closed_publication_reports(uuid)", signatures)
 
 if __name__ == "__main__":
     unittest.main()

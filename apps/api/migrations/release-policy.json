@@ -255,7 +255,115 @@
     },
     {
       "id": "0043",
-      "filename": "0043_document_share_notifications.sql",
+      "filename": "0043_maintenance_cases.sql",
+      "sha256": "326057f8776a097e94d09892a3ab933b0ab57725e7488e700027ffcaa408c81e",
+      "rollout": "operator"
+    },
+    {
+      "id": "0044",
+      "filename": "0044_maintenance_report_import.sql",
+      "sha256": "06d7e7e5dc011709712cb3a2de1ed1c859ca3cdea1dc1300ce2238bea0ea9946",
+      "rollout": "operator"
+    },
+    {
+      "id": "0045",
+      "filename": "0045_maintenance_notification_receipt.sql",
+      "sha256": "1b6937ebf4b3e055cd29060efe06709c50306bc3d343851b288de37a25efa349",
+      "rollout": "operator"
+    },
+    {
+      "id": "0046",
+      "filename": "0046_maintenance_messages.sql",
+      "sha256": "5fd02477b80941dd6e42405c3026fcbadeefe2481f53819023c882f9ac0ed0a7",
+      "rollout": "operator"
+    },
+    {
+      "id": "0047",
+      "filename": "0047_maintenance_publication_outcomes.sql",
+      "sha256": "f0bf006e3ea943effde72592142b9c07fff97734139eef9548bcdbf120c0b663",
+      "rollout": "operator"
+    },
+    {
+      "id": "0048",
+      "filename": "0048_maintenance_case_links.sql",
+      "sha256": "5a2b5e101a648a0df48aed0b76d9b461ce0759a855a7ad209cbb61901c9a44ec",
+      "rollout": "operator"
+    },
+    {
+      "id": "0049",
+      "filename": "0049_maintenance_analysis_runs.sql",
+      "sha256": "9f4d09de07712527d84f856972703dbd25adfc4bca1a7517cfd79b774933f900",
+      "rollout": "operator"
+    },
+    {
+      "id": "0050",
+      "filename": "0050_maintenance_reader_anchor.sql",
+      "sha256": "61e397977ef38d5646a562ad0c09419c380ddd8929eb0684410719b52a14b04c",
+      "rollout": "operator"
+    },
+    {
+      "id": "0051",
+      "filename": "0051_maintenance_closed_reports.sql",
+      "sha256": "2a980fbd409acce8a6e0fcf1dfc4b0cffed6afd510d37f65ceae9405bc53ca25",
+      "rollout": "operator"
+    },
+    {
+      "id": "0052",
+      "filename": "0052_maintenance_version_source.sql",
+      "sha256": "69767fe3aa8ed6f8e760a78c588d1e8f6803aa04150238c66dfbf6fb15998c12",
+      "rollout": "operator"
+    },
+    {
+      "id": "0053",
+      "filename": "0053_maintenance_publication_proof.sql",
+      "sha256": "a5b79d7e59575ecc1169cf1a57bf8f8d79933e4ca57c1e4dadc46c50eb9e0a29",
+      "rollout": "operator"
+    },
+    {
+      "id": "0054",
+      "filename": "0054_maintenance_analysis_lease.sql",
+      "sha256": "df331a0421d96e6205349cf08c7c15b23c2c4946922841e89f333f3fdebb0457",
+      "rollout": "operator"
+    },
+    {
+      "id": "0055",
+      "filename": "0055_maintenance_publication_link.sql",
+      "sha256": "1c8173b15f7c2f252fea28d26fd274190f7b27b32030accacbec960dafb74fda",
+      "rollout": "operator"
+    },
+    {
+      "id": "0056",
+      "filename": "0056_maintenance_publication_request.sql",
+      "sha256": "3ad4ee4ea3f57b660a1a36d12659335d6ac8751e401a92d78a99ce36d1311852",
+      "rollout": "operator"
+    },
+    {
+      "id": "0057",
+      "filename": "0057_maintenance_closed_report_paging.sql",
+      "sha256": "716b346af8d9a74d228bf020e30a09633aef6c7ea45fd228e2821c2d99fd6228",
+      "rollout": "operator"
+    },
+    {
+      "id": "0058",
+      "filename": "0058_maintenance_submission_notices.sql",
+      "sha256": "778b937e99abdf4217fc9a264e2d8e71d79c3ebedbff5b3908c5ffbe9bca7b69",
+      "rollout": "operator"
+    },
+    {
+      "id": "0059",
+      "filename": "0059_maintenance_legacy_report_compatibility.sql",
+      "sha256": "bdb0924fe79b0cab61065b7fa5f3f31de572abf96a90678eeb27d01f5589d90e",
+      "rollout": "operator"
+    },
+    {
+      "id": "0060",
+      "filename": "0060_maintenance_review_corrections.sql",
+      "sha256": "12faec7e03c12945810e0c6cf6160271b1a729fc5485b97cc081c66b0f75477d",
+      "rollout": "operator"
+    },
+    {
+      "id": "0061",
+      "filename": "0061_document_share_notifications.sql",
       "sha256": "409706abd369261e13d06d7563ad8ee5c71c2458a58059ff28a166234d48b2c1",
       "rollout": "operator"
     }

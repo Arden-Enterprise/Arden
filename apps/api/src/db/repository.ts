@@ -8,6 +8,8 @@ import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/stor
 import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
+import { PgMaintenanceStore } from "../maintenance/case-store.js";
+import type { MaintenancePort } from "../maintenance/case-service.js";
 import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
@@ -170,6 +172,7 @@ export type GovernanceInspectionView = GovernanceDocumentView & { readerNames: s
 export type PublicationReport = {
   id: string; documentId: string; publishedVersionId: string; title: string; message: string;
   reporterName: string; createdAt: Date; stillCurrent: boolean; canView: boolean;
+  resolution?: "DISMISSED" | "WITHDRAWN" | null;
 };
 export type OpenGovernanceInspectionResult =
   | { kind: "opened"; inspectionId: string } | { kind: "not-found" } | { kind: "not-admin" } | { kind: "invalid-reason" };
@@ -624,6 +627,7 @@ export interface ArdenDataRepository {
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
   readonly systemAdministration?: SystemAdministrationStore;
+  readonly maintenance?: MaintenancePort;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
   createOrganization(userId: string, email: string, fullName: string | null, setup: OrganizationSetup, requestId: string): Promise<CreatedOrganization>;
@@ -687,6 +691,9 @@ export interface ArdenDataRepository {
   reportPublicationProblem(userId: string, organizationId: string, documentId: string, publishedVersionId: string,
     message: string): Promise<ReportPublicationResult>;
   listPublicationReports(userId: string, organizationId: string): Promise<PublicationReport[] | null>;
+  listClosedPublicationReports(userId: string, organizationId: string, cursor: string | null): Promise<{
+    items: PublicationReport[]; nextCursor: string | null;
+  } | null>;
   dismissPublicationReport(userId: string, organizationId: string, reportId: string): Promise<boolean>;
   withdrawKnowledgeSubmission(userId: string, organizationId: string, submissionId: string,
     requestId: string): Promise<WithdrawKnowledgeSubmissionResult>;
@@ -754,7 +761,8 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly knowledgeCatalog: KnowledgeCatalogStore;
   readonly audienceGroups: AudienceGroupStore;
   readonly systemAdministration: SystemAdministrationStore;
-  constructor(private readonly pool: Pool) {
+  readonly maintenance: MaintenancePort;
+  constructor(private readonly pool: Pool, content?: { read(sourceUri: string, expectedHash: string): Promise<string> }) {
     this.notifications = new PgNotificationStore((user, org, work) => this.withActorContext(user, org, work));
     this.readerSources = new PgReaderSourceStore((user, org, work) => this.withActorContext(user, org, work));
     this.conversations = new PgConversationStore((user, org, work) => this.withActorContext(user, org, work));
@@ -762,6 +770,7 @@ export class ArdenRepository implements ArdenDataRepository {
       (user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.systemAdministration = new PgSystemAdministrationStore((user, work) => this.withSystemAdmin(user, work));
+    this.maintenance = new PgMaintenanceStore((user, org, work) => this.withActorContext(user, org, work), content);
   }
 
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
@@ -2009,6 +2018,23 @@ export class ArdenRepository implements ArdenDataRepository {
       return result.rows.map((row) => ({ id: row.report_id, documentId: row.document_id,
         publishedVersionId: row.published_version_id, title: row.title, message: row.message,
         reporterName: row.reporter_name, createdAt: row.created_at, stillCurrent: row.still_current, canView: row.can_view }));
+    });
+  }
+
+  async listClosedPublicationReports(userId: string, organizationId: string, cursor: string | null): Promise<{
+    items: PublicationReport[]; nextCursor: string | null;
+  } | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      const result = await client.query<{ report_id: string; document_id: string; published_version_id: string;
+        title: string; message: string; reporter_name: string; created_at: Date; still_current: boolean;
+        can_view: boolean; resolution: "DISMISSED" | "WITHDRAWN" | null }>(
+        "SELECT * FROM list_closed_publication_reports($1::uuid)", [cursor]);
+      const items = result.rows.slice(0, 200).map((row) => ({ id: row.report_id, documentId: row.document_id,
+        publishedVersionId: row.published_version_id, title: row.title, message: row.message,
+        reporterName: row.reporter_name, createdAt: row.created_at, stillCurrent: row.still_current,
+        canView: false, resolution: row.resolution }));
+      return { items, nextCursor: result.rows.length > items.length ? items.at(-1)?.id ?? null : null };
     });
   }
 

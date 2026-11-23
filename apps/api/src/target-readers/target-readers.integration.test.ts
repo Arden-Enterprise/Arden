@@ -82,8 +82,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       WHERE migration_id = '0024_target_reader_selection'`);
     if (migrated.rowCount !== 1) throw new Error("Apply migration 0024 to the isolated test database first");
     const shareNotifications = await pool.query(`SELECT 1 FROM public.arden_schema_migrations
-      WHERE migration_id = '0043_document_share_notifications'`);
-    if (shareNotifications.rowCount !== 1) throw new Error("Apply migration 0043 to the isolated test database first");
+      WHERE migration_id = '0061_document_share_notifications'`);
+    if (shareNotifications.rowCount !== 1) throw new Error("Apply migration 0061 to the isolated test database first");
 
     await asSuperuser(async (client) => {
       await client.query(`INSERT INTO organization (organization_id, name, slug)

@@ -20,6 +20,10 @@ import { canRead, readerModes, type ReaderSelection, type TargetReadersInput } f
 import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
 import { registerNotificationRoutes } from "./notifications/routes.js";
 import type { NotificationRealtimeConfiguration } from "./notifications/realtime.js";
+import { controlledAnalysisAdapter, httpAnalysisAdapter } from "./maintenance/analysis.js";
+import { MaintenanceCaseService } from "./maintenance/case-service.js";
+import { MaintenanceError } from "./maintenance/contracts.js";
+import { registerMaintenanceRoutes } from "./maintenance/routes.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -107,6 +111,18 @@ export function buildApp(dependencies: AppDependencies) {
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   registerNotificationRoutes(app, { repository: dependencies.repository,
     store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
+  const maintenanceMode = process.env.ARDEN_MAINTENANCE_ANALYSIS_ADAPTER;
+  const maintenanceAdapter = maintenanceMode === "http" || maintenanceMode === "http-provider"
+    ? httpAnalysisAdapter(process.env.ARDEN_AI_URL ?? "", process.env.ARDEN_AI_SERVICE_TOKEN ?? "",
+      maintenanceMode === "http-provider" ? "provider" : "controlled")
+    : process.env.ARDEN_MAINTENANCE_ANALYSIS_ADAPTER === "controlled"
+    ? async (request: Parameters<typeof controlledAnalysisAdapter>[0]) => {
+      const delay = Number(process.env.ARDEN_MAINTENANCE_ANALYSIS_DELAY_MS ?? 0);
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      return controlledAnalysisAdapter(request);
+    } : null;
+  registerMaintenanceRoutes(app, dependencies.repository.maintenance
+    ? new MaintenanceCaseService(dependencies.repository.maintenance, maintenanceAdapter) : undefined, requestActor, uuidPattern);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
       const isEmailError = error.validation.some((v) =>
@@ -1496,6 +1512,23 @@ export function buildApp(dependencies: AppDependencies) {
         if (!actor || !publication || !canRead(actor, { organizationId, readers: publication.targetReaders })) {
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
+        if (dependencies.repository.maintenance) {
+          try {
+            const created = await new MaintenanceCaseService(dependencies.repository.maintenance)
+              .acceptLegacyReport(context.userId, organizationId, {
+                documentId: publication.draftId, publishedVersionId, message,
+              });
+            reply.header("Cache-Control", "no-store");
+            return reply.code(201).send({ id: created.caseId });
+          } catch (error) {
+            if (error instanceof MaintenanceError && error.code === "CONFLICT") {
+              return reply.code(409).send(safeError("ALREADY_REPORTED",
+                "You already reported this document. The responsible reviewers can see it.", request.id));
+            }
+            if (error instanceof MaintenanceError) return reply.code(404).send(resourceNotAvailable(request.id));
+            throw error;
+          }
+        }
         const result = await dependencies.repository.reportPublicationProblem(context.userId, organizationId,
           publication.draftId, publishedVersionId, message);
         if (result.kind === "duplicate") return reply.code(409).send(safeError("ALREADY_REPORTED",
@@ -1509,18 +1542,25 @@ export function buildApp(dependencies: AppDependencies) {
       }
     });
 
-  app.get<{ Params: { organizationId: string } }>(
+  app.get<{ Params: { organizationId: string }; Querystring: { disposition?: "closed"; cursor?: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/reports", {
       schema: { params: { type: "object", required: ["organizationId"], properties: {
-        organizationId: { type: "string", pattern: uuidPattern } } } },
+        organizationId: { type: "string", pattern: uuidPattern } } },
+        querystring: { type: "object", additionalProperties: false, properties: {
+          disposition: { type: "string", enum: ["closed"] },
+          cursor: { type: "string", pattern: uuidPattern },
+        }, dependencies: { cursor: ["disposition"] } } },
     }, async (request, reply) => {
       const context = await requestActor(request, reply);
       if (!context) return;
       try {
-        const items = await dependencies.repository.listPublicationReports(context.userId, request.params.organizationId);
-        if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+        const result = request.query.disposition === "closed"
+          ? await dependencies.repository.listClosedPublicationReports(context.userId, request.params.organizationId,
+            request.query.cursor ?? null)
+          : { items: await dependencies.repository.listPublicationReports(context.userId, request.params.organizationId) };
+        if (!result?.items) return reply.code(404).send(resourceNotAvailable(request.id));
         reply.header("Cache-Control", "no-store");
-        return { items: items.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })) };
+        return { ...result, items: result.items.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })) };
       } catch (error) {
         request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report list failed");
         return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
