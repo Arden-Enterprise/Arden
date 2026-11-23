@@ -676,6 +676,9 @@ export interface ArdenDataRepository {
   listKnowledgeSubmissions(userId: string, organizationId: string): Promise<SharedKnowledgeSubmission[] | null>;
   listOwnedKnowledgeSubmissionIds(userId: string, organizationId: string,
     submissionIds: readonly string[]): Promise<string[] | null>;
+  /** Current publication IDs allowed by the caller's active audience and Target Readers policy. */
+  listReadableCurrentPublicationIds(userId: string, organizationId: string,
+    publishedVersionIds: readonly string[]): Promise<string[] | null>;
   retryKnowledgePublication(userId: string, organizationId: string, submissionId: string):
     Promise<RetryKnowledgePublicationResult>;
   listGovernancePublications(userId: string, organizationId: string): Promise<GovernancePublication[] | null>;
@@ -1888,6 +1891,23 @@ export class ArdenRepository implements ArdenDataRepository {
          WHERE s.organization_id = $1 AND s.submitted_by_membership_id = $2
            AND s.submission_id = ANY($3::uuid[])`, [organizationId, membership, uniqueSubmissionIds]);
       return result.rows.map(row => row.submission_id);
+    });
+  }
+
+  /** Recheck current publication access for share notifications through the same RLS policies as the library. */
+  async listReadableCurrentPublicationIds(userId: string, organizationId: string,
+    publishedVersionIds: readonly string[]): Promise<string[] | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      const ids = [...new Set(publishedVersionIds)];
+      if (ids.length === 0) return [];
+      const result = await client.query<{ published_version_id: string }>(`
+        SELECT pv.published_version_id
+          FROM knowledge_current_publication cp
+          JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
+         WHERE cp.organization_id = $1 AND pv.published_version_id = ANY($2::uuid[])`,
+      [organizationId, ids]);
+      return result.rows.map(row => row.published_version_id);
     });
   }
 

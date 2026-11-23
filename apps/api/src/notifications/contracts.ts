@@ -1,15 +1,20 @@
 export const notificationTypes = [
   "REVIEW_REQUESTED", "REVIEW_APPROVED", "REVIEW_REJECTED", "PUBLICATION_ACTIVE",
-  "PUBLICATION_FAILED", "PRIMARY_DEPARTMENT_CHANGED", "REVIEWER_GRANT_CREATED", "REVIEWER_GRANT_REVOKED",
+  "PUBLICATION_FAILED", "DOCUMENT_SHARED_PERSONAL", "DOCUMENT_SHARED_GROUP",
+  "PRIMARY_DEPARTMENT_CHANGED", "REVIEWER_GRANT_CREATED", "REVIEWER_GRANT_REVOKED",
 ] as const;
 
 export type NotificationType = typeof notificationTypes[number];
-export type NotificationResourceType = "SUBMISSION" | "DEPARTMENT" | "REVIEWER_GRANT";
+export type NotificationResourceType = "SUBMISSION" | "PUBLICATION" | "DEPARTMENT" | "REVIEWER_GRANT";
 export type NotificationRecord = {
   id: string;
   type: NotificationType;
   resourceType: NotificationResourceType;
   resourceId: string;
+  /** Present only for personal/group share records. */
+  publicationTitle?: string;
+  /** Present only for personal/group share records. */
+  sharedByName?: string;
   createdAt: string;
   readAt: string | null;
 };

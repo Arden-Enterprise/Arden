@@ -9,7 +9,7 @@ import { SetPasswordPage } from "../sign-in/SetPasswordPage";
 import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
 import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
 import { AskArdenPage } from "../ask-arden/AskArdenPage";
-import type { KnowledgeCitationReference, KnowledgeNavigationTarget } from "../knowledge/knowledgeCitation";
+import type { KnowledgeCitationReference, KnowledgeReaderTarget } from "../knowledge/knowledgeCitation";
 import { WaitingRoomPage } from "./WaitingRoomPage";
 import { InvitationAcceptPage } from "../organization/InvitationAcceptPage";
 import { InvitationLinkPage } from "../organization/InvitationLinkPage";
@@ -28,7 +28,7 @@ import { StatusIslandContext, type StatusIslandConfirm, type StatusIslandToast }
 import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
 import { membershipReadiness } from "../organization/organizationWorkflow";
 import type { Platform, PrivateNote, WorkspaceView } from "../shared/types";
-import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership } from "../shared/api-client";
+import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership, type NotificationTarget } from "../shared/api-client";
 import { needsDepartmentAssignment } from "../shared/membershipAssignment";
 
 type ArdenShellProps = { platform: Platform };
@@ -181,7 +181,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
   const [createdKnowledgeDraft, setCreatedKnowledgeDraft] = useState<CreatedKnowledgeDraft | null>(null);
   const [contributionAttempt, setContributionAttempt] = useState<ContributionAttempt | null>(null);
-  const [knowledgeCitationTarget, setKnowledgeCitationTarget] = useState<KnowledgeNavigationTarget | null>(null);
+  const [knowledgeCitationTarget, setKnowledgeCitationTarget] = useState<KnowledgeReaderTarget | null>(null);
   const [requestedReviewId, setRequestedReviewId] = useState<string | null>(null);
   const restoreStarted = useRef(false);
 
@@ -522,12 +522,15 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setActiveView(view);
   };
 
-  const openNotificationTarget = (target: { view: "review-queue"; id: string } | { view: "knowledge" }) => {
+  const openNotificationTarget = (target: NotificationTarget) => {
     if (target.view === "review-queue") {
       setRequestedReviewId(target.id);
       navigate("review-queue");
     } else {
       setRequestedReviewId(null);
+      setKnowledgeCitationTarget(target.publicationId ? {
+        kind: "publication", versionId: target.publicationId, navigationId: crypto.randomUUID(),
+      } : null);
       navigate("knowledge");
     }
   };
