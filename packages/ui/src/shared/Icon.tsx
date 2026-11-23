@@ -42,6 +42,15 @@ export const iconGlyphs = {
   home: "\uf7b8",
   flag: "\uf695",
   refresh: "\ufb34",
+  star: "\ufce9",
+  trash: "\ufe17",
+  folder: "\uf6ba",
+  "folder-add": "\uf118",
+  copy: "\uf4dd",
+  more: "\uf927",
+  move: "\uf984",
+  restore: "\ufe12",
+  settings: "\ufbd2",
 } as const;
 
 export type IconName = keyof typeof iconGlyphs;

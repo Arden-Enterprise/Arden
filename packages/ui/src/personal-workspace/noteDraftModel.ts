@@ -14,7 +14,17 @@ export type NotePreviewAction =
   | { type: "edit"; field: keyof NoteDraft; value: string }
   | { type: "save" }
   | { type: "discard" }
-  | { type: "reset"; notes: PrivateNote[] };
+  | { type: "reset"; notes: PrivateNote[] }
+  /** Replaces notes by id (new ones go first) without touching any draft. */
+  | { type: "upsert"; notes: PrivateNote[] }
+  /** Replaces a saved note (a pending id may become the server id) and clears only its draft. */
+  | { type: "saved"; previousId: string; note: PrivateNote }
+  /** Drops notes and their drafts, for example after moving them to trash. */
+  | { type: "remove"; ids: string[] }
+  /** Reloaded notes; notes with unsaved drafts and never-saved notes keep their local state. */
+  | { type: "merge"; notes: PrivateNote[] }
+  | { type: "draftTitle"; id: string; title: string }
+  | { type: "deselect" };
 
 export function createNotePreview(notes: PrivateNote[]): NotePreviewState {
   return { notes, selectedId: notes[0]?.id ?? "", drafts: {}, savedMessage: "" };
@@ -31,6 +41,48 @@ export function isNoteDirty(state: NotePreviewState, note: PrivateNote): boolean
 
 export function notePreviewReducer(state: NotePreviewState, action: NotePreviewAction): NotePreviewState {
   if (action.type === "reset") return createNotePreview(action.notes);
+  if (action.type === "upsert") {
+    const incoming = new Map(action.notes.map((note) => [note.id, note]));
+    const existing = new Set(state.notes.map((note) => note.id));
+    return { ...state, notes: [...action.notes.filter((note) => !existing.has(note.id)),
+      ...state.notes.map((note) => incoming.get(note.id) ?? note)] };
+  }
+  if (action.type === "saved") {
+    const drafts = { ...state.drafts };
+    delete drafts[action.previousId];
+    delete drafts[action.note.id];
+    const notes = state.notes.some((note) => note.id === action.previousId)
+      ? state.notes.filter((note) => note.id !== action.note.id || action.note.id === action.previousId)
+        .map((note) => note.id === action.previousId ? action.note : note)
+      : [action.note, ...state.notes.filter((note) => note.id !== action.note.id)];
+    const selectedId = state.selectedId === action.previousId ? action.note.id : state.selectedId;
+    return { ...state, notes, drafts, selectedId, savedMessage: "" };
+  }
+  if (action.type === "remove") {
+    const ids = new Set(action.ids);
+    const drafts = { ...state.drafts };
+    for (const id of ids) delete drafts[id];
+    return { ...state, notes: state.notes.filter((note) => !ids.has(note.id)), drafts,
+      selectedId: ids.has(state.selectedId) ? "" : state.selectedId, savedMessage: "" };
+  }
+  if (action.type === "merge") {
+    const kept = state.notes.filter((note) => note.updatedLabel === "Not saved" || isNoteDirty(state, note));
+    const keptIds = new Set(kept.map((note) => note.id));
+    const loadedIds = new Set(action.notes.map((note) => note.id));
+    // Unsaved work is never dropped by a reload, even when the server no longer lists the note.
+    const notes = [...kept.filter((note) => !loadedIds.has(note.id)),
+      ...action.notes.map((note) => keptIds.has(note.id) ? { ...kept.find((entry) => entry.id === note.id)!,
+        collectionId: note.collectionId, favoritedAt: note.favoritedAt } : note)];
+    const present = new Set(notes.map((note) => note.id));
+    const drafts = Object.fromEntries(Object.entries(state.drafts).filter(([id]) => present.has(id)));
+    return { ...state, notes, drafts, selectedId: present.has(state.selectedId) ? state.selectedId : "" };
+  }
+  if (action.type === "draftTitle") {
+    const note = state.notes.find((entry) => entry.id === action.id);
+    if (!note) return state;
+    return { ...state, drafts: { ...state.drafts, [note.id]: { ...getNoteDraft(state, note), title: action.title } } };
+  }
+  if (action.type === "deselect") return { ...state, selectedId: "", savedMessage: "" };
   if (action.type === "select") {
     if (!state.notes.some((note) => note.id === action.id)) return state;
     return { ...state, selectedId: action.id, savedMessage: "" };

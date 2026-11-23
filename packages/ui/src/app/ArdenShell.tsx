@@ -27,7 +27,8 @@ import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext
 import { StatusIslandContext, type StatusIslandConfirm, type StatusIslandToast } from "../shared/StatusIslandContext";
 import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
 import { membershipReadiness } from "../organization/organizationWorkflow";
-import type { Platform, PrivateNote, WorkspaceView } from "../shared/types";
+import type { Platform, PrivateCollection, PrivateNote, WorkspaceView } from "../shared/types";
+import { IslandConfirm } from "../shared/IslandConfirm";
 import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership, type NotificationTarget } from "../shared/api-client";
 import { needsDepartmentAssignment } from "../shared/membershipAssignment";
 
@@ -40,6 +41,7 @@ const initialNotes: PrivateNote[] = [
     body:
       "Observations\nMembers need a place to capture incomplete thoughts before they are ready for a governed shared item.\n\nAssumptions to validate\n• Privacy must be explicit at every entry point.\n• Save acknowledgement must reflect the server response.\n• Publication creates a separate immutable snapshot.",
     updatedLabel: "Updated 2m ago · Sample",
+    collectionId: "sample-discovery",
   },
   {
     id: "handover-observations",
@@ -55,6 +57,11 @@ const initialNotes: PrivateNote[] = [
       "Open questions about note save acknowledgement and version conflicts.",
     updatedLabel: "Updated 3d ago · Sample",
   },
+];
+
+/** Demo-only collection; demo notes and collections live in memory and are cleared on refresh or exit. */
+const initialCollections: PrivateCollection[] = [
+  { id: "sample-discovery", title: "Discovery", parentId: null, favoritedAt: null },
 ];
 
 type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
@@ -165,9 +172,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [knowledgeDirty, setKnowledgeDirty] = useState(false);
   const [invitationBatchSending, setInvitationBatchSending] = useState(false);
   const [activeView, setActiveView] = useState<WorkspaceView>("knowledge");
-  const privateNotes = usePrivateNotes(initialNotes);
+  const privateNotes = usePrivateNotes(initialNotes, initialCollections);
   const [contextOpen, setContextOpen] = useState(false);
   const contextOpener = useRef<HTMLElement | null>(null);
+  const returnContextFocus = useRef(false);
   const [navOpen, setNavOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [islandToast, setIslandToast] = useState<StatusIslandToast | null>(null);
@@ -286,12 +294,22 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (!shell || !sidebar) return;
     const measure = () => {
       const sidebarWidth = getComputedStyle(sidebar).position === "fixed" ? 0 : sidebar.getBoundingClientRect().width;
-      setContextOverlay(shell.getBoundingClientRect().width - sidebarWidth < 1100);
+      // Dock Ask Arden beside the page (the page narrows, as in Notion) while the page keeps a readable width; float it otherwise.
+      const pageWidth = shell.getBoundingClientRect().width - sidebarWidth;
+      setContextOverlay(window.innerWidth < 900 || pageWidth - 360 < 520);
     };
     const observer = new ResizeObserver(measure);
     observer.observe(shell); observer.observe(sidebar); measure();
     return () => observer.disconnect();
   }, [entryView]);
+
+  // Runs after the close renders: a docked panel hides the top-bar opener, which must be visible again before it takes focus.
+  useLayoutEffect(() => {
+    if (contextOpen || !returnContextFocus.current) return;
+    returnContextFocus.current = false;
+    const opener = contextOpener.current;
+    (opener?.isConnected && opener.offsetParent !== null ? opener : document.getElementById("arden-main"))?.focus();
+  }, [contextOpen]);
 
   // While the floating panel or phone sheet covers the workspace, keep keyboard focus out of what it covers.
   useEffect(() => {
@@ -589,8 +607,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       element.removeAttribute("inert");
       element.removeAttribute("data-context-covered");
     });
-    const opener = contextOpener.current;
-    (opener?.isConnected && opener.offsetParent !== null ? opener : document.getElementById("arden-main"))?.focus();
+    returnContextFocus.current = true;
   };
   const contextControl = { contextOpen, onToggleContext: () => {
     setNavOpen(false);
@@ -605,6 +622,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const isUnassignedMember = Boolean(serverSession && activeMembership && needsDepartmentAssignment(activeMembership));
   const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue" || activeView === "knowledge-handover";
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
+  // Demo sessions always have the in-memory notes; signed-in members need a private workspace in this organization.
+  const canUsePrivateNotes = !isUnassignedMember && (!serverSession || Boolean(activeMembership?.canUsePrivateWorkspace));
+  const trashConfirm = privateNotes.trashConfirm;
 
   return (
     <NotificationProvider platform={platform} organizationId={serverSession ? serverOrganizationId : null}
@@ -635,6 +655,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         onNavigate={navigate}
         onSignOut={signOut}
         onOpenSettings={() => setSettingsOpen(true)}
+        privateNotes={canUsePrivateNotes ? { controller: privateNotes, pageVisible: activeView === "personal-workspace", onOpen: () => navigate("personal-workspace") } : undefined}
+        trashCount={canUsePrivateNotes ? privateNotes.trash.length : undefined}
+        onOpenTrash={canUsePrivateNotes ? () => { privateNotes.openTrash(); navigate("personal-workspace"); } : undefined}
       />
       {navOpen && <button type="button" className="shell-nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
       <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={(previewRole === "admin" && !serverSession) || liveAdmin}
@@ -689,6 +712,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         platform={platform} organizationId={serverOrganizationId} onClose={closeContext}
         onOpenAskArden={() => navigate("ask-arden")}
         onOpenCitation={(citation) => { if (contextOverlay) setContextOpen(false); openKnowledgeCitation(citation); }} />
+      {trashConfirm && <IslandConfirm
+        title={trashConfirm.kind === "collection" ? "Move collection to trash?" : "Move note to trash?"}
+        description="Unsaved changes will be lost."
+        actionLabel="Move to trash"
+        busy={false}
+        error=""
+        onCancel={privateNotes.cancelTrash}
+        onConfirm={privateNotes.confirmTrash} />}
       {settingsOpen && (
         <SettingsDialog
           platform={platform}

@@ -7,6 +7,9 @@ import { NotificationBell } from "../notifications/NotificationBell";
 
 export type ContextControlProps = { contextOpen: boolean; onToggleContext: () => void };
 
+/** One breadcrumb step; a step with `onSelect` navigates back to that place. */
+export type TopbarCrumb = { label: string; onSelect?: () => void };
+
 const ardenMark = new URL("../assets/arden-logo-white.png", import.meta.url).href;
 
 type IslandMode = "idle" | "search" | "toast" | "confirm" | "panel";
@@ -19,8 +22,10 @@ function initials(label: string): string {
  * Workspace top bar. Its centre is the status island: it shows where the member is,
  * expands into the page's search (Ctrl K), morphs to announce completed actions and to confirm destructive ones.
  */
-export function WorkspaceTopbar({ breadcrumb, previewLabel, contextOpen, onToggleContext, search, searchActive = false, panel, chrome = "full" }: ContextControlProps & {
+export function WorkspaceTopbar({ breadcrumb, crumbs: crumbSteps, previewLabel, contextOpen, onToggleContext, search, searchActive = false, panel, chrome = "full" }: ContextControlProps & {
   breadcrumb: string;
+  /** Explicit trail shown instead of the breadcrumb's steps after its first (the island mark); steps may be links. */
+  crumbs?: TopbarCrumb[];
   previewLabel?: string;
   /** Page-scoped search field revealed inside the island. */
   search?: ReactNode;
@@ -74,7 +79,7 @@ export function WorkspaceTopbar({ breadcrumb, previewLabel, contextOpen, onToggl
   const expanded = hasSearch && (searchOpen || searchActive);
   const mode: IslandMode = confirm ? "confirm" : panel ? "panel" : toast ? "toast" : expanded ? "search" : "idle";
   const crumbs = breadcrumb.split(" / ");
-  const trail = crumbs.length > 1 ? crumbs.slice(1) : crumbs;
+  const trail: TopbarCrumb[] = crumbSteps ?? (crumbs.length > 1 ? crumbs.slice(1) : crumbs).map((label) => ({ label }));
   const reader = chrome === "reader";
   const closeSearch = () => {
     setSearchOpen(false);
@@ -116,7 +121,11 @@ export function WorkspaceTopbar({ breadcrumb, previewLabel, contextOpen, onToggl
         {mode === "idle" && !reader && <div className="status-island-content">
           <span className="status-island-mark" aria-hidden="true">{initials(crumbs[0] ?? "Arden")}</span>
           <nav aria-label="Breadcrumb"><ol className="topbar-breadcrumb">{trail.map((crumb, index) =>
-            <li key={`${index}:${crumb}`} aria-current={index === trail.length - 1 ? "page" : undefined}>{crumb}</li>)}</ol></nav>
+            <li key={`${index}:${crumb.label}`} aria-current={index === trail.length - 1 ? "page" : undefined}>
+              {crumb.onSelect && index < trail.length - 1
+                ? <button type="button" className="topbar-crumb-link" title={crumb.label} onClick={crumb.onSelect}>{crumb.label}</button>
+                : crumb.label}
+            </li>)}</ol></nav>
           {hasSearch && <button type="button" className="status-island-trigger" aria-label="Search (Ctrl K)" aria-keyshortcuts="Control+k Meta+k" onClick={() => setSearchOpen(true)}>
             <Icon name="search" size={14} /><span aria-hidden="true">Ctrl K</span>
           </button>}

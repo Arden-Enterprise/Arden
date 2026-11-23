@@ -246,6 +246,8 @@
   color: var(--arden-text-secondary); background: transparent;
 }
 .arden-app-shell .context-toggle-mark { width: 28px; height: 28px; display: block; object-fit: contain; }
+/* The docked panel carries its own Arden mark and close button, so the top-bar opener steps aside while it is open. */
+.arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) .context-toggle { display: none; }
 .arden-app-shell .context-toggle:hover, .arden-app-shell .context-toggle[aria-expanded="true"] { color: var(--arden-text-primary); background: transparent; border-color: transparent; }
 
 .status-island {
@@ -276,6 +278,17 @@
   border-radius: 1px; background: rgb(255 255 255 / 28%);
 }
 .status-island .topbar-breadcrumb li[aria-current="page"] { color: var(--arden-text-primary); font-weight: 600; }
+/* Parent steps keep their names (up to a share of the island); the current page title truncates first. */
+.status-island .topbar-breadcrumb li:not(:last-child) { flex: none; max-width: 40%; }
+.status-island .topbar-crumb-link {
+  min-width: 0; max-width: 100%; margin: -3px 0; padding: 3px 5px; overflow: hidden; border: 0; border-radius: 6px;
+  color: inherit; background: transparent; font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: pointer;
+  transition: color var(--arden-motion-quick) ease, background-color var(--arden-motion-quick) ease;
+}
+.status-island .topbar-crumb-link:focus-visible { outline: 2px solid var(--arden-focus-ring); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) {
+  .status-island .topbar-crumb-link:hover { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+}
 .status-island nav { flex: 1; min-width: 0; }
 .status-island-trigger, .status-island-key {
   display: inline-flex; align-items: center; gap: 8px; flex: none; height: 28px; padding: 0 10px; border: 1px solid var(--arden-border);
@@ -471,8 +484,11 @@
 }
 
 @media (min-width: 900px) and (max-width: 1199px) {
-  .arden-app-shell, .arden-app-shell.is-context-collapsed, .arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 224px minmax(0, 1fr); }
-  .arden-app-shell.is-nav-collapsed, .arden-app-shell.is-nav-collapsed:not(.is-context-collapsed) { grid-template-columns: 56px minmax(0, 1fr); }
+  .arden-app-shell, .arden-app-shell.is-context-collapsed { grid-template-columns: 224px minmax(0, 1fr); }
+  .arden-app-shell.is-nav-collapsed, .arden-app-shell.is-nav-collapsed.is-context-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
+  /* Ask Arden docks beside the page (the page narrows) whenever the shell measured room for both. */
+  .arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 224px minmax(0, 1fr) 340px; }
+  .arden-app-shell.is-nav-collapsed:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 56px minmax(0, 1fr) 340px; }
 }
 @media (min-width: 640px) and (max-width: 899px) {
   .arden-app-shell, .arden-app-shell.is-context-collapsed, .arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay),

@@ -8,6 +8,11 @@
 .arden-app-shell .agent-panel[data-state="closed"] {
   position: fixed; top: 0; right: 0; visibility: hidden; opacity: 0; transform: translateX(16px); pointer-events: none; transition: none;
 }
+/* Docked, as in Notion: the panel runs the full window height flush to the top and right edges; the page narrows beside it. */
+.arden-app-shell:not(.is-context-overlay) .agent-panel[data-state="open"] {
+  top: 0; height: 100dvh; margin: calc(-1 * var(--arden-shell-gap)) 0 0 calc(-1 * var(--arden-shell-gap));
+  border-width: 0 0 0 1px; border-radius: 0; box-shadow: none;
+}
 .arden-app-shell.is-context-overlay .agent-panel {
   position: fixed; top: var(--arden-shell-gap); right: var(--arden-shell-gap); bottom: var(--arden-shell-gap);
   width: min(400px, calc(100vw - 2 * var(--arden-shell-gap))); height: auto; box-shadow: var(--arden-shadow-float);
