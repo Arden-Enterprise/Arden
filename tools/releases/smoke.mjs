@@ -19,6 +19,7 @@ const docker = (...args) => {
 };
 const apiImage = `arden-release-api:sha-${source.commit}`;
 const webImage = `arden-release-web:sha-${source.commit}`;
+const smokeWebOrigin = "https://example.test";
 const sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms));
 const migrationDirectory = mkdtempSync(join(resolve(runnerTemp), `${prefix}-migration-`));
 if (!migrationDirectory.startsWith(`${resolve(runnerTemp)}${sep}`)) throw new Error("Migration fixture escaped runner temp");
@@ -104,7 +105,7 @@ try {
     "-e", "DATABASE_URL=postgresql://arden_api:disposable_runtime_only@db:5432/arden_test_images",
     "-e", "SUPABASE_URL=http://127.0.0.1:1", "-e", "SUPABASE_PUBLISHABLE_KEY=synthetic-not-a-live-key",
     "-e", "SUPABASE_AUTH_PUBLIC_URL=https://auth.example.test",
-    "-e", "ARDEN_AUTH_TRUSTED_ORIGINS=https://example.test",
+    "-e", `ARDEN_AUTH_TRUSTED_ORIGINS=${smokeWebOrigin}`,
     "-e", `ARDEN_SESSION_SIGNING_KEY=${randomBytes(32).toString("hex")}`,
     "-e", "ARDEN_PRIVATE_STORAGE_ROOT=/var/lib/arden/private", apiImage);
   await healthy(names.api);
@@ -134,12 +135,15 @@ try {
   const sampleId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const noteQuestion = await fetch(`${origin}/api/v1/organizations/${sampleId}/private-workspace/drafts/${sampleId}/questions`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", origin: smokeWebOrigin },
     body: JSON.stringify({ requestId: sampleId, query: "Summarize this note", expectedVersion: 1 }),
   });
-  if (noteQuestion.status !== 401 || noteQuestion.headers.get("cache-control") !== "no-store"
-    || noteQuestion.headers.get("x-content-type-options") !== "nosniff") throw new Error("Private note question proxy failed");
-  await noteQuestion.body?.cancel();
+  const noteError = await noteQuestion.json();
+  if (noteQuestion.status !== 401 || noteError.error?.code !== "UNAUTHENTICATED"
+    || noteQuestion.headers.get("cache-control") !== "no-store"
+    || noteQuestion.headers.get("x-content-type-options") !== "nosniff") {
+    throw new Error(`Private note question proxy failed with HTTP ${noteQuestion.status}`);
+  }
   for (const path of ["/", "/release.json", "/healthz", "/assets/missing.js", "/api/v1/me", "/auth/missing", "/verify",
     "/api/v1/organizations/00000000-0000-0000-0000-000000000000/knowledge/drafts/pdf"]) {
     const response = await fetch(`${origin}${path}`);
