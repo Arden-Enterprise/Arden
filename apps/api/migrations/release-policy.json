@@ -394,7 +394,7 @@
     {
       "id": "0066",
       "filename": "0066_expired_document_renewal.sql",
-      "sha256": "9420830253316e099b5795afba7209f05a223cff22397cfa0c281285b0a1aa85",
+      "sha256": "06818b9a9d51af0ae8dd09f73e427f900fc53cd71d173a904c9d34ad1ba0812e",
       "rollout": "operator"
     }
   ]

@@ -7,23 +7,32 @@ SET search_path TO arden, public;
 --     frozen snapshot metadata is never rewritten. A newer content version uses its own Valid until.
 --   * RENEWAL is a change request beside READER_CHANGE and WITHDRAWAL. The author may ask at any time; an
 --     Organization Admin or a responsible reviewer may ask on the author's behalf from 7 days before expiry,
---     or at once when the author's membership is no longer active. Nobody approves their own renewal.
+--     or at once when the author's membership is no longer active. Decision 0033 (as amended into 0032): an
+--     active author decides a renewal asked on their behalf, alone during a priority window (3 days or until
+--     expiry); a reviewer whose current grant matches may decide their own submissions of every type.
 --   * In-app reminders at 30 days (author; responsible reviewers when the author is inactive) and 7 days
 --     (responsible reviewers, when no renewal is waiting) are written idempotently by a periodic Core job.
 --
--- Operator rollout: replaces four reviewed SECURITY DEFINER routines in place (validate_shared_submission,
--- validate_review_decision, apply_publication_change, eligible_ai_publications; owners unchanged) and adds
--- four (request_publication_renewal, list_publication_renewal_state, enqueue_publication_expiry_reminders,
--- list_publication_author_names; 51 in the owner inventory). Apply as the trusted superuser. No RLS policy is relaxed.
+-- Operator rollout: replaces six reviewed SECURITY DEFINER routines in place (validate_shared_submission,
+-- validate_review_decision, apply_publication_change, eligible_ai_publications, review_submission_authors,
+-- submission_proposed_reader_directory; owners unchanged) and adds five (request_publication_renewal,
+-- list_publication_renewal_state, enqueue_publication_expiry_reminders, list_publication_author_names,
+-- decide_on_behalf_renewal; 52 in the owner inventory). Apply as the trusted superuser. The review-decision
+-- insert policy no longer excludes the submitter (decision 0033); authority still needs a current grant or
+-- Organization Admin, and the author's own decision on an on-behalf renewal runs only through the reviewed routine.
 
 ALTER TABLE shared_submission ADD COLUMN renewal_expiration_date date;
 ALTER TABLE shared_submission ADD COLUMN on_behalf_of_author boolean NOT NULL DEFAULT false;
+-- Set when someone asks on behalf of an active author: until then only that author may decide (0032).
+ALTER TABLE shared_submission ADD COLUMN author_decides_until timestamptz;
 ALTER TABLE shared_submission DROP CONSTRAINT ck_shared_submission_request_type;
 ALTER TABLE shared_submission ADD CONSTRAINT ck_shared_submission_request_type
     CHECK (request_type IN ('CONTENT', 'READER_CHANGE', 'WITHDRAWAL', 'RENEWAL'));
 ALTER TABLE shared_submission ADD CONSTRAINT ck_shared_submission_renewal_shape CHECK (
     (request_type = 'RENEWAL' AND proposed_selection_id IS NULL)
     OR (request_type <> 'RENEWAL' AND renewal_expiration_date IS NULL AND NOT on_behalf_of_author));
+ALTER TABLE shared_submission ADD CONSTRAINT ck_shared_submission_author_window
+    CHECK (author_decides_until IS NULL OR (request_type = 'RENEWAL' AND on_behalf_of_author));
 -- Serializes concurrent requests from the author and from someone acting on their behalf.
 CREATE UNIQUE INDEX uq_pending_publication_renewal ON shared_submission (shared_draft_id)
     WHERE request_type = 'RENEWAL' AND status = 'PENDING_REVIEW';
@@ -70,7 +79,7 @@ BEGIN
         NEW.content_hash, NEW.submit_request_id, NEW.proposed_selection_id,
         NEW.category_id, NEW.keywords, NEW.change_description,
         NEW.request_type, NEW.request_reason, NEW.target_published_version_id,
-        NEW.renewal_expiration_date, NEW.on_behalf_of_author)
+        NEW.renewal_expiration_date, NEW.on_behalf_of_author, NEW.author_decides_until)
        IS DISTINCT FROM
        (OLD.shared_draft_version_id, OLD.shared_draft_id, OLD.snapshot_version_no,
         OLD.organization_id, OLD.submitted_by_membership_id,
@@ -80,7 +89,7 @@ BEGIN
         OLD.content_hash, OLD.submit_request_id, OLD.proposed_selection_id,
         OLD.category_id, OLD.keywords, OLD.change_description,
         OLD.request_type, OLD.request_reason, OLD.target_published_version_id,
-        OLD.renewal_expiration_date, OLD.on_behalf_of_author) THEN
+        OLD.renewal_expiration_date, OLD.on_behalf_of_author, OLD.author_decides_until) THEN
         RAISE EXCEPTION 'Submitted snapshot is immutable' USING ERRCODE = '55000';
     END IF;
     IF NEW.approved_selection_id IS DISTINCT FROM OLD.approved_selection_id
@@ -246,47 +255,6 @@ BEGIN
 END;
 $$;
 
-
--- 0018 rules, plus the renewal four-eyes rule.
-CREATE OR REPLACE FUNCTION validate_review_decision()
-RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = arden, pg_temp AS $$
-DECLARE submission_row record; reviewer_org uuid; is_org_admin boolean;
-BEGIN
-    SELECT s.submitted_by_membership_id, s.organization_id, s.shared_draft_version_id,
-           s.content_hash, s.responsible_department_id, s.classification,
-           s.team_tag, s.project_tag, s.audience_role_ids, s.status, s.request_type
-      INTO STRICT submission_row FROM shared_submission s WHERE s.submission_id = NEW.submission_id;
-    SELECT organization_id INTO STRICT reviewer_org FROM organization_membership
-     WHERE membership_id = NEW.reviewer_membership_id;
-    is_org_admin := COALESCE(current_setting('arden.org_admin', true), 'false') = 'true';
-    IF reviewer_org IS DISTINCT FROM submission_row.organization_id
-       OR (NEW.reviewer_membership_id = submission_row.submitted_by_membership_id AND NOT is_org_admin) THEN
-        RAISE EXCEPTION 'Reviewer authority does not cover this submission' USING ERRCODE = '23514';
-    END IF;
-    -- Decision 0032: nobody approves their own renewal request, including an Organization Admin.
-    IF submission_row.request_type = 'RENEWAL' AND NEW.decision = 'APPROVED'
-       AND NEW.reviewer_membership_id = submission_row.submitted_by_membership_id THEN
-        RAISE EXCEPTION 'A renewal request needs a different reviewer' USING ERRCODE = '23514';
-    END IF;
-    IF submission_row.shared_draft_version_id IS NOT NULL THEN
-        IF NOT NEW.flow2
-            OR NEW.snapshot_version_id IS DISTINCT FROM submission_row.shared_draft_version_id
-            OR NEW.content_hash IS DISTINCT FROM submission_row.content_hash
-            OR (NOT is_org_admin AND NOT actor_has_reviewer_grant(submission_row.organization_id,
-                submission_row.responsible_department_id, submission_row.classification,
-                submission_row.team_tag, submission_row.project_tag)) THEN
-            RAISE EXCEPTION 'Review decision does not match a live authorized snapshot' USING ERRCODE = '23514';
-        END IF;
-        IF NEW.decision = 'APPROVED' AND NOT audience_snapshot_enforceable(
-            submission_row.organization_id, submission_row.audience_role_ids,
-            (SELECT target_scope_type FROM shared_submission WHERE submission_id = NEW.submission_id),
-            (SELECT target_department_id FROM shared_submission WHERE submission_id = NEW.submission_id)) THEN
-            RAISE EXCEPTION 'Approval audience is no longer enforceable' USING ERRCODE = '23514';
-        END IF;
-    END IF;
-    RETURN NEW;
-END;
-$$;
 
 -- 0035 behaviour for reader changes and withdrawals, plus RENEWAL.
 CREATE OR REPLACE FUNCTION apply_publication_change(p_submission_id uuid)
@@ -496,13 +464,16 @@ BEGIN
         submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id, title,
         classification, team_tag, project_tag, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
         content_hash, submit_request_id, request_type, request_reason, target_published_version_id,
-        renewal_expiration_date, on_behalf_of_author)
+        renewal_expiration_date, on_behalf_of_author, author_decides_until)
     VALUES (released.organization_id, released.shared_draft_id, released.shared_draft_version_id,
         released.snapshot_version_no, actor, released.target_scope_type, released.target_department_id,
         released.responsible_department_id, released.title, released.classification, released.team_tag,
         released.project_tag, released.audience_role_ids, released.policy_version, released.review_rule,
         released.content_uri, released.mime_type, released.content_hash, p_request_id, 'RENEWAL', btrim(p_reason),
-        current_row.published_version_id, p_expiration_date, on_behalf)
+        current_row.published_version_id, p_expiration_date, on_behalf,
+        -- The active author's priority window: 3 days, or until the end of the Valid until day if earlier.
+        CASE WHEN on_behalf AND renewal_member_active(current_row.submitted_by_membership_id)
+             THEN LEAST(now() + interval '3 days', ((current_row.expires_on + 1)::timestamp AT TIME ZONE 'UTC')) END)
     RETURNING shared_submission.submission_id INTO created;
     INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)
     VALUES (org, actor, 'KNOWLEDGE_CHANGE_REQUESTED', 'SUCCESS', jsonb_build_object('submissionId', created,
@@ -526,45 +497,6 @@ END;
 $$;
 REVOKE ALL ON FUNCTION request_publication_renewal(uuid, date, text, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION request_publication_renewal(uuid, date, text, uuid) TO arden_runtime;
-
--- Validity of current publications the caller is responsible for: their own documents, every document for
--- an Organization Admin, and the responsible reviewer's documents. Metadata only; no content or readers.
-CREATE FUNCTION list_publication_renewal_state()
-RETURNS TABLE (document_id uuid, published_version_id uuid, title text, responsible_department_id uuid,
-    expiration_date date, renewal_pending boolean, author_active boolean, is_author boolean, can_renew boolean)
-LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = arden, pg_temp AS $$
-DECLARE
-    org uuid := NULLIF(current_setting('arden.organization_id', true), '')::uuid;
-    actor uuid := governance_actor_membership(NULLIF(current_setting('arden.organization_id', true), '')::uuid);
-    admin boolean;
-    today date := (now() AT TIME ZONE 'UTC')::date;
-BEGIN
-    IF actor IS NULL THEN RETURN; END IF;
-    admin := governance_is_org_admin(actor, org);
-    RETURN QUERY
-    WITH visible AS (
-        SELECT g.shared_draft_id, g.published_version_id, g.title, g.responsible_department_id,
-               publication_expiration_date(g.published_version_id, pv.management) AS expires_on,
-               EXISTS (SELECT 1 FROM shared_submission c WHERE c.shared_draft_id = g.shared_draft_id
-                         AND c.request_type = 'RENEWAL' AND c.status = 'PENDING_REVIEW') AS pending,
-               renewal_member_active(g.submitted_by_membership_id) AS author_is_active,
-               g.submitted_by_membership_id = actor AS mine
-          FROM governance_current_publication g
-          JOIN published_knowledge_version pv ON pv.published_version_id = g.published_version_id
-         WHERE g.organization_id = org
-           AND (g.submitted_by_membership_id = actor OR admin
-             OR governance_is_responsible_reviewer(actor, org, g.responsible_department_id, g.reader_mode)))
-    SELECT v.shared_draft_id, v.published_version_id, v.title, v.responsible_department_id, v.expires_on,
-           v.pending, v.author_is_active, v.mine,
-           v.expires_on IS NOT NULL AND NOT v.pending
-             AND (v.mine OR NOT v.author_is_active OR v.expires_on <= today + 7)
-      FROM visible v
-     ORDER BY v.expires_on NULLS LAST, v.shared_draft_id
-     LIMIT 1000;
-END;
-$$;
-REVOKE ALL ON FUNCTION list_publication_renewal_state() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION list_publication_renewal_state() TO arden_runtime;
 
 -- Periodic, idempotent reminder fan-out (decision 0032 C). One notice per recipient, published version,
 -- Valid until and threshold; a renewal changes the date, so the next cycle can remind again.
@@ -630,3 +562,290 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = arden, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION list_publication_author_names(uuid[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION list_publication_author_names(uuid[]) TO arden_runtime;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- Decision 0033 (reviewer self-approval) and the 0032 renewal decision order.
+
+-- Owner-context helper: who decides an on-behalf renewal first, and until when. The window is fixed when the
+-- request is made (author_decides_until), so the renewal's own effect cannot move it; the author must still be
+-- active when the decision is made.
+CREATE FUNCTION renewal_author_window(p_submission_id uuid)
+RETURNS TABLE (author_membership_id uuid, author_active boolean, window_until timestamptz)
+LANGUAGE sql STABLE SET search_path = arden, pg_temp AS $$
+    SELECT d.author_membership_id, renewal_member_active(d.author_membership_id), s.author_decides_until
+      FROM shared_submission s
+      JOIN shared_draft d ON d.shared_draft_id = s.shared_draft_id
+     WHERE s.submission_id = p_submission_id AND s.request_type = 'RENEWAL' AND s.on_behalf_of_author
+$$;
+REVOKE ALL ON FUNCTION renewal_author_window(uuid) FROM PUBLIC;
+
+-- 0018 rules without the submitter exclusion (0033: a matching current grant may decide its own submission),
+-- plus the 0032 order for renewals asked on the author's behalf. SQLSTATE AR032 = the author's window.
+CREATE OR REPLACE FUNCTION validate_review_decision()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = arden, pg_temp AS $$
+DECLARE submission_row record; reviewer_org uuid; is_org_admin boolean; author_window record; author_decides boolean;
+BEGIN
+    SELECT s.submitted_by_membership_id, s.organization_id, s.shared_draft_version_id,
+           s.content_hash, s.responsible_department_id, s.classification,
+           s.team_tag, s.project_tag, s.audience_role_ids, s.status, s.request_type
+      INTO STRICT submission_row FROM shared_submission s WHERE s.submission_id = NEW.submission_id;
+    SELECT organization_id INTO STRICT reviewer_org FROM organization_membership
+     WHERE membership_id = NEW.reviewer_membership_id;
+    is_org_admin := COALESCE(current_setting('arden.org_admin', true), 'false') = 'true';
+    IF reviewer_org IS DISTINCT FROM submission_row.organization_id THEN
+        RAISE EXCEPTION 'Reviewer authority does not cover this submission' USING ERRCODE = '23514';
+    END IF;
+    SELECT * INTO author_window FROM renewal_author_window(NEW.submission_id);
+    author_decides := FOUND AND author_window.author_active
+        AND author_window.author_membership_id = NEW.reviewer_membership_id;
+    IF FOUND AND author_window.author_active AND NOT author_decides AND now() < author_window.window_until THEN
+        RAISE EXCEPTION 'The author decides this renewal first' USING ERRCODE = 'AR032';
+    END IF;
+    IF submission_row.shared_draft_version_id IS NOT NULL THEN
+        IF NOT NEW.flow2
+            OR NEW.snapshot_version_id IS DISTINCT FROM submission_row.shared_draft_version_id
+            OR NEW.content_hash IS DISTINCT FROM submission_row.content_hash
+            OR (NOT is_org_admin AND NOT author_decides AND NOT actor_has_reviewer_grant(submission_row.organization_id,
+                submission_row.responsible_department_id, submission_row.classification,
+                submission_row.team_tag, submission_row.project_tag)) THEN
+            RAISE EXCEPTION 'Review decision does not match a live authorized snapshot' USING ERRCODE = '23514';
+        END IF;
+        IF NEW.decision = 'APPROVED' AND NOT audience_snapshot_enforceable(
+            submission_row.organization_id, submission_row.audience_role_ids,
+            (SELECT target_scope_type FROM shared_submission WHERE submission_id = NEW.submission_id),
+            (SELECT target_department_id FROM shared_submission WHERE submission_id = NEW.submission_id)) THEN
+            RAISE EXCEPTION 'Approval audience is no longer enforceable' USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+-- 0035 rule, plus the author exception above.
+CREATE OR REPLACE FUNCTION enforce_flow2_review_outcome()
+RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path = arden, pg_temp AS $$
+DECLARE submission_row record; publication_count integer;
+BEGIN
+    IF NOT NEW.flow2 THEN RETURN NEW; END IF;
+    SELECT status, publication_state, organization_id, responsible_department_id,
+           classification, team_tag, project_tag, request_type
+      INTO STRICT submission_row FROM shared_submission WHERE submission_id = NEW.submission_id;
+    IF submission_row.status IS DISTINCT FROM NEW.decision THEN
+        RAISE EXCEPTION 'Review decision and submission status diverged' USING ERRCODE = '23514';
+    END IF;
+    -- Decision 0032: the active author decides a renewal asked on their behalf without a reviewer grant.
+    IF COALESCE(current_setting('arden.org_admin', true), 'false') <> 'true'
+       -- (validate_review_decision also requires that author to be active; this invoker check reads only rows
+       -- the caller can see, which for the author is decide_on_behalf_renewal's owner context.)
+       AND NOT EXISTS (SELECT 1 FROM shared_submission rs JOIN shared_draft d ON d.shared_draft_id = rs.shared_draft_id
+            WHERE rs.submission_id = NEW.submission_id AND rs.request_type = 'RENEWAL' AND rs.on_behalf_of_author
+              AND d.author_membership_id = NEW.reviewer_membership_id)
+       AND NOT actor_has_reviewer_grant(submission_row.organization_id,
+           submission_row.responsible_department_id, submission_row.classification,
+           submission_row.team_tag, submission_row.project_tag) THEN
+        RAISE EXCEPTION 'Review decision lacks current reviewer authority' USING ERRCODE = '23514';
+    END IF;
+    SELECT count(*) INTO publication_count FROM published_knowledge_version
+     WHERE submission_id = NEW.submission_id;
+    IF NEW.decision = 'APPROVED' THEN
+        IF publication_count <> 0
+           OR (submission_row.request_type = 'CONTENT' AND submission_row.publication_state <> 'PREPARING')
+           OR (submission_row.request_type <> 'CONTENT' AND submission_row.publication_state <> 'NONE') THEN
+            RAISE EXCEPTION 'Approval must enter PREPARING without activating a publication'
+                USING ERRCODE = '23514';
+        END IF;
+    ELSIF publication_count <> 0 THEN
+        RAISE EXCEPTION 'Rejected submission cannot be published' USING ERRCODE = '23514';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM audit_event a WHERE a.review_decision_id = NEW.review_decision_id
+        AND a.event_type = 'KNOWLEDGE_REVIEW_DECIDED' AND a.outcome = 'SUCCESS') THEN
+        RAISE EXCEPTION 'Review decision needs a separate audit record' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+-- 0018 insert policy without the submitter exclusion (0033). The author's own decision on an on-behalf renewal
+-- is written only by decide_on_behalf_renewal, so it needs no runtime policy.
+DROP POLICY flow3_review_decision_insert ON review_decision;
+CREATE POLICY review_decision_insert_0033 ON review_decision FOR INSERT TO arden_runtime
+  WITH CHECK (flow2 AND EXISTS (SELECT 1 FROM shared_submission s
+      WHERE s.submission_id = review_decision.submission_id AND s.status = 'PENDING_REVIEW'
+        AND ((current_setting('arden.org_admin', true) = 'true')
+          OR actor_has_reviewer_grant(s.organization_id, s.responsible_department_id,
+                s.classification, s.team_tag, s.project_tag)))
+     AND EXISTS (SELECT 1 FROM organization_membership om
+         WHERE om.membership_id = review_decision.reviewer_membership_id
+           AND om.user_id = NULLIF(current_setting('arden.actor_id', true), '')::uuid
+           AND om.status = 'ACTIVE'));
+
+-- The active author reads renewal requests made on their behalf, to decide them (0032).
+CREATE POLICY renewal_author_read ON shared_submission FOR SELECT TO arden_runtime
+  USING (request_type = 'RENEWAL' AND on_behalf_of_author
+     AND organization_id = NULLIF(current_setting('arden.organization_id', true), '')::uuid
+     AND EXISTS (SELECT 1 FROM shared_draft d JOIN organization_membership om ON om.membership_id = d.author_membership_id
+          WHERE d.shared_draft_id = shared_submission.shared_draft_id AND om.status = 'ACTIVE'
+            AND om.user_id = NULLIF(current_setting('arden.actor_id', true), '')::uuid));
+
+-- 0026 without the submitter exclusion: a reviewer sees the author name on their own pending submission too.
+CREATE OR REPLACE FUNCTION review_submission_authors(p_submission_ids uuid[])
+RETURNS TABLE (submission_id uuid, display_name text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = arden, pg_temp AS $$
+    SELECT s.submission_id, COALESCE(NULLIF(btrim(ua.full_name), ''), ua.email)
+      FROM shared_submission s
+      JOIN organization_membership author ON author.membership_id = s.submitted_by_membership_id
+      JOIN user_account ua ON ua.user_id = author.user_id
+      JOIN organization_membership actor
+        ON actor.organization_id = s.organization_id AND actor.status = 'ACTIVE'
+       AND actor.user_id = NULLIF(current_setting('arden.actor_id', true), '')::uuid
+     WHERE s.submission_id = ANY(p_submission_ids)
+       AND cardinality(p_submission_ids) <= 200
+       AND s.shared_draft_version_id IS NOT NULL
+       AND s.organization_id = NULLIF(current_setting('arden.organization_id', true), '')::uuid
+       AND (EXISTS (SELECT 1 FROM role_assignment ra
+               JOIN role r ON r.role_id = ra.role_id AND r.code = 'ORG_ADMIN' AND r.is_system AND r.status = 'ACTIVE'
+               JOIN access_scope scope ON scope.access_scope_id = ra.access_scope_id
+                AND scope.organization_id = s.organization_id AND scope.scope_type = 'ORGANIZATION'
+                AND scope.status = 'ACTIVE'
+              WHERE ra.membership_id = actor.membership_id AND ra.status = 'ACTIVE'
+                AND ra.valid_from <= now() AND (ra.valid_until IS NULL OR ra.valid_until > now()))
+         OR EXISTS (SELECT 1 FROM review_decision rd
+              WHERE rd.submission_id = s.submission_id AND rd.flow2
+                AND rd.reviewer_membership_id = actor.membership_id)
+         OR (s.status = 'PENDING_REVIEW'
+             AND actor_has_reviewer_grant(s.organization_id, s.responsible_department_id,
+                 s.classification, s.team_tag, s.project_tag)));
+$$;
+REVOKE ALL ON FUNCTION review_submission_authors(uuid[]) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION review_submission_authors(uuid[]) TO arden_runtime;
+
+-- 0025 without the submitter exclusion, for the same reason.
+CREATE OR REPLACE FUNCTION submission_proposed_reader_directory(p_submission_id uuid)
+RETURNS TABLE (membership_id uuid, display_name text)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = arden, pg_temp AS $$
+    SELECT sr.membership_id, COALESCE(NULLIF(btrim(ua.full_name), ''), ua.email)
+      FROM shared_submission s
+      JOIN selected_reader sr ON sr.selection_id = s.proposed_selection_id
+      JOIN organization_membership om ON om.membership_id = sr.membership_id
+      JOIN user_account ua ON ua.user_id = om.user_id
+      JOIN organization_membership actor
+        ON actor.organization_id = s.organization_id AND actor.status = 'ACTIVE'
+       AND actor.user_id = NULLIF(current_setting('arden.actor_id', true), '')::uuid
+     WHERE s.submission_id = p_submission_id
+       AND s.status = 'PENDING_REVIEW'
+       AND s.organization_id = NULLIF(current_setting('arden.organization_id', true), '')::uuid
+       AND (EXISTS (SELECT 1 FROM role_assignment ra
+               JOIN role r ON r.role_id = ra.role_id AND r.code = 'ORG_ADMIN' AND r.is_system AND r.status = 'ACTIVE'
+               JOIN access_scope scope ON scope.access_scope_id = ra.access_scope_id
+                AND scope.organization_id = s.organization_id AND scope.scope_type = 'ORGANIZATION'
+                AND scope.status = 'ACTIVE'
+              WHERE ra.membership_id = actor.membership_id AND ra.status = 'ACTIVE'
+                AND ra.valid_from <= now() AND (ra.valid_until IS NULL OR ra.valid_until > now()))
+         OR actor_has_reviewer_grant(s.organization_id, s.responsible_department_id,
+                 s.classification, s.team_tag, s.project_tag))
+     ORDER BY sr.ordinal;
+$$;
+REVOKE ALL ON FUNCTION submission_proposed_reader_directory(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION submission_proposed_reader_directory(uuid) TO arden_runtime;
+
+-- The active author approves or rejects a renewal asked on their behalf, with no reviewer grant (0032).
+-- Returns DECIDED, REPLAYED, CONFLICT (no longer pending or stale snapshot), COMMENT_REQUIRED, or
+-- NOT_APPLICABLE when the caller is not that author (the regular review path then applies).
+CREATE FUNCTION decide_on_behalf_renewal(p_submission_id uuid, p_decision text, p_snapshot_version_id uuid,
+    p_content_hash text, p_comment text, p_request_id uuid)
+RETURNS text LANGUAGE plpgsql SECURITY DEFINER SET search_path = arden, pg_temp AS $$
+DECLARE
+    org uuid := NULLIF(current_setting('arden.organization_id', true), '')::uuid;
+    actor uuid := governance_actor_membership(NULLIF(current_setting('arden.organization_id', true), '')::uuid);
+    request shared_submission%ROWTYPE;
+    previous review_decision%ROWTYPE;
+    decided uuid := gen_random_uuid();
+    note text := NULLIF(btrim(COALESCE(p_comment, '')), '');
+BEGIN
+    IF actor IS NULL OR p_decision NOT IN ('APPROVED', 'REJECTED') OR p_request_id IS NULL THEN
+        RETURN 'NOT_APPLICABLE';
+    END IF;
+    SELECT s.* INTO request FROM shared_submission s
+      JOIN shared_draft d ON d.shared_draft_id = s.shared_draft_id AND d.author_membership_id = actor
+     WHERE s.submission_id = p_submission_id AND s.organization_id = org
+       AND s.request_type = 'RENEWAL' AND s.on_behalf_of_author
+     FOR UPDATE OF s;
+    IF NOT FOUND THEN RETURN 'NOT_APPLICABLE'; END IF;
+    SELECT * INTO previous FROM review_decision rd
+     WHERE rd.reviewer_membership_id = actor AND rd.decision_request_id = p_request_id AND rd.flow2;
+    IF FOUND THEN
+        RETURN CASE WHEN previous.submission_id = p_submission_id AND previous.decision = p_decision
+            THEN 'REPLAYED' ELSE 'CONFLICT' END;
+    END IF;
+    IF request.status <> 'PENDING_REVIEW'
+       OR request.shared_draft_version_id IS DISTINCT FROM p_snapshot_version_id
+       OR request.content_hash IS DISTINCT FROM p_content_hash THEN
+        RETURN 'CONFLICT';
+    END IF;
+    IF p_decision = 'REJECTED' AND note IS NULL THEN RETURN 'COMMENT_REQUIRED'; END IF;
+    IF note IS NOT NULL AND char_length(note) > 2000 THEN RETURN 'CONFLICT'; END IF;
+    INSERT INTO review_decision (review_decision_id, submission_id, reviewer_membership_id, decision, comment, flow2,
+        decision_request_id, snapshot_version_id, content_hash)
+    VALUES (decided, p_submission_id, actor, p_decision, note, true, p_request_id,
+        request.shared_draft_version_id, request.content_hash);
+    INSERT INTO audit_event (organization_id, actor_membership_id, review_decision_id, event_type, outcome, details_json)
+    VALUES (org, actor, decided, 'KNOWLEDGE_REVIEW_DECIDED', 'SUCCESS', jsonb_build_object(
+        'submissionId', p_submission_id, 'snapshotVersionId', request.shared_draft_version_id, 'decision', p_decision,
+        'requestType', 'RENEWAL', 'publishedVersionId', request.target_published_version_id,
+        'decidedAs', 'AUTHOR', 'selfApproved', false, 'requestId', p_request_id));
+    RETURN 'DECIDED';
+END;
+$$;
+REVOKE ALL ON FUNCTION decide_on_behalf_renewal(uuid, text, uuid, text, text, uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION decide_on_behalf_renewal(uuid, text, uuid, text, text, uuid) TO arden_runtime;
+
+-- Validity of current publications the caller is responsible for: their own documents, every document for
+-- an Organization Admin, and the responsible reviewer's documents. Metadata only; no content or readers.
+-- A pending renewal is described so the author can decide one asked on their behalf.
+CREATE FUNCTION list_publication_renewal_state()
+RETURNS TABLE (document_id uuid, published_version_id uuid, title text, responsible_department_id uuid,
+    expiration_date date, renewal_pending boolean, author_active boolean, is_author boolean, can_renew boolean,
+    pending_submission_id uuid, pending_snapshot_version_id uuid, pending_content_hash text,
+    pending_on_behalf boolean, pending_requested_by text, pending_reason text, pending_expiration_date date,
+    pending_requested_at timestamptz, author_window_until timestamptz, can_decide boolean, author_name text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = arden, pg_temp AS $$
+DECLARE
+    org uuid := NULLIF(current_setting('arden.organization_id', true), '')::uuid;
+    actor uuid := governance_actor_membership(NULLIF(current_setting('arden.organization_id', true), '')::uuid);
+    admin boolean;
+    today date := (now() AT TIME ZONE 'UTC')::date;
+BEGIN
+    IF actor IS NULL THEN RETURN; END IF;
+    admin := governance_is_org_admin(actor, org);
+    RETURN QUERY
+    WITH visible AS (
+        SELECT g.shared_draft_id, g.published_version_id, g.title, g.responsible_department_id,
+               publication_expiration_date(g.published_version_id, pv.management) AS expires_on,
+               renewal_member_active(g.submitted_by_membership_id) AS author_is_active,
+               g.submitted_by_membership_id = actor AS mine,
+               CASE WHEN renewal_member_active(g.submitted_by_membership_id)
+                    THEN renewal_member_name(g.submitted_by_membership_id) END AS author_display_name
+          FROM governance_current_publication g
+          JOIN published_knowledge_version pv ON pv.published_version_id = g.published_version_id
+         WHERE g.organization_id = org
+           AND (g.submitted_by_membership_id = actor OR admin
+             OR governance_is_responsible_reviewer(actor, org, g.responsible_department_id, g.reader_mode)))
+    SELECT v.shared_draft_id, v.published_version_id, v.title, v.responsible_department_id, v.expires_on,
+           p.submission_id IS NOT NULL, v.author_is_active, v.mine,
+           v.expires_on IS NOT NULL AND p.submission_id IS NULL
+             AND (v.mine OR NOT v.author_is_active OR v.expires_on <= today + 7),
+           p.submission_id, p.shared_draft_version_id, p.content_hash, p.on_behalf_of_author,
+           CASE WHEN p.submission_id IS NOT NULL THEN renewal_member_name(p.submitted_by_membership_id) END,
+           p.request_reason, p.renewal_expiration_date, p.submitted_at,
+           (SELECT w.window_until FROM renewal_author_window(p.submission_id) w WHERE w.author_active),
+           COALESCE(p.on_behalf_of_author AND v.mine, false), v.author_display_name
+      FROM visible v
+      LEFT JOIN LATERAL (SELECT c.* FROM shared_submission c WHERE c.shared_draft_id = v.shared_draft_id
+                           AND c.request_type = 'RENEWAL' AND c.status = 'PENDING_REVIEW' LIMIT 1) p ON true
+     ORDER BY v.expires_on NULLS LAST, v.shared_draft_id
+     LIMIT 1000;
+END;
+$$;
+REVOKE ALL ON FUNCTION list_publication_renewal_state() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION list_publication_renewal_state() TO arden_runtime;
