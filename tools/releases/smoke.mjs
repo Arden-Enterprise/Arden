@@ -131,6 +131,15 @@ try {
   if (version.commit !== source.commit || version.tree !== source.tree) throw new Error("Image source identity mismatch");
   const ready = await (await fetch(`${origin}/api/health/ready`)).json();
   if (ready.status !== "ok" || (await fetch(`${origin}/api/v1/me`)).status !== 401) throw new Error("API readiness/denial failed");
+  const sampleId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const noteQuestion = await fetch(`${origin}/api/v1/organizations/${sampleId}/private-workspace/drafts/${sampleId}/questions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ requestId: sampleId, query: "Summarize this note", expectedVersion: 1 }),
+  });
+  if (noteQuestion.status !== 401 || noteQuestion.headers.get("cache-control") !== "no-store"
+    || noteQuestion.headers.get("x-content-type-options") !== "nosniff") throw new Error("Private note question proxy failed");
+  await noteQuestion.body?.cancel();
   for (const path of ["/", "/release.json", "/healthz", "/assets/missing.js", "/api/v1/me", "/auth/missing", "/verify",
     "/api/v1/organizations/00000000-0000-0000-0000-000000000000/knowledge/drafts/pdf"]) {
     const response = await fetch(`${origin}${path}`);
