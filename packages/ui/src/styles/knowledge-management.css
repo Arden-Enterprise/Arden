@@ -12,10 +12,11 @@
 .km-section-heading p { margin: 6px 0 0; color: var(--arden-text-secondary); font-size: 13px; }
 .km-section-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 14px; }
 .arden-app-shell .km-section-heading h2 { margin: 0; font-size: 19px; font-weight: 600; }
-.km-types { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+/* As many type cards per row as fit the page (it narrows beside a docked Ask Arden), never cutting a word. */
+.km-types { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 10px; }
 .km-types > button { display: flex; align-items: center; gap: 11px; min-height: 76px; padding: 15px; text-align: left; color: var(--arden-text-primary); background: var(--arden-surface-raised); border: 1px solid var(--arden-border); border-radius: 11px; }
 .km-types > button > svg { color: var(--arden-violet); flex: none; }
-.km-types strong { font-size: 12px; font-weight: 500; }
+.km-types strong { min-width: 0; font-size: 12px; font-weight: 500; overflow-wrap: normal; }
 .km-types button > span { margin-left: auto; color: var(--arden-text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .km-types button:hover, .km-collection:hover { border-color: var(--arden-border-strong); background: var(--arden-surface-hover); }
 .km-text-button { display: inline-flex; align-items: center; gap: 7px; padding: 3px 0; color: var(--arden-violet); font-size: 12px; font-weight: 500; background: transparent; border: 0; }
@@ -85,7 +86,6 @@
 .km-readers > small { color: var(--arden-text-secondary); font-size: 11px; }
 .km-library button, .km-catalog button { cursor: pointer; transition: background .15s ease, border-color .15s ease; }
 .km-library button:focus-visible, .km-catalog button:focus-visible, .km-metadata-fields :focus-visible { outline: 2px solid var(--arden-violet); outline-offset: 3px; }
-@media (max-width: 1100px) { .km-types { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 760px) { .km-types, .km-collections, .km-catalog-layout { grid-template-columns: 1fr; } .km-catalog-nav { padding-right: 0; border-right: 0; } }
 @container collection-manager (max-width: 600px) {
   .km-catalog-layout { grid-template-columns: 1fr; }

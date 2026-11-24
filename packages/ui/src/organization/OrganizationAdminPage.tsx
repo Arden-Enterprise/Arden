@@ -285,7 +285,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           </div>
           <div className="island-split">
           <div className="island-main">
-            {matchingMembers.length ? <IslandTable label="Members" minWidth={700} columns="minmax(200px, 1.7fr) minmax(110px, .9fr) minmax(180px, 1.2fr) minmax(120px, .8fr) 84px"
+            {matchingMembers.length ? <IslandTable label="Members" minWidth={636} columns="minmax(160px, 1.7fr) minmax(88px, .9fr) minmax(140px, 1.2fr) minmax(88px, .8fr) 84px"
               headers={["MEMBER", "DEPARTMENT", "ACCESS", "STATUS", <span className="sr-only">Actions</span>]}
               footer={<span aria-live="polite">Showing {matchingMembers.length} of {members.length} members</span>}>
               {matchingMembers.map((member) => {
@@ -423,7 +423,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             aria-pressed={grantFilter === filter} onClick={() => setGrantFilter(filter)}>{titleCase(filter)}<span className="island-badge">{reviewerGrants.filter((item) => item.status === filter).length}</span></button>)}</div>
           <div className="island-split">
           <div className="island-main">
-            {reviewerGrants.filter((grant) => grant.status === grantFilter).length ? <IslandTable label="Review permissions" minWidth={680} columns="minmax(180px, 1.4fr) minmax(130px, .9fr) minmax(180px, 1.3fr) 124px 84px"
+            {reviewerGrants.filter((grant) => grant.status === grantFilter).length ? <IslandTable label="Review permissions" minWidth={690} columns="minmax(160px, 1.4fr) minmax(110px, .9fr) minmax(150px, 1.3fr) 112px 84px"
               headers={["REVIEWER", "COVERS", "DOCUMENTS", "STATUS", <span className="sr-only">Actions</span>]}>
               {reviewerGrants.filter((grant) => grant.status === grantFilter).map((grant) => {
                 const reviewer = data.members.find((member) => member.id === grant.reviewerMembershipId);

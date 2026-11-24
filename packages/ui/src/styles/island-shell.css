@@ -494,7 +494,7 @@
   .arden-app-shell .app-sidebar { position: sticky; top: var(--arden-shell-gap); width: 72px; height: var(--arden-shell-height); padding: 10px 8px; border: 1px solid var(--arden-border); }
   .arden-app-shell .app-sidebar .access-card-copy, .arden-app-shell .app-sidebar .access-card-switch,
   .arden-app-shell .app-sidebar .sidebar-nav-label, .arden-app-shell .app-sidebar .sidebar-planned,
-  .arden-app-shell .app-sidebar .sidebar-member > div, .arden-app-shell .sidebar-collapse { display: none; }
+  .arden-app-shell .app-sidebar .sidebar-member > div, .arden-app-shell .sidebar-workspace-row .sidebar-collapse { display: none; }
   .arden-app-shell .app-sidebar .access-card { display: flex; justify-content: center; padding: 6px 0; }
   .arden-app-shell .app-sidebar .navigation-label { display: block; height: 1px; margin: 10px 8px; padding: 0; overflow: hidden; color: transparent; background: var(--arden-border); }
   .arden-app-shell .app-sidebar .sidebar-nav-item { position: relative; justify-content: center; padding: 0; min-height: 36px; }

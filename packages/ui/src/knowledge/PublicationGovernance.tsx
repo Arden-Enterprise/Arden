@@ -265,8 +265,8 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
     <label className="island-field governance-search">Search documents
       <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title" /></label>
     {items === null ? <div className="island island-empty" role="status">Loading documents…</div>
-      : shown.length ? <IslandTable label="Published documents" minWidth={760}
-        columns="minmax(220px, 2fr) minmax(120px, 1fr) minmax(150px, 1.1fr) 80px 110px minmax(190px, auto)"
+      : shown.length ? <IslandTable label="Published documents" minWidth={704}
+        columns="minmax(160px, 2fr) minmax(96px, 1fr) minmax(100px, 1.1fr) 64px 100px minmax(96px, auto)"
         headers={["DOCUMENT", "DEPARTMENT", "SHARED WITH", "VERSION", "PUBLISHED", <span className="sr-only">Actions</span>]}>
         {shown.map((item) => <IslandRow key={item.documentId}>
           <IslandCell className="island-row-cell is-name"><strong>{item.title}</strong>

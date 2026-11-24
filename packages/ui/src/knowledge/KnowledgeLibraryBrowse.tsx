@@ -32,8 +32,8 @@ const statusTone: Record<ReturnType<typeof validityStatus>["status"], string> = 
 };
 
 function DocumentRegister({ items, onOpen, recent = false, showReaders = false }: { items: PublishedKnowledge[]; onOpen: (id: string) => void; recent?: boolean; showReaders?: boolean }) {
-  return <IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={940}
-    columns="minmax(270px, 2.8fr) minmax(120px, 1fr) minmax(130px, 1fr) 70px 115px 140px"
+  return <IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={700}
+    columns="minmax(150px, 2.8fr) minmax(92px, 1fr) minmax(92px, 1fr) 60px 100px 118px"
     headers={["DOCUMENT", "TYPE", "OWNER", "VERSION", recent ? "PUBLISHED" : "VALID UNTIL", "STATUS"]}>
     {items.map(item => {
       const validity = validityStatus(item.management, new Date().toLocaleDateString("en-CA"));
