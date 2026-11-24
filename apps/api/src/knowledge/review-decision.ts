@@ -50,7 +50,7 @@ export type ApprovedReadersPlan = { proposed: ReaderSelection; approved: ReaderS
 export type ReviewDecisionPlan =
   | { kind: "DENIED"; reason: "INVALID_SNAPSHOT" | "STALE_SNAPSHOT" | "NOT_AUTHORIZED" | "AUDIENCE_NOT_ENFORCEABLE"
       | "UNSUPPORTED_POLICY" | "COMMENT_REQUIRED" | "INVALID_REQUEST" | "READERS_NOT_SUPPORTED" | "READERS_WIDENED"
-      | "PUBLICATION_CHANGED" }
+      | "PUBLICATION_CHANGED" | "AUTHOR_DECISION_WINDOW" }
   | { kind: "DENIED"; reason: "INVALID_READERS"; field: ApprovedReadersField; message: string }
   | { kind: "RECORD_ONLY"; decision: "REJECTED"; comment: string }
   | { kind: "APPROVE_FOR_PREPARATION"; decision: "APPROVED"; submissionId: string; snapshotVersionId: string;
@@ -105,10 +105,6 @@ export function planReviewDecision(facts: ReviewDecisionFacts, request: ReviewDe
     : facts.reviewerGrants.some(approveWith);
   if (!canApprove) return { kind: "DENIED", reason: "NOT_AUTHORIZED" };
   const requestType = facts.requestType ?? "CONTENT";
-  // Decision 0032: a renewal always needs someone other than the requester, even an Organization Admin.
-  if (requestType === "RENEWAL" && facts.actor?.membershipId === submission.submittedByMembershipId) {
-    return { kind: "DENIED", reason: "NOT_AUTHORIZED" };
-  }
   if (requestType !== "CONTENT" && (!facts.publicationChange?.targetIsCurrent
     || (requestType === "WITHDRAWAL" && facts.publicationChange.newerVersionPreparing))) {
     return { kind: "DENIED", reason: "PUBLICATION_CHANGED" };

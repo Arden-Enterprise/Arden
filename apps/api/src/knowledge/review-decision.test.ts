@@ -53,17 +53,16 @@ describe("planReviewDecision", () => {
       .toMatchObject({ kind: "APPROVE_FOR_PREPARATION" });
   });
 
-  it("never lets the requester approve their own renewal, even as an Organization Admin (0032 B2)", () => {
+  it("lets a requester with a matching grant decide their own renewal and other requests (decision 0033)", () => {
     const current = { targetIsCurrent: true, newerVersionPreparing: false };
+    for (const requestType of ["CONTENT", "READER_CHANGE", "WITHDRAWAL", "RENEWAL"] as const) {
+      const own = { ...facts, requestType, publicationChange: current,
+        submission: { ...facts.submission, submittedByMembershipId: "reviewer" } };
+      expect(planReviewDecision(own, request)).toMatchObject({ kind: "APPROVE_FOR_PREPARATION", decision: "APPROVED" });
+      expect(planReviewDecision({ ...own, reviewerGrants: [{ ...grant, departmentId: "hr" }] }, request))
+        .toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
+    }
     const renewal = { ...facts, requestType: "RENEWAL" as const, publicationChange: current };
-    expect(planReviewDecision(renewal, request)).toMatchObject({ kind: "APPROVE_FOR_PREPARATION", decision: "APPROVED" });
-    const asRequester = { ...renewal, submission: { ...renewal.submission, submittedByMembershipId: "reviewer" } };
-    expect(planReviewDecision(asRequester, request)).toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
-    const adminRequester = { ...asRequester, actor: { ...asRequester.actor!, isOrganizationAdmin: true } };
-    expect(planReviewDecision(adminRequester, request)).toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
-    // A content submission keeps the audited Organization Admin self-approval of the product contract.
-    expect(planReviewDecision({ ...adminRequester, requestType: "CONTENT" }, request))
-      .toMatchObject({ kind: "APPROVE_FOR_PREPARATION" });
     expect(planReviewDecision({ ...renewal, publicationChange: { ...current, targetIsCurrent: false } }, request))
       .toEqual({ kind: "DENIED", reason: "PUBLICATION_CHANGED" });
   });

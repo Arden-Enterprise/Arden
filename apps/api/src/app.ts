@@ -1945,6 +1945,10 @@ export function buildApp(dependencies: AppDependencies) {
           return reply.code(400).send(safeError("READERS_NOT_SUPPORTED",
             "This submission uses audiences; approve it without approved readers.", request.id));
         }
+        if (result.reason === "AUTHOR_DECISION_WINDOW") {
+          return reply.code(409).send(safeError("AUTHOR_DECISION_WINDOW",
+            "The author decides this renewal first. Reviewers can decide it after 3 days or once the document expires.", request.id));
+        }
         if (result.reason === "PUBLICATION_CHANGED") {
           return reply.code(409).send(safeError("PUBLICATION_CHANGED",
             "This document changed since the request was made, or a newer version is still being prepared.", request.id));

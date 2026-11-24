@@ -2588,6 +2588,18 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "POST", url, headers: { cookie: owner, origin: "http://localhost:5180" } })).statusCode).toBe(200);
   });
 
+  it("refuses a reviewer decision during the author's renewal window with a safe 409 (0032)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    repository.authorDecisionWindow = true;
+    const response = await app.inject({ method: "POST",
+      url: `/api/v1/organizations/${organizationId}/knowledge/reviews/c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1/decisions`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "idempotency-key": "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2" },
+      payload: { action: "APPROVE", expectedSnapshotVersionId: sharedVersionId, expectedContentHash: "a".repeat(64) } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("AUTHOR_DECISION_WINDOW");
+    repository.authorDecisionWindow = false;
+  });
+
   it("hides an expired publication from readers and explains an old link instead of serving it (0032 A)", async () => {
     const owner = await desktopSession(app, "owner@example.test");
     const headers = { cookie: owner, origin: "http://localhost:5180" };
@@ -2652,7 +2664,7 @@ describe("API auth and private draft routes", () => {
     }
     repository.renewalState = [{ documentId: sharedDraftId, publishedVersionId: "efefefef-efef-4efe-8efe-efefefefefef",
       title: "Runbook", responsibleDepartmentId: salesDepartmentId, expirationDate: "2026-11-30", renewalPending: false,
-      authorActive: true, isAuthor: true, canRenew: true }];
+      authorActive: true, isAuthor: true, canRenew: true, authorName: "Avery Author", pending: null }];
     const state = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/renewals`,
       headers: { cookie: owner, origin: "http://localhost:5180" } });
     expect(state.statusCode).toBe(200);
@@ -3369,6 +3381,7 @@ class MemoryRepository implements ArdenDataRepository {
   async decideReview(userId: string, requestedOrganization: string, submissionId: string, action: ReviewAction,
     expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
     idempotencyKey: string, _requestId?: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult> {
+    if (this.authorDecisionWindow) return { kind: "denied", reason: "AUTHOR_DECISION_WINDOW" };
     const submission = this.sharedSubmission;
     if (this.reviewRequestKey === idempotencyKey && submission && submissionId === submission.id) {
       const expected = approvedReaders === undefined ? submission.proposedTargetReaders
@@ -3418,6 +3431,7 @@ class MemoryRepository implements ArdenDataRepository {
   }
 
   departmentPublications = 0;
+  authorDecisionWindow = false;
   renewalState: PublicationRenewalState[] = [];
   renewalResult: RequestPublicationRenewalResult["kind"] = "requested";
   renewalInputs: PublicationRenewalInput[] = [];

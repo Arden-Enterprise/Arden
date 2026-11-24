@@ -1282,9 +1282,24 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       expect(home?.find((item) => item.draftId === lastDay.draftId)?.authorName).toBe("Synthetic reader");
     });
 
-    it("lets a responsible reviewer renew on the author's behalf, refuses their own approval and shows it again only after approval", async () => {
+    /** The reviewer holds both scopes so the frozen legacy breadth of these fixtures is covered either way. */
+    const reviewerGrants = async () => { await departmentGrant(); await organizationGrant(); };
+    const organizationGrant = async () => {
+      await asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope,
+          department_id, granted_by_membership_id, classifications, level)
+        VALUES ($1, $2, 'ORGANIZATION', NULL, $3, ARRAY['INTERNAL'], 'STANDARD') RETURNING reviewer_grant_id`,
+      [ids.orgA, ids.reviewerM, ids.authorM])).then((result) => { createdGrants.push(result.rows[0]!.reviewer_grant_id); });
+    };
+    const decideAs = (userId: string, submission: { id: string; snapshotVersionId: string; contentHash: string },
+      action: "APPROVE" | "REJECT", comment: string | null = null) => repository!.decideReview(userId, ids.orgA, submission.id,
+      action, submission.snapshotVersionId, submission.contentHash, comment, randomUUID(), "renewal-decision");
+    const decisionAudit = (submissionId: string) => asSuperuser(async (client) => (await client.query<{ details: Record<string, unknown> }>(
+      `SELECT details_json AS details FROM audit_event WHERE event_type = 'KNOWLEDGE_REVIEW_DECIDED'
+        AND details_json->>'submissionId' = $1`, [submissionId])).rows.map((row) => row.details));
+
+    it("lets a responsible reviewer renew on the author's behalf and shows it again only after approval", async () => {
       if (!repository) throw new Error("Test database is unavailable");
-      await departmentGrant();
+      await reviewerGrants();
       const { draftId, versionId } = await publish("Expired runbook", utcDay(-2));
       await expect(renew(ids.outsider, draftId, utcDay(90))).resolves.toEqual({ kind: "not-found" });
       await expect(renew(ids.reviewer, draftId, utcDay(0))).resolves.toEqual({ kind: "invalid-date" });
@@ -1299,11 +1314,16 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(count(`SELECT count(*) FROM audit_event WHERE event_type = 'KNOWLEDGE_CHANGE_REQUESTED'
         AND details_json->>'submissionId' = $1 AND details_json->>'onBehalfOfAuthor' = 'true'
         AND details_json->>'requestedBy' = $2`, [requested.submission.id, ids.reviewerM])).resolves.toBe(1);
-      const decide = (userId: string) => repository!.decideReview(userId, ids.orgA, requested.submission.id, "APPROVE",
-        requested.submission.snapshotVersionId, requested.submission.contentHash, null, randomUUID(), "renewal-decision");
-      await expect(decide(ids.reviewer)).resolves.toMatchObject({ kind: "denied", reason: "NOT_AUTHORIZED" });
+      // The author sees the request to decide it.
+      const authorState = (await repository.listPublicationRenewalState(ids.author, ids.orgA))?.find((item) => item.documentId === draftId);
+      expect(authorState?.pending).toMatchObject({ submissionId: requested.submission.id, onBehalfOfAuthor: true,
+        requestedByName: "Synthetic reader", reason: "Checked again", expirationDate: utcDay(90), canDecide: true });
       expect(await listedFor(ids.engineer)).not.toContain(draftId);
-      await expect(decide(ids.author)).resolves.toMatchObject({ kind: "decided", submission: { status: "APPROVED" } });
+      // Already expired: the author's window is closed, so the requester may decide at once (decision 0033).
+      await expect(decideAs(ids.engineer, requested.submission, "APPROVE")).resolves.toMatchObject({ kind: "not-found" });
+      await expect(decideAs(ids.reviewer, requested.submission, "APPROVE"))
+        .resolves.toMatchObject({ kind: "decided", submission: { status: "APPROVED" } });
+      expect(await decisionAudit(requested.submission.id)).toEqual([expect.objectContaining({ selfApproved: true })]);
       await expect(pointer(draftId)).resolves.toEqual({ published_version_id: versionId });
       expect(await listedFor(ids.engineer)).toContain(draftId);
       await expect(repository.getPublishedKnowledge(ids.engineer, ids.orgA, versionId))
@@ -1312,32 +1332,100 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         AND details_json->>'documentId' = $1 AND details_json->>'onBehalfOfAuthor' = 'true'`, [draftId])).resolves.toBe(1);
     });
 
-    it("applies the 7-day on-behalf window, refuses self-approval and opens the window when the author is inactive", async () => {
+    it("gives the active author the first decision on an on-behalf renewal; rejection is final", async () => {
       if (!repository) throw new Error("Test database is unavailable");
-      await departmentGrant();
+      await reviewerGrants();
+      const rejected = await publish("Author rejects", utcDay(5));
+      const asked = await renew(ids.reviewer, rejected.draftId, utcDay(120));
+      if (asked.kind !== "requested") throw new Error(`Renewal fixture failed: ${asked.kind}`);
+      // During the window only the author decides: reviewers, including the requester, are refused (DB and API).
+      await expect(decideAs(ids.reviewer, asked.submission, "APPROVE"))
+        .resolves.toEqual({ kind: "denied", reason: "AUTHOR_DECISION_WINDOW" });
+      await expect(sqlState((client) => client.query(`INSERT INTO review_decision (submission_id, reviewer_membership_id,
+          decision, flow2, decision_request_id, snapshot_version_id, content_hash)
+        SELECT submission_id, submitted_by_membership_id, 'APPROVED', true, gen_random_uuid(), shared_draft_version_id, content_hash
+          FROM shared_submission WHERE submission_id = $1`, [asked.submission.id]))).resolves.toBe("AR032");
+      await expect(decideAs(ids.author, asked.submission, "REJECT")).resolves.toEqual({ kind: "denied", reason: "COMMENT_REQUIRED" });
+      await expect(decideAs(ids.author, asked.submission, "REJECT", "Not needed any more"))
+        .resolves.toMatchObject({ kind: "decided", submission: { status: "REJECTED", requestType: "RENEWAL" } });
+      expect(await decisionAudit(asked.submission.id)).toEqual([expect.objectContaining({ decidedAs: "AUTHOR", selfApproved: false })]);
+      // Final: nobody can override the author's rejection.
+      expect(["conflict", "not-found"]).toContain((await decideAs(ids.reviewer, asked.submission, "APPROVE")).kind);
+      expect(await decisionAudit(asked.submission.id)).toHaveLength(1);
+      await expect(repository.getPublishedKnowledge(ids.engineer, ids.orgA, rejected.versionId))
+        .resolves.toMatchObject({ management: { expirationDate: utcDay(5) } });
+
+      const approved = await publish("Author approves", utcDay(6));
+      const second = await renew(ids.reviewer, approved.draftId, null);
+      if (second.kind !== "requested") throw new Error(`Renewal fixture failed: ${second.kind}`);
+      await expect(decideAs(ids.author, second.submission, "APPROVE"))
+        .resolves.toMatchObject({ kind: "decided", submission: { status: "APPROVED" } });
+      await expect(repository.getPublishedKnowledge(ids.engineer, ids.orgA, approved.versionId))
+        .resolves.toMatchObject({ management: { expirationDate: null } });
+
+      // After the 3-day window the reviewers decide, and the requester may approve their own request.
+      const late = await publish("Author silent", utcDay(6));
+      const third = await renew(ids.reviewer, late.draftId, utcDay(200));
+      if (third.kind !== "requested") throw new Error(`Renewal fixture failed: ${third.kind}`);
+      await asSuperuser(async (client) => {
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query(`UPDATE shared_submission SET submitted_at = now() - interval '4 days',
+            author_decides_until = now() - interval '1 day' WHERE submission_id = $1`,
+          [third.submission.id]);
+      });
+      await expect(decideAs(ids.reviewer, third.submission, "APPROVE"))
+        .resolves.toMatchObject({ kind: "decided", submission: { status: "APPROVED" } });
+      expect(await decisionAudit(third.submission.id)).toEqual([expect.objectContaining({ selfApproved: true })]);
+    });
+
+    it("applies the 7-day on-behalf window, keeps Admin self-approval and lets reviewers decide at once for an inactive author", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      await reviewerGrants();
       const later = await publish("Renew later", utcDay(20));
       await expect(renew(ids.reviewer, later.draftId, utcDay(200))).resolves.toEqual({ kind: "not-yet" });
       const own = await renew(ids.author, later.draftId, null);
       expect(own).toMatchObject({ kind: "requested", submission: { renewal: { expirationDate: null, onBehalfOfAuthor: false } } });
       if (own.kind !== "requested") return;
-      // The author is an Organization Admin here; a renewal still needs someone else.
-      await expect(repository.decideReview(ids.author, ids.orgA, own.submission.id, "APPROVE", own.submission.snapshotVersionId,
-        own.submission.contentHash, null, randomUUID(), "self-renewal")).resolves.toMatchObject({ kind: "denied" });
-      await expect(sqlState((client) => client.query(`INSERT INTO review_decision (submission_id, reviewer_membership_id,
-          decision, flow2, decision_request_id, snapshot_version_id, content_hash)
-        SELECT submission_id, submitted_by_membership_id, 'APPROVED', true, gen_random_uuid(), shared_draft_version_id, content_hash
-          FROM shared_submission WHERE submission_id = $1`, [own.submission.id]))).resolves.toBe("23514");
+      // The author is an Organization Admin here; Admin authority, including self-approval, is unchanged.
+      await expect(decideAs(ids.author, own.submission, "APPROVE"))
+        .resolves.toMatchObject({ kind: "decided", submission: { status: "APPROVED" } });
+      expect(await decisionAudit(own.submission.id)).toEqual([expect.objectContaining({ selfApproved: true })]);
 
       const inactive = await publish("Author left", utcDay(25));
       await asSuperuser((client) => client.query("UPDATE organization_membership SET status = 'SUSPENDED' WHERE membership_id = $1", [ids.authorM]));
       try {
-        await expect(renew(ids.reviewer, inactive.draftId, utcDay(400))).resolves.toMatchObject({ kind: "requested",
-          submission: { renewal: { onBehalfOfAuthor: true } } });
+        const asked = await renew(ids.reviewer, inactive.draftId, utcDay(400));
+        expect(asked).toMatchObject({ kind: "requested", submission: { renewal: { onBehalfOfAuthor: true } } });
         await expect(count(`SELECT count(*) FROM arden_notification WHERE event_type = 'PUBLICATION_RENEWAL_ON_BEHALF'
           AND resource_id = $1`, [inactive.draftId])).resolves.toBe(0);
+        if (asked.kind !== "requested") return;
+        await expect(decideAs(ids.reviewer, asked.submission, "APPROVE"))
+          .resolves.toMatchObject({ kind: "decided", submission: { status: "APPROVED" } });
       } finally {
         await asSuperuser((client) => client.query("UPDATE organization_membership SET status = 'ACTIVE' WHERE membership_id = $1", [ids.authorM]));
       }
+    });
+
+    it("lets a reviewer approve their own submission only with a matching current grant (decision 0033)", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      const draftId = await createDraft(ids.reviewer, ids.orgA, ids.reviewerM, "Reviewer's own guide");
+      const configured = await repository.updateKnowledgeDraft(ids.reviewer, ids.orgA, draftId, 1, {
+        responsibleDepartmentId: ids.sales, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.allMembersA],
+      }, null, "self-configure");
+      if (configured.kind !== "updated") throw new Error(`Configure fixture failed: ${configured.kind}`);
+      await prepareKnowledgeFixture(pool!, ids.orgA, draftId, [ids.reviewerM, ids.engineerM]);
+      const submitted = await repository.submitKnowledgeDraft(ids.reviewer, ids.orgA, draftId, 2, randomUUID(), "self-submit");
+      if (submitted.kind !== "submitted") throw new Error(`Submit fixture failed: ${submitted.kind}`);
+      const own = submitted.submission;
+      // A Department grant does not cover this organization-wide snapshot, even for its own author.
+      await departmentGrant();
+      expect((await repository.listAssignedReviews(ids.reviewer, ids.orgA))?.map((item) => item.submissionId)).not.toContain(own.id);
+      await expect(decideAs(ids.reviewer, own, "APPROVE")).resolves.toEqual({ kind: "denied", reason: "NOT_AUTHORIZED" });
+      await organizationGrant();
+      expect((await repository.listAssignedReviews(ids.reviewer, ids.orgA))?.map((item) => item.submissionId)).toContain(own.id);
+      await expect(decideAs(ids.reviewer, own, "APPROVE"))
+        .resolves.toMatchObject({ kind: "decided", submission: { status: "APPROVED", publicationState: "PREPARING" } });
+      expect(await decisionAudit(own.id)).toEqual([expect.objectContaining({ selfApproved: true, decision: "APPROVED" })]);
     });
 
     it("writes each 30/7-day reminder once and never for a document with no expiry", async () => {

@@ -70,10 +70,9 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
       const renewalDocumentIds = new Set(page.items
         .filter(item => item.type === "PUBLICATION_EXPIRING" || item.type === "PUBLICATION_RENEWAL_ON_BEHALF")
         .map(item => item.resourceId));
-      const responsibleDocuments = new Set(renewalDocumentIds.size
+      const responsibleStates = new Map((renewalDocumentIds.size
         ? (await repository.listPublicationRenewalState(actor.userId, request.params.organizationId) ?? [])
-          .filter(state => renewalDocumentIds.has(state.documentId)).map(state => state.documentId)
-        : []);
+          .filter(state => renewalDocumentIds.has(state.documentId)) : []).map(state => [state.documentId, state]));
       return reply.header("cache-control", "no-store").send({
         ...page,
         items: page.items.map(item => {
@@ -96,14 +95,17 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
               ...(visible ? { target: { view: "knowledge", publicationId: item.resourceId } } : {}) };
           }
           if (item.type === "PUBLICATION_EXPIRING" || item.type === "PUBLICATION_RENEWAL_ON_BEHALF") {
-            const visible = responsibleDocuments.has(item.resourceId);
+            const state = responsibleStates.get(item.resourceId);
+            const visible = state !== undefined;
             const title = item.publicationTitle ?? "a document";
             const message = !visible ? "This notification's item is no longer available."
               : item.type === "PUBLICATION_EXPIRING"
                 ? `“${title}” expires on ${item.expiresOn ?? "its Valid until date"}. Renew it to keep it visible to readers.`
                 : `${item.sharedByName ?? "A colleague"} asked to renew “${title}” on your behalf: ${item.requestReason ?? ""}`.trim();
+            // The author goes to My Contributions, where they renew or approve/reject an on-behalf renewal (0032).
+            const target = state?.isAuthor ? { view: "contribution", documentId: item.resourceId } : { view: "knowledge" };
             return { id: item.id, type: item.type, message, createdAt: item.createdAt, readAt: item.readAt,
-              ...(visible ? { target: { view: "knowledge" } } : {}) };
+              ...(visible ? { target } : {}) };
           }
           return { id: item.id, type: item.type, message: messages[item.type], createdAt: item.createdAt, readAt: item.readAt };
         }),
