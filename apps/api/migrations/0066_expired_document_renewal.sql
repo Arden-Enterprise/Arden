@@ -15,9 +15,9 @@ SET search_path TO arden, public;
 --
 -- Operator rollout: replaces six reviewed SECURITY DEFINER routines in place (validate_shared_submission,
 -- validate_review_decision, apply_publication_change, eligible_ai_publications, review_submission_authors,
--- submission_proposed_reader_directory; owners unchanged) and adds five (request_publication_renewal,
+-- submission_proposed_reader_directory; owners unchanged) and adds six (request_publication_renewal,
 -- list_publication_renewal_state, enqueue_publication_expiry_reminders, list_publication_author_names,
--- decide_on_behalf_renewal; 52 in the owner inventory). Apply as the trusted superuser. The review-decision
+-- decide_on_behalf_renewal, publication_change_target_state; 53 in the owner inventory). Apply as the trusted superuser. The review-decision
 -- insert policy no longer excludes the submitter (decision 0033); authority still needs a current grant or
 -- Organization Admin, and the author's own decision on an on-behalf renewal runs only through the reviewed routine.
 
@@ -849,3 +849,38 @@ END;
 $$;
 REVOKE ALL ON FUNCTION list_publication_renewal_state() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION list_publication_renewal_state() TO arden_runtime;
+
+-- Whether a change request (READER_CHANGE, WITHDRAWAL, RENEWAL) still names the current publication, and whether
+-- a newer approved version is being prepared. Reviewer authority and readership are separate (0010/0023): a
+-- reviewer whose grant covers the request need not be a reader, so this is answered here instead of through the
+-- reader's publication RLS. Two booleans only, for an Organization Admin, a current grant holder for the
+-- request's frozen scope or the document's author; no content, readers or metadata. apply_publication_change
+-- re-checks the pointer when the approval is written.
+CREATE FUNCTION publication_change_target_state(p_submission_id uuid)
+RETURNS TABLE (target_is_current boolean, newer_version_preparing boolean)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = arden, pg_temp AS $$
+DECLARE
+    org uuid := NULLIF(current_setting('arden.organization_id', true), '')::uuid;
+    actor uuid := governance_actor_membership(NULLIF(current_setting('arden.organization_id', true), '')::uuid);
+    request shared_submission%ROWTYPE;
+BEGIN
+    IF actor IS NULL THEN RETURN; END IF;
+    SELECT * INTO request FROM shared_submission s
+     WHERE s.submission_id = p_submission_id AND s.organization_id = org AND s.request_type <> 'CONTENT';
+    IF NOT FOUND THEN RETURN; END IF;
+    IF NOT (governance_is_org_admin(actor, org)
+        OR actor_has_reviewer_grant(request.organization_id, request.responsible_department_id,
+               request.classification, request.team_tag, request.project_tag)
+        OR EXISTS (SELECT 1 FROM shared_draft d WHERE d.shared_draft_id = request.shared_draft_id
+                     AND d.author_membership_id = actor)) THEN
+        RETURN;
+    END IF;
+    RETURN QUERY SELECT
+        EXISTS (SELECT 1 FROM knowledge_current_publication cp WHERE cp.shared_draft_id = request.shared_draft_id
+                  AND cp.organization_id = org AND cp.published_version_id = request.target_published_version_id),
+        EXISTS (SELECT 1 FROM shared_submission c WHERE c.shared_draft_id = request.shared_draft_id
+                  AND c.status = 'APPROVED' AND c.publication_state = 'PREPARING');
+END;
+$$;
+REVOKE ALL ON FUNCTION publication_change_target_state(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION publication_change_target_state(uuid) TO arden_runtime;

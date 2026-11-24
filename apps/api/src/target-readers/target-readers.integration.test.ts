@@ -1406,6 +1406,98 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       }
     });
 
+    it("lets a responsible reviewer who is not a reader approve a reader change without becoming a reader", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      await reviewerGrants();
+      const ask = (draftId: string, input: Omit<Parameters<ArdenRepository["requestPublicationChange"]>[3], "idempotencyKey">) =>
+        repository!.requestPublicationChange(ids.author, ids.orgA, draftId, { ...input, idempotencyKey: randomUUID() }, "change-request");
+      const readable = async (userId: string, versionId: string) => Boolean(await repository!.getPublishedKnowledge(userId, ids.orgA, versionId));
+      // Readers are the selected members author + engineer; the department reviewer is not one of them.
+      const changed = await publish("Reader change by a non-reader reviewer", null);
+      expect(await listedFor(ids.reviewer)).not.toContain(changed.draftId);
+      const readers = { mode: "SELECTED_MEMBERS" as const, departmentId: null, memberIds: [ids.engineerM, ids.outsiderM] };
+      const readerChange = await ask(changed.draftId, { type: "READER_CHANGE", reason: "Rollout team only", targetReaders: readers });
+      if (readerChange.kind !== "requested") throw new Error(`Change fixture failed: ${readerChange.kind}`);
+      const approvedChange = await decideAs(ids.reviewer, readerChange.submission, "APPROVE");
+      expect(approvedChange.kind === "denied" ? approvedChange.reason : approvedChange.kind).toBe("decided");
+      expect(approvedChange).toMatchObject({ submission: { status: "APPROVED", requestType: "READER_CHANGE" } });
+      // The reviewer is still not a reader; the newly selected outsider is.
+      expect(await listedFor(ids.reviewer)).not.toContain(changed.draftId);
+      await expect(readable(ids.reviewer, changed.versionId)).resolves.toBe(false);
+      expect(await listedFor(ids.outsider)).toContain(changed.draftId);
+      const eligible = await asRuntime(ids.reviewer, ids.orgA, async (client) => (await client.query<{ id: string }>(
+        "SELECT eligible_ai_publications() AS id")).rows.map((row) => row.id));
+      expect(eligible).not.toContain(changed.versionId);
+    });
+
+    it("lets a responsible reviewer who is not a reader approve a withdrawal, which removes the current pointer", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      await reviewerGrants();
+      const ask = (draftId: string, input: Omit<Parameters<ArdenRepository["requestPublicationChange"]>[3], "idempotencyKey">) =>
+        repository!.requestPublicationChange(ids.author, ids.orgA, draftId, { ...input, idempotencyKey: randomUUID() }, "change-request");
+      const readable = async (userId: string, versionId: string) => Boolean(await repository!.getPublishedKnowledge(userId, ids.orgA, versionId));
+      const withdrawn = await publish("Withdrawal by a non-reader reviewer", null);
+      expect(await listedFor(ids.reviewer)).not.toContain(withdrawn.draftId);
+      await expect(readable(ids.engineer, withdrawn.versionId)).resolves.toBe(true);
+      const withdrawal = await ask(withdrawn.draftId, { type: "WITHDRAWAL", reason: "Replaced" });
+      if (withdrawal.kind !== "requested") throw new Error(`Withdrawal fixture failed: ${withdrawal.kind}`);
+      const approvedWithdrawal = await decideAs(ids.reviewer, withdrawal.submission, "APPROVE");
+      expect(approvedWithdrawal.kind === "denied" ? approvedWithdrawal.reason : approvedWithdrawal.kind).toBe("decided");
+      expect(approvedWithdrawal).toMatchObject({ submission: { status: "APPROVED", requestType: "WITHDRAWAL" } });
+      await expect(pointer(withdrawn.draftId)).resolves.toBeUndefined();
+      await expect(readable(ids.reviewer, withdrawn.versionId)).resolves.toBe(false);
+      await expect(readable(ids.engineer, withdrawn.versionId)).resolves.toBe(false);
+    });
+
+    it("still refuses a changed target, a withdrawal racing a newer version and a wrong-scope reviewer", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      await reviewerGrants();
+      const ask = (draftId: string, input: Omit<Parameters<ArdenRepository["requestPublicationChange"]>[3], "idempotencyKey">) =>
+        repository!.requestPublicationChange(ids.author, ids.orgA, draftId, { ...input, idempotencyKey: randomUUID() }, "change-request");
+      const gone = await publish("Target no longer current", null);
+      const late = await ask(gone.draftId, { type: "WITHDRAWAL", reason: "Too late" });
+      if (late.kind !== "requested") throw new Error(`Withdrawal fixture failed: ${late.kind}`);
+      await asSuperuser(async (client) => {
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query("DELETE FROM knowledge_current_publication WHERE shared_draft_id = $1", [gone.draftId]);
+      });
+      await expect(decideAs(ids.reviewer, late.submission, "APPROVE")).resolves.toEqual({ kind: "denied", reason: "PUBLICATION_CHANGED" });
+
+      const racing = await publish("Newer version preparing", null);
+      const race = await ask(racing.draftId, { type: "WITHDRAWAL", reason: "Race" });
+      if (race.kind !== "requested") throw new Error(`Withdrawal fixture failed: ${race.kind}`);
+      await asSuperuser(async (client) => {
+        await client.query("SET LOCAL session_replication_role = replica");
+        // A newer approved content version of the same document, still being prepared.
+        const version = await client.query<{ id: string }>(`INSERT INTO shared_draft_version
+          SELECT (jsonb_populate_record(NULL::shared_draft_version, to_jsonb(v)
+                   || jsonb_build_object('shared_draft_version_id', gen_random_uuid(), 'version_no', v.version_no + 100))).*
+            FROM shared_draft_version v WHERE v.shared_draft_version_id = $1
+          RETURNING shared_draft_version_id AS id`, [race.submission.snapshotVersionId]);
+        await client.query(`INSERT INTO shared_submission (organization_id, shared_draft_id, shared_draft_version_id,
+            snapshot_version_no, submitted_by_membership_id, target_scope_type, responsible_department_id, title,
+            classification, audience_role_ids, policy_version, review_rule, content_uri, mime_type, content_hash,
+            submit_request_id, status, publication_state)
+          SELECT organization_id, shared_draft_id, $2, snapshot_version_no + 100, submitted_by_membership_id, target_scope_type,
+                 responsible_department_id, title, classification, audience_role_ids, policy_version, review_rule, content_uri,
+                 mime_type, content_hash, gen_random_uuid(), 'APPROVED', 'PREPARING'
+            FROM shared_submission WHERE submission_id = $1`, [race.submission.id, version.rows[0]!.id]);
+      });
+      await expect(decideAs(ids.reviewer, race.submission, "APPROVE")).resolves.toEqual({ kind: "denied", reason: "PUBLICATION_CHANGED" });
+
+      // An Engineering reviewer does not cover this Sales document, reader or not.
+      await asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id, reviewer_membership_id, scope,
+          department_id, granted_by_membership_id, classifications, level)
+        VALUES ($1, $2, 'DEPARTMENT', $3, $4, ARRAY['INTERNAL'], 'STANDARD') RETURNING reviewer_grant_id`,
+      [ids.orgA, ids.outsiderM, ids.engineering, ids.authorM])).then((result) => { createdGrants.push(result.rows[0]!.reviewer_grant_id); });
+      const scoped = await publish("Wrong-scope reviewer", null);
+      const scopedRequest = await ask(scoped.draftId, { type: "WITHDRAWAL", reason: "Wrong scope" });
+      if (scopedRequest.kind !== "requested") throw new Error(`Withdrawal fixture failed: ${scopedRequest.kind}`);
+      const refused = await decideAs(ids.outsider, scopedRequest.submission, "APPROVE");
+      expect(refused.kind === "not-found" || (refused.kind === "denied" && refused.reason === "NOT_AUTHORIZED")).toBe(true);
+      await expect(pointer(scoped.draftId)).resolves.toEqual({ published_version_id: scoped.versionId });
+    });
+
     it("lets a reviewer approve their own submission only with a matching current grant (decision 0033)", async () => {
       if (!repository) throw new Error("Test database is unavailable");
       const draftId = await createDraft(ids.reviewer, ids.orgA, ids.reviewerM, "Reviewer's own guide");

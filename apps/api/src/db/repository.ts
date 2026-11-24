@@ -2528,18 +2528,12 @@ export class ArdenRepository implements ArdenDataRepository {
       const readerFacts: SelectionFacts = proposedReaders && approvedReaders !== undefined
         ? await this.loadSelectionFacts(client, organizationId, approvedReaders)
         : { organizationId, departments: [], members: [] };
-      // T6.2: a change request applies to the publication it names, which must still be current.
+      // T6.2: a change request applies to the publication it names, which must still be current. One trusted
+      // check for every request type: a reviewer whose grant covers the request need not be a reader (0010/0023),
+      // so this is not read through publication RLS. No row (fail closed) means PUBLICATION_CHANGED.
       const publicationChange = row.request_type === "CONTENT" ? undefined : (await client.query<{
-        target_is_current: boolean; newer_version_preparing: boolean }>(`
-        SELECT (EXISTS (SELECT 1 FROM knowledge_current_publication cp WHERE cp.shared_draft_id = s.shared_draft_id
-                          AND cp.published_version_id = s.target_published_version_id)
-                 -- A responsible reviewer need not be a reader; renewal state is visible to them (0032).
-                 OR (s.request_type = 'RENEWAL' AND EXISTS (SELECT 1 FROM list_publication_renewal_state() r
-                          WHERE r.document_id = s.shared_draft_id
-                            AND r.published_version_id = s.target_published_version_id))) AS target_is_current,
-               EXISTS (SELECT 1 FROM shared_submission c WHERE c.shared_draft_id = s.shared_draft_id
-                         AND c.status = 'APPROVED' AND c.publication_state = 'PREPARING') AS newer_version_preparing
-          FROM shared_submission s WHERE s.submission_id = $1`, [submissionId])).rows
+        target_is_current: boolean; newer_version_preparing: boolean }>(
+        "SELECT target_is_current, newer_version_preparing FROM publication_change_target_state($1)", [submissionId])).rows
         .map((fact) => ({ targetIsCurrent: fact.target_is_current, newerVersionPreparing: fact.newer_version_preparing }))[0];
       const plan = planReviewDecision({
         actor,

@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy" / "release
 from management import migration_role_name, migration_role_probe_sql, valid_migration_role_probe
 
 
-REVIEWED_BASELINE_DEFINER_COUNT = 39
+REVIEWED_BASELINE_DEFINER_COUNT = 40
 REVIEWED_MAINTENANCE_DEFINERS = {
     "enqueue_maintenance_submission_notices()",
     "list_closed_publication_reports()",
