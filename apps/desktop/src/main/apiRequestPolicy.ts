@@ -10,6 +10,7 @@ export type DesktopApiRequest = {
 const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const uuidPattern = new RegExp(`^${uuid}$`);
 const privateDraftPath = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts(?:/${uuid})?$`);
+const privateNoteQuestionPath = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/questions$`);
 // Decision 0029 private notes organization: collections, favorites and trash; spec F03-ARR order and archive. No DELETE method.
 const privateCollectionCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections$`);
 const privateCollectionItem = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections/${uuid}$`);
@@ -99,7 +100,7 @@ export function desktopApiResponseLimit(request: DesktopApiRequest): number {
 
 /** Reader deadlines are main-owned; other routes retain the validated renderer bound. */
 export function desktopApiTimeout(request: DesktopApiRequest): number | undefined {
-  if (request.method === "POST" && readerQuestionPath.test(request.path)) return 240_000;
+  if (request.method === "POST" && (readerQuestionPath.test(request.path) || privateNoteQuestionPath.test(request.path))) return 240_000;
   if (request.method === "POST" && readerSummaryPath.test(request.path)) return 300_000;
   if (request.method === "GET" && readerSummaryAccess.test(request.path)) return 30_000;
   return request.timeoutMs;
@@ -115,12 +116,15 @@ function summaryBody(body: string | undefined): boolean {
   } catch { return false; }
 }
 
-function questionBody(body: string | undefined): boolean {
+function questionBody(body: string | undefined, versioned = false): boolean {
   if (!body || body.length > 25_000) return false;
   try {
     const value: unknown = JSON.parse(body);
     return typeof value === "object" && value !== null && !Array.isArray(value)
-      && Object.keys(value).sort().join() === "query,requestId" && "requestId" in value && "query" in value
+      && Object.keys(value).sort().join() === (versioned ? "expectedVersion,query,requestId" : "query,requestId")
+      && (!versioned || ("expectedVersion" in value && typeof value.expectedVersion === "number"
+        && Number.isInteger(value.expectedVersion) && value.expectedVersion >= 1 && value.expectedVersion <= 2_147_483_647))
+      && "requestId" in value && "query" in value
       && typeof value.requestId === "string" && uuidPattern.test(value.requestId)
       && typeof value.query === "string" && Boolean(value.query.trim()) && Array.from(value.query).length <= 4_000;
   } catch { return false; }
@@ -186,6 +190,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && !request.body && !request.ifMatch && !request.idempotencyKey;
   const readerSummary = ((readerSummaryPath.test(url.pathname) && request.method === "POST" && summaryBody(request.body))
     || (readerQuestionPath.test(url.pathname) && request.method === "POST" && questionBody(request.body))
+    || (privateNoteQuestionPath.test(url.pathname) && request.method === "POST" && !url.search && questionBody(request.body, true))
     || (readerSummaryAccess.test(url.pathname) && request.method === "GET" && request.body === undefined))
     && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
   const adminGet = administrationPath.test(url.pathname) && request.method === "GET"

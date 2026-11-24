@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppSidebar } from "./AppSidebar";
 import { MobileTabIsland } from "./MobileTabIsland";
 import { AgentPanel } from "./AgentPanel";
+import type { ChatSource } from "../ask-arden/useArdenChat";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
 import { SignInPage } from "../sign-in/SignInPage";
 import { clearRecoveryTokens, readRecoveryTokens, storeRecoveryTokens } from "../sign-in/recovery-session";
@@ -624,6 +625,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
   // Demo sessions always have the in-memory notes; signed-in members need a private workspace in this organization.
   const canUsePrivateNotes = !isUnassignedMember && (!serverSession || Boolean(activeMembership?.canUsePrivateWorkspace));
+  const privateNote = privateNotes.focus.kind === "note" ? privateNotes.selectedNote : null;
+  const privateVersion = privateNotes.selectedVersion;
+  const chatSource: ChatSource = activeView !== "personal-workspace" ? { kind: "company" }
+    : canUsePrivateNotes && privateNotes.serverBacked && privateNote?.sourceVersionId && privateVersion
+      && !privateNotes.isDirty && !privateNotes.autosaving
+      ? { kind: "private-note", id: privateNote.id, title: privateNote.title, version: privateVersion }
+      : { kind: "private-empty", hint: privateNote && (privateNotes.isDirty || privateNotes.autosaving)
+        ? "Save this note before asking Arden." : "Open a saved note in Private to ask Arden." };
   const trashConfirm = privateNotes.trashConfirm;
 
   return (
@@ -710,7 +719,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
       {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close Ask Arden" onClick={contextControl.onToggleContext} />}
       <AgentPanel key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`} open={contextOpen}
-        platform={platform} organizationId={serverOrganizationId} onClose={closeContext}
+        platform={platform} organizationId={serverOrganizationId} onClose={closeContext} source={chatSource}
         onOpenAskArden={() => navigate("ask-arden")}
         onOpenCitation={(citation) => { if (contextOverlay) setContextOpen(false); openKnowledgeCitation(citation); }} />
       {trashConfirm && <IslandConfirm

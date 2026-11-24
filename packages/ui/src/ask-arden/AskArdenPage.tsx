@@ -21,7 +21,7 @@ type AskArdenPageProps = {
 };
 
 export function AskArdenPage({ platform, organizationId, onOpenCitation, active = true }: AskArdenPageProps) {
-  const chat = useArdenChat({ platform, organizationId });
+  const chat = useArdenChat({ platform, organizationId, source: { kind: "company" } });
   const [examplesVisible, setExamplesVisible] = useState(true);
   const [resetting, setResetting] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);

@@ -48,6 +48,16 @@ Existing routes keep their behaviour; list and get add `collectionId` and `favor
 | GET | `/trash` | — | 200 `{ items: TrashEntry[] }` newest first |
 | POST | `/trash/:batchId/restore` | — | 200 `{ collections: Collection[], notes: NoteSummary[] }` restored items |
 | POST | `/trash/:batchId/purge` | — | 204 |
+| POST | `/drafts/:id/questions` | `{ requestId: UUID, query: string, expectedVersion: positive integer }` | 200 answer with verified excerpts from the requested saved note, or an insufficient-evidence result |
+
+Private note questions require an active owner, organization and membership. Archived and
+trashed notes are unavailable. The route accepts one saved revision, reads its protected
+text by hash, and checks access and revision before inference and again before returning.
+A stale revision returns 409 `NOTE_CHANGED`. The handler sends bounded excerpts from
+that note to the configured Arden-AI service and returns `Cache-Control: no-store`.
+Questions and replies are held only in the sidebar session. The route requires an
+organization opt-in via `ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS`. See the
+[AI context contract](../../engineering/knowledge-source-contexts.md).
 
 Rename of a note keeps using `PATCH /drafts/:id` with `If-Match` (creates a new version). Placement, favorite, trash and restore are not content versions and do not require `If-Match`; they are idempotent where it makes sense (favorite twice = same state).
 

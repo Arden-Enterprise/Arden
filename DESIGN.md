@@ -110,9 +110,11 @@ The server-backed `Document text` field keeps one compact formatting toolbar (No
 
 ## Knowledge-context naming refinement (23 November 2026)
 
-The private workspace/root/navigation label is **Private**, covering the intended
-notes-and-files scope. Private PDF upload/AI ingestion is a separate pending backend
-path, as recorded in the [context contract](docs/engineering/knowledge-source-contexts.md).
+The private workspace/root/navigation label is **Private**. Its right Ask Arden sidebar
+shows the saved note currently open as the only source. Switching notes or editing the
+note resets the sidebar. PDF imports contribute the text saved in the note. The
+[context contract](docs/engineering/knowledge-source-contexts.md) records the
+organization opt-in and source restrictions.
 The disabled attachment plus and publication-version dropdown are removed from
 chat. There is no source/version selector. Company AI uses the current indexed
 publication from Published date under [ADR0030](docs/decisions/0030-published-date-ai-sources.md).

@@ -10,10 +10,11 @@ const passageKey = (citation: AnswerCitation) =>
  * version, scope and quoted passages. It shows only citation data already validated with the answer;
  * Open in document takes the governed reader path, which rechecks access and highlights the passage.
  */
-export function CitationSourcesPanel({ id, citations, selected, onOpenDocument, onClose }: {
+export function CitationSourcesPanel({ id, citations, selected, hideOpenDocument, onOpenDocument, onClose }: {
   id: string;
   citations: readonly AnswerCitation[];
   selected: AnswerCitation;
+  hideOpenDocument?: boolean;
   onOpenDocument?: (citation: AnswerCitation) => void;
   onClose: () => void;
 }) {
@@ -61,10 +62,10 @@ export function CitationSourcesPanel({ id, citations, selected, onOpenDocument, 
             aria-current={isSelected ? "true" : undefined} aria-label={citation.page ? `Passage on page ${citation.page}` : "Cited passage"}>
             {citation.page && <small>Page {citation.page}</small>}
             <q>{citation.excerpt}</q>
-            <button type="button" className="ask-source-open" disabled={!onOpenDocument}
+            {!hideOpenDocument && <button type="button" className="ask-source-open" disabled={!onOpenDocument}
               aria-label={`Open ${citation.title} at this passage`} onClick={() => onOpenDocument?.(citation)}>
               Open in document <Icon name="open-external" size={11} />
-            </button>
+            </button>}
           </article>;
         })}
       </section>)}

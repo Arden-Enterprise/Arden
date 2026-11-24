@@ -587,6 +587,7 @@ export function usePrivateNotes(initialNotes: PrivateNote[], initialCollections:
 
   return {
     state, selectedNote, draft, hasUnsavedDrafts, serverBacked, loading, saving, error, saveMessage,
+    selectedVersion: selectedNote ? versions.current.get(selectedNote.id) : undefined,
     collections, trash, trashLoading, trashError, actionError, busyAction, notice, focus, expanded, treeOpen, renaming, trashConfirm,
     archive, archiveHasMore, archiveLoading, archiveError,
     isDirty: selectedNote ? isNoteDirty(state, selectedNote) || isPending(selectedNote) : false,
