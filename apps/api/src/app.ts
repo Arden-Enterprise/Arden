@@ -2092,6 +2092,11 @@ export function buildApp(dependencies: AppDependencies) {
         if (stored) await dependencies.storage.remove(stored.sourceUri);
         return reply.code(412).send(safeError("VERSION_CONFLICT", "This note changed. Reload it before saving again.", request.id));
       }
+      if (result.replacedSourceUri) {
+        // Decision 0031: the overwritten open version's old content is no longer reachable.
+        try { await dependencies.storage.remove(result.replacedSourceUri); }
+        catch (error) { request.log.warn({ errorType: safeErrorType(error), requestId: request.id }, "Replaced private content could not be erased"); }
+      }
       const representation = await representDraft(result.draft, dependencies.storage);
       reply.header("ETag", etag(result.draft.currentVersion));
       return representation;

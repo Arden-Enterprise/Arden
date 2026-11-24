@@ -14,6 +14,10 @@ export type PrivateNoteSummary = {
   updatedAt: string;
   collectionId: string | null;
   favoritedAt: string | null;
+  /** Spec F03-ARR order inside the collection or root; null sorts first. */
+  position?: number | null;
+  /** Set only on an archive response for an archived note. */
+  archivedAt?: string | null;
 };
 export type PrivateNoteRecord = PrivateNoteSummary & { body: string; version?: number };
 export type PrivateCollectionRecord = {
@@ -34,6 +38,17 @@ export type PrivateTrashEntry = {
   trashedAt: string;
   purgeAfter: string;
 };
+/** A note in the Archived view (spec F03-ARR); `collectionId` is where Unarchive returns it (null = root). */
+export type PrivateArchivedNote = {
+  id: string;
+  title: string;
+  collectionId: string | null;
+  collectionTitle: string | null;
+  archivedAt: string;
+  createdAt: string;
+  updatedAt: string;
+};
+export type PrivateArchiveList = { items: PrivateArchivedNote[]; hasMore: boolean };
 export type PrivateNoteList = { items: PrivateNoteSummary[]; nextCursor: string | null };
 export type DuplicatedCollection = { collection: PrivateCollectionRecord; collections: PrivateCollectionRecord[]; notes: PrivateNoteSummary[] };
 export type RestoredTrash = { collections: PrivateCollectionRecord[]; notes: PrivateNoteSummary[] };
@@ -83,8 +98,19 @@ export function updatePrivateCollection(platform: Platform, organizationId: stri
   return apiRequest<PrivateCollectionRecord>(platform, `${base(organizationId)}/collections/${collectionId}`, json("PATCH", input));
 }
 
-export function movePrivateNote(platform: Platform, organizationId: string, noteId: string, collectionId: string | null): Promise<PrivateNoteSummary> {
-  return apiRequest<PrivateNoteSummary>(platform, `${base(organizationId)}/drafts/${noteId}/collection`, json("PUT", { collectionId }));
+/** Moves a note into a collection (null = root) at a 0-based `index` of its order, or last when no index is given. */
+export function movePrivateNote(platform: Platform, organizationId: string, noteId: string, collectionId: string | null,
+  index: number | null = null): Promise<PrivateNoteSummary> {
+  return apiRequest<PrivateNoteSummary>(platform, `${base(organizationId)}/drafts/${noteId}/collection`,
+    json("PUT", index === null ? { collectionId } : { collectionId, index }));
+}
+
+export function setPrivateNoteArchived(platform: Platform, organizationId: string, noteId: string, archived: boolean): Promise<PrivateNoteSummary> {
+  return apiRequest<PrivateNoteSummary>(platform, `${base(organizationId)}/drafts/${noteId}/archive`, json("PUT", { archived }));
+}
+
+export function listPrivateArchive(platform: Platform, organizationId: string): Promise<PrivateArchiveList> {
+  return apiRequest<PrivateArchiveList>(platform, `${base(organizationId)}/archive`);
 }
 
 export function setPrivateNoteFavorite(platform: Platform, organizationId: string, noteId: string, favorite: boolean): Promise<PrivateNoteSummary> {

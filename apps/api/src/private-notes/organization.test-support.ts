@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { DraftListItem, PrivateDraft, StoredContentFields } from "../db/repository.js";
 import type {
-  PrivateCollection, PrivateCollectionSubtree, PrivateDuplicatedCollection, PrivateNoteSource,
+  PrivateArchivedNote, PrivateCollection, PrivateCollectionSubtree, PrivateDuplicatedCollection, PrivateNoteSource,
   PrivateOrganizationStore, PrivateTrashEntry, PurgedPrivateContent, UpdateCollectionResult,
 } from "./organization-store.js";
 import { maxListedCollections, PrivateCollectionLimitError } from "./organization-store.js";
@@ -11,13 +11,14 @@ type MemoryNote = {
   id: string; title: string; collectionId: string | null; favoritedAt: Date | null;
   trashedAt: Date | null; batchId: string | null; status: "ACTIVE" | "PURGED"; contentPurged: boolean;
   content: () => NoteContent; createdAt: Date; updatedAt: Date;
+  position: number | null; archivedAt: Date | null;
 };
 type MemoryCollection = {
   id: string; title: string; parentId: string | null; favoritedAt: Date | null;
   trashedAt: Date | null; batchId: string | null; status: "ACTIVE" | "PURGED"; createdAt: Date; updatedAt: Date;
 };
 
-/** In-memory model of decision 0029 for HTTP tests: one owner, other members see nothing. */
+/** In-memory model of decision 0029 and spec F03-ARR for HTTP tests: one owner, other members see nothing. */
 export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore {
   readonly notes = new Map<string, MemoryNote>();
   readonly collections = new Map<string, MemoryCollection>();
@@ -31,7 +32,16 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
   addNote(input: { id: string; title: string; collectionId?: string | null; content: () => NoteContent }): void {
     const at = this.now();
     this.notes.set(input.id, { id: input.id, title: input.title, collectionId: input.collectionId ?? null, favoritedAt: null,
-      trashedAt: null, batchId: null, status: "ACTIVE", contentPurged: false, content: input.content, createdAt: at, updatedAt: at });
+      trashedAt: null, batchId: null, status: "ACTIVE", contentPurged: false, content: input.content, createdAt: at, updatedAt: at,
+      position: null, archivedAt: null });
+  }
+
+  /** Notes of one container in display order: unplaced first (newest first), then by position. */
+  ordered(collectionId: string | null): MemoryNote[] {
+    return [...this.notes.values()]
+      .filter((note) => !this.hidden(note.id) && !note.archivedAt && note.collectionId === collectionId)
+      .sort((left, right) => (left.position ?? -1) - (right.position ?? -1)
+        || right.createdAt.getTime() - left.createdAt.getTime() || right.id.localeCompare(left.id));
   }
 
   /** True when the note is trashed or purged and must behave as not found. */
@@ -51,11 +61,12 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
       id: note.id, organizationId: this.scope.organizationId, title: note.title,
       currentVersion: { id: content.versionId, version: content.version, mimeType: content.mimeType, contentHash: content.contentHash },
       createdAt: note.createdAt, updatedAt: note.updatedAt, collectionId: note.collectionId, favoritedAt: note.favoritedAt,
+      position: note.position, archivedAt: note.archivedAt,
     };
   }
 
   activeNotes(): DraftListItem[] {
-    return [...this.notes.values()].filter((note) => !this.hidden(note.id)).map((note) => this.summary(note));
+    return [...this.notes.values()].filter((note) => !this.hidden(note.id) && !note.archivedAt).map((note) => this.summary(note));
   }
 
   async listCollections(userId: string, organizationId: string): Promise<PrivateCollection[] | null> {
@@ -102,28 +113,59 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     return collectionView(collection);
   }
 
-  async moveNote(userId: string, organizationId: string, draftId: string, collectionId: string | null): Promise<DraftListItem | null> {
-    const note = this.ownedActiveNote(userId, organizationId, draftId);
+  async moveNote(userId: string, organizationId: string, draftId: string, collectionId: string | null, index: number | null): Promise<DraftListItem | null> {
+    const note = this.ownedTreeNote(userId, organizationId, draftId);
     if (!note || (collectionId && !this.isActiveCollection(collectionId))) return null;
+    const order = this.ordered(collectionId).filter((entry) => entry.id !== draftId);
+    order.splice(Math.min(index ?? order.length, order.length), 0, note);
     note.collectionId = collectionId;
+    order.forEach((entry, position) => { entry.position = position + 1; });
     return this.summary(note);
   }
 
   async setNoteFavorite(userId: string, organizationId: string, draftId: string, favorite: boolean): Promise<DraftListItem | null> {
-    const note = this.ownedActiveNote(userId, organizationId, draftId);
+    const note = this.ownedTreeNote(userId, organizationId, draftId);
     if (!note) return null;
     note.favoritedAt = favorite ? note.favoritedAt ?? this.now() : null;
     return this.summary(note);
   }
 
-  async getNoteSource(userId: string, organizationId: string, draftId: string): Promise<PrivateNoteSource | null> {
+  async setNoteArchived(userId: string, organizationId: string, draftId: string, archived: boolean, requestId: string): Promise<DraftListItem | null> {
     const note = this.ownedActiveNote(userId, organizationId, draftId);
+    if (!note) return null;
+    if (Boolean(note.archivedAt) !== archived) {
+      if (archived) note.archivedAt = this.now();
+      else {
+        note.archivedAt = null;
+        note.position = null;
+        if (note.collectionId && !this.isActiveCollection(note.collectionId)) note.collectionId = null;
+      }
+      this.audit.push({ eventType: archived ? "PRIVATE_DRAFT_ARCHIVED" : "PRIVATE_DRAFT_UNARCHIVED", details: { draftId, requestId } });
+    }
+    return this.summary(note);
+  }
+
+  async listArchived(userId: string, organizationId: string): Promise<{ items: PrivateArchivedNote[]; hasMore: boolean } | null> {
+    if (!this.member(userId, organizationId)) return null;
+    if (!this.owner(userId, organizationId)) return { items: [], hasMore: false };
+    const items = [...this.notes.values()].filter((note) => !this.hidden(note.id) && note.archivedAt)
+      .sort((left, right) => (right.archivedAt as Date).getTime() - (left.archivedAt as Date).getTime())
+      .map((note) => {
+        const collection = note.collectionId && this.isActiveCollection(note.collectionId) ? this.collections.get(note.collectionId) : undefined;
+        return { id: note.id, title: note.title, collectionId: collection?.id ?? null, collectionTitle: collection?.title ?? null,
+          archivedAt: note.archivedAt as Date, createdAt: note.createdAt, updatedAt: note.updatedAt };
+      });
+    return { items, hasMore: false };
+  }
+
+  async getNoteSource(userId: string, organizationId: string, draftId: string): Promise<PrivateNoteSource | null> {
+    const note = this.ownedTreeNote(userId, organizationId, draftId);
     return note ? source(note) : null;
   }
 
   async duplicateNote(userId: string, organizationId: string, from: PrivateNoteSource, title: string,
     copy: StoredContentFields, requestId: string): Promise<PrivateDraft | null> {
-    const note = this.ownedActiveNote(userId, organizationId, from.id);
+    const note = this.ownedTreeNote(userId, organizationId, from.id);
     if (!note || note.content().versionId !== from.versionId) return null;
     const created = this.copyNote(title, note.collectionId, copy);
     this.audit.push({ eventType: "PRIVATE_DRAFT_DUPLICATED", details: { draftId: created.id, sourceDraftId: from.id, requestId } });
@@ -131,7 +173,7 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     return {
       id: created.id, organizationId, title, versionId: content.versionId, sourceUri: copy.sourceUri, mimeType: copy.mimeType,
       contentHash: copy.contentHash, currentVersion: 1, createdAt: created.createdAt, updatedAt: created.updatedAt,
-      collectionId: created.collectionId, favoritedAt: null,
+      collectionId: created.collectionId, favoritedAt: null, position: null,
     };
   }
 
@@ -167,6 +209,7 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     const batchId = randomUUID();
     note.trashedAt = this.now();
     note.batchId = batchId;
+    note.archivedAt = null;
     this.audit.push({ eventType: "PRIVATE_ITEM_TRASHED", details: { batchId, kind: "note", itemCount: 1, requestId } });
     return this.entries().find((entry) => entry.batchId === batchId) ?? null;
   }
@@ -236,6 +279,11 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     return this.notes.get(draftId) ?? null;
   }
 
+  private ownedTreeNote(userId: string, organizationId: string, draftId: string): MemoryNote | null {
+    const note = this.ownedActiveNote(userId, organizationId, draftId);
+    return note && !note.archivedAt ? note : null;
+  }
+
   private copyNote(title: string, collectionId: string | null, copy: StoredContentFields): MemoryNote {
     const content: NoteContent = { versionId: randomUUID(), version: 1, ...copy };
     const id = randomUUID();
@@ -251,7 +299,8 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
       }
     }
     const collections = ids.map((id) => collectionView(this.collections.get(id) as MemoryCollection));
-    const notes = [...this.notes.values()].filter((note) => note.collectionId && ids.includes(note.collectionId) && !this.hidden(note.id)).map(source);
+    const notes = [...this.notes.values()].filter((note) => note.collectionId && ids.includes(note.collectionId)
+      && !this.hidden(note.id) && !note.archivedAt).map(source);
     return { root: collections[0] as PrivateCollection, collections, notes };
   }
 

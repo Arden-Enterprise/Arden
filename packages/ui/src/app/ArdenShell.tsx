@@ -658,6 +658,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         privateNotes={canUsePrivateNotes ? { controller: privateNotes, pageVisible: activeView === "personal-workspace", onOpen: () => navigate("personal-workspace") } : undefined}
         trashCount={canUsePrivateNotes ? privateNotes.trash.length : undefined}
         onOpenTrash={canUsePrivateNotes ? () => { privateNotes.openTrash(); navigate("personal-workspace"); } : undefined}
+        onOpenArchive={canUsePrivateNotes ? () => { privateNotes.openArchive(); navigate("personal-workspace"); } : undefined}
       />
       {navOpen && <button type="button" className="shell-nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
       <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={(previewRole === "admin" && !serverSession) || liveAdmin}

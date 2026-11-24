@@ -32,6 +32,8 @@ type AppSidebarProps = {
   /** Private trash, reached from the account menu. */
   trashCount?: number;
   onOpenTrash?: () => void;
+  /** Archived private notes (spec F03-ARR), reached from the account menu. */
+  onOpenArchive?: () => void;
 };
 
 export type NavigationItem = {
@@ -69,8 +71,8 @@ export function initialsOf(label: string): string {
   return label.split(/[\s.@]+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 }
 
-/** Notion-style account menu: identity, Settings, Private Trash and sign-out. */
-function SidebarAccountMenu({ memberName, memberRole, organizationName, authenticated, trashCount, onSignOut, onOpenSettings, onOpenTrash }: {
+/** Notion-style account menu: identity, Settings, Private Archived and Trash, and sign-out. */
+function SidebarAccountMenu({ memberName, memberRole, organizationName, authenticated, trashCount, onSignOut, onOpenSettings, onOpenTrash, onOpenArchive }: {
   memberName: string;
   memberRole: string;
   organizationName: string;
@@ -79,6 +81,7 @@ function SidebarAccountMenu({ memberName, memberRole, organizationName, authenti
   onSignOut: () => void;
   onOpenSettings?: () => void;
   onOpenTrash?: () => void;
+  onOpenArchive?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
@@ -134,6 +137,9 @@ function SidebarAccountMenu({ memberName, memberRole, organizationName, authenti
         </div>
         <div className="sidebar-account-separator" role="separator" />
         <button type="button" role="menuitem" onClick={() => choose(onOpenSettings)}><Icon name="settings" size={15} /><b>Settings</b></button>
+        {onOpenArchive && <button type="button" role="menuitem" onClick={() => choose(onOpenArchive)}>
+          <Icon name="archive" size={15} /><b>Archived</b>
+        </button>}
         {onOpenTrash && <button type="button" role="menuitem" onClick={() => choose(onOpenTrash)}>
           <Icon name="trash" size={15} /><b>Trash</b>{trashCount ? <small className="sidebar-account-count" data-count={trashCount} aria-hidden="true" /> : null}
         </button>}
@@ -169,6 +175,7 @@ export function AppSidebar({
   privateNotes,
   trashCount,
   onOpenTrash,
+  onOpenArchive,
 }: AppSidebarProps) {
   const organizationName = organizationLabel ?? organization?.name ?? "FPT Digital";
   const sessionLabel = environmentLabel ?? (authenticated ? "Signed in" : "Preview");
@@ -236,7 +243,7 @@ export function AppSidebar({
 
       <div className="sidebar-session">
         <SidebarAccountMenu memberName={memberName} memberRole={memberRole} organizationName={organizationName} authenticated={authenticated}
-          trashCount={trashCount} onSignOut={onSignOut} onOpenSettings={onOpenSettings} onOpenTrash={onOpenTrash} />
+          trashCount={trashCount} onSignOut={onSignOut} onOpenSettings={onOpenSettings} onOpenTrash={onOpenTrash} onOpenArchive={onOpenArchive} />
         <span className="sidebar-platform">{platform === "desktop" ? "WINDOWS" : "WEB"} · {authenticated ? "SIGNED IN" : "SAMPLE SESSION"}</span>
       </div>
     </aside>

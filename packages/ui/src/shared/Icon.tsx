@@ -51,6 +51,8 @@ export const iconGlyphs = {
   move: "\uf984",
   restore: "\ufe12",
   settings: "\ufbd2",
+  archive: "\uf16d",
+  unarchive: "\uf800",
 } as const;
 
 export type IconName = keyof typeof iconGlyphs;

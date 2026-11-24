@@ -6,7 +6,7 @@ Decision owner/approval: implementation task owner confirmed the first-slice sco
 Implementation: partial — Supabase Auth session integration, private-note storage, initial SQL migration, and web/desktop API integration exist; real PostgreSQL and live Supabase verification remain outstanding
 
 Identity amendment: a temporary Better Auth amendment recorded in decision 0003 was superseded when the user relayed the leader's restored Supabase direction. Follow [decision 0001](0001-supabase-and-hybrid-development.md) for the current identity implementation. The API/session and owner-private note scope remains accepted.
-Supersedes / superseded by: none
+Supersedes / superseded by: the rule that every private-note save creates an immutable version is superseded by [0031](0031-private-note-live-version-and-autosave.md) (one live version, sealed on contribution); the rest stands.
 
 ## Context and requirement
 

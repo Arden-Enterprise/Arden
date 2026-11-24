@@ -132,12 +132,12 @@
 .arden-app-shell .pn-page-toolbar .private-state { color: var(--arden-text-secondary); background: none; font-weight: 500; }
 .arden-app-shell .pn-header-button { width: 32px; height: 32px; border-radius: 8px; }
 .arden-app-shell .pn-star.is-on { color: var(--arden-warning); }
-.arden-app-shell .pn-page-body, .arden-app-shell .pn-trash { width: 100%; max-width: 760px; margin: 0 auto; padding: 36px 32px 96px; }
-.arden-app-shell .pn-trash { padding-top: 112px; }
+.arden-app-shell .pn-page-body, .arden-app-shell .pn-trash, .arden-app-shell .pn-archive { width: 100%; max-width: 760px; margin: 0 auto; padding: 36px 32px 96px; }
+.arden-app-shell .pn-trash, .arden-app-shell .pn-archive { padding-top: 112px; }
 .arden-app-shell .pn-page-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; min-width: 0; }
 .arden-app-shell .pn-page-heading h2 { margin: 0; font-size: 30px; line-height: 1.2; overflow-wrap: anywhere; }
 .arden-app-shell .pn-page-icon { display: inline-flex; flex: none; color: var(--arden-violet-hover); }
-.arden-app-shell .pn-trash .pn-page-icon { color: var(--arden-text-secondary); }
+.arden-app-shell .pn-trash .pn-page-icon, .arden-app-shell .pn-archive .pn-page-icon { color: var(--arden-text-secondary); }
 .arden-app-shell .pn-title-input {
   flex: 1; min-width: 0; padding: 2px 8px; border: 1px solid var(--arden-violet); border-radius: 8px;
   color: var(--arden-text-primary); background: var(--arden-surface-base); font: 600 28px/1.2 var(--arden-font-heading); outline: none;
@@ -162,13 +162,59 @@
 .arden-app-shell .pn-trash-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .arden-app-shell .pn-danger-button { color: var(--arden-danger); }
 
+/* Spec F03-ARR: click-to-edit collection title. */
+.arden-app-shell .pn-page-heading h2:has(> .pn-title-button) { flex: 1 1 auto; min-width: 0; }
+.arden-app-shell .pn-title-button {
+  display: inline-block; max-width: calc(100% + 8px); margin: 0 0 0 -8px; padding: 2px 8px; border: 1px solid transparent; border-radius: 8px;
+  color: inherit; background: none; font: inherit; line-height: inherit; text-align: left; overflow-wrap: anywhere; cursor: text;
+}
+.arden-app-shell .pn-title-button:hover { background: var(--arden-surface-hover); }
+.arden-app-shell .pn-title-button:focus-visible { border-color: var(--arden-violet); outline: none; }
+.arden-app-shell .pn-title-field { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.arden-app-shell .pn-title-input[aria-invalid="true"] { border-color: var(--arden-danger); }
+.arden-app-shell .pn-title-error { color: var(--arden-danger); font-size: 12px; }
+
+/* Spec F03-ARR: drag and drop of notes in the sidebar tree. */
+.arden-app-shell .pn-row[draggable="true"] { cursor: grab; }
+.arden-app-shell .pn-row.is-dragging { opacity: 0.45; }
+.arden-app-shell .pn-row.is-drop-before, .arden-app-shell .pn-row.is-drop-after { position: relative; }
+.arden-app-shell .pn-row.is-drop-before::before, .arden-app-shell .pn-row.is-drop-after::after {
+  content: ""; position: absolute; right: 4px; left: 4px; height: 2px; border-radius: 2px; background: var(--arden-violet); pointer-events: none;
+}
+.arden-app-shell .pn-row.is-drop-before::before { top: -1px; }
+.arden-app-shell .pn-row.is-drop-after::after { bottom: -1px; }
+.arden-app-shell .pn-row.is-drop-into, .arden-app-shell .pn-nav-row.is-drop-into, .arden-app-shell .pn-empty.is-drop-into {
+  border-radius: 8px; background: var(--arden-accent-subtle); box-shadow: inset 0 0 0 1px var(--arden-accent-border);
+}
+
+/* Spec F03-ARR: Archived view. */
+.arden-app-shell .pn-archive-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
+.arden-app-shell .pn-archive-search, .arden-app-shell .pn-archive-sort {
+  display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 1px solid var(--arden-border); border-radius: 8px;
+  color: var(--arden-text-muted); background: var(--arden-surface-base);
+}
+.arden-app-shell .pn-archive-search { flex: 1 1 260px; min-width: 0; }
+.arden-app-shell .pn-archive-search:focus-within, .arden-app-shell .pn-archive-sort:focus-within { border-color: var(--arden-violet); }
+.arden-app-shell .pn-archive-search input, .arden-app-shell .pn-archive-sort select {
+  flex: 1; min-width: 0; border: 0; color: var(--arden-text-primary); background: transparent; font: inherit; font-size: 14px; outline: none;
+}
+.arden-app-shell .pn-archive-sort select { cursor: pointer; }
+.arden-app-shell .pn-archive-sort select option { color: var(--arden-text-primary); background: var(--arden-surface-raised); }
+.arden-app-shell .pn-archive-group { margin-bottom: 24px; }
+.arden-app-shell .pn-archive-group-head {
+  display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 8px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--arden-border); color: var(--arden-text-secondary);
+}
+.arden-app-shell .pn-archive-group-head strong { flex: 1; min-width: 0; color: var(--arden-text-primary); font-size: 14px; }
+.arden-app-shell .pn-archive-group-head span { flex: none; font-size: 12px; }
+
 @container workspace (max-width: 760px) {
-  .arden-app-shell .pn-page-body, .arden-app-shell .pn-trash { padding-left: 18px; padding-right: 18px; }
+  .arden-app-shell .pn-page-body, .arden-app-shell .pn-trash, .arden-app-shell .pn-archive { padding-left: 18px; padding-right: 18px; }
   .arden-app-shell .pn-page-heading h2 { font-size: 24px; }
 }
 @media (max-width: 639px) {
   .arden-app-shell .pn-page { padding-top: 0; }
-  .arden-app-shell .pn-trash { padding-top: 24px; }
+  .arden-app-shell .pn-trash, .arden-app-shell .pn-archive { padding-top: 24px; }
   .arden-app-shell .pn-page-status { margin-top: 12px; }
   .arden-app-shell .pn-row, .arden-app-shell .pn-row-main { height: 36px; }
   .arden-app-shell .pn-icon-button { width: 32px; height: 32px; }
