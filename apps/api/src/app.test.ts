@@ -150,7 +150,7 @@ describe("API auth and private draft routes", () => {
     const headers = { cookie: owner, origin: "http://localhost:5180" };
     const base = `/api/v1/organizations/${organizationId}/ai`;
     const payload = { query: "No matching knowledge?", conversationId: versionId,
-      requestId: createKey, expectedRevision: 0, versionScope: "CURRENT" };
+      requestId: createKey, expectedRevision: 0 };
     const answer = await app.inject({ method: "POST", url: `${base}/answers`, headers, payload });
     expect(answer.statusCode).toBe(200);
     expect(answer.json()).toMatchObject({ status: "INSUFFICIENT_EVIDENCE", conversationId: versionId, revision: 1 });
@@ -161,6 +161,11 @@ describe("API auth and private draft routes", () => {
     expect(loaded.statusCode).toBe(200);
     expect(loaded.json().turns).toHaveLength(1);
     expect(loaded.json().turns[0]).not.toHaveProperty("evidence");
+    expect(loaded.json().turns[0]).not.toHaveProperty("versionScope");
+    for (const versionScope of ["CURRENT", "UPCOMING", "COMPARE"]) {
+      expect((await app.inject({ method: "POST", url: `${base}/answers`, headers,
+        payload: { ...payload, versionScope } })).statusCode).toBe(400);
+    }
     expect((await app.inject({ method: "GET", url: `${base}/conversations/${versionId}`,
       headers: { cookie: other } })).statusCode).toBe(404);
     expect((await app.inject({ method: "GET", url: `${base}/conversations` })).statusCode).toBe(401);
@@ -1717,8 +1722,7 @@ describe("API auth and private draft routes", () => {
     // Decision0027: an older client that still sends a Topic is refused rather than silently dropped.
     const withTopic = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
-      payload: { management: { type: "Guide", topicId: "11111111-1111-4111-8111-111111111111", version: "1.0",
-        effectiveDate: null, expirationDate: null, changeNote: "" } } });
+      payload: { management: { type: "Guide", topicId: "11111111-1111-4111-8111-111111111111", version: "1.0", expirationDate: null, changeNote: "" } } });
     expect(withTopic.statusCode).toBe(400);
     const updated = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
@@ -1815,7 +1819,7 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "POST", url: `${root}/new`, headers,
       payload: { title: "Topic-free", body: "Synthetic guidance" } })).statusCode).toBe(201);
     const update = vi.spyOn(repository, "updateKnowledgeDraft");
-    const management = { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "",
+    const management = { type: "Guide", version: "1.0", expirationDate: null, changeNote: "",
       ...(topicId === undefined ? {} : { topicId }) };
     const response = await app.inject({ method: "PATCH", url: `${root}/${sharedDraftId}`,
       headers: { ...headers, "if-match": '"1"' }, payload: { management } });
@@ -1828,12 +1832,13 @@ describe("API auth and private draft routes", () => {
 
   it.each([
     { topicId: "malformed" }, { type: "Free text" }, { version: "x".repeat(31) },
+    { effectiveDate: null }, { effectiveDate: "2027-01-01" },
   ])("rejects malformed metadata at the request boundary: %j", async invalid => {
     const session = await desktopSession(app, "owner@example.test");
     const update = vi.spyOn(repository, "updateKnowledgeDraft");
     const response = await app.inject({ method: "PATCH", url: `/api/v1/organizations/${organizationId}/knowledge/drafts/${sharedDraftId}`,
       headers: { cookie: session, origin: "http://localhost:5180", "if-match": '"1"' },
-      payload: { management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "", ...invalid } } });
+      payload: { management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "", ...invalid } } });
     expect(response.statusCode).toBe(400);
     expect(update).not.toHaveBeenCalled();
   });

@@ -1,12 +1,12 @@
 import type { PrivateCollection, PrivateNote } from "../shared/types";
 
-/** Pure tree helpers for the Private Notes sidebar (ADR 0029). Collections come before notes at every level. */
+/** Pure tree helpers for the Private sidebar (ADR 0029). Collections come before notes at every level. */
 export type TreeItemRef = { kind: "note" | "collection"; id: string };
 export type TreeItem =
   | { kind: "collection"; id: string; title: string; parentId: string | null; favoritedAt: string | null; collection: PrivateCollection }
   | { kind: "note"; id: string; title: string; parentId: string | null; favoritedAt: string | null; note: PrivateNote };
 
-export const ROOT_LABEL = "Private Notes";
+export const ROOT_LABEL = "Private";
 export const UNTITLED_COLLECTION = "Untitled collection";
 export const UNTITLED_NOTE = "Untitled private note";
 

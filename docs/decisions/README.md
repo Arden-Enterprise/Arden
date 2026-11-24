@@ -106,3 +106,5 @@ The current release migration policy is [0016: run approved expand migrations th
 - Keep examples, ports, commands, versions, package paths, implementation status, tests, and configuration accurate. If an old document disagrees with source, identify the discrepancy and resolve it explicitly.
 - Capture reusable constraints and rationale, not secrets, customer content, transient logs, or an unfiltered transcript. Review privacy of referenced screenshots/output too.
 - When documentation gaps remain, name them in the handoff/PR and obtain a decision where necessary; do not quietly promote an assumption into policy.
+
+Current Company AI version selection: [0030 — Published-date AI sources](0030-published-date-ai-sources.md) supersedes the temporal parts of 0021.

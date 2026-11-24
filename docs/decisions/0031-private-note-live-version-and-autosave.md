@@ -1,11 +1,11 @@
-# 0030: Private notes keep one live version; contribution seals it
+# 0031: Private notes keep one live version; contribution seals it
 
 Status: accepted
 Date: 2026-11-24
 Decision owner/approval: requesting project maintainer. In the implementation session on 2026-11-24 the maintainer was shown that every save of a private note adds an immutable `draft_version` row and content object (decision 0002), was given four options with their trade-offs (keep, working copy + snapshots, coalesce versions, prune old versions) and the recommendation to consult the team, and answered "vậy thay đổi đi, note thì không cần lưu draft chứ" ("then change it; a note does not need to keep drafts"). Team consultation: not recorded.
 Brainstorm originator / record author: maintainer request; record drafted by the coding agent.
 Approval evidence and exact source revision: maintainer answer above, against `origin/staging` d47ddc5 plus the unmerged F03-ARR branch `feat/private-notes-arrange-archive`.
-Implementation: branch `feat/private-notes-arrange-archive` (not merged, not deployed). Migration `0064_private_note_live_version.sql`, spec F03-SAVE.
+Implementation: branch `feat/private-notes-arrange-archive` (not merged, not deployed). Migration `0065_private_note_live_version.sql`, spec F03-SAVE.
 Supersedes / superseded by: supersedes the part of [0002](0002-first-slice-private-notes-contract.md) that makes **every** private-note save an immutable version. Owner-only access, `ETag`/`If-Match` concurrency, protected private storage and the decision 0029 trash/tombstone rules are unchanged.
 
 ## Context

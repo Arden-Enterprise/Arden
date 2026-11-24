@@ -1,6 +1,6 @@
 SET search_path TO arden, public;
 
--- Decision 0030 (spec F03-SAVE): a private note keeps one open, overwritable
+-- Decision 0031 (spec F03-SAVE): a private note keeps one open, overwritable
 -- current version. Contributing it to a review draft seals that version; sealed
 -- versions, and versions referenced by a review draft or a legacy submission,
 -- stay immutable. Nothing is deleted here and no DELETE grant is added.
@@ -59,4 +59,4 @@ GRANT UPDATE (version_no, source_uri, mime_type, content_hash, sealed_at) ON dra
 CREATE INDEX ix_draft_version_source_uri ON draft_version (source_uri);
 
 COMMENT ON COLUMN draft_version.sealed_at IS
-    'Set when the version was contributed (or by migration 0064 for history); sealed versions are immutable (decision 0030)';
+    'Set when the version was contributed (or by migration 0065 for history); sealed versions are immutable (decision 0031)';

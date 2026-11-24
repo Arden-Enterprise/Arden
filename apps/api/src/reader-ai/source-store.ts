@@ -16,7 +16,6 @@ export class PgReaderSourceStore implements ReaderSourceStore {
   constructor(private readonly withActor: ActorTransaction) {}
   async resolve(user: string, organization: string, publication: string): Promise<ReaderSourceRecord | null> {
     return this.withActor(user, organization, async client => {
-      await client.query("SELECT set_config('arden.ai_version_scope', 'COMPARE', true)");
       const result = await client.query<SourceRow>(`
         SELECT pv.published_version_id, pv.shared_draft_id, pv.content_uri, g.submission_id,
                g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
@@ -25,7 +24,7 @@ export class PgReaderSourceStore implements ReaderSourceStore {
           JOIN knowledge_index_generation g ON g.submission_id = pv.submission_id
             AND g.snapshot_content_hash = pv.content_hash AND g.status = 'READY'
          WHERE g.organization_id = $1 AND pv.published_version_id = $2
-           AND pv.published_version_id IN (SELECT eligible_ai_publications('COMPARE'))`, [organization, publication]);
+           AND pv.published_version_id IN (SELECT eligible_ai_publications())`, [organization, publication]);
       if (result.rows.length !== 1) return null;
       const row = result.rows[0];
       const source: IndexGenerationSource = { jobId: row.job_id, generationId: row.generation_id,

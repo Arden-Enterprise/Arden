@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, askArden, listAiConversations, loadAiConversation, type AiConversation,
-  type AiConversationSummary, type AiVersionScope } from "../shared/api-client";
+  type AiConversationSummary } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { answerMessage, type AnswerCitation, type AskArdenMessage } from "./askArdenModel";
 
@@ -18,9 +18,8 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [sources, setSources] = useState<{ messageId: string; citation: AnswerCitation } | null>(null);
   const sourcesOpener = useRef<HTMLElement | null>(null);
-  const [versionScope, setVersionScope] = useState<AiVersionScope>("CURRENT");
   const conversation = useRef<{ id: string; revision: number }>({ id: crypto.randomUUID(), revision: 0 });
-  const retryRequest = useRef<{ query: string; scope: AiVersionScope; id: string; conversationId: string; revision: number } | null>(null);
+  const retryRequest = useRef<{ query: string; id: string; conversationId: string; revision: number } | null>(null);
   const pendingQuestion = useRef<{ id: string; query: string } | null>(null);
   const requestGeneration = useRef(0);
 
@@ -30,7 +29,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     retryRequest.current = null;
     setMessages([]); setDraft(""); setError(null); setPending(false);
     setHistoryOpen(false); setHistoryLoading(false); setHistory([]); setHistoryError(null); setOpeningId(null);
-    setSources(null); setVersionScope("CURRENT");
+    setSources(null);
     return () => { requestGeneration.current++; };
   }, [organizationId]);
 
@@ -42,7 +41,6 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
       { id: turn.id, role: "assistant" as const, body: turn.answer, citations: turn.citations,
         insufficientEvidence: turn.status === "INSUFFICIENT_EVIDENCE", unavailable: turn.status === "UNAVAILABLE" },
     ]));
-    setVersionScope(saved.turns.at(-1)?.versionScope ?? "CURRENT");
   };
 
   /** Opens a saved chat from History, or reloads the current one; an error stays where the request started. */
@@ -121,13 +119,13 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
       const previous = retryRequest.current;
       const conversationId = conversation.current.id;
       // A retry replays the original turn, so it keeps the revision it was first sent with.
-      const retry = previous?.query === query && previous.scope === versionScope && previous.conversationId === conversationId
+      const retry = previous?.query === query && previous.conversationId === conversationId
         ? previous : null;
       const requestId = retry?.id ?? crypto.randomUUID();
       const expectedRevision = retry?.revision ?? conversation.current.revision;
-      retryRequest.current = { query, scope: versionScope, id: requestId, conversationId, revision: expectedRevision };
+      retryRequest.current = { query, id: requestId, conversationId, revision: expectedRevision };
       const answer = await askArden(platform, organizationId, query, { conversationId,
-        expectedRevision, requestId, versionScope });
+        expectedRevision, requestId });
       if (generation !== requestGeneration.current) {
         // A stopped request can still commit; keep the revision so the next prompt does not conflict.
         if (answer.conversationId === conversationId && conversation.current.id === conversationId
@@ -176,7 +174,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   };
 
   return {
-    draft, setDraft, messages, pending, error, versionScope, setVersionScope, history, historyOpen, historyLoading,
+    draft, setDraft, messages, pending, error, history, historyOpen, historyLoading,
     historyError, openingId, sourcePanel,
     empty: messages.length === 0,
     currentId: messages.length ? conversation.current.id : null,

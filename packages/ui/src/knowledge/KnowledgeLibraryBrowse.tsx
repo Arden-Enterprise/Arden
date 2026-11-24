@@ -20,15 +20,15 @@ export function filterLibrary(items: PublishedKnowledge[], catalog: KnowledgeCat
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id));
 }
 
-/** One status vocabulary for Home and the reader: Current, Expires in N days, Expired (older drafts may still be Upcoming). */
+/** One status vocabulary for Home and the reader: Current, Expires in N days, Expired. */
 export function validityLabel({ status, daysLeft }: ReturnType<typeof validityStatus>): string {
   if (status === "Expiring soon") return daysLeft === 0 ? "Expires today" : `Expires in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}`;
   return status;
 }
 
-/** Same chip tones as the reader: sage Current, blue Upcoming, amber Expires soon, coral Expired. */
+/** Same chip tones as the reader: sage Current, amber Expires soon, coral Expired. */
 const statusTone: Record<ReturnType<typeof validityStatus>["status"], string> = {
-  Current: "effective", Upcoming: "upcoming", "Expiring soon": "expiring", Expired: "expired",
+  Current: "effective", "Expiring soon": "expiring", Expired: "expired",
 };
 
 function DocumentRegister({ items, onOpen, recent = false, showReaders = false }: { items: PublishedKnowledge[]; onOpen: (id: string) => void; recent?: boolean; showReaders?: boolean }) {

@@ -332,7 +332,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       if (!owner?.workspaceId) return null;
       await lockTree(client, owner.workspaceId);
       const current = (await noteSources(client, owner.workspaceId, { draftIds: [source.id] }))[0];
-      // Decision 0030: an open version can change in place, so compare its content too.
+      // Decision 0031: an open version can change in place, so compare its content too.
       if (!current || current.versionId !== source.versionId || current.contentHash !== source.contentHash) return null;
       const created = await insertNoteCopy(client, owner, current.collectionId, title, copy);
       await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_DRAFT_DUPLICATED",

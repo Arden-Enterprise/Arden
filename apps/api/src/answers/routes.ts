@@ -3,11 +3,11 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ArdenDataRepository } from "../db/repository.js";
 import type { AskArdenClient } from "./ai-client.js";
 import { GovernedAnswering } from "./governed-answering.js";
-import { GovernedAnswerError, type VersionScope } from "./governed-contracts.js";
+import { GovernedAnswerError } from "./governed-contracts.js";
 
 type Actor = (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>;
 type Params = { organizationId: string; conversationId: string };
-type Body = { query: string; conversationId?: string; requestId?: string; expectedRevision?: number; versionScope?: VersionScope };
+type Body = { query: string; conversationId?: string; requestId?: string; expectedRevision?: number };
 export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenDataRepository, ai: AskArdenClient | null,
   actor: Actor, uuidPattern: string): void {
   const base = "/api/v1/organizations/:organizationId/ai";
@@ -31,7 +31,6 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
       query: { type: "string", minLength: 1, maxLength: 4_000 },
       conversationId: { type: "string", pattern: uuidPattern }, requestId: { type: "string", pattern: uuidPattern },
       expectedRevision: { type: "integer", minimum: 0, maximum: 1_000_000 },
-      versionScope: { type: "string", enum: ["CURRENT", "UPCOMING", "COMPARE"] },
     } } } }, async (request, reply) => {
     const context = await actor(request, reply);
     if (!context) return;
@@ -43,7 +42,7 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
     try {
       return await engine.answer(context.userId, request.params.organizationId, { query,
         conversationId: request.body.conversationId ?? randomUUID(), requestId: request.body.requestId ?? randomUUID(),
-        expectedRevision: request.body.expectedRevision ?? 0, versionScope: request.body.versionScope ?? "CURRENT" });
+        expectedRevision: request.body.expectedRevision ?? 0 });
     } catch (error) { return fail(reply, error, request); }
   });
   app.get<{ Params: Params }>(`${base}/conversations`, { schema: { params } }, async (request, reply) => {

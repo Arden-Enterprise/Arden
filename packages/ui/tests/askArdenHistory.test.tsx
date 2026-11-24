@@ -11,13 +11,12 @@ beforeEach(() => { restoreDialogs = installTestDialogs(); });
 afterEach(() => { cleanup(); restoreDialogs(); vi.restoreAllMocks(); });
 const summary = { id: "saved", title: "MFA discussion", revision: 1, updatedAt: "2026-11-13T00:00:00Z" };
 const saved: api.AiConversation = { ...summary, turns: [{ id: "turn", requestId: "request", sequence: 1,
-  question: "Is MFA required?", answer: "This answer is no longer available.", status: "UNAVAILABLE",
-  versionScope: "CURRENT", citations: [] }] };
+  question: "Is MFA required?", answer: "This answer is no longer available.", status: "UNAVAILABLE", citations: [] }] };
 const prompt = () => screen.getByRole("textbox", { name: "Ask Arden" });
 const send = (text: string) => { fireEvent.change(prompt(), { target: { value: text } }); fireEvent.click(screen.getByRole("button", { name: "Send message" })); };
 
 describe("persisted Ask Arden history", () => {
-  it("loads owner history, marks withheld answers and sends selected scope with the saved revision", async () => {
+  it("loads owner history, marks withheld answers and continues with the saved revision without a version selector", async () => {
     vi.spyOn(api, "listAiConversations").mockResolvedValue([summary]);
     vi.spyOn(api, "loadAiConversation").mockResolvedValue(saved);
     const ask = vi.spyOn(api, "askArden").mockResolvedValue({ status: "INSUFFICIENT_EVIDENCE", answer: "No guidance.", citations: [],
@@ -27,10 +26,11 @@ describe("persisted Ask Arden history", () => {
     fireEvent.click(await screen.findByRole("button", { name: /^MFA discussion/ }));
     expect(await screen.findByText("Unavailable", { exact: true })).toBeTruthy();
     expect(screen.queryByLabelText("Sources")).toBeNull();
-    fireEvent.change(screen.getByRole("combobox", { name: "Knowledge version scope" }), { target: { value: "UPCOMING" } });
+    expect(screen.queryByRole("combobox", { name: "Knowledge version scope" })).toBeNull();
     send("What changes next?");
     await screen.findByText("No guidance.");
-    expect(ask.mock.calls[0]).toMatchObject(["web", "org", "What changes next?", { conversationId: "saved", expectedRevision: 1, versionScope: "UPCOMING" }]);
+    expect(ask.mock.calls[0]).toMatchObject(["web", "org", "What changes next?", { conversationId: "saved", expectedRevision: 1 }]);
+    expect(ask.mock.calls[0]![3]).not.toHaveProperty("versionScope");
   });
 
   it("preserves the request ID for a retry after an uncertain network result", async () => {
@@ -52,7 +52,7 @@ describe("persisted Ask Arden history", () => {
     await act(() => finish([summary]));
     expect(screen.queryByText("MFA discussion")).toBeNull();
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect((screen.getByRole("combobox", { name: "Knowledge version scope" }) as HTMLSelectElement).value).toBe("CURRENT");
+    expect(screen.queryByRole("combobox", { name: "Knowledge version scope" })).toBeNull();
   });
 
   it("can close a failed history request without refreshing or losing the unsent prompt", async () => {

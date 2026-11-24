@@ -144,9 +144,9 @@ Migrations `0039_in_app_notifications.sql` and `0061_document_share_notification
 
 Migration `0062_private_notes_organization_and_trash.sql` (decision 0029) is operator-class: it replaces the `draft_document` status check, adds owner-only `private_collection` rows and retention-only RLS policies, and introduces no new `SECURITY DEFINER` routine or DELETE grant. The API then runs an hourly in-process purge (`arden.private_trash_retention` transaction context) that tombstones private trash older than 30 days and erases its content objects; an erasure failure is logged and retried on the next run. Rehearse 0001–0062 on a disposable database before any shared target.
 
-Migration `0063_private_notes_order_and_archive.sql` (spec F03-ARR) is operator-class: it adds nullable `draft_document.sort_position` and `archived_at` with check constraints and an index, and recreates `trg_draft_document_updated_at` with a `WHEN` clause so placement and archive changes keep `updated_at`. It adds no grant, policy or `SECURITY DEFINER` routine and needs no backfill (existing notes keep a null position and sort newest first). Rehearse 0001–0063 on a disposable database before any shared target.
+Migration `0064_private_notes_order_and_archive.sql` (spec F03-ARR) is operator-class: it adds nullable `draft_document.sort_position` and `archived_at` with check constraints and an index, and recreates `trg_draft_document_updated_at` with a `WHEN` clause so placement and archive changes keep `updated_at`. It adds no grant, policy or `SECURITY DEFINER` routine and needs no backfill (existing notes keep a null position and sort newest first). Rehearse 0001–0064 on a disposable database before any shared target.
 
-Migration `0064_private_note_live_version.sql` (decision 0030) is operator-class: it adds `draft_version.sealed_at`, seals all existing private-note history except each live note's uncontributed current version, replaces the `draft_version` immutability trigger with a `SECURITY INVOKER` guard that only lets an unsealed, unreferenced version be overwritten, and grants `arden_runtime` column-level `UPDATE` on the version number, content reference and `sealed_at`. It deletes nothing and adds no `SECURITY DEFINER` routine. After deployment the API erases a replaced content object after each save; an erasure failure is logged and leaves an unreferenced object. Rehearse 0001–0064 on a disposable database before any shared target.
+Migration `0065_private_note_live_version.sql` (decision 0031) is operator-class: it adds `draft_version.sealed_at`, seals all existing private-note history except each live note's uncontributed current version, replaces the `draft_version` immutability trigger with a `SECURITY INVOKER` guard that only lets an unsealed, unreferenced version be overwritten, and grants `arden_runtime` column-level `UPDATE` on the version number, content reference and `sealed_at`. It deletes nothing and adds no `SECURITY DEFINER` routine. After deployment the API erases a replaced content object after each save; an erasure failure is logged and leaves an unreferenced object. Rehearse 0001–0064 on a disposable database before any shared target.
 
 Migration 0039 creates the `arden_notification_worker` role as `NOLOGIN`, with only notification-envelope reads and the outbox state columns needed for leasing/retry/delivery. Provision a separate `LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS` database role for the API dispatcher, grant it membership in `arden_notification_worker`, and put that login's secret only in `ARDEN_NOTIFICATION_DATABASE_URL` through the environment's secret manager. The dispatcher uses `SET LOCAL ROLE` inside each transaction; the login itself must fail direct reads, and after role switch it must still fail reads from submissions, drafts, and other Arden content. Never reuse `DATABASE_URL`, the migration login, or the indexing-worker login. If Realtime is absent, leave both the dispatcher URL and Realtime settings unset.
 
@@ -309,3 +309,18 @@ unordered function is no longer executable by the worker. Existing publications 
 republished or repaired; review any pre-existing stale pointer separately. Core and web must be
 released together for the expanded state contract. A live schema upgrade still requires a separate
 reviewed backup, compatibility/recovery plan and explicit authorization; this guide is not consent.
+
+## Published-date AI contraction (0063)
+
+Migration0063 is operator-only under [ADR0030](../decisions/0030-published-date-ai-sources.md).
+It removes the chat scope column and obsolete temporal lineage, replaces the
+eligibility policies/helper and maintenance publication proof, and clears retired
+Effective Date keys from mutable drafts. Frozen metadata, publications, chat turns,
+evidence, files and generation IDs remain. The trusted routine inventory becomes47.
+Rehearse a full backup restore, rollback and upgrade with old chat/publication data,
+then test real runtime workflows after the ownership handoff. Do not edit applied
+SQL or transfer trusted executors. Core/web/desktop must roll out together: older
+clients send a retired field, and older Core expects the removed column/helper.
+No reindex or AI service contract change is needed. Recovery uses matching reviewed
+code/schema or the protected pre-upgrade backup. This local implementation is not
+approval or evidence of applying0063 on a shared environment.

@@ -102,7 +102,7 @@ describe("note order model", () => {
     ];
     const byArchive = arrangeArchived(items, "", "archived");
     expect(byArchive.map((group) => [group.title, group.items.map((item) => item.title)]))
-      .toEqual([["Capstone", ["Backlog", "Agenda"]], ["Private Notes", ["Budget"]]]);
+      .toEqual([["Capstone", ["Backlog", "Agenda"]], ["Private", ["Budget"]]]);
     expect(arrangeArchived(items, "", "title")[0]!.items.map((item) => item.title)).toEqual(["Agenda", "Backlog"]);
     expect(arrangeArchived(items, "", "updated")[0]!.items.map((item) => item.title)).toEqual(["Agenda", "Backlog"]);
     expect(arrangeArchived(items, "  BUD ", "archived").flatMap((group) => group.items.map((item) => item.id))).toEqual(["1"]);
@@ -183,7 +183,7 @@ describe("collection title on its page", () => {
     expect(screen.getByRole("heading", { name: "Thesis" })).toBeTruthy();
     expect(within(tree()).getByRole("button", { name: "Thesis" })).toBeTruthy();
     const crumbs = [...within(screen.getByRole("navigation", { name: "Breadcrumb" })).getAllByRole("listitem")].map(textOf);
-    expect(crumbs).toEqual(["Private Notes", "Thesis"]);
+    expect(crumbs).toEqual(["Private", "Thesis"]);
 
     fireEvent.click(within(screen.getByRole("heading", { name: "Thesis" })).getByRole("button", { name: "Thesis" }));
     input = screen.getByRole("textbox", { name: "Rename Thesis" }) as HTMLInputElement;
@@ -213,7 +213,7 @@ describe("archived notes", () => {
       .toEqual(["Settings", "Archived", "Trash", "Exit preview"]);
     await act(async () => fireEvent.click(menuItem("Archived")));
     const page = screen.getByRole("region", { name: "Archived notes" });
-    expect(within(page).getByRole("region", { name: "From Private Notes" })).toBeTruthy();
+    expect(within(page).getByRole("region", { name: "From Private" })).toBeTruthy();
     await act(async () => fireEvent.click(within(page).getByRole("button", { name: "Unarchive Loose" })));
     expect(within(page).getByText(/No archived notes\./)).toBeTruthy();
     expect(rowTitles()).toEqual(["Favorites", "Loose", "Collections & notes", "Capstone", "Reading", "Loose"]);

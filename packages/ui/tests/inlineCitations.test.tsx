@@ -125,7 +125,7 @@ describe("inline citation chips", () => {
 
 describe("reader citation highlight", () => {
   const metadata = { title: "Synthetic Lifecycle Policy", ownerDepartment: "HR", summary: "", activeVersionId: "ver-1",
-    versions: [{ id: "ver-1", label: "1.0", status: "EFFECTIVE" as const, effectiveDate: "2026-11-01" }] };
+    versions: [{ id: "ver-1", label: "1.0", status: "EFFECTIVE" as const }] };
   const content = createElement("section", { "data-source-block-id": "b2" }, "All company devices must be returned to IT on the last working day.");
   const target = (navigationId: string): KnowledgeNavigationTarget => ({ ...devices, navigationId });
 

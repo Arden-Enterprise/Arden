@@ -27,9 +27,9 @@ type AppSidebarProps = {
   onNavigate: (view: WorkspaceView) => void;
   onSignOut: () => void;
   onOpenSettings?: () => void;
-  /** Private Notes tree inside the main navigation (ADR 0029); omitted when the private workspace is unavailable. */
+  /** Private tree inside the main navigation (ADR 0029); omitted when the private workspace is unavailable. */
   privateNotes?: { controller: PrivateNotesController; pageVisible: boolean; onOpen: () => void };
-  /** Private Notes trash, reached from the account menu. */
+  /** Private trash, reached from the account menu. */
   trashCount?: number;
   onOpenTrash?: () => void;
   /** Archived private notes (spec F03-ARR), reached from the account menu. */
@@ -48,7 +48,7 @@ export type NavigationItem = {
 export const workNavigation: NavigationItem[] = [
   { label: "Home", shortLabel: "Home", icon: "home", view: "knowledge" },
   { label: "Ask Arden", shortLabel: "Ask", icon: "chat", view: "ask-arden" },
-  { label: "Private Notes", shortLabel: "Notes", icon: "lock", view: "personal-workspace" },
+  { label: "Private", shortLabel: "Private", icon: "lock", view: "personal-workspace" },
 ];
 
 export const knowledgeNavigation: NavigationItem[] = [
@@ -71,7 +71,7 @@ export function initialsOf(label: string): string {
   return label.split(/[\s.@]+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 }
 
-/** Notion-style account menu: identity, Settings, Private Notes Archived and Trash, and sign-out. */
+/** Notion-style account menu: identity, Settings, Private Archived and Trash, and sign-out. */
 function SidebarAccountMenu({ memberName, memberRole, organizationName, authenticated, trashCount, onSignOut, onOpenSettings, onOpenTrash, onOpenArchive }: {
   memberName: string;
   memberRole: string;

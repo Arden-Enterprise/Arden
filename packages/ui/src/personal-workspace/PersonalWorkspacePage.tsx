@@ -83,7 +83,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   const ancestors = current ? ancestorsOf(collections, current.parentId) : [];
   const pageLabel = view === "trash" ? "Trash" : view === "archive" ? "Archived" : null;
   const breadcrumb = ["Arden", pageLabel ?? ROOT_LABEL, ...ancestors.map((entry) => entry.title), ...(current ? [current.title] : [])].join(" / ");
-  // Like Notion: the trail starts at the outermost collection; only items at the top level show the Private Notes root.
+  // Like Notion: the trail starts at the outermost collection; only items at the top level show the Private root.
   const crumbs: TopbarCrumb[] = pageLabel ? [{ label: pageLabel }] : [
     ...(ancestors.length ? [] : [{ label: ROOT_LABEL, onSelect: controller.openRoot }]),
     ...ancestors.map((entry) => ({ label: entry.title, onSelect: () => controller.openCollection(entry.id) })),
@@ -117,7 +117,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
       <WorkspaceTopbar breadcrumb={breadcrumb} crumbs={crumbs} previewLabel={serverBacked ? undefined : "Demo"} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={contributionPanel} />
       <WorkspacePageContent className="personal-content is-single is-editing-note" header={<WorkspacePageHeader className="personal-title-row"
         eyebrow="WORK"
-        title="Private Notes"
+        title="Private"
         titleId="personal-workspace-title"
       />}>
         {loading && <p className="island-meta pn-page-status" role="status">Loading your private notes…</p>}

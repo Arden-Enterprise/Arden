@@ -66,7 +66,7 @@ Rename of a note keeps using `PATCH /drafts/:id` with `If-Match` (creates a new 
 
 ## Spec F03-ARR: order and archive
 
-Owner: spec [F03-ARR](../../product/identity-and-access.md#f03-arr-note-order-in-place-collection-titles-and-archive). Base: `origin/staging` d47ddc5. Migration `0063_private_notes_order_and_archive.sql` adds `draft_document.sort_position` and `draft_document.archived_at`.
+Owner: spec [F03-ARR](../../product/identity-and-access.md#f03-arr-note-order-in-place-collection-titles-and-archive). Base: `origin/staging` d47ddc5. Migration `0064_private_notes_order_and_archive.sql` adds `draft_document.sort_position` and `draft_document.archived_at`.
 
 Note summaries (`GET /drafts` items, placement/favorite/archive responses) add `position: number | null` and `archivedAt: string | null`; `GET /drafts/:id` adds `position`. Notes inside one collection (or the root) are ordered: `position` null first (newest first), then ascending `position`.
 
@@ -92,6 +92,6 @@ Rules:
 - Audit events `PRIVATE_DRAFT_ARCHIVED` and `PRIVATE_DRAFT_UNARCHIVED` carry the draft id and request id only.
 - Other members, Org Admins and System Admins get the existing non-enumerating 404 for every route above and an empty archive list. The desktop allow-list adds exactly `PUT /drafts/:id/archive` and `GET /archive`.
 
-## Decision 0030: saving a note
+## Decision 0031: saving a note
 
 `PATCH /drafts/:id` keeps its request, `If-Match` and response shape. The note's open current version is overwritten (same `currentVersion.id`, higher `version`), and the replaced content object is erased after commit. When the current version has been contributed (sealed), the save creates a new version with a new `currentVersion.id`. `POST /knowledge/drafts` from a private version seals that version. Clients that compare version ids to detect changes must also compare `currentVersion.contentHash`.

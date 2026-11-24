@@ -3,7 +3,6 @@ import { metadataSubmissionErrors, validKnowledgeMetadata, type KnowledgeMetadat
 import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledge/catalog-store.js";
 import { PgConversationStore, type ConversationStore } from "../answers/conversation-store.js";
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
-import type { VersionScope } from "../answers/governed-contracts.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
@@ -65,7 +64,7 @@ export type DraftListItem = {
 };
 export type DraftWrite = { title: string; body: string; collectionId?: string | null };
 /**
- * Decision 0030: `replacedSourceUri` is the content object the save made unreachable (the open version was
+ * Decision 0031: `replacedSourceUri` is the content object the save made unreachable (the open version was
  * overwritten and no other version uses it); the caller erases it after commit.
  */
 export type DraftUpdateResult = { kind: "not-found" } | { kind: "conflict"; currentVersion: number }
@@ -393,7 +392,7 @@ const sharedDraftSelect = `
 
 function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnowledgeDraft {
   return {
-    management: withoutTopic(row.management), hasPublishedVersion: row.has_published_version,
+    management: currentManagement(row.management), hasPublishedVersion: row.has_published_version,
     id: row.shared_draft_id,
     organizationId,
     title: row.title,
@@ -478,10 +477,10 @@ type GovernanceViewRow = {
   mime_type: string; responsible_department_id: string | null; reader_mode: GovernanceReaderMode;
   reader_department_id: string | null;
 };
-/** Decision0027: versions frozen before migration0042 keep historical Topic keys; Arden never returns them. */
-function withoutTopic<T extends object>(management: T | null | undefined): T | null {
+/** Frozen snapshots retain retired keys for provenance; current API metadata never returns them. */
+function currentManagement<T extends object>(management: T | null | undefined): T | null {
   if (!management) return null;
-  const { topicId: _topicId, topicName: _topicName, ...rest } = management as T & { topicId?: unknown; topicName?: unknown };
+  const { topicId: _topicId, topicName: _topicName, effectiveDate: _effectiveDate, ...rest } = management as T & { topicId?: unknown; topicName?: unknown; effectiveDate?: unknown };
   return rest as T;
 }
 function mapGovernanceView(row: GovernanceViewRow): GovernanceDocumentView {
@@ -495,7 +494,7 @@ function sqlStateOf(error: unknown): string | null {
 }
 function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmission {
   return {
-    management: withoutTopic(row.management),
+    management: currentManagement(row.management),
     id: row.submission_id,
     draftId: row.shared_draft_id,
     snapshotVersionId: row.shared_draft_version_id,
@@ -606,7 +605,7 @@ const publishedKnowledgeSelect = `
       AND owner_department.organization_id = cp.organization_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
   return {
-    management: withoutTopic(row.management),
+    management: currentManagement(row.management),
     id: row.published_version_id,
     draftId: row.shared_draft_id,
     title: row.title,
@@ -737,7 +736,7 @@ export interface ArdenDataRepository {
     idempotencyKey: string, requestId: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
-  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[], versionScope?: VersionScope): Promise<AuthorizedAiSource[] | null>;
+  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null>;
   readonly conversations?: ConversationStore;
   /** The caller as a TargetReaderPolicy actor, or null when they are not an active member. */
   getTargetReaderActor(userId: string, organizationId: string): Promise<ReaderActor | null>;
@@ -1588,7 +1587,7 @@ export class ArdenRepository implements ArdenDataRepository {
       const createRequestHash = createHash("sha256")
         .update(`${input.sourceVersionId}:${input.classification}`)
         .digest("hex");
-      // Decision 0030: serialize with saves of the source note, which may overwrite an open version.
+      // Decision 0031: serialize with saves of the source note, which may overwrite an open version.
       await client.query(`SELECT 1 FROM draft_version v JOIN draft_document d ON d.draft_id = v.draft_id
         WHERE v.draft_version_id = $1 FOR UPDATE OF d, v`, [input.sourceVersionId]);
       const source = await this.findPrivateContributionSource(client, userId, organizationId, input.sourceVersionId);
@@ -1754,8 +1753,7 @@ export class ArdenRepository implements ArdenDataRepository {
       if (patch.management !== undefined) {
         if (!validKnowledgeMetadata(patch.management)) return { kind: "invalid-metadata" };
         const value = patch.management;
-        management = { schemaVersion: 1, type: value.type, version: value.version.trim(),
-          effectiveDate: value.effectiveDate, expirationDate: value.expirationDate, changeNote: value.changeNote.trim() };
+        management = { schemaVersion: 1, type: value.type, version: value.version.trim(), expirationDate: value.expirationDate, changeNote: value.changeNote.trim() };
       }
       // Decision 0014: the responsible department always follows the author's primary department.
       const responsible = resolveResponsibleDepartment(patch.responsibleDepartmentId,
@@ -2532,28 +2530,17 @@ export class ArdenRepository implements ArdenDataRepository {
   async getPublishedKnowledge(userId: string, organizationId: string,
     publishedVersionId: string): Promise<PublishedKnowledge | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
-      await client.query("SELECT set_config('arden.ai_version_scope', 'COMPARE', true)");
       const result = await client.query<PublishedKnowledgeRow>(`${publishedKnowledgeSelect}
         WHERE cp.organization_id = $1 AND pv.published_version_id = $2`, [organizationId, publishedVersionId]);
       if (result.rows[0]) return mapPublishedKnowledge(result.rows[0]);
-      const applicable = await client.query<PublishedKnowledgeRow>(`
-        SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
-          pv.document_code, pv.management, pv.responsible_department_id, pv.content_hash, pv.content_uri,
-          d.name AS responsible_department_name, pv.audience_role_ids, pv.published_at,
-          pv.valid_from, pv.valid_until, ${readerSelectionColumns("pv.reader_selection_id")}
-        FROM published_knowledge_version pv JOIN knowledge_base kb USING (knowledge_base_id)
-        LEFT JOIN department d ON d.department_id = pv.responsible_department_id AND d.organization_id = kb.organization_id
-        WHERE kb.organization_id = $1 AND pv.published_version_id = $2
-          AND pv.published_version_id IN (SELECT eligible_ai_publications('COMPARE'))`, [organizationId, publishedVersionId]);
-      return applicable.rows[0] ? mapPublishedKnowledge(applicable.rows[0]) : null;
+      return null;
     });
   }
 
-  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[], versionScope: VersionScope = "CURRENT"): Promise<AuthorizedAiSource[] | null> {
+  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null> {
     if ((generationIds && generationIds.length > 64) || (chunkIds && chunkIds.length > 64)) throw new Error("Too many evidence locations");
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
-      await client.query("SELECT set_config('arden.ai_version_scope', $1, true)", [versionScope]);
       const result = await client.query<AuthorizedAiSourceRow>(`
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
@@ -2566,13 +2553,13 @@ export class ArdenRepository implements ArdenDataRepository {
           JOIN knowledge_base kb ON kb.knowledge_base_id = pv.knowledge_base_id
           JOIN knowledge_index_generation g
             ON g.submission_id = pv.submission_id AND g.status = 'READY'
-         WHERE g.organization_id = $1 AND pv.published_version_id IN (SELECT eligible_ai_publications($4))
+         WHERE g.organization_id = $1 AND pv.published_version_id IN (SELECT eligible_ai_publications())
            AND ($2::uuid[] IS NULL OR g.generation_id = ANY($2::uuid[]))
          ORDER BY pv.published_at DESC, pv.published_version_id DESC
-         LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null, versionScope]);
+         LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null]);
       if (result.rows.length > 500) throw new Error("Authorized source count exceeds the request budget");
       return result.rows.map((row) => ({
-        management: withoutTopic(row.management),
+        management: currentManagement(row.management),
         generationId: row.generation_id,
         chunks: row.chunks,
         snapshotVersionId: row.snapshot_version_id,
@@ -2792,7 +2779,7 @@ export class ArdenRepository implements ArdenDataRepository {
       let versionId: string;
       let replacedSourceUri: string | null = null;
       if (!current.sealed) {
-        // Decision 0030: the open current version is overwritten instead of adding history.
+        // Decision 0031: the open current version is overwritten instead of adding history.
         await client.query(`
           UPDATE draft_version SET version_no = $2, source_uri = $3, mime_type = $4, content_hash = $5
            WHERE draft_version_id = $1`, [current.draft_version_id, version, source.sourceUri, source.mimeType, source.contentHash]);

@@ -67,13 +67,7 @@
 .ask-composer:focus-within { outline: 2px solid #b7a7ef; outline-offset: 2px; }
 .ask-composer-tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .ask-composer-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-.ask-scope {
-  display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 0 3px; border: 0; color: var(--arden-text-secondary);
-  background: transparent; font-size: 11px; font-weight: 500; margin-right: auto;
-}
-.ask-scope svg:last-child { color: var(--arden-text-muted); }
-.ask-attach, .ask-send { display: grid; place-items: center; flex: none; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 999px; }
-.ask-attach { color: var(--arden-text-disabled); background: transparent; }
+.ask-send { display: grid; place-items: center; flex: none; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 999px; }
 .ask-send { color: var(--arden-on-accent); background: var(--arden-violet); cursor: pointer; }
 .ask-send:hover:not(:disabled) { background: var(--arden-violet-hover); }
 .ask-send:disabled { color: var(--arden-text-disabled); background: var(--arden-border); cursor: default; }
@@ -171,13 +165,6 @@
 }
 
 @keyframes ask-pulse { 50% { opacity: .3; transform: scale(.82); } }
-.ask-scope select {
-  max-width: 170px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-}
 
 /* History popover (design option B): anchored under History, searchable titles grouped by last update. */
 .ask-history-anchor { position: relative; display: inline-flex; }

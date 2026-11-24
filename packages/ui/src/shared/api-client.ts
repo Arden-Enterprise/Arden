@@ -248,11 +248,10 @@ export type AskArdenAnswer = {
     endOffset?: number;
   }>;
 };
-export type AiVersionScope = "CURRENT" | "UPCOMING" | "COMPARE";
 export type AiConversationSummary = { id: string; title: string; revision: number; updatedAt: string };
 export type AiConversation = AiConversationSummary & { turns: Array<{
   id: string; requestId: string; question: string; sequence: number; answer: string;
-  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE"; versionScope: AiVersionScope;
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE";
   citations: AskArdenAnswer["citations"];
 }> };
 
@@ -508,7 +507,7 @@ export function loadPublishedKnowledge(platform: Platform, organizationId: strin
 }
 
 export function askArden(platform: Platform, organizationId: string, query: string, conversation?: {
-  conversationId: string; requestId: string; expectedRevision: number; versionScope: AiVersionScope;
+  conversationId: string; requestId: string; expectedRevision: number;
 }): Promise<AskArdenAnswer> {
   return request(platform, `/api/v1/organizations/${organizationId}/ai/answers`, {
     method: "POST", body: JSON.stringify({ query, ...conversation }),

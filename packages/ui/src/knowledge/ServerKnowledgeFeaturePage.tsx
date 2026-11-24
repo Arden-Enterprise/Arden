@@ -60,10 +60,10 @@ const ArdenDocumentView = lazy(() => import("./ArdenRichTextEditor")
 /** Minimum time between window-focus refreshes of Home (deliberate Refresh and actions are not limited). */
 export const focusReloadIntervalMs = 30_000;
 
-function readerValidity(item: PublishedKnowledge): { status: "EFFECTIVE" | "EXPIRING" | "UPCOMING" | "EXPIRED"; expiresInDays?: number } {
+function readerValidity(item: PublishedKnowledge): { status: "EFFECTIVE" | "EXPIRING" | "EXPIRED"; expiresInDays?: number } {
   const { status, daysLeft } = validityStatus(item.management, new Date().toLocaleDateString("en-CA"));
   if (status === "Expiring soon") return { status: "EXPIRING", expiresInDays: daysLeft ?? 0 };
-  return { status: status === "Current" ? "EFFECTIVE" : status === "Upcoming" ? "UPCOMING" : "EXPIRED" };
+  return { status: status === "Current" ? "EFFECTIVE" : "EXPIRED" };
 }
 
 function DocumentSurfaceLoading() {
@@ -1138,7 +1138,6 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                   {review.management ? <>
                     <div><dt>Type</dt><dd>{review.management.type ?? "—"}</dd></div>
                     <div><dt>Version</dt><dd>{review.management.version}</dd></div>
-                    {review.management.effectiveDate && <div><dt>Effective Date</dt><dd>{review.management.effectiveDate}</dd></div>}
                     {review.management.expirationDate && <div><dt>Expiration Date</dt><dd>{review.management.expirationDate}</dd></div>}
                     {review.management.changeNote && <div><dt>Change Note</dt><dd>{review.management.changeNote}</dd></div>}
                   </> : <>

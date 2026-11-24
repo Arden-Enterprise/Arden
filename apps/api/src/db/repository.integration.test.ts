@@ -71,7 +71,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0038_admin_only_direct_withdrawal', '0039_in_app_notifications', '0040_flat_collection_placement',
           '0041_verified_legacy_metadata_repair', '0042_remove_knowledge_topics',
           '0061_document_share_notifications', '0062_private_notes_organization_and_trash',
-          '0063_private_notes_order_and_archive', '0064_private_note_live_version')`);
+          '0064_private_notes_order_and_archive', '0065_private_note_live_version')`);
     if (migration.rows[0]?.count !== "32") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
@@ -184,9 +184,6 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM knowledge_collection_document WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_collection WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = $1", [ids.organization]);
-          // Derived release lineage deliberately retains publication references in production.
-          // Remove only this fixture's lineage before removing its immutable publications.
-          await client.query("DELETE FROM knowledge_ai_release WHERE organization_id = $1", [ids.organization]);
           await client.query(`DELETE FROM published_knowledge_version
             WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id = $1)`, [ids.organization]);
           await client.query(`DELETE FROM knowledge_index_job WHERE generation_id IN
@@ -835,7 +832,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     const revised = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
       created.draft.id, configured.draft.currentVersion, { title: "Replacement candidate",
-        management: { type: "Guide", version: "2.0", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "Updated guidance." } }, null,
+        management: { type: "Guide", version: "2.0", expirationDate: null, changeNote: "Updated guidance." } }, null,
       "integration-flow3-revise");
     expect(revised).toMatchObject({ kind: "updated", draft: { currentVersion: 3 } });
     if (revised.kind !== "updated") return;

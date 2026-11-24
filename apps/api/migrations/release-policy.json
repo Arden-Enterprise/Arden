@@ -375,14 +375,20 @@
     },
     {
       "id": "0063",
-      "filename": "0063_private_notes_order_and_archive.sql",
-      "sha256": "9f22d17e977b874951b0bc9549ba5d868a8310e5cf21c34c0536580c8326d729",
+      "filename": "0063_published_date_ai_sources.sql",
+      "sha256": "d5486e8a3cd7bfb362d22af6c6a68d6d8e38d8144be4c177fff9fbdfb708c942",
       "rollout": "operator"
     },
     {
       "id": "0064",
-      "filename": "0064_private_note_live_version.sql",
-      "sha256": "b0fce40f892e88726622d1cceb5a35b128e32bf0c09321e2ac2cf87ee88d8cab",
+      "filename": "0064_private_notes_order_and_archive.sql",
+      "sha256": "9f22d17e977b874951b0bc9549ba5d868a8310e5cf21c34c0536580c8326d729",
+      "rollout": "operator"
+    },
+    {
+      "id": "0065",
+      "filename": "0065_private_note_live_version.sql",
+      "sha256": "497031f3604039a8fe37cc9c6cea3ee2bd914f8ebbc385c9e6959a79291540cd",
       "rollout": "operator"
     }
   ]
