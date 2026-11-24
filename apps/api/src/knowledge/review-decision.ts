@@ -27,7 +27,7 @@ export type ReviewDecisionFacts = {
    */
   readers?: { proposed: ReaderSelection | null; facts: SelectionFacts };
   /** T6.1/T6.2: what the submission asks for. Omitted means CONTENT. */
-  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
   /**
    * T6.2: for a change request, whether it still names the current publication and whether a newer approved
    * version is being prepared (which a withdrawal would race). Omitted for a change request refuses approval.
@@ -105,6 +105,10 @@ export function planReviewDecision(facts: ReviewDecisionFacts, request: ReviewDe
     : facts.reviewerGrants.some(approveWith);
   if (!canApprove) return { kind: "DENIED", reason: "NOT_AUTHORIZED" };
   const requestType = facts.requestType ?? "CONTENT";
+  // Decision 0032: a renewal always needs someone other than the requester, even an Organization Admin.
+  if (requestType === "RENEWAL" && facts.actor?.membershipId === submission.submittedByMembershipId) {
+    return { kind: "DENIED", reason: "NOT_AUTHORIZED" };
+  }
   if (requestType !== "CONTENT" && (!facts.publicationChange?.targetIsCurrent
     || (requestType === "WITHDRAWAL" && facts.publicationChange.newerVersionPreparing))) {
     return { kind: "DENIED", reason: "PUBLICATION_CHANGED" };

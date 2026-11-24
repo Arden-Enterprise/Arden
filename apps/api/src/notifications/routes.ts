@@ -5,7 +5,8 @@ import type { NotificationStore } from "./store.js";
 import { signNotificationReaderToken, type NotificationRealtimeConfiguration } from "./realtime.js";
 
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
-const messages: Record<Exclude<NotificationType, "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP">, string> = {
+const messages: Record<Exclude<NotificationType, "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP"
+  | "PUBLICATION_EXPIRING" | "PUBLICATION_RENEWAL_ON_BEHALF">, string> = {
   REVIEW_REQUESTED: "A knowledge item is waiting for your review.",
   REVIEW_APPROVED: "Your knowledge request was approved.",
   REVIEW_REJECTED: "Your knowledge request was rejected.",
@@ -65,6 +66,14 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
         : [];
       if (readablePublicationIds === null) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "The organization is unavailable." } });
       const readablePublications = new Set(readablePublicationIds);
+      // Decision 0032: renewal notices keep their details only while the member is still responsible for the document.
+      const renewalDocumentIds = new Set(page.items
+        .filter(item => item.type === "PUBLICATION_EXPIRING" || item.type === "PUBLICATION_RENEWAL_ON_BEHALF")
+        .map(item => item.resourceId));
+      const responsibleDocuments = new Set(renewalDocumentIds.size
+        ? (await repository.listPublicationRenewalState(actor.userId, request.params.organizationId) ?? [])
+          .filter(state => renewalDocumentIds.has(state.documentId)).map(state => state.documentId)
+        : []);
       return reply.header("cache-control", "no-store").send({
         ...page,
         items: page.items.map(item => {
@@ -85,6 +94,16 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
             return { id: item.id, type: item.type, message,
               createdAt: item.createdAt, readAt: item.readAt,
               ...(visible ? { target: { view: "knowledge", publicationId: item.resourceId } } : {}) };
+          }
+          if (item.type === "PUBLICATION_EXPIRING" || item.type === "PUBLICATION_RENEWAL_ON_BEHALF") {
+            const visible = responsibleDocuments.has(item.resourceId);
+            const title = item.publicationTitle ?? "a document";
+            const message = !visible ? "This notification's item is no longer available."
+              : item.type === "PUBLICATION_EXPIRING"
+                ? `“${title}” expires on ${item.expiresOn ?? "its Valid until date"}. Renew it to keep it visible to readers.`
+                : `${item.sharedByName ?? "A colleague"} asked to renew “${title}” on your behalf: ${item.requestReason ?? ""}`.trim();
+            return { id: item.id, type: item.type, message, createdAt: item.createdAt, readAt: item.readAt,
+              ...(visible ? { target: { view: "knowledge" } } : {}) };
           }
           return { id: item.id, type: item.type, message: messages[item.type], createdAt: item.createdAt, readAt: item.readAt };
         }),

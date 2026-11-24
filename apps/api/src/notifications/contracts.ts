@@ -2,10 +2,11 @@ export const notificationTypes = [
   "REVIEW_REQUESTED", "REVIEW_APPROVED", "REVIEW_REJECTED", "PUBLICATION_ACTIVE",
   "PUBLICATION_FAILED", "DOCUMENT_SHARED_PERSONAL", "DOCUMENT_SHARED_GROUP",
   "PRIMARY_DEPARTMENT_CHANGED", "REVIEWER_GRANT_CREATED", "REVIEWER_GRANT_REVOKED",
+  "PUBLICATION_EXPIRING", "PUBLICATION_RENEWAL_ON_BEHALF",
 ] as const;
 
 export type NotificationType = typeof notificationTypes[number];
-export type NotificationResourceType = "SUBMISSION" | "PUBLICATION" | "DEPARTMENT" | "REVIEWER_GRANT";
+export type NotificationResourceType = "SUBMISSION" | "PUBLICATION" | "DOCUMENT" | "DEPARTMENT" | "REVIEWER_GRANT";
 export type NotificationRecord = {
   id: string;
   type: NotificationType;
@@ -15,6 +16,10 @@ export type NotificationRecord = {
   publicationTitle?: string;
   /** Present only for personal/group share records. */
   sharedByName?: string;
+  /** PUBLICATION_EXPIRING only (decision 0032): the Valid until the reminder is about. */
+  expiresOn?: string;
+  /** PUBLICATION_RENEWAL_ON_BEHALF only: why the renewal was requested. */
+  requestReason?: string;
   createdAt: string;
   readAt: string | null;
 };

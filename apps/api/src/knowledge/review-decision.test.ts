@@ -53,6 +53,21 @@ describe("planReviewDecision", () => {
       .toMatchObject({ kind: "APPROVE_FOR_PREPARATION" });
   });
 
+  it("never lets the requester approve their own renewal, even as an Organization Admin (0032 B2)", () => {
+    const current = { targetIsCurrent: true, newerVersionPreparing: false };
+    const renewal = { ...facts, requestType: "RENEWAL" as const, publicationChange: current };
+    expect(planReviewDecision(renewal, request)).toMatchObject({ kind: "APPROVE_FOR_PREPARATION", decision: "APPROVED" });
+    const asRequester = { ...renewal, submission: { ...renewal.submission, submittedByMembershipId: "reviewer" } };
+    expect(planReviewDecision(asRequester, request)).toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
+    const adminRequester = { ...asRequester, actor: { ...asRequester.actor!, isOrganizationAdmin: true } };
+    expect(planReviewDecision(adminRequester, request)).toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
+    // A content submission keeps the audited Organization Admin self-approval of the product contract.
+    expect(planReviewDecision({ ...adminRequester, requestType: "CONTENT" }, request))
+      .toMatchObject({ kind: "APPROVE_FOR_PREPARATION" });
+    expect(planReviewDecision({ ...renewal, publicationChange: { ...current, targetIsCurrent: false } }, request))
+      .toEqual({ kind: "DENIED", reason: "PUBLICATION_CHANGED" });
+  });
+
   it("never publishes the wrong or corrupted snapshot", () => {
     expect(planReviewDecision(facts, { ...request, expectedSnapshotVersionId: "version-1" })).toEqual({ kind: "DENIED", reason: "STALE_SNAPSHOT" });
     expect(planReviewDecision(facts, { ...request, expectedContentHash: "b".repeat(64) })).toEqual({ kind: "DENIED", reason: "STALE_SNAPSHOT" });

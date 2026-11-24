@@ -140,6 +140,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
           await client.query("DELETE FROM audit_event WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM publication_report WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM governance_inspection WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM arden_notification WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM publication_validity_renewal WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = ANY($1::uuid[])", [orgs]);
           // Change requests reference a published version; remove them before the publications.
           await client.query(`DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission
@@ -1200,6 +1202,170 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
       await expect(repository.withdrawPublicationDirectly(ids.author, ids.orgA, draftId, "Confirmed"))
         .resolves.toEqual({ kind: "withdrawn" });
       expect(mine(await repository.listPublicationReports(ids.author, ids.orgA))).toHaveLength(0);
+    });
+  });
+
+  describe("decision 0032 expired visibility and renewal (migration 0066)", () => {
+    const createdGrants: string[] = [];
+    afterEach(async () => {
+      const pending = createdGrants.splice(0);
+      if (pending.length) await asSuperuser((client) => client.query(
+        "UPDATE reviewer_grant SET status = 'INACTIVE' WHERE reviewer_grant_id = ANY($1::uuid[])", [pending]));
+    });
+    const utcDay = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+    const departmentGrant = () => asSuperuser((client) => client.query(`INSERT INTO reviewer_grant (organization_id,
+        reviewer_membership_id, scope, department_id, granted_by_membership_id, classifications, level)
+      VALUES ($1, $2, 'DEPARTMENT', $3, $4, ARRAY['INTERNAL'], 'STANDARD') RETURNING reviewer_grant_id`,
+    [ids.orgA, ids.reviewerM, ids.sales, ids.authorM])).then((result) => { createdGrants.push(result.rows[0]!.reviewer_grant_id); });
+    /** A current, indexed publication (readers: author and engineer) whose frozen Valid until is `expires`. */
+    const publish = async (title: string, expires: string | null) => {
+      const { draftId, submissionId } = await submitLegacyDraft(title);
+      const versionId = id();
+      await asSuperuser(async (client) => {
+        await client.query(`UPDATE shared_submission SET status = 'APPROVED', publication_state = 'ACTIVE',
+            approved_selection_id = proposed_selection_id WHERE submission_id = $1`, [submissionId]);
+        const knowledgeBase = await client.query<{ knowledge_base_id: string }>(`INSERT INTO knowledge_base
+            (organization_id, name, scope_type) VALUES ($1, 'Renewal fixture ' || $2, 'ORGANIZATION')
+          RETURNING knowledge_base_id`, [ids.orgA, draftId]);
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query(`INSERT INTO published_knowledge_version (published_version_id, submission_id, knowledge_base_id,
+            title, version_no, content_uri, content_hash, shared_draft_id, classification, responsible_department_id,
+            audience_role_ids, valid_from, reader_selection_id, index_status, management)
+          SELECT $1, s.submission_id, $3, s.title, 1, s.content_uri, s.content_hash, s.shared_draft_id, s.classification,
+                 s.responsible_department_id, s.audience_role_ids, now() - interval '1 day', s.approved_selection_id, 'INDEXED',
+                 jsonb_build_object('type', 'Guide', 'version', '1.0', 'expirationDate', $4::text, 'changeNote', '')
+            FROM shared_submission s WHERE s.submission_id = $2`,
+        [versionId, submissionId, knowledgeBase.rows[0]?.knowledge_base_id, expires]);
+        await client.query(`UPDATE published_knowledge_version SET published_at = now() - interval '1 day'
+          WHERE published_version_id = $1`, [versionId]);
+        await client.query(`INSERT INTO knowledge_current_publication (shared_draft_id, organization_id, published_version_id,
+            audience_role_ids, target_scope_type, valid_from, reader_selection_id)
+          SELECT pv.shared_draft_id, $2, pv.published_version_id, pv.audience_role_ids, 'ORGANIZATION', pv.valid_from,
+                 pv.reader_selection_id FROM published_knowledge_version pv WHERE pv.published_version_id = $1`,
+        [versionId, ids.orgA]);
+      });
+      return { draftId, versionId };
+    };
+    const renew = (userId: string, draftId: string, expirationDate: string | null, key = randomUUID()) =>
+      repository!.requestPublicationRenewal(userId, ids.orgA, draftId, { expirationDate, reason: "Checked again", idempotencyKey: key }, "renewal");
+    const listedFor = async (userId: string) => (await repository!.listPublishedKnowledge(userId, ids.orgA) ?? []).map((item) => item.draftId);
+    const pointer = (draftId: string) => asSuperuser(async (client) => (await client.query(
+      "SELECT published_version_id FROM knowledge_current_publication WHERE shared_draft_id = $1", [draftId])).rows[0]);
+    const count = (sql: string, values: unknown[]) => asSuperuser(async (client) =>
+      Number((await client.query<{ count: string }>(sql, values)).rows[0]?.count));
+
+    it("hides an expired publication from readers and AI without withdrawing it; responsible people still see it", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      await departmentGrant();
+      const expired = await publish("Expired policy", utcDay(-1));
+      const lastDay = await publish("Expires today", utcDay(0));
+      expect(await listedFor(ids.engineer)).toContain(lastDay.draftId);
+      expect(await listedFor(ids.engineer)).not.toContain(expired.draftId);
+      await expect(repository.getPublishedKnowledge(ids.engineer, ids.orgA, expired.versionId))
+        .resolves.toMatchObject({ expired: true, management: { expirationDate: utcDay(-1) } });
+      const eligible = await asRuntime(ids.engineer, ids.orgA, async (client) => (await client.query<{ id: string }>(
+        "SELECT eligible_ai_publications() AS id")).rows.map((row) => row.id));
+      expect(eligible).toContain(lastDay.versionId);
+      expect(eligible).not.toContain(expired.versionId);
+      await expect(pointer(expired.draftId)).resolves.toEqual({ published_version_id: expired.versionId });
+      await expect(count(`SELECT count(*) FROM audit_event WHERE event_type = 'KNOWLEDGE_PUBLICATION_WITHDRAWN'
+        AND details_json->>'documentId' = $1`, [expired.draftId])).resolves.toBe(0);
+      const authorState = await repository.listPublicationRenewalState(ids.author, ids.orgA);
+      expect(authorState?.find((item) => item.documentId === expired.draftId)).toMatchObject({ isAuthor: true,
+        expirationDate: utcDay(-1), canRenew: true, renewalPending: false, authorActive: true });
+      const reviewerState = await repository.listPublicationRenewalState(ids.reviewer, ids.orgA);
+      expect(reviewerState?.find((item) => item.documentId === expired.draftId)).toMatchObject({ isAuthor: false, canRenew: true });
+      expect((await repository.listPublicationRenewalState(ids.outsider, ids.orgA))?.map((item) => item.documentId))
+        .not.toContain(expired.draftId);
+      // Home AUTHOR column: the active author's display name only.
+      const home = await repository.listPublishedKnowledge(ids.engineer, ids.orgA);
+      expect(home?.find((item) => item.draftId === lastDay.draftId)?.authorName).toBe("Synthetic reader");
+    });
+
+    it("lets a responsible reviewer renew on the author's behalf, refuses their own approval and shows it again only after approval", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      await departmentGrant();
+      const { draftId, versionId } = await publish("Expired runbook", utcDay(-2));
+      await expect(renew(ids.outsider, draftId, utcDay(90))).resolves.toEqual({ kind: "not-found" });
+      await expect(renew(ids.reviewer, draftId, utcDay(0))).resolves.toEqual({ kind: "invalid-date" });
+      const requested = await renew(ids.reviewer, draftId, utcDay(90));
+      expect(requested).toMatchObject({ kind: "requested", submission: { requestType: "RENEWAL", status: "PENDING_REVIEW",
+        renewal: { expirationDate: utcDay(90), onBehalfOfAuthor: true } } });
+      if (requested.kind !== "requested") return;
+      await expect(renew(ids.author, draftId, null)).resolves.toEqual({ kind: "pending" });
+      await expect(count(`SELECT count(*) FROM arden_notification WHERE recipient_membership_id = $1
+        AND event_type = 'PUBLICATION_RENEWAL_ON_BEHALF' AND resource_id = $2 AND request_reason = 'Checked again'
+        AND shared_by_name = 'Synthetic reader'`, [ids.authorM, draftId])).resolves.toBe(1);
+      await expect(count(`SELECT count(*) FROM audit_event WHERE event_type = 'KNOWLEDGE_CHANGE_REQUESTED'
+        AND details_json->>'submissionId' = $1 AND details_json->>'onBehalfOfAuthor' = 'true'
+        AND details_json->>'requestedBy' = $2`, [requested.submission.id, ids.reviewerM])).resolves.toBe(1);
+      const decide = (userId: string) => repository!.decideReview(userId, ids.orgA, requested.submission.id, "APPROVE",
+        requested.submission.snapshotVersionId, requested.submission.contentHash, null, randomUUID(), "renewal-decision");
+      await expect(decide(ids.reviewer)).resolves.toMatchObject({ kind: "denied", reason: "NOT_AUTHORIZED" });
+      expect(await listedFor(ids.engineer)).not.toContain(draftId);
+      await expect(decide(ids.author)).resolves.toMatchObject({ kind: "decided", submission: { status: "APPROVED" } });
+      await expect(pointer(draftId)).resolves.toEqual({ published_version_id: versionId });
+      expect(await listedFor(ids.engineer)).toContain(draftId);
+      await expect(repository.getPublishedKnowledge(ids.engineer, ids.orgA, versionId))
+        .resolves.toMatchObject({ expired: false, management: { expirationDate: utcDay(90) } });
+      await expect(count(`SELECT count(*) FROM audit_event WHERE event_type = 'KNOWLEDGE_PUBLICATION_RENEWED'
+        AND details_json->>'documentId' = $1 AND details_json->>'onBehalfOfAuthor' = 'true'`, [draftId])).resolves.toBe(1);
+    });
+
+    it("applies the 7-day on-behalf window, refuses self-approval and opens the window when the author is inactive", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      await departmentGrant();
+      const later = await publish("Renew later", utcDay(20));
+      await expect(renew(ids.reviewer, later.draftId, utcDay(200))).resolves.toEqual({ kind: "not-yet" });
+      const own = await renew(ids.author, later.draftId, null);
+      expect(own).toMatchObject({ kind: "requested", submission: { renewal: { expirationDate: null, onBehalfOfAuthor: false } } });
+      if (own.kind !== "requested") return;
+      // The author is an Organization Admin here; a renewal still needs someone else.
+      await expect(repository.decideReview(ids.author, ids.orgA, own.submission.id, "APPROVE", own.submission.snapshotVersionId,
+        own.submission.contentHash, null, randomUUID(), "self-renewal")).resolves.toMatchObject({ kind: "denied" });
+      await expect(sqlState((client) => client.query(`INSERT INTO review_decision (submission_id, reviewer_membership_id,
+          decision, flow2, decision_request_id, snapshot_version_id, content_hash)
+        SELECT submission_id, submitted_by_membership_id, 'APPROVED', true, gen_random_uuid(), shared_draft_version_id, content_hash
+          FROM shared_submission WHERE submission_id = $1`, [own.submission.id]))).resolves.toBe("23514");
+
+      const inactive = await publish("Author left", utcDay(25));
+      await asSuperuser((client) => client.query("UPDATE organization_membership SET status = 'SUSPENDED' WHERE membership_id = $1", [ids.authorM]));
+      try {
+        await expect(renew(ids.reviewer, inactive.draftId, utcDay(400))).resolves.toMatchObject({ kind: "requested",
+          submission: { renewal: { onBehalfOfAuthor: true } } });
+        await expect(count(`SELECT count(*) FROM arden_notification WHERE event_type = 'PUBLICATION_RENEWAL_ON_BEHALF'
+          AND resource_id = $1`, [inactive.draftId])).resolves.toBe(0);
+      } finally {
+        await asSuperuser((client) => client.query("UPDATE organization_membership SET status = 'ACTIVE' WHERE membership_id = $1", [ids.authorM]));
+      }
+    });
+
+    it("writes each 30/7-day reminder once and never for a document with no expiry", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      await departmentGrant();
+      const soon = await publish("Expires soon", utcDay(5));
+      const month = await publish("Expires in a month", utcDay(28));
+      const never = await publish("No expiry", null);
+      await repository.enqueuePublicationExpiryReminders();
+      await expect(repository.enqueuePublicationExpiryReminders()).resolves.toBe(0);
+      const notices = (draftId: string) => asSuperuser(async (client) => (await client.query<{ recipient: string; key: string }>(
+        `SELECT recipient_membership_id AS recipient, event_key AS key FROM arden_notification
+          WHERE event_type = 'PUBLICATION_EXPIRING' AND resource_id = $1 ORDER BY event_key`, [draftId])).rows);
+      expect(await notices(soon.draftId)).toEqual([
+        { recipient: ids.authorM, key: `expiry:${soon.versionId}:${utcDay(5)}:30` },
+        { recipient: ids.reviewerM, key: `expiry:${soon.versionId}:${utcDay(5)}:7` }]);
+      expect(await notices(month.draftId)).toEqual([{ recipient: ids.authorM, key: `expiry:${month.versionId}:${utcDay(28)}:30` }]);
+      expect(await notices(never.draftId)).toEqual([]);
+      await expect(count(`SELECT count(*) FROM arden_notification_outbox o JOIN arden_notification n USING (notification_id)
+        WHERE n.resource_id = $1`, [soon.draftId])).resolves.toBe(2);
+    });
+
+    it("refuses to delete a department that still owns current publications", async () => {
+      if (!repository) throw new Error("Test database is unavailable");
+      await publish("Owned by sales", null);
+      await expect(repository.deleteDepartment(ids.author, ids.orgA, ids.sales, "delete-department"))
+        .resolves.toMatchObject({ success: false, errorReason: "OWNS_PUBLICATIONS" });
+      await expect(count("SELECT count(*) FROM department WHERE department_id = $1 AND status = 'ACTIVE'", [ids.sales])).resolves.toBe(1);
     });
   });
 });
