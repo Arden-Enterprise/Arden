@@ -665,7 +665,7 @@ export interface ArdenDataRepository {
   deleteDepartment(userId: string, organizationId: string, departmentId: string, requestId: string): Promise<DeleteDepartmentResult>;
   changePrimaryDepartment(userId: string, organizationId: string, membershipId: string, departmentId: string, requestId: string): Promise<boolean>;
   listDrafts(userId: string, organizationId: string, limit: number, cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null>;
-  getDraft(userId: string, organizationId: string, draftId: string): Promise<PrivateDraft | null>;
+  getDraft(userId: string, organizationId: string, draftId: string, options?: { forQuestion: boolean }): Promise<PrivateDraft | null>;
   canCreateDraft(userId: string, organizationId: string): Promise<boolean>;
   createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, requestId: string): Promise<PrivateDraft | null>;
   canUpdateDraft(userId: string, organizationId: string, draftId: string): Promise<boolean>;
@@ -1525,7 +1525,7 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async getDraft(userId: string, organizationId: string, draftId: string): Promise<PrivateDraft | null> {
+  async getDraft(userId: string, organizationId: string, draftId: string, options?: { forQuestion: boolean }): Promise<PrivateDraft | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
     const result = await client.query<{
       draft_id: string;
@@ -1549,7 +1549,11 @@ export class ArdenRepository implements ArdenDataRepository {
         JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
        WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
-         AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ"]);
+         AND (NOT $5::boolean OR (d.archived_at IS NULL AND EXISTS (
+           SELECT 1 FROM organization o JOIN user_account ua ON ua.user_id = om.user_id
+            WHERE o.organization_id = om.organization_id AND o.status = 'ACTIVE' AND ua.status = 'ACTIVE'
+         )))
+         AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ", options?.forQuestion ?? false]);
     const row = result.rows[0];
     return row ? {
       id: row.draft_id,

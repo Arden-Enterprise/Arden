@@ -1,4 +1,4 @@
-import { apiRequest } from "./api-client";
+import { apiRequest, type AskArdenAnswer } from "./api-client";
 import type { Platform } from "./types";
 
 /**
@@ -20,6 +20,13 @@ export type PrivateNoteSummary = {
   archivedAt?: string | null;
 };
 export type PrivateNoteRecord = PrivateNoteSummary & { body: string; version?: number };
+
+export function askPrivateNote(platform: Platform, organizationId: string, noteId: string,
+  expectedVersion: number, query: string, requestId: string): Promise<AskArdenAnswer> {
+  return apiRequest(platform, `/api/v1/organizations/${organizationId}/private-workspace/drafts/${noteId}/questions`, {
+    method: "POST", body: JSON.stringify({ expectedVersion, query, requestId }),
+  });
+}
 export type PrivateCollectionRecord = {
   id: string;
   title: string;

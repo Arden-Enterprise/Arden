@@ -62,6 +62,20 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${path}/access?all=1`, method: "GET" }), false);
     assert.equal(desktopApiTimeout({ path: "/api/v1/me", method: "GET" }), undefined);
   });
+  it("allows questions for one saved private note revision without a scope override", () => {
+    const path = `/api/v1/organizations/${organizationId}/private-workspace/drafts/${sourcePrivateVersionId}/questions`;
+    const payload = { requestId: idempotencyKey, query: "Summarize this note", expectedVersion: 2 };
+    const request = { path, method: "POST" as const, body: JSON.stringify(payload) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 240_000);
+    for (const expectedVersion of [undefined, "2", 0, -1, 1.5, 2_147_483_648]) {
+      assert.equal(validateDesktopApiRequest({ ...request, body: JSON.stringify({ ...payload, expectedVersion }) }), false);
+    }
+    for (const change of [{ path: `${path}?scope=all` }, { method: "GET" }, { timeoutMs: 45_000 },
+      { body: JSON.stringify({ ...payload, source: "company" }) }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+  });
   it("allows only exact bodyless private conversation reads", () => {
     const list = `/api/v1/organizations/${organizationId}/ai/conversations`;
     for (const path of [list, `${list}/${sourcePrivateVersionId}`]) {

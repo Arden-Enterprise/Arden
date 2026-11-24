@@ -15,6 +15,7 @@ import type { AskArdenClient } from "./answers/ai-client.js";
 import { registerAnswerRoutes } from "./answers/routes.js";
 import { registerReaderSummaryRoutes } from "./reader-ai/routes.js";
 import { registerReaderQuestionRoutes } from "./reader-ai/question-routes.js";
+import { registerPrivateNoteQuestion } from "./private-notes/question.js";
 import type { ReaderAiClient } from "./reader-ai/summary.js";
 import { canRead, readerModes, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
 import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
@@ -55,6 +56,7 @@ type AppDependencies = {
   publicApiOrigin?: string | null;
   invitationDeliveryMode?: "email" | "local-test-no-email";
   askArden?: AskArdenClient | null;
+  privateNoteAiOrganizations?: ReadonlySet<string>;
   readerAi?: ReaderAiClient | null;
   notificationRealtime?: NotificationRealtimeConfiguration | null;
   testActor?: SessionContext;
@@ -109,6 +111,8 @@ export function buildApp(dependencies: AppDependencies) {
   registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern);
   registerReaderSummaryRoutes(app, dependencies.repository, dependencies.storage, dependencies.readerAi ?? null, requestActor, uuidPattern);
   registerReaderQuestionRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null, requestActor, uuidPattern);
+  registerPrivateNoteQuestion(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null,
+    requestActor, uuidPattern, dependencies.privateNoteAiOrganizations ?? new Set());
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   registerNotificationRoutes(app, { repository: dependencies.repository,
     store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });

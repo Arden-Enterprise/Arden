@@ -2,11 +2,20 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, askArden, listAiConversations, loadAiConversation, type AiConversation,
   type AiConversationSummary } from "../shared/api-client";
 import type { Platform } from "../shared/types";
+import { askPrivateNote } from "../shared/private-workspace-api";
 import { answerMessage, type AnswerCitation, type AskArdenMessage } from "./askArdenModel";
 
 export type ArdenChat = ReturnType<typeof useArdenChat>;
 
-export function useArdenChat({ platform, organizationId }: { platform: Platform; organizationId: string | null }) {
+export type ChatSource =
+  | { kind: "company" }
+  | { kind: "private-note"; id: string; version: number; title: string }
+  | { kind: "private-empty"; hint: string };
+
+export function useArdenChat({ platform, organizationId, source }: {
+  platform: Platform; organizationId: string | null; source: ChatSource;
+}) {
+  const canAsk = Boolean(organizationId) && source.kind !== "private-empty";
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<AskArdenMessage[]>([]);
   const [pending, setPending] = useState(false);
@@ -45,7 +54,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
 
   /** Opens a saved chat from History, or reloads the current one; an error stays where the request started. */
   const openConversation = async (id: string, fromHistory = false): Promise<boolean> => {
-    if (!organizationId || pending) return false;
+    if (!organizationId || pending || source.kind !== "company") return false;
     const generation = ++requestGeneration.current;
     // Reloading the open chat keeps an unsent follow-up; switching chats starts from an empty draft.
     const sameChat = id === conversation.current.id;
@@ -65,7 +74,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   };
 
   const loadHistory = async () => {
-    if (!organizationId) return;
+    if (!organizationId || source.kind !== "company") return;
     const generation = ++requestGeneration.current;
     setHistoryLoading(true); setHistoryError(null);
     try {
@@ -77,7 +86,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   };
 
   const openHistory = () => {
-    if (!organizationId || pending) return;
+    if (!organizationId || pending || source.kind !== "company") return;
     setHistoryOpen(true); void loadHistory();
   };
 
@@ -100,7 +109,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
 
   const submit = async () => {
     const query = draft.trim();
-    if (!query || pending || !organizationId) return;
+    if (!query || pending || !organizationId || source.kind === "private-empty") return;
     const generation = ++requestGeneration.current;
     setHistoryLoading(false);
     const last = messages.at(-1);
@@ -116,6 +125,13 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     setError(null);
     setPending(true);
     try {
+      if (source.kind === "private-note") {
+        const answer = await askPrivateNote(platform, organizationId, source.id, source.version, query, crypto.randomUUID());
+        if (generation === requestGeneration.current) {
+          setMessages((current) => [...current, answerMessage(answer, crypto.randomUUID())]);
+        }
+        return;
+      }
       const previous = retryRequest.current;
       const conversationId = conversation.current.id;
       // A retry replays the original turn, so it keeps the revision it was first sent with.
@@ -124,8 +140,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
       const requestId = retry?.id ?? crypto.randomUUID();
       const expectedRevision = retry?.revision ?? conversation.current.revision;
       retryRequest.current = { query, id: requestId, conversationId, revision: expectedRevision };
-      const answer = await askArden(platform, organizationId, query, { conversationId,
-        expectedRevision, requestId });
+      const answer = await askArden(platform, organizationId, query, { conversationId, expectedRevision, requestId });
       if (generation !== requestGeneration.current) {
         // A stopped request can still commit; keep the revision so the next prompt does not conflict.
         if (answer.conversationId === conversationId && conversation.current.id === conversationId
@@ -179,7 +194,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     empty: messages.length === 0,
     currentId: messages.length ? conversation.current.id : null,
     threadTitle: messages.find((message) => message.role === "member")?.body ?? "New conversation",
-    canAsk: Boolean(organizationId),
+    canAsk, privateNote: source.kind !== "company",
     submit, reset, stopWaiting, openHistory, closeHistory, openConversation, loadHistory, showSources, closeSources,
     toggleHistory: () => { if (historyOpen) closeHistory(); else openHistory(); },
     reloadConversation: () => openConversation(conversation.current.id),

@@ -12,6 +12,6 @@ export function ChatMessages({ chat }: { chat: ArdenChat }) {
         ? <CitedAnswer body={message.body} citations={message.citations} onOpen={(citation) => chat.showSources(message.id, citation)} />
         : <p>{message.body}</p>}</div>
     </article>)}
-    {chat.pending && <div className="ask-answer-pending" role="status"><span />Searching documents…</div>}
+    {chat.pending && <div className="ask-answer-pending" role="status"><span />{chat.privateNote ? "Reading this note…" : "Searching documents…"}</div>}
   </section>;
 }

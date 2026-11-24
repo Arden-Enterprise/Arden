@@ -149,10 +149,11 @@ Path requested in ARD-50: left navigation → dominant central graph → search/
 ## F13 Grounded agent
 
 The [Company/Personal context contract](../engineering/knowledge-source-contexts.md)
-records the 23 November refinement: Ask Arden uses permitted Company publications;
-the sidebar in Private is planned to use only owner-private knowledge. There is no
-reader-scope picker. Private PDF ingestion/indexing/answering remain implementation
-work; a renamed workspace does not imply those paths are available.
+records the 24 November refinement. Ask Arden uses permitted Company publications.
+In Private, the right sidebar answers from the saved note currently open and resets
+when the note or its revision changes. PDF imports participate via the text already
+saved in the note. Private questions require organization opt-in for the configured
+inference destination.
 
 Path: user asks with explicit permitted context → Core calculates allowed versions → retrieval → permitted evidence/context → generation → validated answer/citations with final access recheck. ARD-52 is the umbrella; later branch ADR 0012 changes its older architecture wording.
 

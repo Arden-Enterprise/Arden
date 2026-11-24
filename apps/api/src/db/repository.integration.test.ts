@@ -309,6 +309,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     await expect(repository.getDraft(ids.owner, ids.organization, created.id)).resolves.toMatchObject({ title: "Private" });
     await expect(repository.getDraft(ids.manager, ids.organization, created.id)).resolves.toBeNull();
+    await expect(repository.getDraft(ids.owner, ids.organization, created.id, { forQuestion: true })).resolves.toMatchObject({ currentVersion: 1 });
+    await expect(repository.getDraft(ids.owner, randomUUID(), created.id, { forQuestion: true })).resolves.toBeNull();
+    await expect(repository.getDraft(ids.manager, ids.organization, created.id, { forQuestion: true })).resolves.toBeNull();
     await expect(repository.listDrafts(ids.manager, ids.organization, 10, null)).resolves.toMatchObject({ items: [] });
     // Decision0010 makes private-workspace creation an active Member capability.
     // It never gives the Member access to somebody else's private originals.
@@ -1318,6 +1321,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     // F03-ARR-AC3: archive hides the note from the list without touching its saved time.
     const archived = await store.setNoteArchived(ids.owner, ids.organization, third!.id, true, "arr-archive");
     expect(archived).toMatchObject({ id: third!.id, archivedAt: expect.any(Date) });
+    await expect(repository.getDraft(ids.owner, ids.organization, third!.id, { forQuestion: true })).resolves.toBeNull();
     expect(await savedAt(third!.id)).toBe(thirdSaved);
     const listed = await repository.listDrafts(ids.owner, ids.organization, 100, null);
     expect(listed!.items.map((item) => item.id)).not.toContain(third!.id);

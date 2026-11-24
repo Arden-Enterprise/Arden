@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArdenShell } from "../src/app/ArdenShell";
 import * as apiClient from "../src/shared/api-client";
+import * as privateApi from "../src/shared/private-workspace-api";
 
 vi.mock("../src/shared/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/shared/api-client")>();
@@ -13,6 +14,37 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
     restoreSession: vi.fn(),
     apiRequest: vi.fn(),
   };
+});
+
+describe("ArdenShell Private sidebar", () => {
+  it("uses the open note in Private and removes the composer from the Private root", async () => {
+    const note = { id: "note-a", organizationId: "org-1", title: "Personal handover",
+      currentVersion: { id: "version-a", version: 3 }, createdAt: "2026-11-24T00:00:00Z",
+      updatedAt: "2026-11-24T00:00:00Z", body: "Return the badge Friday.", collectionId: null, favoritedAt: null };
+    vi.spyOn(privateApi, "listPrivateNotes").mockResolvedValue({ items: [note], nextCursor: null });
+    vi.spyOn(privateApi, "loadPrivateNote").mockResolvedValue(note);
+    vi.spyOn(privateApi, "listPrivateCollections").mockResolvedValue([]);
+    vi.spyOn(privateApi, "listPrivateTrash").mockResolvedValue([]);
+    const ask = vi.spyOn(privateApi, "askPrivateNote").mockResolvedValue({
+      status: "ANSWERED", answer: "Friday.", citations: [],
+    });
+    render(createElement(ArdenShell, { platform: "web" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Private" })[0]);
+    const privateRoot = await within(screen.getByRole("main", { name: "Private" }))
+      .findByRole("button", { name: "Private", exact: true });
+    fireEvent.click(within(screen.getByRole("main", { name: "Private" })).getByRole("button", { name: "Ask Arden", exact: true }));
+    const ready = screen.getByRole("complementary", { name: "Ask Arden" });
+    expect(within(ready).getByText("Personal handover")).toBeTruthy();
+    fireEvent.change(within(ready).getByRole("textbox", { name: "Ask Arden" }), { target: { value: "When?" } });
+    fireEvent.click(within(ready).getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Friday.")).toBeTruthy();
+    expect(ask).toHaveBeenCalledWith("web", "org-1", "note-a", 3, "When?", expect.any(String));
+    fireEvent.click(privateRoot);
+    const root = screen.getByRole("complementary", { name: "Ask Arden" });
+    expect(within(root).queryByRole("textbox")).toBeNull();
+    expect(within(root).queryByText("Friday.")).toBeNull();
+  });
 });
 
 vi.mock("../src/organization/OrganizationAdminPage", async () => {
@@ -54,6 +86,7 @@ beforeEach(() => {
   vi.spyOn(apiClient, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, collections: [] });
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   vi.stubGlobal("scrollTo", vi.fn());
+  Object.defineProperty(document, "fonts", { configurable: true, value: { ready: Promise.resolve() } });
 });
 
 afterEach(() => {
@@ -61,6 +94,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   Reflect.deleteProperty(HTMLDialogElement.prototype, "showModal");
   Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
+  Reflect.deleteProperty(document, "fonts");
   vi.unstubAllGlobals();
 });
 
