@@ -2,19 +2,21 @@ import { useRef, useState } from "react";
 import { ApiError, requestPublicationChange, type KnowledgeSubmission, type PublicationChangeRequest,
   type TargetReaders } from "../shared/api-client";
 import type { Platform } from "../shared/types";
+import type { IconName } from "../shared/Icon";
 import { KnowledgeDialog } from "./KnowledgeDialog";
+import { ReasonField, ReasonNotice } from "./ReasonField";
 import { TargetReadersField, targetReadersComplete } from "./TargetReadersField";
 
 export type PublicationChangeType = PublicationChangeRequest["type"];
 
-const copy: Record<PublicationChangeType, { title: string; effect: string; submit: string; sent: string }> = {
+const copy: Record<PublicationChangeType, { title: string; icon: IconName; effect: string; submit: string; sent: string }> = {
   READER_CHANGE: {
-    title: "Request a reader change",
+    title: "Request a reader change", icon: "people",
     effect: "A reviewer must approve the new readers. Until then, the current readers keep access.",
     submit: "Send for review", sent: "Reader change sent for review",
   },
   WITHDRAWAL: {
-    title: "Request withdrawal",
+    title: "Request withdrawal", icon: "warning",
     effect: "If a reviewer approves, this document leaves the Library and AI answers. Its versions stay in history, and publishing it again needs a new review.",
     submit: "Send for review", sent: "Withdrawal sent for review",
   },
@@ -57,24 +59,22 @@ export function PublicationChangeDialog({ type, documentTitle, documentId, platf
     } finally { setBusy(false); }
   };
 
-  return <KnowledgeDialog title={copy[type].title} dismissible={!busy} onClose={onClose}>
-    <form className="publication-change-form" onSubmit={event => { event.preventDefault(); void send(); }}>
-      <p className="island-meta">{documentTitle}</p>
-      <p className="publication-change-effect">{copy[type].effect}</p>
-      {type === "READER_CHANGE" && <>
-        <TargetReadersField readers={readers} departments={departments} busy={busy} platform={platform}
-          organizationId={organizationId} onReaders={setReaders} legend="New readers *" />
-        {attempted && readersMissing && <small className="field-error" role="alert">Choose the new readers.</small>}
-      </>}
-      <label className="island-field publication-change-reason">Reason *
-        <textarea rows={4} maxLength={1000} value={reason} disabled={busy} aria-invalid={attempted && reasonMissing}
-          aria-describedby="publication-change-reason-help" onChange={event => setReason(event.target.value)}
+  return <KnowledgeDialog title={copy[type].title} subtitle={documentTitle} icon={copy[type].icon} compact dismissible={!busy}
+    onClose={onClose}>
+    <form className="reason-dialog-form" onSubmit={event => { event.preventDefault(); void send(); }}>
+      <div className="reason-dialog-body">
+        {type === "READER_CHANGE" && <>
+          <TargetReadersField readers={readers} departments={departments} busy={busy} platform={platform}
+            organizationId={organizationId} onReaders={setReaders} legend="New readers" />
+          {attempted && readersMissing && <small className="field-error" role="alert">Choose the new readers.</small>}
+        </>}
+        <ReasonField label="Reason" value={reason} busy={busy} showMissing={attempted && reasonMissing} onChange={setReason}
+          initialFocus={type !== "READER_CHANGE"}
           placeholder={type === "WITHDRAWAL" ? "Why should this document be withdrawn?" : "Why should the readers change?"} />
-        <small id="publication-change-reason-help" className={attempted && reasonMissing ? "field-error" : ""}
-          role={attempted && reasonMissing ? "alert" : undefined}>{attempted && reasonMissing ? "Enter a reason." : `${reason.length}/1000`}</small>
-      </label>
-      {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-      <div className="publication-change-actions">
+        <ReasonNotice icon="review"><p>{copy[type].effect}</p></ReasonNotice>
+        {error && <p role="alert" className="knowledge-live-error">{error}</p>}
+      </div>
+      <div className="reason-dialog-footer">
         <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
         <button type="submit" className="primary-button" disabled={busy}>{busy ? "Sending…" : copy[type].submit}</button>
       </div>
