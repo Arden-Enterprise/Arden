@@ -8,6 +8,7 @@ import { ChatMessages } from "../ask-arden/ChatMessages";
 import { CitationSourcesPanel } from "../ask-arden/CitationSourcesPanel";
 import { NewChatDialog } from "../ask-arden/NewChatDialog";
 import { useArdenChat, type ChatSource } from "../ask-arden/useArdenChat";
+import { AskPanelResizeHandle, type AskPanelResize } from "./AskPanelResizeHandle";
 
 const ardenMark = new URL("../assets/arden-logo-white.png", import.meta.url).href;
 
@@ -19,6 +20,8 @@ type AgentPanelProps = {
   onClose: () => void;
   onOpenAskArden: () => void;
   onOpenCitation?: (citation: KnowledgeCitationReference) => void;
+  /** Present only while the panel is docked beside the page (spec F13-RESIZE). */
+  resize?: AskPanelResize;
 };
 
 export function AgentPanel(props: AgentPanelProps) {
@@ -27,7 +30,7 @@ export function AgentPanel(props: AgentPanelProps) {
   return <AgentPanelContent key={sourceKey} {...props} />;
 }
 
-function AgentPanelContent({ open, platform, organizationId, source, onClose, onOpenAskArden, onOpenCitation }: AgentPanelProps) {
+function AgentPanelContent({ open, platform, organizationId, source, onClose, onOpenAskArden, onOpenCitation, resize }: AgentPanelProps) {
   const chat = useArdenChat({ platform, organizationId, source });
   const noteTitle = source.kind === "private-note" ? source.title : undefined;
   const prompts = chat.privateNote ? ["Summarize this note", "What are the key points?", "What action items are listed?"] : starterPrompts;
@@ -53,6 +56,7 @@ function AgentPanelContent({ open, platform, organizationId, source, onClose, on
   const close = () => onClose();
 
   return <aside id="arden-agent-panel" className="agent-panel" aria-label="Ask Arden" data-state={open ? "open" : "closed"} inert={!open}>
+    {open && resize && <AskPanelResizeHandle {...resize} />}
     <header className="agent-panel-header">
       <img className="agent-panel-mark" src={ardenMark} alt="" />
       <div className="agent-panel-title">

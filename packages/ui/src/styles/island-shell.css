@@ -86,10 +86,10 @@
 /* ---------- Shell grid ---------- */
 .arden-app-shell,
 .arden-app-shell.is-context-collapsed { grid-template-columns: 256px minmax(0, 1fr); align-items: start; }
-.arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 256px minmax(0, 1fr) 360px; }
+.arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 256px minmax(0, 1fr) var(--arden-context-width, 360px); }
 .arden-app-shell.is-nav-collapsed,
 .arden-app-shell.is-nav-collapsed.is-context-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
-.arden-app-shell.is-nav-collapsed:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 56px minmax(0, 1fr) 360px; }
+.arden-app-shell.is-nav-collapsed:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 56px minmax(0, 1fr) var(--arden-context-width, 360px); }
 .arden-app-shell .workspace-page {
   height: calc(var(--arden-shell-height) + var(--arden-shell-gap));
   margin-top: calc(-1 * var(--arden-shell-gap));
@@ -485,8 +485,8 @@
   .arden-app-shell, .arden-app-shell.is-context-collapsed { grid-template-columns: 224px minmax(0, 1fr); }
   .arden-app-shell.is-nav-collapsed, .arden-app-shell.is-nav-collapsed.is-context-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
   /* Ask Arden docks beside the page (the page narrows) whenever the shell measured room for both. */
-  .arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 224px minmax(0, 1fr) 340px; }
-  .arden-app-shell.is-nav-collapsed:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 56px minmax(0, 1fr) 340px; }
+  .arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 224px minmax(0, 1fr) var(--arden-context-width, 340px); }
+  .arden-app-shell.is-nav-collapsed:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 56px minmax(0, 1fr) var(--arden-context-width, 340px); }
 }
 @media (min-width: 640px) and (max-width: 899px) {
   .arden-app-shell, .arden-app-shell.is-context-collapsed, .arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay),

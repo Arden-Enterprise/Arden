@@ -84,3 +84,20 @@
   position: absolute; inset: 0; z-index: 6; grid-column: auto; grid-row: auto; width: auto;
   border-left: 0; background: var(--arden-surface-base); box-shadow: none;
 }
+
+/* Spec F13-RESIZE: the docked panel's left edge is a splitter. A thin line shows on hover, focus and while dragging. */
+.arden-app-shell .agent-panel-resize {
+  position: absolute; top: 0; bottom: 0; left: 0; z-index: 7; width: 8px; cursor: col-resize; touch-action: none;
+}
+.arden-app-shell .agent-panel-resize::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: transparent;
+  transition: background-color var(--arden-motion-quick) ease;
+}
+.arden-app-shell .agent-panel-resize:hover::after,
+.arden-app-shell .agent-panel-resize.is-dragging::after { background: var(--arden-border-strong); }
+.arden-app-shell .agent-panel-resize:focus-visible { outline: none; }
+.arden-app-shell .agent-panel-resize:focus-visible::after { width: 3px; background: var(--arden-focus-ring); }
+.arden-app-shell:has(.agent-panel-resize.is-dragging) { cursor: col-resize; user-select: none; }
+
+/* With the panel docked, the bell is the last top-bar control: keep it off the panel's edge. */
+.arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) .workspace-topbar:not(.is-reader) { padding-right: 20px; }
