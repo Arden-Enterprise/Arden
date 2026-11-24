@@ -6,7 +6,7 @@ type ColumnStyle = CSSProperties & { "--island-columns": string; "--island-list-
  * A data table drawn as an island of grid rows. ARIA table roles keep row/cell
  * semantics that CSS grid display would otherwise remove from a native table.
  */
-export function IslandTable({ label, columns, minWidth, headers, children, footer }: {
+export function IslandTable({ label, columns, minWidth, headers, children, footer, sort, className = "" }: {
   label: string;
   /** CSS grid-template-columns shared by the header and every row. */
   columns: string;
@@ -14,12 +14,16 @@ export function IslandTable({ label, columns, minWidth, headers, children, foote
   headers: ReactNode[];
   children: ReactNode;
   footer?: ReactNode;
+  /** The sorted column, exposed as aria-sort on its header. */
+  sort?: { index: number; direction: "ascending" | "descending" };
+  className?: string;
 }) {
   const style: ColumnStyle = { "--island-columns": columns, "--island-list-min": `${minWidth}px` };
-  return <section className="island island-list" style={style} aria-label={label}>
+  return <section className={`island island-list${className ? ` ${className}` : ""}`} style={style} aria-label={label}>
     <div className="island-list-inner" role="table" aria-label={label}>
       <div role="rowgroup"><div className="island-row is-head" role="row">
-        {headers.map((header, index) => <span key={index} role="columnheader">{header}</span>)}
+        {headers.map((header, index) => <span key={index} role="columnheader"
+          aria-sort={sort ? sort.index === index ? sort.direction : "none" : undefined}>{header}</span>)}
       </div></div>
       <div role="rowgroup">{children}</div>
     </div>

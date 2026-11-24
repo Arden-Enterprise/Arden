@@ -549,3 +549,16 @@ button.review-row:disabled { cursor: progress; }
 }
 @media (prefers-reduced-motion: reduce) { .review-group-chevron { transition: none; } }
 .knowledge-dialog > small, .island-side > small { color: var(--arden-text-secondary); font-size: 12px; font-weight: 400; line-height: 1.45; }
+
+/* Decision 0032: sortable Home register, expiring clock and amber Valid until. */
+.library-sort { display: inline-flex; align-items: center; gap: 4px; padding: 0; border: 0; background: none; color: inherit;
+  font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.library-sort:hover { color: var(--arden-text-primary); }
+.library-sort:focus-visible { outline: 2px solid var(--arden-focus-ring); outline-offset: 2px; border-radius: 4px; }
+.library-row-expiring { display: inline-flex; flex: none; align-self: center; color: var(--arden-warning); }
+.knowledge-reader-expiring { color: var(--arden-warning); }
+.knowledge-reader-expiring small { display: block; font-size: 12px; }
+@container workspace (max-width: 640px) {
+  /* Narrow and phone layouts drop AUTHOR first. */
+  .library-register .library-row-author { display: none; }
+}

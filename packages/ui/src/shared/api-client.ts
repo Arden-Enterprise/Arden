@@ -142,12 +142,14 @@ export type KnowledgeSubmission = {
   publishedVersionId: string | null;
   decisionComment: string | null;
   /** T6.1/T6.2: CONTENT, or a READER_CHANGE / WITHDRAWAL request about the current publication. */
-  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
   requestReason?: string | null;
   /** T6.3: why preparation failed, only while publicationState is FAILED. Only TEMPORARY can be retried. */
   publicationFailure?: "TEMPORARY" | "CONTENT" | "SYSTEM" | null;
   /** Historical provenance; new direct withdrawals require Organization Admin authority (0024). */
   withdrawal?: { by: "REVIEWER" | "ORGANIZATION_ADMIN"; reason: string; at: string } | null;
+  /** RENEWAL only (decision 0032): the requested Valid until (null = no expiry). */
+  renewal?: { expirationDate: string | null; onBehalfOfAuthor: boolean } | null;
 };
 export type AssignedKnowledgeReview = {
   submissionId: string;
@@ -162,7 +164,7 @@ export type AssignedKnowledgeReview = {
   /** Submitter's display name, visible to reviewers; absent or null when unavailable. */
   authorName?: string | null;
   /** T6.1: what the request asks for; absent from older servers means CONTENT. */
-  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
 };
 /** A submission the signed-in reviewer already decided (REV-02 history). */
 export type DecidedKnowledgeReview = {
@@ -208,9 +210,12 @@ export type PublishedKnowledge = {
   /** Approved readers without member identities; null for publications from before Target Readers. */
   targetReaders?: { mode: TargetReaders["mode"]; departmentId: string | null } | null;
   contentHash: string;
+  /** Published date of the current version (Home UPDATED column). */
   publishedAt: string;
   validFrom: string;
   validUntil: string | null;
+  /** Home AUTHOR column: the active author's display name; null shows "—" (decision 0032). */
+  authorName?: string | null;
   body?: string;
   mimeType?: "text/plain" | "application/pdf";
   pdfBase64?: string;
@@ -491,6 +496,26 @@ export type PublicationChangeRequest =
 export function requestPublicationChange(platform: Platform, organizationId: string, documentId: string,
   input: PublicationChangeRequest, idempotencyKey: string): Promise<KnowledgeSubmission> {
   return request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/change-requests`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
+  });
+}
+
+/** Decision 0032: validity of current publications the caller is responsible for (author, reviewer, Admin). */
+export type PublicationRenewalState = {
+  documentId: string; publishedVersionId: string; title: string; responsibleDepartmentId: string | null;
+  /** Effective Valid until (YYYY-MM-DD); null means no expiry. */
+  expirationDate: string | null; renewalPending: boolean; authorActive: boolean; isAuthor: boolean; canRenew: boolean;
+};
+
+export async function listPublicationRenewals(platform: Platform, organizationId: string): Promise<PublicationRenewalState[]> {
+  const result = await request<{ items: PublicationRenewalState[] }>(platform, `${knowledgePath(organizationId)}/renewals`);
+  return result.items;
+}
+
+/** Decision 0032 B: asks a reviewer to renew the Valid until of the current publication (null = no expiry). */
+export function requestPublicationRenewal(platform: Platform, organizationId: string, documentId: string,
+  input: { expirationDate: string | null; reason: string }, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/renewal`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
   });
 }
