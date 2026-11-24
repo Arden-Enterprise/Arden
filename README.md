@@ -178,6 +178,19 @@ contract change with:
 uv run arden-ai-export-schemas
 ```
 
+### Selection writing actions
+
+The authenticated internal `POST /v1/writing-actions` endpoint handles `IMPROVE`, `REFORMAT`
+and `EXPLAIN` using the existing configured OpenAI chat model. A future Core caller must supply only
+the selected text, or explicit page context when nothing is selected. The service returns a bounded proposed
+replacement, a concise no-change message, or a chat-only explanation; it never edits a document.
+Page-context explanations include an exact short source quote, checked against the supplied text.
+Reformat output is checked against source wording and protected links/code. The v1 schema and
+synthetic fixture are in `schemas/writing-v1.schema.json` and `tests/fixtures/writing-v1.json`.
+No new dependency, model configuration, storage, index or migration is required. Provider
+failures return safe codes. This change does not add a Core or UI caller. Deploy this additive endpoint before an authorized Core caller rollout;
+ordinary tests use fake providers and do not establish live writing quality.
+
 The current chunker derives deterministic section boundaries from Arden's source map, then uses
 LangChain's token-aware `RecursiveCharacterTextSplitter` inside each section. Default child chunks
 target 600 tokens with 60-token overlap; section breadcrumbs are included in embedding text while

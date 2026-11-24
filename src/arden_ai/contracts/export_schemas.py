@@ -13,6 +13,7 @@ from arden_ai.contracts.governed import (
 from arden_ai.contracts.indexing import IndexGenerationManifest, IndexGenerationRequest
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
+from arden_ai.contracts.writing import WritingRequest, WritingResponse
 from arden_ai.domain.semantic_document import SemanticDocument
 
 
@@ -32,6 +33,11 @@ def build_schemas() -> dict[str, dict[str, object]]:
         title="Arden answer contract v1",
     )
     return {
+        "writing-v1.schema.json": models_json_schema(
+            [(WritingRequest, "validation"), (WritingResponse, "validation")],
+            by_alias=True,
+            title="Arden writing action contract v1",
+        )[1],
         "reader-summary-v1.schema.json": models_json_schema(
             [(ReaderSourceResponse, "validation"), (ReaderSummaryResponse, "validation")],
             by_alias=True,
