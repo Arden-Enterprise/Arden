@@ -17,7 +17,6 @@
   grid-column: 2; grid-row: 1; z-index: 3; align-self: start; height: 76px; padding-right: 12px;
   background: var(--arden-bg-app);
 }
-.arden-app-shell:has(.personal-content) .app-sidebar { z-index: 4; }
 .arden-app-shell:has(.personal-content) .personal-content { grid-column: 1 / -1; grid-row: 1; min-height: 0; }
 .arden-app-shell .personal-content > .workspace-page-header {
   position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
