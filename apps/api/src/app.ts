@@ -2093,7 +2093,7 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(412).send(safeError("VERSION_CONFLICT", "This note changed. Reload it before saving again.", request.id));
       }
       if (result.replacedSourceUri) {
-        // Decision 0030: the overwritten open version's old content is no longer reachable.
+        // Decision 0031: the overwritten open version's old content is no longer reachable.
         try { await dependencies.storage.remove(result.replacedSourceUri); }
         catch (error) { request.log.warn({ errorType: safeErrorType(error), requestId: request.id }, "Replaced private content could not be erased"); }
       }

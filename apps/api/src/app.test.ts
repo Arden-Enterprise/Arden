@@ -1362,7 +1362,7 @@ describe("API auth and private draft routes", () => {
       expect(list.json().items.find((item: { id: string }) => item.id === draftId)).toMatchObject({ position: 3 });
     });
 
-    it("overwrites an open version and erases its old content, but keeps a contributed version's content (decision 0030)", async () => {
+    it("overwrites an open version and erases its old content, but keeps a contributed version's content (decision 0031)", async () => {
       repository.currentSource = await storage.write(repository.currentBody);
       const headers = await ownerHeaders();
       const before = repository.currentSource;
@@ -3366,7 +3366,7 @@ class MemoryRepository implements ArdenDataRepository {
     if (this.privateOrganization.hidden(draftId)) return { kind: "not-found" };
     if (expectedVersion !== this.currentVersion) return { kind: "conflict", currentVersion: this.currentVersion };
     this.currentVersion += 1;
-    // Decision 0030: an open version is overwritten; its previous content object becomes unreachable.
+    // Decision 0031: an open version is overwritten; its previous content object becomes unreachable.
     let replacedSourceUri: string | null = null;
     if (patch.body !== undefined) {
       this.currentBody = patch.body;
@@ -3378,7 +3378,7 @@ class MemoryRepository implements ArdenDataRepository {
     const draft = { ...this.note(), title: patch.title ?? this.note().title };
     return { kind: "updated", draft, replacedSourceUri };
   }
-  /** Set when the note's version was contributed (decision 0030). */
+  /** Set when the note's version was contributed (decision 0031). */
   sourceVersionSealed = false;
 
   private note(): PrivateDraft {

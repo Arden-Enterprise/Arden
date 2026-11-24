@@ -1360,7 +1360,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(JSON.stringify(audit.rows)).not.toMatch(/Third|Arrange shelf/);
   }, 30_000);
 
-  it("overwrites a note's open version, seals it on contribution and keeps sealed versions immutable (decision 0030)", async () => {
+  it("overwrites a note's open version, seals it on contribution and keeps sealed versions immutable (decision 0031)", async () => {
     if (!repository || !pool) throw new Error("Test database is unavailable");
     const object = (hash: string) => ({ sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain" as const, contentHash: hash.repeat(64) });
     const first = object("1");
