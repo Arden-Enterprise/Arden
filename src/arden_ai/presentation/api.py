@@ -15,6 +15,7 @@ from arden_ai.application.governed import GovernedAnswerer
 from arden_ai.application.reader_question import UnsupportedReaderQuestion
 from arden_ai.application.reader_sources import prepare_reader_source
 from arden_ai.application.reader_summary import ReaderSummarizer, UnsupportedSummary
+from arden_ai.application.writing import InvalidWritingOutput, Writer
 from arden_ai.contracts import (
     AnswerRequest,
     AnswerResponse,
@@ -29,6 +30,7 @@ from arden_ai.contracts.governed import (
 )
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
+from arden_ai.contracts.writing import WritingRequest, WritingResponse
 from arden_ai.presentation.summary_failures import summary_failure
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,8 @@ def create_api(
     governed_factory: Callable[[], GovernedAnswerer] | None = None,
     summaries: ReaderSummarizer | None = None,
     summaries_factory: Callable[[], ReaderSummarizer] | None = None,
+    writer: Writer | None = None,
+    writer_factory: Callable[[], Writer] | None = None,
 ) -> FastAPI:
     application = FastAPI(
         title="Arden AI",
@@ -55,6 +59,19 @@ def create_api(
     application.state.permission_aware_answerer = answerer
     application.state.governed_answerer = governed
     application.state.reader_summarizer = summaries
+    application.state.writer = writer
+
+    def runtime_writer() -> Writer:
+        current: Writer | None = application.state.writer
+        if current is None:
+            if writer_factory is None:
+                raise HTTPException(status_code=503, detail="Writing is unavailable")
+            try:
+                current = writer_factory()
+            except ValueError as error:
+                raise HTTPException(status_code=503, detail="Writing is unavailable") from error
+            application.state.writer = current
+        return current
 
     def runtime_summaries() -> ReaderSummarizer:
         current: ReaderSummarizer | None = application.state.reader_summarizer
@@ -84,6 +101,37 @@ def create_api(
                 detail="Invalid service credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+    @application.post(
+        "/v1/writing-actions",
+        response_model=WritingResponse,
+        dependencies=[Depends(authorize_service)],
+        tags=["writing-v1"],
+    )
+    async def writing_action(
+        request: WritingRequest,
+        service: Annotated[Writer, Depends(runtime_writer)],
+    ) -> WritingResponse:
+        started = time.monotonic()
+        try:
+            async with asyncio.timeout(60):
+                return await service.run(request)
+        except InvalidWritingOutput:
+            code = "INVALID_OUTPUT"
+        except Exception as error:
+            code = summary_failure(error)
+        logger.warning(
+            json.dumps(
+                {
+                    "event": "writing_action_failed",
+                    "operationId": str(request.request_id),
+                    "action": request.action,
+                    "code": code,
+                    "durationMs": round((time.monotonic() - started) * 1_000),
+                }
+            )
+        )
+        raise HTTPException(status_code=502, detail={"code": code}) from None
 
     def runtime_governed() -> GovernedAnswerer:
         current: GovernedAnswerer | None = application.state.governed_answerer
