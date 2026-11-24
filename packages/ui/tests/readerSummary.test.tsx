@@ -12,7 +12,7 @@ import { PdfViewer } from "../src/knowledge/PdfDocument";
 import type { KnowledgeCitationReference } from "../src/knowledge/knowledgeCitation";
 
 const metadata: ReaderDocumentMetadata = { title: "Working together", ownerDepartment: "HR", summary: "",
-  activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE", effectiveDate: "2026-11-01" }] };
+  activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE" }] };
 function fixture() {
   const options: ReaderSummaryOptions = { platform: "web", context: { ...readerContext }, active: true, onCitation: vi.fn(), onAccessLost: vi.fn() };
   const generation = vi.spyOn(api, "generateReaderSummary").mockImplementation(async (_platform, context, requestId) => readerSummaryFixture(requestId, context));

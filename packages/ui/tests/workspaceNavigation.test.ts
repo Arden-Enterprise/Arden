@@ -10,7 +10,7 @@ describe("workspace navigation with Ask Arden", () => {
     const markup = JSON.stringify(sidebar);
     expect(markup).toContain("Ask Arden");
     expect(workNavigation).toContainEqual(expect.objectContaining({ label: "Ask Arden", view: "ask-arden" }));
-    for (const label of ["Home", "Ask Arden", "Private Notes", "Reviews"]) {
+    for (const label of ["Home", "Ask Arden", "Private", "Reviews"]) {
       expect(markup).toContain(label);
     }
     // Home replaced the sample My Work dashboard and the Library label (15 Nov 2026).

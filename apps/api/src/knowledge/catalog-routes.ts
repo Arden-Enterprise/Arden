@@ -3,10 +3,9 @@ import { knowledgeTypes } from "@arden/domain";
 import { CatalogError, type CatalogKind, type CatalogWrite, type KnowledgeCatalogStore } from "./catalog-store.js";
 
 export const managementSchema = { type: "object", additionalProperties: false,
-  required: ["type", "version", "effectiveDate", "expirationDate", "changeNote"], properties: {
+  required: ["type", "version", "expirationDate", "changeNote"], properties: {
     type: { enum: [...knowledgeTypes, null] },
     version: { type: "string", maxLength: 30 },
-    effectiveDate: { type: ["string", "null"], maxLength: 10 },
     expirationDate: { type: ["string", "null"], maxLength: 10 }, changeNote: { type: "string", maxLength: 1000 },
   } };
 

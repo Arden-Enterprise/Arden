@@ -19,7 +19,7 @@ afterEach(() => {
 const common: api.PublishedKnowledge = { id: "common-version", draftId: "common-doc", title: "Common working guide", classification: "INTERNAL",
   targetReaders: { mode: "ORGANIZATION", departmentId: null }, responsibleDepartmentId: "finance", responsibleDepartmentName: "Finance",
   audienceIds: [], contentHash: "hash", body: "Exact document content", mimeType: "text/plain", publishedAt: "2026-11-19T00:00:00Z",
-  validFrom: "2026-11-19T00:00:00Z", validUntil: null, management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" } };
+  validFrom: "2026-11-19T00:00:00Z", validUntil: null, management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" } };
 const assigned = { ...common, id: "assigned-version", draftId: "assigned-doc", title: "Common reference", management: { ...common.management!, type: "Reference" as const } };
 const department = { ...common, id: "department-version", draftId: "department-doc", title: "Department access procedure",
   targetReaders: { mode: "DEPARTMENT" as const, departmentId: "engineering", memberIds: [] } };

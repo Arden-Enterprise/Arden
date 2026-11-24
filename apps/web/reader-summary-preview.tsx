@@ -26,7 +26,7 @@ window.fetch = async (input, init) => {
   } }, { status: 503 });
   const request: { requestId: string } = JSON.parse(String(init?.body));
   const result = readerSummaryFixture(request.requestId);
-  result.points.push({ kind: "CONDITION", text: "Check that you are reading the version currently open. Publication and effective dates are different.", citations: result.points[0].citations },
+  result.points.push({ kind: "CONDITION", text: "Check that you are reading the version currently open. Check the version and publication date shown for this document.", citations: result.points[0].citations },
     { kind: "EXCEPTION", text: "If access is revoked, the summary and its sources become unavailable.", citations: result.points[0].citations });
   if (sourceFormat === "text") result.points.forEach(point => point.citations.forEach(citation => { delete citation.page; }));
   if (path.endsWith("/questions")) return Response.json({ requestId: request.requestId,
@@ -76,7 +76,7 @@ function Preview() {
     </div>
     {unavailable && <p role="alert">This document is unavailable.</p>}
     {open && <KnowledgeDocumentDetail key={format} metadata={{ title: "Working together", ownerDepartment: "HR", summary: "",
-      activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE", effectiveDate: "2026-11-01" }] }}
+      activeVersionId: readerContext.versionId, versions: [{ id: readerContext.versionId, label: "1.0", status: "EFFECTIVE" }] }}
       summaryOptions={{ platform: transport, active: true, context: readerContext, onCitation: setFocus,
         onAccessLost: () => { setOpen(false); setUnavailable(true); } }} focusTarget={focus} onBack={() => setOpen(false)}
       content={format === "pdf" ? <PdfDocument base64={pdf} title="Synthetic source" page={focus?.page} />

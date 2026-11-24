@@ -68,10 +68,10 @@ describe("concise user-facing copy", () => {
 
   it("does not claim an index is ready in the empty chat", () => {
     render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
-    expect((screen.getByRole("combobox", { name: "Knowledge version scope" }) as HTMLSelectElement).value).toBe("CURRENT");
+    expect(screen.queryByRole("combobox", { name: "Knowledge version scope" })).toBeNull();
     expect(screen.queryByText(/indexed|permission-aware/i)).toBeNull();
     expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Attachments aren’t available yet" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Attachments aren’t available yet" })).toBeNull();
   });
 
   it.each(["DEPARTMENT", "ORGANIZATION"] as const)("shows the %s boundary before approving group readers", async (scope) => {

@@ -102,7 +102,7 @@ describe("ArdenShell invitation batch navigation", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Administration" }));
     expect(screen.getByText("Batch in progress")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Start batch" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "Private Notes" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Private" })[0]);
     expect(screen.getByText("Batch in progress")).toBeTruthy();
     const unloadWhileSending = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(unloadWhileSending);
@@ -114,7 +114,7 @@ describe("ArdenShell invitation batch navigation", () => {
     const unloadAfterSending = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(unloadAfterSending);
     expect(unloadAfterSending.defaultPrevented).toBe(false);
-    fireEvent.click(screen.getAllByRole("button", { name: "Private Notes" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Private" })[0]);
     await waitFor(() => expect(screen.queryByText("Batch in progress")).toBeNull());
   });
 

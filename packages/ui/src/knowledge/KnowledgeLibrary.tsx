@@ -20,37 +20,37 @@ export const sampleDocuments: SampleKnowledgeDocument[] = [
   { id: "release-readiness-checklist", title: "Release readiness checklist", ownerDepartment: "Platform Engineering",
     summary: "Defines the evidence and ownership checks required before a production release is approved.",
     activeVersionId: "release-v2", versions: [
-      { id: "release-v2", label: "2.0", status: "EFFECTIVE", effectiveDate: "2026-09-15" },
-      { id: "release-v1", label: "1.0", status: "EXPIRED", effectiveDate: "2026-03-10" },
+      { id: "release-v2", label: "2.0", status: "EFFECTIVE" },
+      { id: "release-v1", label: "1.0", status: "EXPIRED" },
     ], details: "Checklist · Platform Engineering", status: "Published", scope: "Company-wide", type: "Checklist", previewHeading: "Release controls",
     sourceBlocks: [{ id: "release-evidence", heading: "Release controls", text: "Every production release must include named ownership, tested rollback evidence and the recorded approval outcome before deployment begins." }] },
   { id: "checkout-timeout-decision", title: "Checkout timeout decision", ownerDepartment: "Product Engineering",
     summary: "Records the accepted checkout timeout behavior, operating limits and escalation path for affected services.",
-    activeVersionId: "checkout-v1", versions: [{ id: "checkout-v1", label: "1.0", status: "EFFECTIVE", effectiveDate: "2026-08-22" }],
+    activeVersionId: "checkout-v1", versions: [{ id: "checkout-v1", label: "1.0", status: "EFFECTIVE" }],
     details: "Decision · Product Engineering", status: "Published", scope: "Department", type: "Decision", previewHeading: "Accepted timeout behavior",
     sourceBlocks: [{ id: "accepted-timeout", heading: "Accepted timeout behavior", text: "Checkout requests use the agreed service timeout and follow the documented escalation path when the dependency exceeds its operating limit." }] },
   { id: "operations-ownership-handover", title: "Operations ownership handover", ownerDepartment: "Infrastructure Operations",
     summary: "Documents service ownership, unresolved risks and the operational contacts required for the handover.",
-    activeVersionId: "handover-v1", versions: [{ id: "handover-v1", label: "1.0", status: "UPCOMING", effectiveDate: "2026-11-01" }],
+    activeVersionId: "handover-v1", versions: [{ id: "handover-v1", label: "1.0", status: "EFFECTIVE" }],
     details: "Handover · Infrastructure Operations", status: "In review", scope: "Company-wide", type: "Handover", previewHeading: "Ownership transition",
     sourceBlocks: [{ id: "handover-ownership", heading: "Ownership transition", text: "The receiving team accepts service ownership only after open risks, operational contacts and escalation responsibilities are recorded." }] },
   { id: "incident-retrospective-18-sep", title: "Incident retrospective - 18 Sep", ownerDepartment: "Infrastructure Operations",
     summary: "Captures the incident timeline, contributing conditions and follow-up work identified by the response team.",
-    activeVersionId: "incident-v1", versions: [{ id: "incident-v1", label: "1.0", status: "EFFECTIVE", effectiveDate: "2026-09-20" }],
+    activeVersionId: "incident-v1", versions: [{ id: "incident-v1", label: "1.0", status: "EFFECTIVE" }],
     details: "Retrospective · Your personal workspace", status: "Private", scope: "Private", type: "Retrospective", previewHeading: "Incident findings",
     sourceBlocks: [{ id: "incident-findings", heading: "Incident findings", text: "The response team recorded the incident timeline, contributing conditions and follow-up owners for private working use." }] },
   { id: "data-retention-policy-mapping", title: "Data retention policy mapping", ownerDepartment: "Security & Compliance",
     summary: "Maps retained data categories to their approved retention periods and accountable control owners.",
     activeVersionId: "retention-v3", versions: [
-      { id: "retention-v3", label: "3.0", status: "EFFECTIVE", effectiveDate: "2026-10-01" },
-      { id: "retention-v2", label: "2.0", status: "EXPIRED", effectiveDate: "2025-10-01" },
+      { id: "retention-v3", label: "3.0", status: "EFFECTIVE" },
+      { id: "retention-v2", label: "2.0", status: "EXPIRED" },
     ], details: "Policy · Security & Compliance", status: "Published", scope: "Company-wide", type: "Policy", previewHeading: "Retention responsibilities",
     sourceBlocks: [{ id: "retention-responsibilities", heading: "Retention responsibilities", text: "Control owners must apply the approved retention period to each data category and record any exception through the security review process." }] },
   { id: "knowledge-publication-workflow", title: "Knowledge publication workflow", ownerDepartment: "Knowledge Governance",
     summary: "Defines how an authored draft becomes an authorized, indexed and active knowledge publication.",
     activeVersionId: "publication-workflow-v2-1", versions: [
-      { id: "publication-workflow-v2-1", label: "2.1", status: "EFFECTIVE", effectiveDate: "2026-10-12" },
-      { id: "publication-workflow-v2-0", label: "2.0", status: "EXPIRED", effectiveDate: "2026-06-20" },
+      { id: "publication-workflow-v2-1", label: "2.1", status: "EFFECTIVE" },
+      { id: "publication-workflow-v2-0", label: "2.0", status: "EXPIRED" },
     ], details: "Procedure · Knowledge Governance", status: "Published", scope: "Company-wide", type: "Procedure", previewHeading: "Publication boundary",
     sourceBlocks: [
       { id: "immutable-submission", heading: "Review snapshot", text: "Submitting a working draft for review creates an immutable snapshot. Later edits remain in the working draft and do not change the submitted version." },
@@ -58,7 +58,7 @@ export const sampleDocuments: SampleKnowledgeDocument[] = [
     ] },
   { id: "reviewer-responsibility-guide", title: "Reviewer responsibility guide", ownerDepartment: "Product Engineering",
     summary: "Clarifies reviewer authority, decision boundaries and responsibility for an exact submitted version.",
-    activeVersionId: "reviewer-guide-v1-4", versions: [{ id: "reviewer-guide-v1-4", label: "1.4", status: "EFFECTIVE", effectiveDate: "2026-10-08" }],
+    activeVersionId: "reviewer-guide-v1-4", versions: [{ id: "reviewer-guide-v1-4", label: "1.4", status: "EFFECTIVE" }],
     details: "Guide · Product Engineering", status: "Published", scope: "Department", type: "Guide", previewHeading: "Reviewer decision boundary",
     sourceBlocks: [{ id: "reviewer-decision-boundary", heading: "Reviewer decision boundary", text: "A reviewer may approve or reject only the exact submitted snapshot covered by an active reviewer grant." }] },
 ];
@@ -115,7 +115,7 @@ export function KnowledgeLibrary({ active, createdDraft, onCreate, onOpenDocumen
           <IslandCell>{document.ownerDepartment}</IslandCell>
           <IslandCell className="island-row-cell is-number">v{version?.label ?? "Current"}</IslandCell>
           <IslandCell className="island-row-cell is-number">{document.expirationDate ? shortDate(document.expirationDate) : "No expiry"}</IslandCell>
-          <IslandCell><span className={`island-chip knowledge-reader-status is-${(version?.status ?? "EFFECTIVE").toLowerCase()}`}>{version?.status === "UPCOMING" ? "Upcoming" : version?.status === "EXPIRED" ? "Expired" : "Current"}</span></IslandCell>
+          <IslandCell><span className={`island-chip knowledge-reader-status is-${(version?.status ?? "EFFECTIVE").toLowerCase()}`}>{version?.status === "EXPIRED" ? "Expired" : "Current"}</span></IslandCell>
         </IslandRow>;
       })}
     </IslandTable> : <div className="knowledge-empty"><h2>No matching publications</h2><p>Try another keyword, document code or owner department.</p><button type="button" className="secondary-button" onClick={() => { setQuery(""); setDepartmentOnly(false); setDocumentType("All types"); }}>Clear filters</button></div>}

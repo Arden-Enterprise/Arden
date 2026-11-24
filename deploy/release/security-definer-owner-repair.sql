@@ -9,7 +9,7 @@ SELECT pg_advisory_xact_lock(hashtext('arden:migrations'));
 DO $repair_internal_execution$
 DECLARE
     item record;
-    -- Exact inventory after migrations 0001-0062 (48 routines). Any other count or name refuses.
+    -- Exact inventory after migrations 0001-0063 (47 routines). Any other count or name refuses.
     expected_names text[] := ARRAY[
         -- Reviewed baseline (0001-0022).
         'audience_snapshot_enforceable', 'claim_knowledge_index_job',
@@ -23,7 +23,7 @@ DECLARE
         'validate_selected_reader', 'validate_submission_reader_selection',
         'submission_proposed_reader_directory', 'review_submission_authors',
         -- 0027 categories; 0030 reader directory; 0032 governed AI sources.
-        'seed_document_categories', 'eligible_ai_publications', 'maintain_knowledge_ai_release',
+        'seed_document_categories', 'eligible_ai_publications',
         'knowledge_reader_directory',
         -- 0035 publication changes; 0036 preparation retry.
         'apply_publication_change', 'retry_knowledge_publication',

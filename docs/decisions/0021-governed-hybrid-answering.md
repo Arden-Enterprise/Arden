@@ -7,6 +7,10 @@ request to implement combined permission hardening/Ask Arden with hybrid search,
 and explicit confirmation to default to the currently applicable version.
 Refines ADR 0012/0020; does not replace Core ownership or Target Readers authority.
 
+Temporal selection/lineage paragraphs below are superseded by
+[ADR0030](0030-published-date-ai-sources.md), accepted 23 November 2026.
+Hybrid ranking, exact evidence authorization and private history remain in force.
+
 Use staged retrieve → authorize exact evidence → generate → reauthorize all used
 sources → persist/return. Chroma is derived storage; AI never gets business DB
 credentials. Add lexical BM25 with deterministic RRF alongside dense retrieval,

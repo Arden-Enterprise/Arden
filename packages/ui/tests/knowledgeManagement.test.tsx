@@ -15,7 +15,7 @@ const publication: api.PublishedKnowledge = { id: "readable", draftId: "draft", 
   targetReaders: { mode: "ORGANIZATION", departmentId: null },
   responsibleDepartmentId: "hr", responsibleDepartmentName: "HR", audienceIds: [], contentHash: "hash",
   publishedAt: "2026-11-12T10:00:00Z", validFrom: "2026-11-12T10:00:00Z", validUntil: null,
-  management: { type: "Guide", version: "1.0", effectiveDate: "2027-01-01",
+  management: { type: "Guide", version: "1.0",
     expirationDate: null, changeNote: "", releaseKind: "NEW" } };
 describe("live Library management components", () => {
   it("keeps a selected active Collection visible when its last document disappears", () => {
@@ -120,12 +120,11 @@ describe("live Library management components", () => {
     expect(screen.queryByText(/Ask an Org Admin to add a Topic/)).toBeNull();
   });
   it("clears retired Topic input on new saves without modifying historical response metadata", () => {
-    const legacy = { ...publication.management!, topicId: "legacy-topic", topicName: "Legacy topic" };
-    expect(editableKnowledgeMetadata(legacy)).toEqual({ type: "Guide", version: "1.0",
-      effectiveDate: null, expirationDate: null, changeNote: "" });
+    const legacy = { ...publication.management!, topicId: "legacy-topic", topicName: "Legacy topic", effectiveDate: "2027-01-01" };
+    expect(editableKnowledgeMetadata(legacy)).toEqual({ type: "Guide", version: "1.0", expirationDate: null, changeNote: "" });
     expect(legacy.topicId).toBe("legacy-topic");
     expect(legacy.topicName).toBe("Legacy topic");
-    expect(legacy.effectiveDate).toBe("2027-01-01");
+    expect(editableKnowledgeMetadata(legacy)).not.toHaveProperty("effectiveDate");
   });
   it("says when a pasted email is not a member of the organization (decision 0021)", async () => {
     vi.spyOn(api, "findKnowledgeReaders").mockResolvedValue([]);
