@@ -35,11 +35,16 @@
   text-align: center;
 }
 .notification-layer { position: fixed; z-index: 200; inset: 0; }
+/*
+ * The layer lives in the page's top bar, so its z-index only counts inside the page. While it is open the page is
+ * lifted above the docked Ask Arden panel (z-index 8) and the sidebar, so the scrim and dialog cover both.
+ */
+.arden-app-shell .workspace-page:has(.notification-layer) { z-index: 9; }
 .notification-scrim { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgb(0 0 0 / 42%); cursor: default; }
 .notification-dialog {
   position: absolute;
   top: 70px;
-  right: 20px;
+  right: var(--notification-anchor-right, 20px);
   display: flex;
   width: min(420px, calc(100vw - 32px));
   max-height: min(650px, calc(100dvh - 88px));

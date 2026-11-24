@@ -1,5 +1,18 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { useNotifications } from "./NotificationProvider";
+
+const DIALOG_WIDTH = 420;
+const EDGE = 16;
+
+/**
+ * Right offset that lines the dialog's right edge up with the bell, kept inside the window. With Ask Arden docked
+ * the bell sits left of the panel, so the dialog opens beside the panel instead of under it.
+ */
+export function notificationAnchorRight(windowWidth: number, bellRight: number): number {
+  const width = Math.min(DIALOG_WIDTH, windowWidth - 2 * EDGE);
+  const widest = Math.max(EDGE, windowWidth - width - EDGE);
+  return Math.round(Math.min(Math.max(windowWidth - bellRight, EDGE), widest));
+}
 
 function formatNotificationTime(value: string): string {
   const date = new Date(value);
@@ -21,6 +34,19 @@ export function NotificationBell() {
     if (!open) return;
     const focusFrame = requestAnimationFrame(() => closeRef.current?.focus());
     return () => cancelAnimationFrame(focusFrame);
+  }, [open]);
+
+  // The dialog hangs below the bell, so a docked Ask Arden panel beside the page never sits on top of it.
+  const [anchorRight, setAnchorRight] = useState<number | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const bell = buttonRef.current?.getBoundingClientRect();
+      if (bell) setAnchorRight(notificationAnchorRight(window.innerWidth, bell.right));
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
   }, [open]);
 
   if (!notifications?.enabled) return null;
@@ -65,7 +91,8 @@ export function NotificationBell() {
         {notifications.unreadCount > 99 ? "99+" : notifications.unreadCount}
       </span>}
     </button>
-    {open && <div className="notification-layer">
+    {open && <div className="notification-layer"
+      style={anchorRight === null ? undefined : { "--notification-anchor-right": `${anchorRight}px` } as CSSProperties}>
       <button className="notification-scrim" type="button" aria-label="Close notifications" onClick={close} />
       <section ref={dialogRef} id="arden-notification-dialog" className="notification-dialog" role="dialog" aria-modal="true"
         aria-labelledby={headingId} onKeyDown={onDialogKeyDown}>

@@ -3,7 +3,7 @@ import { createElement, useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/shared/api-client";
-import { NotificationBell } from "../src/notifications/NotificationBell";
+import { NotificationBell, notificationAnchorRight } from "../src/notifications/NotificationBell";
 import { NotificationProvider, useNotifications } from "../src/notifications/NotificationProvider";
 
 const realtimeHarness = vi.hoisted(() => ({
@@ -80,6 +80,27 @@ describe("F21 in-app notification inbox", () => {
     expect(onOpenTarget).toHaveBeenCalledWith(fixture.target);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(list).toHaveBeenCalled();
+  });
+
+  it("hangs the dialog below the bell, inside the window", async () => {
+    // A docked Ask Arden panel (window 1440, bell ending at 1036) leaves the dialog left of the panel.
+    expect(notificationAnchorRight(1440, 1036)).toBe(404);
+    // Bell near the window edge: the usual 16px margin.
+    expect(notificationAnchorRight(1440, 1436)).toBe(16);
+    // Narrow window: the dialog never runs past the left edge (500 - 64 - 420 = 16px from it).
+    expect(notificationAnchorRight(500, 120)).toBe(64);
+    expect(notificationAnchorRight(1000, 300)).toBe(564);
+
+    vi.spyOn(api, "listNotifications").mockResolvedValue({ items: [], unreadCount: 0, nextCursor: null });
+    vi.spyOn(api, "getNotificationRealtimeCredential").mockRejectedValue(new Error("offline"));
+    renderInbox();
+    const bell = await screen.findByRole("button", { name: "Notifications" });
+    vi.spyOn(bell, "getBoundingClientRect").mockReturnValue({ right: window.innerWidth - 300 } as DOMRect);
+    fireEvent.click(bell);
+    const dialog = await screen.findByRole("dialog", { name: "Notifications" });
+    const layer = dialog.parentElement!;
+    await waitFor(() => expect(layer.style.getPropertyValue("--notification-anchor-right"))
+      .toBe(`${notificationAnchorRight(window.innerWidth, window.innerWidth - 300)}px`));
   });
 
   it("supports filter and keyboard dismissal with focus returned to the bell", async () => {
