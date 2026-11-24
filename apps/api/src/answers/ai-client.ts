@@ -8,6 +8,7 @@ const maxResponseBytes = 2 * 1024 * 1024;
 export interface AskArdenClient {
   retrieve(request: RetrievalRequest): Promise<RetrievalResponse>;
   generate(request: GenerationRequest): Promise<GenerationResponse>;
+  writing?(request: unknown): Promise<unknown>;
 }
 
 export class ArdenAiAnswerError extends Error {
@@ -43,6 +44,10 @@ export class HttpAskArdenClient implements AskArdenClient {
   async generate(request: GenerationRequest): Promise<GenerationResponse> {
     return parseGenerationResponse(await this.post("/v2/generations", request, maxResponseBytes,
       request.purpose === "READER_QUESTION" ? 125_000 : this.timeoutMs), request);
+  }
+
+  async writing(request: unknown): Promise<unknown> {
+    return this.post("/v1/writing-actions", request, 64 * 1024, 65_000);
   }
 
   private async post(path: string, payload: unknown, responseLimit = maxResponseBytes, timeoutMs = this.timeoutMs): Promise<unknown> {

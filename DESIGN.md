@@ -58,6 +58,8 @@ Tokens live in `packages/ui/src/styles/island-shell.css` under `.arden-app-shell
 
 The implemented UI combines live authentication, server-backed private notes, governed shared knowledge, Organization administration and permission-aware Ask Arden retrieval with session-memory previews for My Work and handover. Ask Arden conversations are session-local for the MVP, while answers and citations come from the server-authorized RAG path. Preview content stays labelled and never represents a server write. Durable chat history and the graph remain deferred. [Mainflow 1 preview](docs/engineering/mainflow-1-preview.md) records the earlier demonstration and its then-current boundaries.
 
+In editable Private notes and shared text drafts, selecting text opens a compact Writing assistant menu with Improve Writing, Reformat and Explain; right-click on selected text opens it too. The note toolbar supports whole-note actions. Improve/Reformat show a suggestion with an explicit Replace action; Explain stays in the assistant panel and does not change the editor. The UI disables rich-text replacements that cannot preserve the exact surrounding structure. The separate published-reader Explain selection task remains disabled under RA-06. See [F22](docs/product/writing-actions.md).
+
 ## Typography, icons and geometry
 
 Inter (body, controls, metadata) and Inter Tight (headings) are bundled through the pinned `@fontsource-variable/inter` and `@fontsource-variable/inter-tight` packages (OFL-1.1) and served locally by Vite; there is no runtime font-service request. They include Vietnamese diacritics. Page titles are 34px Inter Tight 600 with -0.03em tracking, section headings 15–18px, body 14px and metadata 12px. Use tabular figures for counts.

@@ -17,6 +17,7 @@ import { registerReaderSummaryRoutes } from "./reader-ai/routes.js";
 import { registerReaderQuestionRoutes } from "./reader-ai/question-routes.js";
 import { registerPrivateNoteQuestion } from "./private-notes/question.js";
 import { privateFeedbackTickets, registerPrivateFeedbackRoute } from "./private-notes/feedback.js";
+import { registerWritingRoutes } from "./writing/routes.js";
 import type { ReaderAiClient } from "./reader-ai/summary.js";
 import { canRead, readerModes, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
 import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
@@ -119,6 +120,8 @@ export function buildApp(dependencies: AppDependencies) {
     requestActor, uuidPattern, privateAiOrganizations, ratePrivateAnswer ? feedbackTickets.issue : undefined);
   registerPrivateFeedbackRoute(app, ratePrivateAnswer,
     requestActor, uuidPattern, privateAiOrganizations, feedbackTickets);
+  registerWritingRoutes(app, dependencies.repository, dependencies.askArden ?? null,
+    requestActor, uuidPattern, privateAiOrganizations);
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   registerNotificationRoutes(app, { repository: dependencies.repository,
     store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
