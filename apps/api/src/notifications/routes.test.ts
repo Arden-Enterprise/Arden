@@ -59,6 +59,29 @@ describe("notification routes", () => {
     return { app, list, store, repository };
   }
 
+  it("shows renewal notices only while the member is still responsible for the document (0032)", async () => {
+    const documentId = "c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2", goneId = "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3";
+    const { app, repository } = makeApp({ list: async () => ({ unreadCount: 3, nextCursor: null, items: [
+      { id: "21212121-2121-4212-8212-212121212121", type: "PUBLICATION_EXPIRING", resourceType: "DOCUMENT", resourceId: documentId,
+        publicationTitle: "Travel policy", expiresOn: "2026-12-01", createdAt: "2026-11-24T10:00:00.000Z", readAt: null },
+      { id: "31313131-3131-4313-8313-313131313131", type: "PUBLICATION_RENEWAL_ON_BEHALF", resourceType: "DOCUMENT",
+        resourceId: documentId, publicationTitle: "Travel policy", sharedByName: "Blake Reviewer", requestReason: "Still valid",
+        createdAt: "2026-11-24T09:00:00.000Z", readAt: null },
+      { id: "41414141-4141-4414-8414-414141414141", type: "PUBLICATION_EXPIRING", resourceType: "DOCUMENT", resourceId: goneId,
+        publicationTitle: "Secret plan", expiresOn: "2026-12-02", createdAt: "2026-11-24T08:00:00.000Z", readAt: null },
+    ] }) });
+    (repository as unknown as Record<string, unknown>).listPublicationRenewalState = vi.fn(async () => [{ documentId }]);
+    const response = await app.inject(`/api/v1/organizations/${organizationId}/notifications`);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items).toEqual([
+      expect.objectContaining({ message: "“Travel policy” expires on 2026-12-01. Renew it to keep it visible to readers.",
+        target: { view: "knowledge" } }),
+      expect.objectContaining({ message: "Blake Reviewer asked to renew “Travel policy” on your behalf: Still valid" }),
+      expect.objectContaining({ message: "This notification's item is no longer available." }),
+    ]);
+    expect(JSON.stringify(response.json())).not.toContain("Secret plan");
+  });
+
   it("returns generic messages and links only items currently visible to the actor", async () => {
     const { app, list, repository } = makeApp();
     const response = await app.inject(`/api/v1/organizations/${organizationId}/notifications?unreadOnly=true`);

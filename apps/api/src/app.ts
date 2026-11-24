@@ -2018,8 +2018,10 @@ export function buildApp(dependencies: AppDependencies) {
           reply.header("Cache-Control", "no-store");
           const expiredOn = publication.management?.expirationDate ?? null;
           const owner = publication.responsibleDepartmentName;
+          const shown = expiredOn ? new Date(`${expiredOn}T00:00:00Z`).toLocaleDateString("en-US",
+            { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : null;
           return reply.code(410).send({ error: { code: "DOCUMENT_EXPIRED", requestId: request.id,
-            message: `This document expired${expiredOn ? ` on ${expiredOn}` : ""}. Contact ${owner ?? "the owner department"}.`,
+            message: `This document expired${shown ? ` on ${shown}` : ""}. Contact ${owner ?? "the owner department"}.`,
             expiredOn, ownerDepartmentName: owner, title: publication.title } });
         }
         const mimeType = publication.sourceUri.endsWith(".pdf") ? "application/pdf" : "text/plain";

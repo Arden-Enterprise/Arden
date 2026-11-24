@@ -2606,7 +2606,7 @@ describe("API auth and private draft routes", () => {
     const opened = await app.inject({ method: "GET", url: `${root}/published/${publicationId}`, headers });
     expect(opened.statusCode).toBe(410);
     expect(opened.json().error).toMatchObject({ code: "DOCUMENT_EXPIRED", expiredOn: "2026-11-01", ownerDepartmentName: "Sales",
-      message: "This document expired on 2026-11-01. Contact Sales." });
+      message: "This document expired on Nov 1, 2026. Contact Sales." });
     expect(JSON.stringify(opened.json())).not.toContain("Expired body");
     const reported = await app.inject({ method: "POST", url: `${root}/published/${publicationId}/reports`, headers,
       payload: { message: "Out of date" } });
