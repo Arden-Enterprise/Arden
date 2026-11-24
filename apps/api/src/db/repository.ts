@@ -1,7 +1,7 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { metadataSubmissionErrors, validKnowledgeMetadata, type KnowledgeMetadata } from "@arden/domain";
 import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledge/catalog-store.js";
-import { PgConversationStore, type ConversationStore } from "../answers/conversation-store.js";
+import { PgConversationStore, type AnswerFeedback, type ConversationStore } from "../answers/conversation-store.js";
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
@@ -649,6 +649,7 @@ export interface ArdenDataRepository {
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
   readonly systemAdministration?: SystemAdministrationStore;
+  ratePrivateAnswer?(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean>;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
@@ -1456,8 +1457,8 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query(`SELECT set_config('arden.actor_id', $1, true),
         set_config('arden.organization_id', '', true), set_config('arden.org_admin', 'false', true),
         set_config('arden.instance_admin', 'false', true)`, [userId]);
-      const administrator = await client.query(`SELECT 1 FROM system_administrator
-        WHERE user_id = $1 AND status = 'ACTIVE'`, [userId]);
+      const administrator = await client.query(`SELECT 1 FROM system_administrator sa JOIN user_account ua USING (user_id)
+        WHERE sa.user_id = $1 AND sa.status = 'ACTIVE' AND ua.status = 'ACTIVE'`, [userId]);
       if (!administrator.rowCount) {
         await client.query("ROLLBACK");
         return null;
@@ -1472,6 +1473,19 @@ export class ArdenRepository implements ArdenDataRepository {
     } finally {
       client.release();
     }
+  }
+
+  async ratePrivateAnswer(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean> {
+    return this.withActorContext(userId, organizationId, async client => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return false;
+      await client.query("SELECT set_config('arden.private_feedback_key', $1, true)", [voteKey]);
+      await client.query(`
+        INSERT INTO private_ai_feedback(vote_key, feedback, rated_at)
+        VALUES ($1, $2::text, CASE WHEN $2 IS NULL THEN NULL ELSE now() END)
+        ON CONFLICT (vote_key) DO UPDATE SET feedback = EXCLUDED.feedback, rated_at = EXCLUDED.rated_at
+        WHERE private_ai_feedback.feedback IS DISTINCT FROM EXCLUDED.feedback`, [voteKey, feedback]);
+      return true;
+    });
   }
 
   async listDrafts(userId: string, organizationId: string, limit: number, cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null> {

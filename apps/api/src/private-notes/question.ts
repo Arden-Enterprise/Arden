@@ -46,7 +46,7 @@ function noteEvidence(note: PrivateDraft, body: string, query: string): Generati
 export function registerPrivateNoteQuestion(app: FastifyInstance, repository: Pick<ArdenDataRepository, "getDraft">,
   storage: Pick<PrivateContentStorage, "read">, ai: Pick<AskArdenClient, "generate"> | null,
   actor: (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>, uuidPattern: string,
-  enabledOrganizations: ReadonlySet<string>) {
+  enabledOrganizations: ReadonlySet<string>, issueFeedbackTicket?: (userId: string, organizationId: string) => string) {
   const admission = new ReaderAdmission(Date.now, 10_000);
   const uuid = { type: "string", pattern: uuidPattern };
   app.post<{ Params: { organizationId: string; draftId: string };
@@ -71,6 +71,8 @@ export function registerPrivateNoteQuestion(app: FastifyInstance, repository: Pi
         reply.code(status).send({ error: { code, message, requestId: request.id } });
       const unavailable = () => fail(404, "RESOURCE_NOT_AVAILABLE", "This note is unavailable.");
       const changed = () => fail(409, "NOTE_CHANGED", "This note changed. Open the current version and try again.");
+      const answerWithFeedback = (answer: StoredAnswer) => issueFeedbackTicket
+        ? { ...answer, feedbackToken: issueFeedbackTicket(context.userId, organizationId) } : answer;
       try {
         const note = await findNote();
         if (!note) return unavailable();
@@ -92,21 +94,21 @@ export function registerPrivateNoteQuestion(app: FastifyInstance, repository: Pi
           };
           const before = await recheck();
           if (before !== "current") return before === "missing" ? unavailable() : changed();
-          if (!evidence.length) return insufficient;
+          if (!evidence.length) return answerWithFeedback(insufficient);
           lease.dispatch();
           const input: GenerationRequest = { contractVersion: 2, purpose: "READER_QUESTION", organizationId,
             requestId, query: query.trim(), history: [], evidence };
           const result = parseGenerationResponse(await ai.generate(structuredClone(input)), input);
           const after = await recheck();
           if (after !== "current") return after === "missing" ? unavailable() : changed();
-          if (result.status === "INSUFFICIENT_EVIDENCE") return insufficient;
-          return { status: result.status, answer: result.answer, citations: result.citations.map(({ chunkId, quote }) => {
+          if (result.status === "INSUFFICIENT_EVIDENCE") return answerWithFeedback(insufficient);
+          return answerWithFeedback({ status: result.status, answer: result.answer, citations: result.citations.map(({ chunkId, quote }) => {
             const passage = evidence.find(item => item.chunkId === chunkId)!;
             const startOffset = passage.startOffset + Array.from(passage.content.slice(0, passage.content.indexOf(quote))).length;
             return { documentId: draftId, versionId: note.versionId, title: note.title, version: `Version ${expectedVersion}`,
               scope: "Private note", classification: "INTERNAL", documentCode: null, excerpt: quote,
               startOffset, endOffset: startOffset + Array.from(quote).length };
-          }) } satisfies StoredAnswer;
+          }) });
         } finally { lease.release(); }
       } catch (error) {
         if (error instanceof ReaderSummaryError && error.code === "BUSY") {

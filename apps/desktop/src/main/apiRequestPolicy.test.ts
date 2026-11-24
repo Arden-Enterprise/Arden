@@ -88,6 +88,30 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${list}/not-a-uuid`, method: "GET" }), false);
     assert.equal(validateDesktopApiRequest({ path: `${list}/${sourcePrivateVersionId}/turns`, method: "GET" }), false);
   });
+  it("allows an exact Company turn feedback update", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/conversations/${sourcePrivateVersionId}/turns/${idempotencyKey}/feedback`;
+    for (const feedback of ["GOOD", "BAD", null]) {
+      assert.equal(validateDesktopApiRequest({ path, method: "PUT", body: JSON.stringify({ feedback }) }), true);
+    }
+    const request = { path, method: "PUT", body: '{"feedback":"GOOD"}' };
+    for (const change of [{ method: "POST" }, { path: `${path}?all=1` }, { body: '{"feedback":true}' },
+      { body: '{"feedback":"BAD","answer":"sensitive text"}' }, { ifMatch: '"1"' }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+  });
+  it("limits private feedback and analytics to their exact IPC shapes", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/private-feedback`;
+    const token = `${idempotencyKey}.1795500000000.${"A".repeat(43)}`;
+    const request = { path, method: "PUT", body: JSON.stringify({ token, feedback: "GOOD" }) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    for (const change of [{ path: `${path}?all=1` }, { method: "POST" },
+      { body: JSON.stringify({ token, feedback: "BAD", documentId: sourcePrivateVersionId }) }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+    const analytics = { path: "/api/v1/system/analytics/private-feedback", method: "GET" };
+    assert.equal(validateDesktopApiRequest(analytics), true);
+    assert.equal(validateDesktopApiRequest({ ...analytics, path: `${analytics.path}?all=1` }), false);
+  });
   it("permits only the scoped bodyless submission withdrawal action", () => {
     const path = `/api/v1/organizations/${organizationId}/knowledge/submissions/${sourcePrivateVersionId}/withdraw`;
     assert.equal(validateDesktopApiRequest({ path, method: "POST" }), true);

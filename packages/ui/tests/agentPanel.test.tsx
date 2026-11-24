@@ -29,7 +29,7 @@ describe("agent panel", () => {
     const panel = screen.getByRole("complementary", { name: "Ask Arden" });
     ask(panel, "Where does paper go?");
     expect((await within(panel).findByText("Paper")).tagName).toBe("STRONG");
-    fireEvent.click(within(panel).getByRole("button", { name: /^Source:/ }));
+    fireEvent.click(within(panel).getByRole("button", { name: "View sources" }));
     expect(onOpenCitation).not.toHaveBeenCalled();
     const sources = within(panel).getByRole("complementary", { name: "Sources" });
     fireEvent.click(within(sources).getByRole("button", { name: "Open Synthetic Waste Guide at this passage" }));
@@ -80,9 +80,11 @@ describe("agent panel", () => {
 
   it("asks only the selected saved private note and shows its cited passage", async () => {
     const company = vi.spyOn(api, "askArden");
+    const rate = vi.spyOn(api, "rateAiAnswer");
+    const privateRate = vi.spyOn(privateApi, "ratePrivateAnswer").mockResolvedValue({ feedback: "GOOD" });
     const source = { kind: "private-note" as const, id: "note-a", version: 2, title: "Handover notes" };
     const send = vi.spyOn(privateApi, "askPrivateNote").mockResolvedValue({
-      status: "ANSWERED", answer: "Return it on Friday.", citations: [{ documentId: source.id, versionId: "version-a",
+      status: "ANSWERED", answer: "Return it on Friday.", feedbackToken: "fake-opaque-token", citations: [{ documentId: source.id, versionId: "version-a",
         title: source.title, version: "Version 2", scope: "Private note", classification: "INTERNAL",
         excerpt: "Return the badge on Friday." }],
     });
@@ -94,7 +96,11 @@ describe("agent panel", () => {
     expect(await screen.findByText("Return it on Friday.")).toBeTruthy();
     expect(send).toHaveBeenCalledWith("web", "org", source.id, 2, "When do I return the badge?", expect.any(String));
     expect(company).not.toHaveBeenCalled();
-    fireEvent.click(within(panel).getByRole("button", { name: /^Source:/ }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Good response" }));
+    expect(await within(panel).findByText("Feedback saved.")).toBeTruthy();
+    expect(privateRate).toHaveBeenCalledWith("web", "org", "fake-opaque-token", "GOOD");
+    expect(rate).not.toHaveBeenCalled();
+    fireEvent.click(within(panel).getByRole("button", { name: "View sources" }));
     expect(screen.getByText("Return the badge on Friday.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /at this passage/ })).toBeNull();
   });

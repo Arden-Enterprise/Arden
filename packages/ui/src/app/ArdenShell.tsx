@@ -8,6 +8,7 @@ import { SignInPage } from "../sign-in/SignInPage";
 import { clearRecoveryTokens, readRecoveryTokens, storeRecoveryTokens } from "../sign-in/recovery-session";
 import { SetPasswordPage } from "../sign-in/SetPasswordPage";
 import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
+import { SystemFeedbackPage } from "../sign-in/SystemFeedbackPage";
 import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
 import { AskArdenPage } from "../ask-arden/AskArdenPage";
 import type { KnowledgeCitationReference, KnowledgeReaderTarget } from "../knowledge/knowledgeCitation";
@@ -65,7 +66,7 @@ const initialCollections: PrivateCollection[] = [
   { id: "sample-discovery", title: "Discovery", parentId: null, favoritedAt: null },
 ];
 
-type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
+type EntryView = "sign-in" | "password-setup" | "workspace-select" | "system-feedback" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
 
 /**
  * Extracts a 43-character invitation token from the URL path `/invite/:token`.
@@ -478,12 +479,16 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     );
   }
 
+  if (entryView === "system-feedback" && serverSession?.systemAdmin) {
+    return <SystemFeedbackPage platform={platform} onBack={() => setEntryView("workspace-select")} />;
+  }
   if (entryView === "workspace-select") {
     if (serverSession) {
       return <WorkspaceSelectPage
         organizationName="organization"
         memberships={serverSession.memberships}
         testMode={serverSession.testMode}
+        onOpenSystemFeedback={serverSession.systemAdmin ? () => setEntryView("system-feedback") : undefined}
         onCreateOrganization={async (name, departmentName) => {
           await apiCreateOrganization(platform, name, departmentName);
           await acceptServerSession(await currentSession(platform));

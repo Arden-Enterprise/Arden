@@ -90,11 +90,11 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
             </div>
           </div>}
 
-        </section> : <ChatMessages chat={chat} />}
+        </section> : <ChatMessages chat={chat} sourcesId={sourcesId} />}
       </div>
 
       {!chat.empty && <ChatComposer chat={chat} placement="dock" composerRef={composerRef} />}
-      {chat.sourcePanel && <CitationSourcesPanel id={sourcesId} citations={chat.sourcePanel.citations}
+      {chat.sourcePanel && <CitationSourcesPanel key={chat.sourcePanel.messageId} id={sourcesId} citations={chat.sourcePanel.citations}
         selected={chat.sourcePanel.selected} onOpenDocument={onOpenCitation} onClose={chat.closeSources} />}
     </div>
     {resetting && <NewChatDialog hasDraft={Boolean(chat.draft.trim())} onCancel={() => setResetting(false)} onConfirm={reset} />}

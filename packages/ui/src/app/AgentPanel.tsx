@@ -80,11 +80,11 @@ function AgentPanelContent({ open, platform, organizationId, source, onClose, on
             <Icon name={index === 0 ? "review" : index === 1 ? "search" : "people"} size={14} /><span>{prompt}</span>
           </button>)}
         </div>}
-      </div> : <ChatMessages chat={chat} />}
+      </div> : <ChatMessages chat={chat} sourcesId={sourcesId} />}
     </div>
     {source.kind !== "private-empty" && <ChatComposer chat={chat} placement="panel" composerRef={composerRef} />}
-    {/* In the narrow panel the Sources view covers the chat; Close or Escape returns to the chip. */}
-    {chat.sourcePanel && <CitationSourcesPanel id={sourcesId} citations={chat.sourcePanel.citations}
+    {/* In the narrow panel, Close or Escape returns focus to the source control that opened the overlay. */}
+    {chat.sourcePanel && <CitationSourcesPanel key={chat.sourcePanel.messageId} id={sourcesId} citations={chat.sourcePanel.citations}
       selected={chat.sourcePanel.selected} hideOpenDocument={chat.privateNote}
       onOpenDocument={chat.privateNote ? undefined : onOpenCitation} onClose={chat.closeSources} />}
     {resetting && <NewChatDialog hasDraft={Boolean(chat.draft.trim())} onCancel={() => setResetting(false)} onConfirm={startNewChat} />}

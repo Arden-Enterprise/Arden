@@ -2,20 +2,22 @@ import type { PoolClient } from "pg";
 import { GovernedAnswerError, parsePublicCitations, type EvidenceReference, type StoredAnswer } from "./governed-contracts.js";
 
 export type ConversationSummary = { id: string; title: string; revision: number; updatedAt: string };
+export type AnswerFeedback = "GOOD" | "BAD" | null;
 export type ConversationTurn = StoredAnswer & { id: string; requestId: string; question: string; sequence: number;
-  evidence: EvidenceReference[] };
+  evidence: EvidenceReference[]; feedback?: AnswerFeedback };
 export type Conversation = ConversationSummary & { turns: ConversationTurn[] };
 export interface ConversationStore {
   list(user: string, organization: string): Promise<ConversationSummary[]>;
   load(user: string, organization: string, id: string): Promise<Conversation | null>;
   ensure(user: string, organization: string, id: string, title: string): Promise<void>;
+  setFeedback(user: string, organization: string, conversationId: string, turnId: string, feedback: AnswerFeedback): Promise<boolean>;
   append(user: string, organization: string, id: string, expectedRevision: number,
     turn: Omit<ConversationTurn, "sequence">): Promise<ConversationTurn>;
 }
 type ActorTransaction = <T>(user: string, organization: string, work: (client: PoolClient) => Promise<T>) => Promise<T>;
 type ConversationRow = { conversation_id: string; title: string; revision: number; updated_at: Date };
 type TurnRow = { turn_id: string; request_id: string; sequence: number; question: string; answer: string;
-  status: StoredAnswer["status"]; citations: StoredAnswer["citations"] };
+  status: StoredAnswer["status"]; citations: StoredAnswer["citations"]; feedback: AnswerFeedback };
 type EvidenceRow = { turn_id: string; generation_id: string; published_version_id: string;
   snapshot_version_id: string; snapshot_content_hash: string; chunk_id: string };
 const summary = (row: ConversationRow): ConversationSummary => ({ id: row.conversation_id, title: row.title,
@@ -36,18 +38,27 @@ export class PgConversationStore implements ConversationStore {
         FROM ai_conversation WHERE organization_id = $1 AND conversation_id = $2`, [organization, id])).rows[0];
       if (!conversation) return null;
       const rows = (await client.query<TurnRow>(`SELECT turn_id, request_id, sequence, question, answer, status,
-          citations FROM ai_conversation_turn WHERE organization_id = $1 AND conversation_id = $2
+          citations, feedback FROM ai_conversation_turn WHERE organization_id = $1 AND conversation_id = $2
           ORDER BY sequence DESC LIMIT 50`, [organization, id])).rows.reverse();
       const references = (await client.query<EvidenceRow>(`SELECT e.* FROM ai_turn_evidence e
         WHERE organization_id = $1 AND turn_id = ANY($2::uuid[]) ORDER BY generation_id, chunk_id`,
       [organization, rows.map((row) => row.turn_id)])).rows;
       return { ...summary(conversation), turns: rows.map((row) => ({ id: row.turn_id, requestId: row.request_id,
         sequence: row.sequence, question: row.question, answer: row.answer, status: row.status,
-        citations: parsePublicCitations(row.citations),
+        citations: parsePublicCitations(row.citations), feedback: row.feedback,
         evidence: references.filter((reference) => reference.turn_id === row.turn_id).map((reference) => ({
           generationId: reference.generation_id, publishedVersionId: reference.published_version_id,
           snapshotVersionId: reference.snapshot_version_id, snapshotContentHash: reference.snapshot_content_hash,
           chunkId: reference.chunk_id })) })) };
+    });
+  }
+
+  setFeedback(user: string, organization: string, conversationId: string, turnId: string, feedback: AnswerFeedback): Promise<boolean> {
+    return this.transaction(user, organization, async (client) => {
+      const result = await client.query(`UPDATE ai_conversation_turn SET feedback = $4
+        WHERE organization_id = $1 AND conversation_id = $2 AND turn_id = $3`,
+      [organization, conversationId, turnId, feedback]);
+      return result.rowCount === 1;
     });
   }
 

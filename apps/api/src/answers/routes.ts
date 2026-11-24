@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ArdenDataRepository } from "../db/repository.js";
 import type { AskArdenClient } from "./ai-client.js";
+import type { AnswerFeedback } from "./conversation-store.js";
 import { GovernedAnswering } from "./governed-answering.js";
 import { GovernedAnswerError } from "./governed-contracts.js";
 
@@ -68,4 +69,28 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
       return found;
     } catch (error) { return fail(reply, error, request); }
   });
+  app.put<{ Params: Params & { turnId: string }; Body: { feedback: AnswerFeedback } }>(
+    `${base}/conversations/:conversationId/turns/:turnId/feedback`, {
+      schema: {
+        params: { ...params, required: ["organizationId", "conversationId", "turnId"],
+          properties: { ...params.properties, conversationId: { type: "string", pattern: uuidPattern },
+            turnId: { type: "string", pattern: uuidPattern } } },
+        querystring: { type: "object", additionalProperties: false, properties: {} },
+        body: { type: "object", additionalProperties: false, required: ["feedback"],
+          properties: { feedback: { enum: ["GOOD", "BAD", null] } } },
+      },
+    }, async (request, reply) => {
+      const context = await actor(request, reply);
+      if (!context) return;
+      reply.header("Cache-Control", "no-store");
+      const { organizationId, conversationId, turnId } = request.params;
+      const { feedback } = request.body;
+      try {
+        if (!repository.conversations) throw new Error("Conversation persistence unavailable");
+        if (!await repository.conversations.setFeedback(context.userId, organizationId, conversationId, turnId, feedback)) {
+          throw new GovernedAnswerError("NOT_FOUND");
+        }
+        return { feedback };
+      } catch (error) { return fail(reply, error, request); }
+    });
 }

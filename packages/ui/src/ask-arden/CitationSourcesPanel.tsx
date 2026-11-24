@@ -13,7 +13,7 @@ const passageKey = (citation: AnswerCitation) =>
 export function CitationSourcesPanel({ id, citations, selected, hideOpenDocument, onOpenDocument, onClose }: {
   id: string;
   citations: readonly AnswerCitation[];
-  selected: AnswerCitation;
+  selected: AnswerCitation | null;
   hideOpenDocument?: boolean;
   onOpenDocument?: (citation: AnswerCitation) => void;
   onClose: () => void;
@@ -33,10 +33,10 @@ export function CitationSourcesPanel({ id, citations, selected, hideOpenDocument
     }
     return [...byVersion.entries()];
   }, [citations]);
-  const selectedKey = passageKey(selected);
+  const selectedKey = selected ? passageKey(selected) : null;
 
   useEffect(() => {
-    const target = root.current?.querySelector<HTMLElement>(".ask-source-passage.is-selected");
+    const target = root.current?.querySelector<HTMLElement>(selectedKey === null ? ".ask-sources-header h2" : ".ask-source-passage.is-selected");
     target?.scrollIntoView?.({ block: "nearest" });
     target?.focus({ preventScroll: true });
   }, [selectedKey]);
@@ -44,7 +44,7 @@ export function CitationSourcesPanel({ id, citations, selected, hideOpenDocument
   return <aside ref={root} id={id} className="ask-sources-panel" aria-labelledby={`${id}-title`}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <header className="ask-sources-header">
-      <h2 id={`${id}-title`}>Sources</h2>
+      <h2 id={`${id}-title`} tabIndex={-1}>Sources</h2>
       <span className="ask-sources-count">{documents.length} {documents.length === 1 ? "document" : "documents"}</span>
       <button type="button" className="island-icon-button" aria-label="Close sources" title="Close sources" onClick={onClose}>
         <Icon name="close" size={13} />

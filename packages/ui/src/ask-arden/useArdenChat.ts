@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, askArden, listAiConversations, loadAiConversation, type AiConversation,
+import { ApiError, askArden, listAiConversations, loadAiConversation, rateAiAnswer, type AiConversation, type AnswerFeedback,
   type AiConversationSummary } from "../shared/api-client";
 import type { Platform } from "../shared/types";
-import { askPrivateNote } from "../shared/private-workspace-api";
+import { askPrivateNote, ratePrivateAnswer } from "../shared/private-workspace-api";
 import { answerMessage, type AnswerCitation, type AskArdenMessage } from "./askArdenModel";
 
 export type ArdenChat = ReturnType<typeof useArdenChat>;
@@ -25,7 +25,7 @@ export function useArdenChat({ platform, organizationId, source }: {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
-  const [sources, setSources] = useState<{ messageId: string; citation: AnswerCitation } | null>(null);
+  const [sources, setSources] = useState<{ messageId: string; citation: AnswerCitation | null } | null>(null);
   const sourcesOpener = useRef<HTMLElement | null>(null);
   const conversation = useRef<{ id: string; revision: number }>({ id: crypto.randomUUID(), revision: 0 });
   const retryRequest = useRef<{ query: string; id: string; conversationId: string; revision: number } | null>(null);
@@ -48,6 +48,7 @@ export function useArdenChat({ platform, organizationId, source }: {
     setMessages(saved.turns.flatMap((turn) => [
       { id: `${turn.id}-question`, role: "member" as const, body: turn.question },
       { id: turn.id, role: "assistant" as const, body: turn.answer, citations: turn.citations,
+        savedTurn: { conversationId: saved.id, turnId: turn.id }, feedback: turn.feedback,
         insufficientEvidence: turn.status === "INSUFFICIENT_EVIDENCE", unavailable: turn.status === "UNAVAILABLE" },
     ]));
   };
@@ -93,8 +94,8 @@ export function useArdenChat({ platform, organizationId, source }: {
   const closeHistory = () => { requestGeneration.current++; setHistoryOpen(false); setHistoryLoading(false); setOpeningId(null); };
 
   /** Shows an answer's sources beside the chat; Open in document stays the governed reader path. */
-  const showSources = (messageId: string, citation: AnswerCitation) => {
-    sourcesOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const showSources = (messageId: string, opener: HTMLElement, citation: AnswerCitation | null = null) => {
+    sourcesOpener.current = opener;
     setSources({ messageId, citation });
   };
   const closeSources = () => {
@@ -105,7 +106,19 @@ export function useArdenChat({ platform, organizationId, source }: {
   };
   const sourceMessage = sources ? messages.find((message) => message.id === sources.messageId) : undefined;
   const sourcePanel = sources && sourceMessage?.citations?.length
-    ? { citations: sourceMessage.citations, selected: sources.citation } : null;
+    ? { messageId: sources.messageId, citations: sourceMessage.citations, selected: sources.citation } : null;
+
+  const rateAnswer = async (message: AskArdenMessage, feedback: AnswerFeedback) => {
+    if (!organizationId) throw new Error("This answer cannot be rated.");
+    const { savedTurn, privateFeedbackToken } = message;
+    const result = source.kind === "private-note" && privateFeedbackToken
+      ? await ratePrivateAnswer(platform, organizationId, privateFeedbackToken, feedback)
+      : source.kind === "company" && savedTurn
+        ? await rateAiAnswer(platform, organizationId, savedTurn.conversationId, savedTurn.turnId, feedback)
+        : null;
+    if (!result) throw new Error("This answer cannot be rated.");
+    setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, feedback: result.feedback } : entry));
+  };
 
   const submit = async () => {
     const query = draft.trim();
@@ -152,7 +165,8 @@ export function useArdenChat({ platform, organizationId, source }: {
       if (!answer.conversationId || answer.revision === undefined) throw new Error("Conversation persistence is unavailable.");
       conversation.current = { id: answer.conversationId, revision: answer.revision };
       retryRequest.current = null;
-      setMessages((current) => [...current, answerMessage(answer, crypto.randomUUID())]);
+      const answerId = answer.turnId ?? crypto.randomUUID();
+      setMessages((current) => [...current, answerMessage(answer, answerId)]);
     } catch (cause) {
       if (generation === requestGeneration.current) {
         setError(cause instanceof ApiError ? cause.message : "Ask Arden could not prepare an answer.");
@@ -195,7 +209,7 @@ export function useArdenChat({ platform, organizationId, source }: {
     currentId: messages.length ? conversation.current.id : null,
     threadTitle: messages.find((message) => message.role === "member")?.body ?? "New conversation",
     canAsk, privateNote: source.kind !== "company",
-    submit, reset, stopWaiting, openHistory, closeHistory, openConversation, loadHistory, showSources, closeSources,
+    submit, reset, stopWaiting, openHistory, closeHistory, openConversation, loadHistory, showSources, closeSources, rateAnswer,
     toggleHistory: () => { if (historyOpen) closeHistory(); else openHistory(); },
     reloadConversation: () => openConversation(conversation.current.id),
   };

@@ -390,6 +390,18 @@
       "filename": "0065_private_note_live_version.sql",
       "sha256": "497031f3604039a8fe37cc9c6cea3ee2bd914f8ebbc385c9e6959a79291540cd",
       "rollout": "operator"
+    },
+    {
+      "id": "0066",
+      "filename": "0066_ai_turn_feedback.sql",
+      "sha256": "8998207456d95043ca162d42b403d9a27342ceddd12c13f26cab7d24413cd95f",
+      "rollout": "operator"
+    },
+    {
+      "id": "0067",
+      "filename": "0067_private_ai_feedback.sql",
+      "sha256": "d16f4464601be1488459aee48f418bfefcbefef3456ea352030763535ffb1c41",
+      "rollout": "operator"
     }
   ]
 }

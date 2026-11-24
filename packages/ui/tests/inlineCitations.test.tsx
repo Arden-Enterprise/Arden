@@ -1,17 +1,17 @@
 // @vitest-environment jsdom
 import { createElement } from "react";
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { layoutCitedAnswer, type AnswerBlock, type AnswerCitation } from "../src/ask-arden/askArdenModel";
+import { copyableAnswer, layoutCitedAnswer, type AnswerBlock, type AnswerCitation } from "../src/ask-arden/askArdenModel";
 import { CitedAnswer } from "../src/ask-arden/CitedAnswer";
 import { KnowledgeDocumentDetail } from "../src/knowledge/KnowledgeDocumentDetail";
 import type { KnowledgeNavigationTarget } from "../src/knowledge/knowledgeCitation";
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(cleanup);
 
 const policy = { documentId: "doc-1", versionId: "ver-1", title: "Synthetic Lifecycle Policy", version: "1.0", scope: "Company-wide",
   classification: "INTERNAL" as const };
-const access: AnswerCitation = { ...policy, blockId: "b1", page: 1, excerpt: "Managers must request system access five working days before the start date." };
+const access: AnswerCitation = { ...policy, blockId: "b1", page: 1, excerpt: "Managers must request system access five working days before the start date [1]." };
 const devices: AnswerCitation = { ...policy, blockId: "b2", page: 1, excerpt: "All company devices must be returned to IT on the last working day." };
 const lessons: AnswerCitation = { ...policy, documentId: "doc-2", versionId: "ver-2", title: "Synthetic Handover Lessons",
   blockId: "c1", excerpt: "Unrelated archive retention text." };
@@ -24,39 +24,21 @@ function sentencesOf(blocks: AnswerBlock[]) {
 }
 
 describe("inline citation layout", () => {
-  it("places each passage after the sentence it supports and unmatched passages at the end", () => {
+  it("keeps unmarked passages in the Sources panel without assigning them to sentences", () => {
     const paragraph = sentencesOf(layoutCitedAnswer(answer, [devices, access, lessons]));
     expect(paragraph).toHaveLength(2);
-    expect(paragraph[0]!.sources.map((source) => source.citations)).toEqual([[access]]);
-    expect(paragraph[1]!.sources.map((source) => source.label)).toEqual(["Synthetic Lifecycle Policy", "Synthetic Handover Lessons"]);
-    expect(paragraph[1]!.text.endsWith("working day.")).toBe(true);
+    expect(paragraph.map(segment => segment.sourceNumbers)).toEqual([[], []]);
   });
 
-  it("names a source by title even when an older server still sends a Document Code (decision 0021)", () => {
-    const legacy = { ...access, documentCode: "ARD-7098B0251CA744F0" } as AnswerCitation;
-    const [segment] = sentencesOf(layoutCitedAnswer("Request system access five working days before the start date.", [legacy]));
-    expect(segment!.sources[0]!.label).toBe("Synthetic Lifecycle Policy");
+  it("honors explicit source order and removes only valid markers from answer text", () => {
+    const paragraph = sentencesOf(layoutCitedAnswer("Access comes first [2]. Devices go back on the last day [1] [1]. Other [8].", [devices, access]));
+    expect(paragraph.map(segment => segment.text)).toEqual(["Access comes first.", "Devices go back on the last day.", "Other [8]."]);
+    expect(paragraph.map(segment => segment.sourceNumbers)).toEqual([[2], [1], []]);
   });
 
-  it("uses numbered markers when the answer provides them and removes the marker text", () => {
-    const paragraph = sentencesOf(layoutCitedAnswer("Access comes first [2]. Devices go back on the last day [1].", [devices, access]));
-    expect(paragraph.map((segment) => segment.text)).toEqual(["Access comes first.", "Devices go back on the last day."]);
-    expect(paragraph[0]!.sources[0]!.citations).toEqual([access]);
-    expect(paragraph[1]!.sources[0]!.citations).toEqual([devices]);
-  });
-
-  it("collapses repeated passages and groups one document per point", () => {
-    const [segment] = sentencesOf(layoutCitedAnswer("Return company devices to IT on the last working day.", [devices, { ...devices }, devices]));
-    expect(segment!.sources).toHaveLength(1);
-    expect(segment!.sources[0]!.citations).toHaveLength(1);
-  });
-
-  it("keeps paragraphs and leaves uncited sentences plain", () => {
-    const layout = layoutCitedAnswer("Intro without support.\n\nReturn company devices to IT on the last working day.", [devices]);
-    expect(layout.map((block) => block.kind)).toEqual(["paragraph", "paragraph"]);
-    const [intro, devicesSentence] = sentencesOf(layout);
-    expect(intro!.sources).toEqual([]);
-    expect(devicesSentence!.sources).toHaveLength(1);
+  it("copies plain answer text while keeping paragraphs and numbered lists", () => {
+    expect(copyableAnswer("## Note\n\n2. Request **system access** [1].\n3. Keep the `ticket`.", [access]))
+      .toBe("Note\n\n2. Request system access.\n3. Keep the ticket.");
   });
 });
 
@@ -83,42 +65,23 @@ describe("answer formatting", () => {
   });
 
   it("renders strong text, list items and citation chips together", () => {
-    render(createElement(CitedAnswer, { body: "- **Access:** request system access five working days before the start date.",
+    render(createElement(CitedAnswer, { body: "- **Access:** request system access five working days before the start date [1].",
       citations: [access], onOpen: vi.fn() }));
     const item = screen.getByRole("listitem");
     expect(within(item).getByText("Access:").tagName).toBe("STRONG");
     expect(item.textContent).not.toContain("**");
-    expect(within(item).getByRole("button", { name: /^Source:/ }).textContent).toBe("Synthetic Lifecycle Policy");
+    expect(within(item).getByRole("button", { name: "Source 1: Synthetic Lifecycle Policy" }).textContent).toBe("1");
   });
 });
 
-describe("inline citation chips", () => {
-  it("shows a compact chip, reveals the passages on hover and opens the chosen passage", () => {
-    vi.useFakeTimers();
+describe("numbered source buttons", () => {
+  it("opens the exact cited passage directly from a number", () => {
     const onOpen = vi.fn();
-    render(createElement(CitedAnswer, { body: answer, citations: [access, devices, lessons], onOpen }));
-    const chips = screen.getAllByRole("button", { name: /^Source:/ });
-    expect(chips.map((chip) => chip.textContent)).toEqual(["Synthetic Lifecycle Policy", "Synthetic Lifecycle Policy+1"]);
-    expect(screen.queryByRole("group", { name: "Cited passages" })).toBeNull();
-
-    fireEvent.mouseEnter(chips[1]!);
-    act(() => { vi.advanceTimersByTime(200); });
-    const card = screen.getByRole("group", { name: "Cited passages" });
-    expect(within(card).getByText(lessons.excerpt)).toBeTruthy();
-    fireEvent.click(within(card).getAllByRole("button")[1]!);
-    expect(onOpen).toHaveBeenCalledWith(lessons);
-    expect(screen.queryByRole("group", { name: "Cited passages" })).toBeNull();
-
-    fireEvent.click(chips[0]!);
-    expect(onOpen).toHaveBeenLastCalledWith(access);
-  });
-
-  it("opens the passages from the keyboard and closes them with Escape", () => {
-    render(createElement(CitedAnswer, { body: answer, citations: [access], onOpen: vi.fn() }));
-    const chip = screen.getByRole("button", { name: /^Source:/ });
-    fireEvent.focus(chip);
-    expect(screen.getByRole("group", { name: "Cited passages" })).toBeTruthy();
-    fireEvent.keyDown(chip, { key: "Escape" });
+    render(createElement(CitedAnswer, { body: "Request access first [2].", citations: [devices, access], onOpen }));
+    const button = screen.getByRole("button", { name: "Source 2: Synthetic Lifecycle Policy" });
+    expect(button.textContent).toBe("2");
+    fireEvent.click(button);
+    expect(onOpen).toHaveBeenCalledWith(access, button);
     expect(screen.queryByRole("group", { name: "Cited passages" })).toBeNull();
   });
 });
