@@ -54,6 +54,8 @@ const maintenanceImport = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/m
 const closedReportQuery = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reports$`);
 const aiAnswerPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/answers$`);
 const aiConversationPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations(?:/${uuid})?$`);
+const aiFeedbackPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations/${uuid}/turns/${uuid}/feedback$`);
+const privateFeedbackPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/private-feedback$`);
 const reviewerGrantDeactivate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants/${uuid}/deactivate$`);
 const administrationPath = new RegExp(`^/api/v1/organizations/${uuid}/administration$`);
 const adminCreatePath = new RegExp(`^/api/v1/organizations/${uuid}/(departments|invitations)$`);
@@ -66,6 +68,7 @@ const audienceGroupMemberPath = new RegExp(`^/api/v1/organizations/${uuid}/audie
 const audienceGroupRemovePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/members/${uuid}/remove$`);
 const audienceGroupDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/deactivate$`);
 const systemAdministratorCollection = /^\/api\/v1\/system\/administrators$/;
+const systemPrivateFeedbackAnalytics = "/api/v1/system/analytics/private-feedback";
 const systemAdministratorRevoke = new RegExp(`^/api/v1/system/administrators/${uuid}/revoke$`);
 const invitationPreview = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}$/;
 const notificationCollection = new RegExp(`^/api/v1/organizations/${uuid}/notifications$`);
@@ -130,6 +133,18 @@ function questionBody(body: string | undefined, versioned = false): boolean {
   } catch { return false; }
 }
 
+function feedbackBody(body: string | undefined, privateAnswer: boolean): boolean {
+  if (!body || body.length > (privateAnswer ? 200 : 60)) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      && Object.keys(value).length === (privateAnswer ? 2 : 1) && "feedback" in value
+      && (!privateAnswer || ("token" in value && typeof value.token === "string"
+        && /^[0-9a-f-]{36}\.[0-9]{13}\.[A-Za-z0-9_-]{43}$/.test(value.token)))
+      && (value.feedback === "GOOD" || value.feedback === "BAD" || value.feedback === null);
+  } catch { return false; }
+}
+
 function isAllowedRequest(request: DesktopApiRequest): boolean {
   let url: URL;
   try { url = new URL(request.path, "https://arden.invalid"); }
@@ -188,6 +203,9 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const aiConversationGet = aiConversationPath.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const privateAnswerFeedback = privateFeedbackPath.test(url.pathname);
+  const aiFeedback = (aiFeedbackPath.test(url.pathname) || privateAnswerFeedback) && request.method === "PUT" && !url.search
+    && !request.ifMatch && !request.idempotencyKey && feedbackBody(request.body, privateAnswerFeedback);
   const readerSummary = ((readerSummaryPath.test(url.pathname) && request.method === "POST" && summaryBody(request.body))
     || (readerQuestionPath.test(url.pathname) && request.method === "POST" && questionBody(request.body))
     || (privateNoteQuestionPath.test(url.pathname) && request.method === "POST" && !url.search && questionBody(request.body, true))
@@ -205,8 +223,8 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && request.body === "{}" && !request.ifMatch && !request.idempotencyKey;
   const audienceGroupDeactivate = audienceGroupDeactivatePath.test(url.pathname) && request.method === "POST"
     && request.body === "{}" && typeof request.ifMatch === "string" && /^"audience-group-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
-  const systemAdministrationGet = systemAdministratorCollection.test(url.pathname) && request.method === "GET"
-    && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const systemAdministrationGet = (systemAdministratorCollection.test(url.pathname) || url.pathname === systemPrivateFeedbackAnalytics) && request.method === "GET"
+    && !url.search && !request.body && !request.ifMatch && !request.idempotencyKey;
   const systemAdministrationGrant = systemAdministratorCollection.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const systemAdministrationRevoke = systemAdministratorRevoke.test(url.pathname) && request.method === "POST"
@@ -266,7 +284,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const maintenanceWrite = maintenanceCommand.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   return (privateOrganizationRequest || placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
-    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || readerSummary || adminGet
+    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || aiFeedback || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || maintenanceImportPost || maintenanceList || maintenanceCreate || maintenanceRead || maintenanceWrite

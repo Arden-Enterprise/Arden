@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GenerationRequest, GenerationResponse } from "../answers/governed-contracts.js";
 import type { PrivateDraft } from "../db/repository.js";
 import { registerPrivateNoteQuestion } from "./question.js";
+import { privateFeedbackTickets, registerPrivateFeedbackRoute } from "./feedback.js";
 
 const apps: ReturnType<typeof Fastify>[] = [];
 afterEach(async () => { await Promise.all(apps.splice(0).map(app => app.close())); });
@@ -24,13 +25,23 @@ function harness(body = "# Handover\nReturn the badge on Friday.", enabled = tru
     citations: [{ chunkId: input.evidence[0].chunkId, quote: "Return the badge on Friday." }],
     usedEvidence: input.evidence.map(passage => passage.chunkId),
   }));
-  registerPrivateNoteQuestion(app, { getDraft }, { read }, { generate }, async request => ({
+  const actor = async (request: import("fastify").FastifyRequest) => ({
     userId: request.headers["x-other-member"] ? randomUUID() : userId,
-  }), "^[0-9a-f-]{36}$", new Set(enabled ? [organizationId] : []));
+  });
+  const organizations = new Set(enabled ? [organizationId] : []);
+  let now = 1_795_500_000_000;
+  const tickets = privateFeedbackTickets(Buffer.alloc(32, 9), () => now);
+  const write = vi.fn(async () => true);
+  registerPrivateNoteQuestion(app, { getDraft }, { read }, { generate }, actor, "^[0-9a-f-]{36}$", organizations, tickets.issue);
+  registerPrivateFeedbackRoute(app, write, actor, "^[0-9a-f-]{36}$", organizations, tickets);
   const path = `/api/v1/organizations/${organizationId}/private-workspace/drafts/${id}/questions`;
+  const feedbackUrl = `/api/v1/organizations/${organizationId}/ai/private-feedback`;
   const payload = { requestId: randomUUID(), query: "When do I return the badge?", expectedVersion: 2 };
   const ask = (options = {}) => app.inject({ method: "POST", url: path, payload, ...options });
-  return { note, getDraft, generate, read, ask, path, payload, userId };
+  const rate = (token: string, feedback: unknown, options = {}) => app.inject({ method: "PUT", url: feedbackUrl,
+    payload: { token, feedback }, ...options });
+  return { note, getDraft, generate, read, ask, path, payload, userId, rate, write,
+    expireTicket: () => { now += 24 * 60 * 60 * 1_000; } };
 }
 
 describe("exact private note questions", () => {
@@ -100,5 +111,30 @@ describe("exact private note questions", () => {
       return output;
     });
     expect((await forged.ask()).statusCode).toBe(503);
+  });
+
+  it("accepts one private rating capability per answer and blocks foreign, expired, or expanded requests", async () => {
+    const h = harness();
+    const token: string = (await h.ask()).json().feedbackToken;
+    const voteKey = token.split(".")[0];
+    expect(token).not.toContain(h.userId);
+    expect(token).not.toContain(h.note.id);
+    expect(token).not.toContain(h.note.organizationId);
+    expect(h.write).not.toHaveBeenCalled();
+    expect((await h.rate(token, "GOOD", { headers: { "x-other-member": "1" } })).statusCode).toBe(404);
+    expect((await h.rate(token, "GOOD", { payload: { token, feedback: "GOOD", documentId: h.note.id } })).statusCode).toBe(400);
+    expect((await h.rate(token.replace(voteKey, randomUUID()), "GOOD")).statusCode).toBe(404);
+    expect(h.write).not.toHaveBeenCalled();
+    for (const feedback of ["GOOD", "BAD", null]) {
+      const response = await h.rate(token, feedback);
+      expect(response.headers["cache-control"]).toBe("no-store");
+      expect(response.json()).toEqual({ feedback });
+      expect(h.write).toHaveBeenLastCalledWith(h.userId, h.note.organizationId, voteKey, feedback);
+    }
+    h.write.mockResolvedValueOnce(false);
+    expect((await h.rate(token, "BAD")).statusCode).toBe(404);
+    h.expireTicket();
+    expect((await h.rate(token, "GOOD")).statusCode).toBe(404);
+    expect(h.write).toHaveBeenCalledTimes(4);
   });
 });

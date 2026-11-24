@@ -43,3 +43,36 @@ F13-SC4 covers exact-note authorization, revision freshness, quote validation,
 sidebar routing and ignoring replies from a previous context. F13-SC5 covers
 signed-in web and native verification and a paired AI smoke test with synthetic
 data in an opted-in organization.
+
+## Answer actions
+
+Ask Arden and its right sidebar show Copy, Good response, Bad response and View
+sources under each available answer. Copy preserves readable text and list
+structure. View sources lists all validated passages for that answer. Numbered
+inline references open their exact passages when the answer supplies a valid
+number. Company source links still use the governed reader.
+
+Company ratings belong to a single answer turn in the owner's conversation.
+`PUT /api/v1/organizations/:organizationId/ai/conversations/:conversationId/turns/:turnId/feedback`
+accepts `{ "feedback": "GOOD" }`, `"BAD"` or `null` as the value. The owner can
+replace or clear a rating and see it again in History. Migration 0066 gives the
+runtime update access only to the rating column under the existing conversation
+owner policy.
+
+Private conversations remain session-only. The 24 November decision allows a
+member to send the rating alone. The question response issues a random, signed
+feedback token valid for 24 hours. The token is scoped to the current member and
+organization and contains no document or member identifier. The feedback endpoint
+(`PUT /api/v1/organizations/:organizationId/ai/private-feedback`) checks that
+token and active membership, then accepts only the token and rating. Migration 0067
+stores one random vote key, a nullable rating and the timestamp of the latest
+change. Repeating the same request preserves the timestamp. Clearing a rating
+excludes it from the report. There is no foreign key to a user, organization,
+conversation, file or document. Feedback submissions carry no private text.
+
+From the workspace chooser, an active System Admin can open **Private AI
+feedback**. `GET /api/v1/system/analytics/private-feedback` returns only counts
+of current Good and Bad ratings for the last 12 UTC weeks, including the current
+week. The UI computes their total and Good rate. A changed vote is counted in the
+week of its latest change. The report returns no user, document, per-vote details,
+or conversation content.

@@ -16,6 +16,7 @@ import { registerAnswerRoutes } from "./answers/routes.js";
 import { registerReaderSummaryRoutes } from "./reader-ai/routes.js";
 import { registerReaderQuestionRoutes } from "./reader-ai/question-routes.js";
 import { registerPrivateNoteQuestion } from "./private-notes/question.js";
+import { privateFeedbackTickets, registerPrivateFeedbackRoute } from "./private-notes/feedback.js";
 import type { ReaderAiClient } from "./reader-ai/summary.js";
 import { canRead, readerModes, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
 import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
@@ -111,8 +112,13 @@ export function buildApp(dependencies: AppDependencies) {
   registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern);
   registerReaderSummaryRoutes(app, dependencies.repository, dependencies.storage, dependencies.readerAi ?? null, requestActor, uuidPattern);
   registerReaderQuestionRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null, requestActor, uuidPattern);
+  const privateAiOrganizations = dependencies.privateNoteAiOrganizations ?? new Set<string>();
+  const feedbackTickets = privateFeedbackTickets(sessionKey);
+  const ratePrivateAnswer = dependencies.repository.ratePrivateAnswer?.bind(dependencies.repository);
   registerPrivateNoteQuestion(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null,
-    requestActor, uuidPattern, dependencies.privateNoteAiOrganizations ?? new Set());
+    requestActor, uuidPattern, privateAiOrganizations, ratePrivateAnswer ? feedbackTickets.issue : undefined);
+  registerPrivateFeedbackRoute(app, ratePrivateAnswer,
+    requestActor, uuidPattern, privateAiOrganizations, feedbackTickets);
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   registerNotificationRoutes(app, { repository: dependencies.repository,
     store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
@@ -600,11 +606,15 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     try {
-      const memberships = await dependencies.repository.listMemberships(context.userId);
+      const [memberships, systemAdmin] = await Promise.all([
+        dependencies.repository.listMemberships(context.userId),
+        dependencies.repository.systemAdministration?.canAccess(context.userId),
+      ]);
       const pendingInvitationToken = readPendingInvitationCookie(request.headers.cookie, dependencies.secureCookies);
       return {
         actor: { id: context.userId, email: context.email, fullName: context.fullName },
         account: { passwordSetupRequired: Boolean(context.passwordSetupRequired) },
+        ...(systemAdmin ? { systemAdmin: true } : {}),
         ...(context.sessionExpiresAt ? { sessionExpiresAt: new Date(context.sessionExpiresAt * 1000).toISOString() } : {}),
         ...(dependencies.testActor ? { testMode: true } : {}),
         ...(pendingInvitationToken ? { pendingInvitationToken } : {}),

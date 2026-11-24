@@ -7,6 +7,7 @@ export const iconGlyphs = {
   close: "\uf4f6",
   document: "\uf57a",
   knowledge: "\uf274",
+  "book-open": "\uf281",
   lock: "\uf8d5",
   logout: "\ufc0c",
   plus: "\ufaac",

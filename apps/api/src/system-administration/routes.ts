@@ -35,6 +35,10 @@ export function registerSystemAdministrationRoutes(app: FastifyInstance,
 
   app.get(root, (request, reply) => run(request, reply,
     (service, actorUserId) => service.overview(actorUserId)));
+  app.get("/api/v1/system/analytics/private-feedback", {
+    schema: { querystring: { type: "object", additionalProperties: false, properties: {} } },
+  }, (request, reply) => run(request, reply, async (service, actorUserId) =>
+    ({ weeks: await service.privateFeedback(actorUserId) })));
   app.post<{ Body: { userId: string } }>(root, { schema: { body: targetSchema } },
     (request, reply) => run(request, reply, async (service, actorUserId) => {
       reply.code(201);
