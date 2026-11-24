@@ -31,8 +31,8 @@ export function itemActions(controller: PrivateNotesController, item: TreeItem, 
     onRename,
     onMove: (collectionId) => void controller.moveTo(ref, collectionId),
     onTrash: () => void controller.requestTrash(ref),
-    ...(item.kind === "collection" ? { onImportPdf: () => void controller.pickPdf(item.id) } : {}),
     ...(item.kind === "note" ? {
+      onImportPdf: () => void controller.pickPdf(item.id),
       order: {
         canMoveUp: index > 0, canMoveDown: index >= 0 && index < siblings.length - 1,
         onMoveUp: () => void controller.shiftNote(item.id, -1), onMoveDown: () => void controller.shiftNote(item.id, 1),

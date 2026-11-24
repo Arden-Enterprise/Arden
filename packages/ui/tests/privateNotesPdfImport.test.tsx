@@ -6,7 +6,8 @@ import * as api from "../src/shared/api-client";
 import { AppSidebar } from "../src/app/AppSidebar";
 import { PersonalWorkspacePage } from "../src/personal-workspace/PersonalWorkspacePage";
 import { usePrivateNotes, type PrivateNotesController } from "../src/personal-workspace/usePrivateNotes";
-import { buildImportedNote, importTitle, pageText, PdfImportError, readPdfFile } from "../src/personal-workspace/pdfImport";
+import { buildImportedNote, importTitle, mergePdfIntoNote, pageText, PdfImportError, readPdfFile, type PdfText } from "../src/personal-workspace/pdfImport";
+import { UNTITLED_NOTE } from "../src/personal-workspace/privateNotesModel";
 import type { PrivateCollection, PrivateNote } from "../src/shared/types";
 import { installTestDialogs } from "./dialogTestSupport";
 
@@ -110,47 +111,82 @@ function Workspace({ connect }: { connect?: boolean }) {
 }
 const tree = () => screen.getByRole("group", { name: "Private notes" });
 
+describe("PDF text into an existing note", () => {
+  const pdf: PdfText = { fileName: "Kickoff_meeting.pdf", metadataTitle: null, pages: ["Page one", "Page two"] };
+
+  it("fills an empty untitled note and names it after the PDF", () => {
+    expect(mergePdfIntoNote({ title: UNTITLED_NOTE, body: "" }, pdf, UNTITLED_NOTE))
+      .toMatchObject({ title: "Kickoff meeting", body: "Page one\n\nPage two", imported: { truncated: false } });
+    expect(mergePdfIntoNote({ title: "  ", body: "\n" }, pdf, UNTITLED_NOTE).title).toBe("Kickoff meeting");
+  });
+
+  it("keeps a note's own title and text and adds the PDF after a blank line", () => {
+    expect(mergePdfIntoNote({ title: "Meeting notes", body: "My notes\n\n" }, pdf, UNTITLED_NOTE))
+      .toMatchObject({ title: "Meeting notes", body: "My notes\n\nPage one\n\nPage two" });
+  });
+
+  it("counts the existing text against the note limit and refuses a full note", () => {
+    // "abc" + blank line leaves 9 - 5 = 4 bytes: no whole page fits, so the first page is cut at a line.
+    expect(mergePdfIntoNote({ title: "T", body: "abc" }, { ...pdf, pages: ["one\ntwo", "three"] }, UNTITLED_NOTE, 9))
+      .toMatchObject({ body: "abc\n\none", imported: { importedPages: 0, truncated: true } });
+    expect(() => mergePdfIntoNote({ title: "T", body: "123456789" }, pdf, UNTITLED_NOTE, 9)).toThrow(/note is full/);
+    expect(() => mergePdfIntoNote({ title: "T", body: "abc" }, { ...pdf, pages: ["longline"] }, UNTITLED_NOTE, 9)).toThrow(/enough room/);
+  });
+});
+
 describe("Import PDF in Private Notes", () => {
-  it("offers Import PDF in a collection's ··· menu, opening the file picker", () => {
+  it("offers Import PDF in a note's ··· menu only, opening the file picker", () => {
     const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined);
     render(createElement(Workspace));
     fireEvent.click(within(tree()).getByRole("button", { name: "More actions for Capstone" }));
+    expect(within(screen.getByRole("menu")).queryByRole("menuitem", { name: "Import PDF" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("button", { name: /Import PDF/ })).toBeNull();
+    fireEvent.click(within(tree()).getByRole("button", { name: "Expand Capstone" }));
+    fireEvent.click(within(tree()).getByRole("button", { name: "More actions for Existing" }));
     fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Import PDF" }));
     expect(click).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("menu")).toBeNull();
-    fireEvent.click(within(tree()).getByRole("button", { name: "Expand Capstone" }));
-    fireEvent.click(within(tree()).getByRole("button", { name: "More actions for Existing" }));
-    expect(within(screen.getByRole("menu")).queryByRole("menuitem", { name: "Import PDF" })).toBeNull();
   });
 
-  it("saves the imported text as a note in the collection, opens it and announces truncation honestly", async () => {
+  it("puts the PDF's text into the note as an unsaved edit, then saves it to that note", async () => {
     const posted: unknown[] = [];
+    const updated: unknown[] = [];
+    let draft = { id: "n1", organizationId: "org", title: UNTITLED_NOTE, body: "", collectionId: "c1", createdAt: "2026-11-24T00:00:00Z",
+      updatedAt: "2026-11-24T00:00:00Z", currentVersion: { id: "v1", version: 1 }, favoritedAt: null, position: null };
     vi.spyOn(api, "apiRequest").mockImplementation(async (_platform, path, init) => {
       const method = init?.method ?? "GET";
-      if (method === "GET" && path.includes("/drafts?")) return { items: [], nextCursor: null };
+      if (method === "GET" && path.includes("/drafts?")) return { items: [draft], nextCursor: null };
       if (method === "GET" && path.endsWith("/collections")) return { items: [{ ...collections[0], createdAt: "", updatedAt: "" }] };
       if (method === "GET" && path.endsWith("/trash")) return { items: [] };
-      if (method === "POST" && path.endsWith("/drafts")) {
+      if (method === "GET" && path.endsWith("/drafts/n1")) return draft;
+      if (method === "POST" && path.endsWith("/drafts")) { posted.push(init!.body); throw new Error("no new note expected"); }
+      if (method === "PUT" || method === "PATCH") {
         const body = JSON.parse(String(init!.body));
-        posted.push(body);
-        return { id: "imported", organizationId: "org", ...body, createdAt: "2026-11-24T00:00:00Z", updatedAt: "2026-11-24T00:00:00Z",
-          currentVersion: { id: "v1", version: 1 }, favoritedAt: null, position: null };
+        updated.push(body);
+        draft = { ...draft, ...body, currentVersion: { id: "v1", version: draft.currentVersion.version + 1 } };
+        return draft;
       }
       throw new Error(`Unexpected ${method} ${path}`);
     });
     runtimeMock.pages = [{ items: [{ str: "Page one", hasEOL: true }] }, { items: [{ str: "Page two" }] }];
     render(createElement(Workspace, { connect: true }));
     await act(() => controllerRef.connectServer("web", "org"));
-    await act(async () => { await controllerRef.importPdf(pdfFile(), "c1"); });
-    expect(posted).toEqual([{ title: "Quarterly report", body: "Page one\n\nPage two", collectionId: "c1" }]);
-    expect(controllerRef.selectedNote).toMatchObject({ id: "imported", collectionId: "c1", body: "Page one\n\nPage two" });
-    expect(controllerRef.focus.kind).toBe("note");
+    await act(async () => { await controllerRef.importPdf("n1", pdfFile()); });
+    expect(posted).toEqual([]);
+    expect(controllerRef.selectedNote?.id).toBe("n1");
+    expect(controllerRef.draft).toEqual({ title: "Quarterly report", body: "Page one\n\nPage two" });
+    expect(controllerRef.isDirty).toBe(true);
     expect(controllerRef.notice?.message).toBe("Imported “Quarterly report” (2 pages)");
+    await act(async () => { await controllerRef.save(); });
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toMatchObject({ title: "Quarterly report", body: "Page one\n\nPage two" });
 
-    // A scanned PDF (no text) shows an explicit error and creates nothing.
+    // A scanned PDF (no text) shows an explicit error and leaves the note unchanged.
     runtimeMock.pages = [{ items: [] }];
-    await act(async () => { await controllerRef.importPdf(pdfFile("scan.pdf"), null); });
+    await act(async () => { await controllerRef.importPdf("n1", pdfFile("scan.pdf")); });
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("no selectable text"));
-    expect(posted).toHaveLength(1);
+    expect(controllerRef.draft.body).toBe("Page one\n\nPage two");
+    expect(posted).toEqual([]);
   });
 });

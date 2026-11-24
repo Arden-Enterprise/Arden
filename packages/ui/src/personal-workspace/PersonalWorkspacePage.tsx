@@ -176,9 +176,6 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
                 <button type="button" className="secondary-button" disabled={busyAction === "create-note"} onClick={() => void controller.addNote(collection.id, "page").then(focusNoteTitle)}>
                   <Icon name="plus" size={14} />New note in this collection
                 </button>
-                <button type="button" className="secondary-button" disabled={busyAction === "import-pdf"} onClick={() => void controller.pickPdf(collection.id)}>
-                  <Icon name="pdf" size={14} />Import PDF
-                </button>
               </div>
             </div>
           </section>}
@@ -205,9 +202,6 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
                 <button type="button" className="secondary-button" disabled={loading || busyAction === "create-collection"}
                   onClick={() => void controller.createCollection(null, "page")}>
                   <Icon name="folder-add" size={14} />New collection
-                </button>
-                <button type="button" className="secondary-button" disabled={loading || busyAction === "import-pdf"} onClick={() => void controller.pickPdf(null)}>
-                  <Icon name="pdf" size={14} />Import PDF
                 </button>
               </div>
             </div>

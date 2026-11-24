@@ -16,7 +16,7 @@ export type ItemActions = {
   onTrash: () => void;
   /** Notes only (spec F03-ARR): keyboard alternative to dragging inside the same place. */
   order?: { canMoveUp: boolean; canMoveDown: boolean; onMoveUp: () => void; onMoveDown: () => void };
-  /** Collections only (spec F03-PDF): import a PDF as a new note inside this collection. */
+  /** Notes only (spec F03-PDF revision 2): add a PDF's text to this note. */
   onImportPdf?: () => void;
   /** Notes only (spec F03-ARR): `available` is false for never-saved notes and unsaved edits. */
   archive?: { available: boolean; onArchive: () => void };

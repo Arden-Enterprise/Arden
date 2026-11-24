@@ -4,7 +4,7 @@ import { ApiError } from "../shared/api-client";
 import type { PrivateArchivedNote, PrivateTrashEntry } from "../shared/private-workspace-api";
 import { createNotePreview, getNoteDraft, isNoteDirty, notePreviewReducer, type NotePreviewState } from "./noteDraftModel";
 import { createDemoBackend, createServerBackend, type LoadedNote, type PrivateNotesBackend } from "./privateNotesBackend";
-import { choosePdfFile, readPdfFile } from "./pdfImport";
+import { choosePdfFile, mergePdfIntoNote, PdfImportError, readPdfText } from "./pdfImport";
 import { ancestorsOf, itemSubtree, notesIn, placeNote, placementOf, ROOT_LABEL, serverIndex, UNTITLED_COLLECTION, UNTITLED_NOTE,
   type TreeItemRef } from "./privateNotesModel";
 
@@ -334,29 +334,31 @@ export function usePrivateNotes(initialNotes: PrivateNote[], initialCollections:
     }, "The note couldn’t be created.");
 
   /**
-   * Spec F03-PDF: reads a PDF's text in this browser and saves it as a new note in `collectionId`
-   * (null = root), then opens it. Errors are shown like any other action error.
+   * Spec F03-PDF revision 2: reads a PDF's text in this browser and adds it to the note `noteId`, which opens.
+   * The text becomes an ordinary edit, so autosave (or Save) stores it and Discard changes undoes it.
+   * Errors are shown like any other action error and leave the note unchanged.
    */
-  const importPdf = (file: File, collectionId: string | null = null) => run("import-pdf", async (service) => {
-    const imported = await readPdfFile(file);
-    return { imported, note: await service.createNote({ title: imported.title, body: imported.body, collectionId }) };
-  }, ({ imported, note }) => {
-    rememberVersions([note]);
-    dispatch({ type: "upsert", notes: [withoutVersion(note)] });
-    dispatch({ type: "select", id: note.id });
-    setFocus({ kind: "note" });
-    setTreeOpen(true);
-    if (collectionId) expandPath(collectionId, collectionId);
+  const importPdf = (noteId: string, file: File) => run("import-pdf", async () => {
+    const pdf = await readPdfText(file);
+    const note = findNote(noteId);
+    if (!note) throw new PdfImportError("This note is no longer available.");
+    return mergePdfIntoNote(getNoteDraft(latest.current.state, note), pdf, UNTITLED_NOTE);
+  }, ({ title, body, imported }) => {
+    if (latest.current.state.selectedId !== noteId) openNote(noteId);
+    else setFocus({ kind: "note" });
+    setSaveMessage("");
+    dispatch({ type: "edit", field: "body", value: body });
+    dispatch({ type: "edit", field: "title", value: title });
     const pages = `${imported.totalPages} ${imported.totalPages === 1 ? "page" : "pages"}`;
     announce(imported.truncated
-      ? `Imported “${imported.title}”: the first ${imported.importedPages} of ${pages} fit in one note`
+      ? `Imported the first ${imported.importedPages} of ${pages}: the rest doesn’t fit in this note`
       : `Imported “${imported.title}” (${pages})`);
   }, "The PDF couldn’t be imported.");
 
-  /** Opens the file picker (must run inside the click) and imports the chosen PDF. */
-  const pickPdf = async (collectionId: string | null = null) => {
+  /** Opens the file picker (must run inside the click) and imports the chosen PDF into the note. */
+  const pickPdf = async (noteId: string) => {
     const file = await choosePdfFile();
-    return file ? importPdf(file, collectionId) : false;
+    return file ? importPdf(noteId, file) : false;
   };
 
   const createCollection = (parentId: string | null = null, where: RenameTarget["where"] = "tree") => run("create-collection",
