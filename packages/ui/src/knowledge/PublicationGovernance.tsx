@@ -330,6 +330,7 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
     {withdrawing && <WithdrawPublicationDialog target={withdrawing} platform={platform} organizationId={organizationId}
       onClose={() => setWithdrawing(null)} onDone={() => { setWithdrawing(null); setMessage("Publication withdrawn"); reload(); }} />}
     {renewing && <RenewPublicationDialog target={renewing} platform={platform} organizationId={organizationId}
+      departmentName={departmentName}
       onClose={() => setRenewing(null)} onSent={() => { setRenewing(null); setMessage("Renewal sent for review"); reload(); }} />}
   </div>;
 }

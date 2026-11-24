@@ -191,6 +191,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [contributionAttempt, setContributionAttempt] = useState<ContributionAttempt | null>(null);
   const [knowledgeCitationTarget, setKnowledgeCitationTarget] = useState<KnowledgeReaderTarget | null>(null);
   const [requestedReviewId, setRequestedReviewId] = useState<string | null>(null);
+  const [requestedContributionId, setRequestedContributionId] = useState<string | null>(null);
   const restoreStarted = useRef(false);
 
   useEffect(() => { setRequestedReviewId(null); }, [serverOrganizationId, serverSession?.actor.id]);
@@ -544,6 +545,11 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (target.view === "review-queue") {
       setRequestedReviewId(target.id);
       navigate("review-queue");
+    } else if (target.view === "contribution") {
+      setRequestedReviewId(null);
+      setKnowledgeCitationTarget(null);
+      setRequestedContributionId(target.documentId);
+      navigate("knowledge");
     } else {
       setRequestedReviewId(null);
       setKnowledgeCitationTarget(target.publicationId ? {
@@ -700,6 +706,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
           citationTarget={knowledgeCitationTarget}
           requestedReviewId={requestedReviewId} onReviewTargetHandled={() => setRequestedReviewId(null)}
+          requestedContributionId={requestedContributionId} onContributionTargetHandled={() => setRequestedContributionId(null)}
           onAssignedReviewCount={setAssignedReviewCount} awaitingAssignment={isUnassignedMember}
           canUsePrivateWorkspace={activeMembership?.canUsePrivateWorkspace ?? false}
           onOpenPrivateNotes={() => navigate("personal-workspace")}

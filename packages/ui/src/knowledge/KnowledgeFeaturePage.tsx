@@ -25,6 +25,8 @@ export type KnowledgeFeaturePageProps = ContextControlProps & {
   citationTarget?: KnowledgeReaderTarget | null;
   requestedReviewId?: string | null;
   onReviewTargetHandled?: () => void;
+  requestedContributionId?: string | null;
+  onContributionTargetHandled?: () => void;
   onNavigate?: (view: KnowledgeFeatureView) => void;
   /** Signed-in member who is waiting for a department: Home explains the limited reading scope. */
   awaitingAssignment?: boolean;
@@ -41,7 +43,9 @@ export function KnowledgeFeaturePage(props: KnowledgeFeaturePageProps) {
       createdDraftId={props.createdDraft?.id ?? null} onAssignedReviewCount={props.onAssignedReviewCount}
       onDirtyChange={props.onDirtyChange}
       citationTarget={props.citationTarget} requestedReviewId={props.requestedReviewId}
-      onReviewTargetHandled={props.onReviewTargetHandled} awaitingAssignment={props.awaitingAssignment}
+      onReviewTargetHandled={props.onReviewTargetHandled}
+      requestedContributionId={props.requestedContributionId} onContributionTargetHandled={props.onContributionTargetHandled}
+      awaitingAssignment={props.awaitingAssignment}
       canUsePrivateWorkspace={props.canUsePrivateWorkspace} onOpenPrivateNotes={props.onOpenPrivateNotes}
       onOpenReviews={props.onNavigate ? () => props.onNavigate!("review-queue") : undefined}
       contextOpen={props.contextOpen} onToggleContext={props.onToggleContext} />;

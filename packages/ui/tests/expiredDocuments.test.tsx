@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installTestDialogs } from "./dialogTestSupport";
 import * as api from "../src/shared/api-client";
 import { GovernanceDocumentsPanel, matchesValidityFilter } from "../src/knowledge/PublicationGovernance";
-import { RenewPublicationDialog, renewalStatus } from "../src/knowledge/RenewPublicationDialog";
+import { OnBehalfRenewalDecision, RenewPublicationDialog, renewalStatus } from "../src/knowledge/RenewPublicationDialog";
 import { contributionStatus } from "../src/knowledge/ServerKnowledgeFeaturePage";
 
 vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({ ArdenDocumentView: () => null }));
@@ -80,10 +80,12 @@ describe("decision 0032 validity for responsible people", () => {
       .mockRejectedValueOnce(new api.ApiError(409, "A renewal is already waiting for review.", "RENEWAL_PENDING"))
       .mockResolvedValue({} as api.KnowledgeSubmission);
     const sent = vi.fn();
-    render(createElement(RenewPublicationDialog, { target: state(), platform: "web", organizationId: "org",
-      onClose: vi.fn(), onSent: sent }));
+    render(createElement(RenewPublicationDialog, { target: state({ authorName: "Avery Author" }), platform: "web",
+      organizationId: "org", departmentName: () => "HR", onClose: vi.fn(), onSent: sent }));
     const dialog = screen.getByRole("dialog", { name: "Renew document" });
-    expect(within(dialog).getByText(/on the author’s behalf/)).toBeTruthy();
+    expect(within(dialog).getByText("You’re renewing on behalf of Avery Author. They’ll see your name and reason and can approve or reject it within 3 days; after that a reviewer for HR can decide.",
+      { normalizer: (text) => text.replace(/\s+/g, " ").trim() })).toBeTruthy();
+    expect(within(dialog).queryByText(/can’t approve|cannot approve/)).toBeNull();
     fireEvent.click(within(dialog).getByRole("button", { name: "Send for review" }));
     expect(within(dialog).getByText("Choose a date after today, or no expiry.")).toBeTruthy();
     expect(within(dialog).getByText("Enter a reason.")).toBeTruthy();
@@ -97,5 +99,39 @@ describe("decision 0032 validity for responsible people", () => {
     expect(send.mock.calls[0]!.slice(0, 4)).toEqual(["web", "org", "doc", { expirationDate: "2027-05-31", reason: "Checked again" }]);
     expect(send.mock.calls[1]![3]).toEqual({ expirationDate: null, reason: "Checked again" });
     expect(send.mock.calls[1]![4]).toBe(send.mock.calls[0]![4]);
+  });
+
+  it("explains who decides for an inactive author and for the author's own request", () => {
+    render(createElement(RenewPublicationDialog, { target: state({ authorActive: false, authorName: null }), platform: "web",
+      organizationId: "org", departmentName: () => "HR", onClose: vi.fn(), onSent: vi.fn() }));
+    expect(screen.getByText("The author is no longer active, so a reviewer for HR decides it.")).toBeTruthy();
+    cleanup();
+    render(createElement(RenewPublicationDialog, { target: state({ isAuthor: true }), platform: "web",
+      organizationId: "org", departmentName: () => "HR", onClose: vi.fn(), onSent: vi.fn() }));
+    expect(screen.getByText("A reviewer for HR decides it.")).toBeTruthy();
+  });
+
+  it("lets the author approve, or reject with a note, a renewal asked on their behalf", async () => {
+    const pending = { submissionId: "sub", snapshotVersionId: "snap", contentHash: "a".repeat(64), onBehalfOfAuthor: true,
+      requestedByName: "Blake Reviewer", reason: "Still valid", expirationDate: "2027-05-31",
+      requestedAt: "2026-11-24T10:00:00Z", authorWindowUntil: "2026-11-27T10:00:00Z", canDecide: true };
+    expect(renewalStatus(state({ renewalPending: true, pending })).label).toBe("Renewal awaiting your decision");
+    const decide = vi.spyOn(api, "decidePublicationRenewal").mockResolvedValue({} as api.KnowledgeSubmission);
+    const decided = vi.fn();
+    render(createElement(OnBehalfRenewalDecision, { pending, platform: "web", organizationId: "org", onDecided: decided }));
+    expect(screen.getByText(/Blake Reviewer asked to renew this document until May 31, 2027: Still valid/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reject renewal" }));
+    expect(screen.getByText("Enter a note.")).toBeTruthy();
+    expect(decide).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: /Note for the requester/ }), { target: { value: " Not needed " } });
+    fireEvent.click(screen.getByRole("button", { name: "Reject renewal" }));
+    await waitFor(() => expect(decided).toHaveBeenCalledWith("REJECT"));
+    expect(decide.mock.calls[0]!.slice(0, 5)).toEqual(["web", "org", pending, "REJECT", "Not needed"]);
+    cleanup();
+    render(createElement(OnBehalfRenewalDecision, { pending, platform: "web", organizationId: "org", onDecided: decided }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(decided).toHaveBeenCalledWith("APPROVE"));
+    expect(decide.mock.calls[1]!.slice(0, 5)).toEqual(["web", "org", pending, "APPROVE", null]);
   });
 });

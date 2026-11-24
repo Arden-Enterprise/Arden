@@ -3,7 +3,9 @@ import type { KnowledgeMetadata, PublicationScope, KnowledgeType } from "@arden/
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
   departmentId: string | null; memberIds: string[] };
-export type NotificationTarget = { view: "review-queue"; id: string } | { view: "knowledge"; publicationId?: string };
+export type NotificationTarget = { view: "review-queue"; id: string } | { view: "knowledge"; publicationId?: string }
+  /** Decision 0032: My Contributions with this document selected (e.g. to decide an on-behalf renewal). */
+  | { view: "contribution"; documentId: string };
 export type NotificationItem = {
   id: string;
   type: "REVIEW_REQUESTED" | "REVIEW_APPROVED" | "REVIEW_REJECTED" | "PUBLICATION_ACTIVE"
@@ -505,7 +507,24 @@ export type PublicationRenewalState = {
   documentId: string; publishedVersionId: string; title: string; responsibleDepartmentId: string | null;
   /** Effective Valid until (YYYY-MM-DD); null means no expiry. */
   expirationDate: string | null; renewalPending: boolean; authorActive: boolean; isAuthor: boolean; canRenew: boolean;
+  /** Active author's display name; null when the author is no longer active. */
+  authorName?: string | null;
+  /** The renewal waiting for review. `canDecide`: you are the author of a request made on your behalf (0032). */
+  pending?: { submissionId: string; snapshotVersionId: string; contentHash: string; onBehalfOfAuthor: boolean;
+    requestedByName: string | null; reason: string; expirationDate: string | null; requestedAt: string;
+    authorWindowUntil: string | null; canDecide: boolean } | null;
 };
+
+/** Decision 0032: the author approves or rejects a renewal asked on their behalf (same decision endpoint). */
+export function decidePublicationRenewal(platform: Platform, organizationId: string,
+  pending: NonNullable<PublicationRenewalState["pending"]>, action: "APPROVE" | "REJECT", comment: string | null,
+  idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/reviews/${pending.submissionId}/decisions`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ action, expectedSnapshotVersionId: pending.snapshotVersionId,
+      expectedContentHash: pending.contentHash, comment }),
+  });
+}
 
 export async function listPublicationRenewals(platform: Platform, organizationId: string): Promise<PublicationRenewalState[]> {
   const result = await request<{ items: PublicationRenewalState[] }>(platform, `${knowledgePath(organizationId)}/renewals`);

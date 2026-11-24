@@ -49,7 +49,7 @@ import {
 } from "../maintenance/maintenance-client";
 import { ApprovedReadersField, approvedReadersReady } from "./ApprovedReadersField";
 import { PublicationChangeDialog, publicationChangeSentMessage, type PublicationChangeType } from "./PublicationChangeDialog";
-import { RenewPublicationDialog, renewalStatus } from "./RenewPublicationDialog";
+import { OnBehalfRenewalDecision, RenewPublicationDialog, renewalStatus } from "./RenewPublicationDialog";
 import type { KnowledgeReaderTarget, KnowledgeCitationReference } from "./knowledgeCitation";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
@@ -83,6 +83,9 @@ type Props = ContextControlProps & {
   citationTarget?: KnowledgeReaderTarget | null;
   requestedReviewId?: string | null;
   onReviewTargetHandled?: () => void;
+  /** Decision 0032: open My Contributions with this document selected. */
+  requestedContributionId?: string | null;
+  onContributionTargetHandled?: () => void;
   onAssignedReviewCount?: (count: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
   awaitingAssignment?: boolean;
@@ -129,6 +132,7 @@ export function ServerKnowledgeFeaturePage(props: Props) {
 }
 function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   view, active, createdDraftId, citationTarget, requestedReviewId, onReviewTargetHandled,
+  requestedContributionId, onContributionTargetHandled,
   onAssignedReviewCount, onDirtyChange, awaitingAssignment = false,
   onOpenPrivateNotes, canUsePrivateWorkspace = false, contextOpen, onToggleContext, onOpenReviews }: Props) {
   const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
@@ -724,6 +728,12 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     onReviewTargetHandled?.();
     openReview(requestedReviewId);
   }, [active, view, requestedReviewId, onReviewTargetHandled]);
+
+  useEffect(() => {
+    if (!requestedContributionId || !active || view !== "knowledge") return;
+    onContributionTargetHandled?.();
+    setScreen("library"); setLibraryTab("drafts"); setSelectedContributionId(requestedContributionId);
+  }, [active, view, requestedContributionId, onContributionTargetHandled]);
 
   const requireDecisionReason = () => {
     setCommentSubmitted(true);
@@ -1374,6 +1384,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
               <dt>Readers</dt><dd>{targetReadersLabel(selectedContribution.targetReaders, departmentName)}</dd>
               {pendingChangeRequest && <><dt>Request</dt><dd>{reviewRequestPresentation(pendingChangeRequest).label} · awaiting review</dd></>}
             </dl>
+            {renewals.get(selectedContribution.id)?.pending?.canDecide
+              && <OnBehalfRenewalDecision key={renewals.get(selectedContribution.id)!.pending!.submissionId}
+                pending={renewals.get(selectedContribution.id)!.pending!} platform={platform} organizationId={organizationId}
+                onDecided={(action) => { setMessage(action === "APPROVE" ? "Renewal approved" : "Renewal rejected"); void refresh(); }} />}
             {selectedContributionLatest?.withdrawal && <blockquote className="island-box contribution-reason">
               <strong>{selectedContributionLatest.withdrawal.by === "REVIEWER" ? "Withdrawn by a reviewer" : "Withdrawn by an administrator"}</strong>
               <p>{selectedContributionLatest.withdrawal.reason}</p></blockquote>}
@@ -1456,6 +1470,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       departments={options?.departments ?? []} onClose={() => setChangeRequest(null)}
       onSent={() => { const sent = changeRequest; setChangeRequest(null); setMessage(publicationChangeSentMessage(sent)); void refresh(); }} />}
     {renewing && <RenewPublicationDialog target={renewing} platform={platform} organizationId={organizationId}
+      departmentName={departmentName}
       onClose={() => setRenewing(null)}
       onSent={() => { setRenewing(null); setMessage("Renewal sent for review"); void refresh(); }} />}
     {discardAction && <DiscardChangesDialog exiting={false} onCancel={() => setDiscardAction(null)} onDiscard={() => {
