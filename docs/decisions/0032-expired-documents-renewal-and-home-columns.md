@@ -6,6 +6,7 @@ Decision owner/approval: project maintainer (repository user), approved in the p
 Brainstorm originator / record author: project maintainer; record written by Claude (coding agent) from the agreed rules.
 Approval evidence and exact source revision: maintainer approval in that conversation, against `origin/staging` `adcfac5`.
 Implementation: partial, branch `feat/expired-document-visibility` only (migration `0066_expired_document_renewal.sql`, API and UI); not merged, released or deployed. Evidence is listed under Verification.
+Amended by: [0033](0033-reviewer-self-approval.md) (renewal decision order, B2/B4; edited in place because 0032 is unmerged).
 Supersedes / superseded by: supersedes [0022](0022-home-start-page-and-reader-validity.md) item 4 (one status vocabulary shown on Home) and the Home column list in 0022; extends [0024](0024-admin-only-direct-withdrawal.md) (withdrawal of expired documents) and [0025](0025-in-app-notifications.md) (two new in-app notice types). Expiry stays inclusive through its UTC day as in [0030](0030-published-date-ai-sources.md). Everything else in those records stays in force.
 
 ## Context and requirement
@@ -32,9 +33,12 @@ Under 0022 an expired publication stayed on Home with an Expired chip, and reade
 ### B. Renewal authority
 
 1. Renewal is a publication change request of type `RENEWAL` beside `READER_CHANGE` and `WITHDRAWAL`. It carries a new Valid until (or no expiry) and a short reason, and changes **only** validity: not content, readers or owner. The frozen snapshot metadata is never rewritten; the approved date is recorded for that published version.
-2. It is reviewed like the other requests (same routing, 0013/0015). The requester can never approve their own request, including an Organization Admin.
+2. It is reviewed like the other requests (same routing, 0013/0015). Decision order (amended 2026-11-24, see [0033](0033-reviewer-self-approval.md)):
+   - Asked by the author: a matching reviewer or an Organization Admin decides, including self-approval when the author holds a matching grant.
+   - Asked on behalf of an **active** author: the author may approve or reject it without a reviewer grant. For 3 days after the request, or until the document expires if earlier, only the author may decide; afterwards matching reviewers and Organization Admins (including the requester) may. An author rejection is final.
+   - Asked on behalf of an author who is **not active**: matching reviewers and Organization Admins decide at once; the requester may approve their own request.
 3. Who may submit: the author at any time. From 7 days before expiry (and after expiry), when no renewal is pending, reviewers with a matching grant for the responsible department and Organization Admins may also submit on the author's behalf. If the author's membership is no longer active, that right applies immediately.
-4. When someone other than the author renews, the active author gets an in-app notice saying who and why; they can disagree through the normal withdrawal request. Audit records the requester and whether it was on behalf of the author.
+4. When someone other than the author renews, the active author gets an in-app notice saying who and why that opens My Contributions, where they approve or reject it. Audit records the requester and whether it was on behalf of the author.
 5. Admins do **not** get a direct (unreviewed) renewal.
 
 ### C. Notifications (in-app, 0025)
@@ -59,14 +63,14 @@ Published content stays published, the author's private originals stay private, 
 
 ## Boundaries and consequences
 
-- Data: `shared_submission` gains `renewal_expiration_date` and `on_behalf_of_author`; `publication_validity_renewal` records an approved date per published version (a newer content version uses its own Valid until). `arden_notification` gains `PUBLICATION_EXPIRING` and `PUBLICATION_RENEWAL_ON_BEHALF` with `expires_on` and `request_reason`.
-- Authority is re-derived in reviewed `SECURITY DEFINER` routines from the actor context; no RLS policy is relaxed and existing routine owners are kept. Reader hiding is applied in the reader projection; publication RLS itself is unchanged, so responsible views, governance, maintenance and notifications keep working.
+- Data: `shared_submission` gains `renewal_expiration_date`, `on_behalf_of_author` and `author_decides_until` (the author's priority window, fixed when an on-behalf request is created); `publication_validity_renewal` records an approved date per published version (a newer content version uses its own Valid until). `arden_notification` gains `PUBLICATION_EXPIRING` and `PUBLICATION_RENEWAL_ON_BEHALF` with `expires_on` and `request_reason`.
+- Authority is re-derived in reviewed `SECURITY DEFINER` routines from the actor context and existing routine owners are kept. Under 0033 the review-decision insert policy no longer excludes the submitter (a matching grant or Admin is still required), and an active author may read renewal requests made on their behalf; no other RLS policy changes. Reader hiding is applied in the reader projection; publication RLS itself is unchanged, so responsible views, governance, maintenance and notifications keep working.
 - An expired document is no longer "readable" for the Admin governance catalog, so an Admin opens it through the audited inspection (0023) rather than the reader.
 - Operators apply 0066 as the trusted superuser (operator-class) after backup and rehearsal; old Core cannot use the new request type but is not broken by the added columns.
 
 ## Verification and rollout
 
-Planned and obtained evidence is recorded in the branch PR; at the time of writing: API unit tests (fake repository) and real-PostgreSQL integration cases for reader hiding, AI exclusion, author/reviewer/Admin state, on-behalf routing, the 7-day and inactive-author windows, self-approval refusal, reminder idempotency and the department guard; UI tests for the Home columns, sort and expiring icon. Ownership-handoff rehearsal, signed-in web/desktop acceptance and staging rollout remain separate milestones.
+Planned and obtained evidence is recorded in the branch PR; at the time of writing: API unit tests (fake repository) and real-PostgreSQL integration cases for reader hiding, AI exclusion, author/reviewer/Admin state, on-behalf routing, the 7-day and inactive-author windows, the author's decision window and final rejection, reviewer self-approval (0033), reminder idempotency and the department guard; UI tests for the Home columns, sort and expiring icon. Ownership-handoff rehearsal, signed-in web/desktop acceptance and staging rollout remain separate milestones.
 
 ## Rules and documentation updates
 
