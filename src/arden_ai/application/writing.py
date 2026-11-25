@@ -24,8 +24,8 @@ PROMPTS = {
     "EXPLAIN": (
         "Explain only the supplied word, phrase or passage like the reader is five years old. "
         "Use short, accessible language. Define necessary jargon. "
-        "Reply in chat; never propose a document edit. For PAGE scope, return an exact short "
-        "source_quote copied from the page as the citation."
+        "Reply in chat; never propose a document edit. For PAGE scope, select the source_id "
+        "of the passage that best supports the explanation."
     ),
 }
 

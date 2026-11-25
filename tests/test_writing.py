@@ -8,12 +8,11 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import SecretStr
+from pydantic import BaseModel, SecretStr
 
 from arden_ai.application.writing import (
     InvalidWritingOutput,
     Writer,
-    WritingOutput,
     WritingTextOutput,
 )
 from arden_ai.contracts.writing import WritingRequest, WritingResponse
@@ -173,21 +172,21 @@ def test_provider_keeps_document_in_human_data_and_disables_storage(monkeypatch)
             captured.update(kwargs)
 
         def with_structured_output(
-            self, schema: type[WritingTextOutput], **kwargs: object
+            self, schema: type[BaseModel], **kwargs: object
         ) -> "FakeStructured":
             assert kwargs == {"method": "json_schema", "strict": True}
             return FakeStructured(schema)
 
     class FakeStructured:
-        def __init__(self, schema: type[WritingTextOutput]) -> None:
+        def __init__(self, schema: type[BaseModel]) -> None:
             self.schema = schema
 
         async def ainvoke(self, messages: object) -> object:
             captured["messages"] = messages
             captured["schema"] = self.schema
             values = {"status": "EXPLAINED", "text": "A simple rule."}
-            if self.schema is WritingOutput:
-                values["source_quote"] = "The rule starts today."
+            if "source_id" in self.schema.model_fields:
+                values["source_id"] = str(captured.get("source_id", "E2"))
             return self.schema.model_validate(values)
 
     monkeypatch.setattr("arden_ai.infrastructure.writing.ChatOpenAI", FakeModel)
@@ -205,7 +204,15 @@ def test_provider_keeps_document_in_human_data_and_disables_storage(monkeypatch)
     assert isinstance(messages[1], HumanMessage) and malicious in str(messages[1].content)
     assert captured["store"] is False and captured["max_retries"] == 0
 
-    page = request("EXPLAIN", "The rule starts today.").model_copy(update={"scope": "PAGE"})
+    source = "📘" * 150 + "\r\nThe rule starts today."
+    page = request("EXPLAIN", source).model_copy(update={"scope": "PAGE"})
     result = asyncio.run(Writer(provider).run(page))
-    assert captured["schema"] is WritingOutput
+    page_messages = captured["messages"]
+    assert isinstance(page_messages, list)
+    passages = json.loads(page_messages[1].content)["passages"]
+    assert passages == {"E1": "📘" * 150, "E2": "The rule starts today."}
     assert result.source_quote == "The rule starts today."
+    assert result.source_quote in source
+    captured["source_id"] = "E9"
+    with pytest.raises(InvalidWritingOutput, match="unknown page passage"):
+        asyncio.run(Writer(provider).run(page))
