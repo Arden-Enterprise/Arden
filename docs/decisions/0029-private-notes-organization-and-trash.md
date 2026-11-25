@@ -6,7 +6,7 @@ Decision owner/approval: requesting project maintainer. On 2026-11-23 the mainta
 Brainstorm originator / record author: maintainer request; record drafted by the coding agent.
 Approval evidence and exact source/spec revision: maintainer answers in the implementation session, against `origin/staging` 990ee1c. Linear ARD-83.
 Implementation: branch `feat/private-notes-collections` (not merged, not deployed).
-Supersedes / superseded by: refines [0002](0002-first-slice-private-notes-contract.md), which deferred delete and retention. Owner-only access, immutable versions and ETag concurrency from 0002 remain unchanged.
+Supersedes / superseded by: refines [0002](0002-first-slice-private-notes-contract.md), which deferred delete and retention. Refined by [0034](0034-share-button-direct-share-and-private-pdf.md): items can be shared with named individuals (collections cannot), Trash ends that access, and Private can hold PDF items. Owner-only access, immutable versions and ETag concurrency from 0002 remain unchanged.
 
 ## Context and requirement
 

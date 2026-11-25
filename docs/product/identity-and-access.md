@@ -130,7 +130,7 @@ Out of scope: dragging collections or reordering them manually, reordering Favor
 
 - Spec revision/date: 2 / 2026-11-24. Originator and decision owner: requesting project maintainer. Revision 1 (same day) imported a PDF as a new note from a collection's `···` menu. Revision 2, asked for on 2026-11-24 after using it: "an empty note that I import the PDF into is more logical than the collection", so Import PDF moves to the note. Record author: coding agent. Decision state: the change of place is **accepted**; the details marked *agent choice* are **proposed — confirmation needed**. Branch `feat/import-pdf-into-note` from `staging`; not merged or deployed.
 - Scope: `···` on a note (sidebar row and note header) offers **Import PDF**. The user picks one PDF and its text goes into **that note**, which opens with a confirmation such as "Imported “Kickoff meeting” (2 pages)". Collections, the collection page and the Private Notes root page no longer offer Import PDF.
-- *Agent choices:* an empty note receives the text; a note that already has text keeps it and gets the PDF's text after a blank line (nothing is replaced). A note still titled "Untitled private note" (or with no title) takes the PDF's own title, otherwise the file name; a note with its own title keeps it. The text arrives as an ordinary unsaved edit, so autosave or Save stores it in the note's live version (F03-SAVE) and **Discard changes** undoes it. The text is extracted **in the browser** with the bundled pdf.js and saved through the existing note update, so no new API route, dependency or migration, and the PDF file itself is never uploaded or stored. Pages are separated by a blank line; layout, images and tables are not kept. A note holds at most 100 KB of text including what is already there, so a long PDF keeps the whole pages that fit and the confirmation says how many of how many pages were imported; a full note refuses the import. Files over 25 MB, non-PDFs, password-protected or damaged PDFs and scans without a text layer get explicit errors and leave the note unchanged (no OCR).
+- *Agent choices:* an empty note receives the text; a note that already has text keeps it and gets the PDF's text after a blank line (nothing is replaced). A note still titled "Untitled private note" (or with no title) takes the PDF's own title, otherwise the file name; a note with its own title keeps it. The text arrives as an ordinary unsaved edit, so autosave or Save stores it in the note's live version (F03-SAVE) and **Discard changes** undoes it. The text is extracted **in the browser** with the bundled pdf.js and saved through the existing note update, so no new API route, dependency or migration, and the PDF file itself is never uploaded or stored (this import path still discards the file; keeping an original PDF is the separate F03-FILE item under ADR 0034). Pages are separated by a blank line; layout, images and tables are not kept. A note holds at most 100 KB of text including what is already there, so a long PDF keeps the whole pages that fit and the confirmation says how many of how many pages were imported; a full note refuses the import. Files over 25 MB, non-PDFs, password-protected or damaged PDFs and scans without a text layer get explicit errors and leave the note unchanged (no OCR).
 - Out of scope: OCR, keeping the PDF as an attachment, inserting at the cursor, several files at once, importing into a collection as a new note.
 
 | Acceptance ID | Complete path to verify | Evidence / remaining |
@@ -151,6 +151,71 @@ Out of scope: dragging collections or reordering them manually, reordering Favor
 | F03-SAVE-AC2 | Contribution seals the contributed version; later saves never change it; the database rejects updates to sealed or contributed versions, any delete, identity changes and going back in number. | Real-PostgreSQL case with the runtime role. |
 | F03-SAVE-AC3 | Stale saves still get `412`; autosave then stops for that note; typing during a save is not lost. | UI tests, existing concurrency integration case. |
 | F03-SAVE-AC4 | Migration seals all existing history and leaves only each live, uncontributed current version open; nothing is deleted. | Applied to a disposable database holding F03 test data; all versions consistent. Not rehearsed on a production-shaped copy. |
+
+### F03-SHR Share button and direct sharing
+
+- Spec revision/date: 1 / 2026-11-26. Decision state: **accepted** ([ADR 0034](../decisions/0034-share-button-direct-share-and-private-pdf.md)); it relaxes product contract item 4 and F03 owner-only access for named recipients.
+- Originator: requesting project maintainer (one-member sharing in Reports 1/3; the single Share button). Rules for review, cap and PDF: coding agent recommendation at the maintainer's request. Decision owner: requesting project maintainer. Record author: coding agent. Approval: maintainer, 2026-11-26, "Duyệt như đề xuất" after reviewing ADR 0034 as proposed, including the *agent choice* details. Team consultation: not recorded.
+- Baseline `origin/staging` c62b2f6, `origin/main` 9fa3d34. Affected repository: Arden only (Core, UI, migrations); Arden-AI unchanged. Linear: not prioritized. Delivery: not started.
+
+Goal: let an owner show a private note or private PDF item to named colleagues without review, and start every kind of sharing from one Share button, while keeping official knowledge on the reviewed path.
+
+Scope:
+
+1. **Share button** in the note/PDF header and `···`, opening a panel with **Share with people** and **Contribute to a department or the organization**. Contribute opens the existing contribution form (F07) unchanged.
+2. **Share with people:** search active members of the organization by name or email, add several at once, see the current recipients and revoke one or all. Each recipient gets a separate view-only grant. The panel states "Not reviewed · view only · not an official document".
+3. **Recipient view:** shared items appear in Home → Shared with me under a separate heading "Shared directly — not reviewed", apart from approved publications. The reader shows the owner's current saved content read-only with the label "Shared by ‹owner› — not reviewed". No edit, re-share, contribute, move, favorite or AI action.
+4. **Limits:** individuals only (no department, group or Everyone); at most N active recipients per item, N set by the Organization Admin (default 10); the Organization Admin can disable direct sharing; near the cap the panel suggests Contribute.
+5. **End of access:** owner revocation; owner moves the item to Trash (Restore does not re-share); purge; owner or recipient leaves the organization or becomes inactive. Archive keeps grants (*agent choice*).
+6. **Audit and notice:** share/revoke audit events with actor, recipient, item id and time, without title or content; the recipient receives an in-app notice on share (new 0025 event type, no excerpt); revocation sends none.
+
+Out of scope: recipient editing or comments, sharing collections, public links, people outside the organization, indexing for organization Ask Arden, recipient AI over shared items, "save a copy" for recipients.
+
+Paths:
+
+- Owner: open item → Share → Share with people → pick members → Share → recipients listed → Revoke one or Revoke all.
+- Owner: Share → Contribute → existing contribution form → review (F07/F09).
+- Recipient: notice or Home → Shared with me → open → read-only view; after revocation the item disappears and a stale link shows "You no longer have access".
+- Admin: Organization settings → Direct sharing on/off and recipient cap.
+
+| ID | Observable requirement, including failure/denial cases | Implementation reference | Evidence actually obtained | Remaining/owner |
+| --- | --- | --- | --- | --- |
+| F03-SHR-AC1 | Share opens both choices with their consequences; Contribute opens the unchanged contribution form. | Not implemented | Not run | Phase 1 |
+| F03-SHR-AC2 | The owner shares a note or PDF item with several members in one action; each recipient can open the current saved content read-only, and sees later saves after reload. | Not implemented | Not run | Phase 3 |
+| F03-SHR-AC3 | Only individual active members of the same organization can be chosen; departments, groups, inactive members and other organizations are rejected by Core, not only hidden in the UI. | Not implemented | Not run | Phase 3 |
+| F03-SHR-AC4 | A recipient cannot edit, re-share, contribute, move, list the owner's other items or read the owner's collections; another member, Org Admin and System Admin still cannot read the item (404, no metadata). | Not implemented | Not run | Phase 3; real-PostgreSQL RLS case required |
+| F03-SHR-AC5 | Revoke one/all, owner Trash, purge and owner or recipient deactivation end access immediately; Restore from Trash does not re-share; a stale open view or link shows an explicit no-access state. | Not implemented | Not run | Phase 3 |
+| F03-SHR-AC6 | Adding recipients beyond the organization cap is rejected with an explicit message and a Contribute suggestion; a disabled organization setting hides Share with people and Core rejects share requests. | Not implemented | Not run | Phase 3 |
+| F03-SHR-AC7 | Shared items are never indexed or returned by organization Ask Arden, and are labelled "not reviewed" wherever shown. | Not implemented | Not run | Phase 3 |
+| F03-SHR-AC8 | Share and revoke write audit events without title or content; the recipient gets one in-app notice per share; repeated sharing to the same person does not duplicate the grant or notice. | Not implemented | Not run | Phase 3 |
+| F03-SHR-AC9 | Network/server failures show explicit errors without partial grants; the panel works by keyboard and at phone width on web and desktop; the desktop allow-list permits exactly the new routes. | Not implemented | Not run | Phases 1 and 3 |
+
+### F03-FILE Private PDF items
+
+- Spec revision/date: 1 / 2026-11-26. Decision state: **accepted** ([ADR 0034](../decisions/0034-share-button-direct-share-and-private-pdf.md)); it replaces the F03-PDF rule that the PDF file is never stored. Same provenance, baseline and delivery state as F03-SHR.
+
+Goal: keep an original PDF in Private so that it can be organized, read, contributed and (after F03-SHR) shared without losing layout.
+
+Scope:
+
+1. **Upload PDF** in Private (header and collection `+`) creates a PDF item next to notes. Maximum 5 MB. The server checks the file type and size; the file goes to protected private storage and is served only through Core after authorization, using short-lived signed access.
+2. The PDF's text is extracted for the title (PDF title, otherwise file name), search and the private AI side panel. A PDF without a text layer is accepted and labelled "No text found — AI is unavailable for this file" (no OCR).
+3. The file cannot be edited. **Replace file** stores a new file as the item's live version under ADR 0031; a version sealed by contribution is kept; the replaced unsealed object is erased.
+4. PDF items take part in collections, favorites, ordering, archive and the 30-day trash like notes; purge erases every stored file of the item.
+5. **Contribute** creates a shared PDF draft through the existing PDF contribution path; a PDF without text is warned about because indexing needs text.
+6. **Import PDF into a note** (F03-PDF) is unchanged for users who want editable text.
+
+Out of scope: annotating PDFs, other file types, OCR, files over 5 MB.
+
+| ID | Observable requirement, including failure/denial cases | Implementation reference | Evidence actually obtained | Remaining/owner |
+| --- | --- | --- | --- | --- |
+| F03-FILE-AC1 | Uploading a valid PDF up to 5 MB creates an item that opens in the PDF viewer and survives reload; non-PDF, oversized, damaged and password-protected files are rejected with explicit errors and leave nothing stored. | Not implemented | Not run | Phase 2 |
+| F03-FILE-AC2 | Only the owner (and, after F03-SHR, active recipients) can obtain the file; signed access expires; another member, Org Admin and System Admin get 404 without metadata. | Not implemented | Not run | Phase 2; real-PostgreSQL and storage checks required |
+| F03-FILE-AC3 | Replace file keeps one live version, keeps contribution-sealed versions and erases the replaced unsealed object. | Not implemented | Not run | Phase 2 |
+| F03-FILE-AC4 | PDF items work with collections, favorites, ordering, archive, trash, restore and purge; purge erases the stored files. | Not implemented | Not run | Phase 2 |
+| F03-FILE-AC5 | Search and the private AI side panel use the extracted text; a PDF without text shows the AI-unavailable label. | Not implemented | Not run | Phase 2 |
+| F03-FILE-AC6 | Contribute creates a shared PDF draft with the same file; the private item is unchanged; a PDF without text shows a warning first. | Not implemented | Not run | Phase 2 |
+| F03-FILE-AC7 | Upload, view and replace work on web and the Windows desktop app, by keyboard and at phone width. | Not implemented | Not run | Phase 2 |
 
 ## F04 Published audiences
 
