@@ -16,7 +16,8 @@ function dropHalf(event: DragEvent<HTMLElement>): "before" | "after" {
 }
 
 /** Builds the shared `···` actions for a tree item; `onRename` lets the caller choose where renaming happens. */
-export function itemActions(controller: PrivateNotesController, item: TreeItem, onRename: () => void): ItemActions {
+export function itemActions(controller: PrivateNotesController, item: TreeItem, onRename: () => void,
+  onPdfImported?: () => void): ItemActions {
   const ref = { kind: item.kind, id: item.id };
   const siblings = item.kind === "note" ? notesIn(controller.collections, controller.state.notes, item.parentId) : [];
   const index = siblings.findIndex((note) => note.id === item.id);
@@ -31,8 +32,10 @@ export function itemActions(controller: PrivateNotesController, item: TreeItem, 
     onRename,
     onMove: (collectionId) => void controller.moveTo(ref, collectionId),
     onTrash: () => void controller.requestTrash(ref),
-    ...(item.kind === "collection" ? { onImportPdf: () => void controller.pickPdf(item.id) } : {}),
     ...(item.kind === "note" ? {
+      onImportPdf: () => void controller.pickPdf(item.id).then(imported => {
+        if (imported) onPdfImported?.();
+      }),
       order: {
         canMoveUp: index > 0, canMoveDown: index >= 0 && index < siblings.length - 1,
         onMoveUp: () => void controller.shiftNote(item.id, -1), onMoveDown: () => void controller.shiftNote(item.id, 1),
@@ -73,6 +76,8 @@ export function PrivateNotesNavSection({ controller, navItem, pageVisible, colla
 }) {
   const { state, collections, treeOpen, expanded, renaming, loading, error, actionError } = controller;
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const latestOnOpen = useRef(onOpen);
+  latestOnOpen.current = onOpen;
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
   const expandTimer = useRef<{ id: string; timer: number } | null>(null);
@@ -173,7 +178,8 @@ export function PrivateNotesNavSection({ controller, navItem, pageVisible, colla
             {unsaved && <span className="pn-unsaved" title="Unsaved changes"><span className="sr-only">, unsaved changes</span></span>}
           </button>
           <span className="pn-row-actions">
-            <ItemActionsMenu label={`More actions for ${item.title}`} actions={itemActions(controller, item, () => controller.startRename(item))}
+            <ItemActionsMenu label={`More actions for ${item.title}`} actions={itemActions(controller, item,
+              () => controller.startRename(item), () => latestOnOpen.current())}
               onOpenChange={(isMenuOpen) => setMenuFor(isMenuOpen ? key : null)} />
             {isCollection && <button type="button" className="pn-icon-button" aria-label={`Add a note to ${item.title}`} title="New note inside"
               onClick={() => { void controller.addNote(item.id); onOpen(); }}><Icon name="plus" size={14} /></button>}
