@@ -29,6 +29,22 @@ quote against the supplied passages and confirms current access and revision bef
 responding. An empty note or insufficient evidence is reported in the same context.
 The route requires no new DB migration, shared retrieval, or re-index.
 
+On 25 November the maintainer approved a first improvement for long-note summaries:
+the server reports whether selected passages cover all non-whitespace note content.
+When passages omit content, the sidebar identifies the answer as based on selected
+passages. This applies to any question, including summaries and action items.
+Coverage measures the source text supplied to the model.
+
+The 25 November follow-up improves passage selection for whole-note summaries.
+The sidebar's Summary, Key Points and Action Items prompts, along with
+recognized English and Vietnamese overview requests, send the complete note
+when it fits the existing 8,000-byte evidence budget. Longer notes use excerpts
+from across the note, including the beginning, middle and end. Topic-specific
+questions continue to select passages by relevance. Each request still makes
+one inference call. Long-note overviews can omit details between the samples.
+Both improvements are implemented locally and require signed-in web and
+Electron verification before release.
+
 Private note answering is off by default. Set `ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS`
 to approved organization UUIDs after each organization approves the configured
 inference destination and its data handling. The sidebar discloses the handoff

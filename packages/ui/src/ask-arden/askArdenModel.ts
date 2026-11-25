@@ -8,6 +8,7 @@ export type AskArdenMessage = {
   savedTurn?: { conversationId: string; turnId: string };
   feedback?: AnswerFeedback;
   privateFeedbackToken?: string;
+  noteCoverage?: "FULL" | "PARTIAL";
   insufficientEvidence?: boolean;
   unavailable?: boolean;
   /** The request failed before an answer was saved; sending the same text retries it. */
@@ -30,6 +31,7 @@ export function answerMessage(answer: AskArdenAnswer, id: string): AskArdenMessa
     ...(answer.conversationId && answer.turnId ? { savedTurn: { conversationId: answer.conversationId, turnId: answer.turnId } } : {}),
     ...(answer.feedback !== undefined ? { feedback: answer.feedback } : {}),
     ...(answer.feedbackToken ? { privateFeedbackToken: answer.feedbackToken } : {}),
+    ...(answer.noteCoverage ? { noteCoverage: answer.noteCoverage } : {}),
   };
 }
 

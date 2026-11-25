@@ -11,10 +11,14 @@ import type { PrivateContentStorage } from "./content-storage.js";
 const hash = (text: string) => createHash("sha256").update(text).digest("hex");
 const words = (text: string) => new Set(text.normalize("NFKC").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
 const insufficient: StoredAnswer = { status: "INSUFFICIENT_EVIDENCE", answer: insufficientDocumentEvidence, citations: [] };
+const evidenceByteBudget = 8_000;
+const overviewPrompts = new Set([
+  "summarize", "summarize this note", "summarize the note", "summarize this document",
+  "what are the key points", "tóm tắt", "tóm tắt ghi chú này", "tóm tắt tài liệu này",
+  "what action items are listed", "liệt kê các việc cần làm trong ghi chú này",
+]);
 
-/** Rank passages within one saved note. No shared index or other private notes are queried. */
-function noteEvidence(note: PrivateDraft, body: string, query: string): GenerationRequest["evidence"] {
-  const points = Array.from(body);
+function rankedPassages(points: string[], query: string) {
   const terms = words(query);
   const ranked = [];
   // Overlap keeps passages near a boundary available. Bound the bytes sent to inference.
@@ -27,7 +31,7 @@ function noteEvidence(note: PrivateDraft, body: string, query: string): Generati
     if (start + 900 >= points.length) break;
   }
   const selected = [];
-  let remainingBytes = 8_000;
+  let remainingBytes = evidenceByteBudget;
   for (const passage of ranked.sort((a, b) => b.score - a.score || a.start - b.start)) {
     const bytes = Buffer.byteLength(passage.content, "utf8");
     if (bytes > remainingBytes) continue;
@@ -35,7 +39,49 @@ function noteEvidence(note: PrivateDraft, body: string, query: string): Generati
     remainingBytes -= bytes;
     if (selected.length === 8) break;
   }
-  return selected.sort((a, b) => a.start - b.start).map(({ start, content }) => ({
+  return selected.sort((a, b) => a.start - b.start);
+}
+
+function boundedPassage(points: string[], start: number, stop: number, byteBudget: number) {
+  let end = start;
+  while (end < stop) {
+    byteBudget -= Buffer.byteLength(points[end]);
+    if (byteBudget < 0) break;
+    end++;
+  }
+  return { start, content: points.slice(start, end).join("") };
+}
+
+function overviewPassages(body: string, points: string[]) {
+  if (!body.trim()) return [];
+  if (Buffer.byteLength(body) <= evidenceByteBudget) return [{ start: 0, content: body }];
+
+  // Use an odd number of sections to give the middle its own sample. Retain both ends.
+  const sectionCount = 7;
+  const bytesPerSection = Math.floor(evidenceByteBudget / sectionCount);
+  const passages = [];
+  for (let section = 0; section < sectionCount; section++) {
+    let first = Math.floor(section * points.length / sectionCount);
+    let stop = Math.floor((section + 1) * points.length / sectionCount);
+    while (first < stop && !points[first].trim()) first++;
+    while (first < stop && !points[stop - 1].trim()) stop--;
+    if (first === stop) continue;
+
+    const extraBytes = Math.max(0, Buffer.byteLength(points.slice(first, stop).join("")) - bytesPerSection);
+    let skipBytes = section === 0 ? 0 : section === sectionCount - 1 ? extraBytes : Math.floor(extraBytes / 2);
+    let start = first;
+    while (skipBytes > 0) skipBytes -= Buffer.byteLength(points[start++]);
+    const passage = boundedPassage(points, start, stop, bytesPerSection);
+    passages.push(passage.content.trim() ? passage : boundedPassage(points, first, stop, bytesPerSection));
+  }
+  return passages;
+}
+
+/** Select passages within one saved note. No shared index or other private notes are queried. */
+function noteEvidence(note: PrivateDraft, body: string, points: string[], query: string): GenerationRequest["evidence"] {
+  const prompt = query.normalize("NFC").trim().toLowerCase().replace(/[.!?]+$/u, "").replace(/\s+/gu, " ");
+  const selected = overviewPrompts.has(prompt) ? overviewPassages(body, points) : rankedPassages(points, query);
+  return selected.map(({ start, content }) => ({
     generationId: note.versionId, snapshotVersionId: note.versionId, snapshotContentHash: note.contentHash,
     chunkId: hash(`${note.versionId}:${note.contentHash}:${start}`), contentHash: hash(content),
     startOffset: start, endOffset: start + Array.from(content).length, content,
@@ -85,7 +131,15 @@ export function registerPrivateNoteQuestion(app: FastifyInstance, repository: Pi
         const lease = admission.reserve(context.userId, organizationId, draftId);
         try {
           const body = await storage.read(note.sourceUri, note.contentHash);
-          const evidence = noteEvidence(note, body, query);
+          const points = Array.from(body);
+          const evidence = noteEvidence(note, body, points, query);
+          let coveredUntil = 0;
+          let partial = false;
+          for (const passage of evidence) {
+            if (points.slice(coveredUntil, passage.startOffset).join("").trim()) partial = true;
+            coveredUntil = Math.max(coveredUntil, passage.endOffset);
+          }
+          if (points.slice(coveredUntil).join("").trim()) partial = true;
           const recheck = async () => {
             const current = await findNote();
             if (!current) return "missing";
@@ -101,14 +155,14 @@ export function registerPrivateNoteQuestion(app: FastifyInstance, repository: Pi
           const result = parseGenerationResponse(await ai.generate(structuredClone(input)), input);
           const after = await recheck();
           if (after !== "current") return after === "missing" ? unavailable() : changed();
-          if (result.status === "INSUFFICIENT_EVIDENCE") return answerWithFeedback(insufficient);
-          return answerWithFeedback({ status: result.status, answer: result.answer, citations: result.citations.map(({ chunkId, quote }) => {
+          if (result.status === "INSUFFICIENT_EVIDENCE") return { ...answerWithFeedback(insufficient), noteCoverage: partial ? "PARTIAL" : "FULL" };
+          return { ...answerWithFeedback({ status: result.status, answer: result.answer, citations: result.citations.map(({ chunkId, quote }) => {
             const passage = evidence.find(item => item.chunkId === chunkId)!;
             const startOffset = passage.startOffset + Array.from(passage.content.slice(0, passage.content.indexOf(quote))).length;
             return { documentId: draftId, versionId: note.versionId, title: note.title, version: `Version ${expectedVersion}`,
               scope: "Private note", classification: "INTERNAL", documentCode: null, excerpt: quote,
               startOffset, endOffset: startOffset + Array.from(quote).length };
-          }) });
+          }) }), noteCoverage: partial ? "PARTIAL" : "FULL" };
         } finally { lease.release(); }
       } catch (error) {
         if (error instanceof ReaderSummaryError && error.code === "BUSY") {

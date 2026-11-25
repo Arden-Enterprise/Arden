@@ -58,7 +58,94 @@ describe("exact private note questions", () => {
         content: "# Handover\nReturn the badge on Friday." })],
     }));
     expect(response.json()).toMatchObject({ status: "ANSWERED", citations: [{ documentId: h.note.id, versionId: h.note.versionId,
-      startOffset: 11, excerpt: "Return the badge on Friday." }] });
+      startOffset: 11, excerpt: "Return the badge on Friday." }], noteCoverage: "FULL" });
+  });
+
+  it("reports partial coverage when a long note has text outside the selected passages", async () => {
+    const h = harness("Return the badge on Friday. " + "🟣".repeat(9000) + " Final decision.");
+    const result = await h.ask();
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toMatchObject({ status: "ANSWERED", noteCoverage: "PARTIAL" });
+    expect(h.generate.mock.calls[0][0].evidence.length).toBeLessThanOrEqual(8);
+  });
+
+  it("does not count unselected whitespace as omitted content", async () => {
+    const h = harness("Return the badge on Friday." + " ".repeat(10000));
+    const result = await h.ask();
+    expect(result.statusCode).toBe(200);
+    expect(result.json().noteCoverage).toBe("FULL");
+  });
+
+  it("supplies a complete note for an overview when its UTF-8 text fits the budget", async () => {
+    const body = "Return the badge on Friday. " + "Biên bản bàn giao. ".repeat(310) + "Final decision.";
+    const h = harness(body);
+    const result = await h.ask({ payload: { ...h.payload, query: "Summarize this note" } });
+    expect(result.statusCode).toBe(200);
+    expect(result.json().noteCoverage).toBe("FULL");
+    expect(h.generate.mock.calls[0][0].evidence.map(passage => passage.content).join("")).toBe(body);
+    expect(h.generate).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["Summarize this note", "What are the key points?", "Tóm tắt ghi chú này.", "What action items are listed?"])(
+    "samples the beginning, middle and end for %s without exceeding the budget",
+    async query => {
+      const opening = "Return the badge on Friday.";
+      const middle = "The access review found two exceptions.";
+      const closing = "Transfer the records by 30 June.";
+      const paragraphs = [
+        opening
+          + " The team met to review operational changes and discuss outstanding work.\n\n".repeat(50),
+        "Hệ thống quản lý tài liệu đã được cập nhật. Nội dung được rà soát theo từng phòng ban. 🟣\n".repeat(17)
+          + middle
+          + "Hệ thống quản lý tài liệu đã được cập nhật. Nội dung được rà soát theo từng phòng ban. 🟣\n".repeat(17),
+        "The weekly operations report contains progress updates from participating teams.\n".repeat(50)
+          + closing,
+      ];
+      const body = paragraphs.join("\n\n");
+      const h = harness(body);
+      const generate = h.generate.getMockImplementation()!;
+      h.generate.mockImplementationOnce(async input => {
+        const response = await generate(input);
+        response.citations = [{ chunkId: input.evidence.at(-1)!.chunkId, quote: closing }];
+        return response;
+      });
+      const result = await h.ask({ payload: { ...h.payload, query } });
+      expect(result.statusCode).toBe(200);
+      expect(result.json().noteCoverage).toBe("PARTIAL");
+      const evidence = h.generate.mock.calls[0][0].evidence;
+      const contents = evidence.map(passage => passage.content).join("\n");
+      for (const fact of [opening, middle, closing]) expect(contents.includes(fact), fact).toBe(true);
+      expect(evidence.length).toBeLessThanOrEqual(8);
+      expect(evidence.reduce((bytes, passage) => bytes + Buffer.byteLength(passage.content), 0))
+        .toBeLessThanOrEqual(8_000);
+      const points = Array.from(body);
+      for (const passage of evidence) {
+        expect(points.slice(passage.startOffset, passage.endOffset).join("")).toBe(passage.content);
+      }
+      const [citation] = result.json().citations;
+      expect(points.slice(citation.startOffset, citation.endOffset).join("")).toBe(closing);
+      expect(h.generate).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("keeps text in a sparse section when its centered sample contains only whitespace", async () => {
+    const section = "Return the badge on Friday." + " ".repeat(2_000) + "Archive the handover log.";
+    const h = harness(section.repeat(7));
+    const result = await h.ask({ payload: { ...h.payload, query: "Summarize this note" } });
+    expect(result.statusCode).toBe(200);
+    expect(result.json().noteCoverage).toBe("PARTIAL");
+    const evidence = h.generate.mock.calls[0][0].evidence;
+    expect(evidence.filter(passage => passage.content.trim()).length).toBe(7);
+  });
+
+  it("still ranks passages by relevance when a summary request names a specific subject", async () => {
+    const h = harness("Return the badge on Friday.\n" + "General operations update.\n".repeat(280)
+      + "The offboarding coordinator owns access revocation.\n" + "General operations update.\n".repeat(400));
+    const result = await h.ask({ payload: { ...h.payload, query: "Summarize offboarding access revocation in this note" } });
+    expect(result.statusCode).toBe(200);
+    expect(h.generate.mock.calls[0][0].evidence.some(passage =>
+      passage.content.includes("The offboarding coordinator owns access revocation."),
+    )).toBe(true);
   });
 
   it("rejects cross-owner and cross-organization requests before reading storage", async () => {

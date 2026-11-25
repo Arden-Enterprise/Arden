@@ -244,6 +244,7 @@ export type AskArdenAnswer = {
   turnId?: string;
   feedback?: AnswerFeedback;
   feedbackToken?: string;
+  noteCoverage?: "FULL" | "PARTIAL";
   status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
   answer: string;
   citations: Array<{
