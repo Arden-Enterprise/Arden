@@ -1,11 +1,11 @@
 # F22: Writing actions in editable text
 
-- Spec revision/date: 1 / 2026-11-24
+- Spec revision/date: 2 / 2026-11-25
 - Decision state: accepted for the requested Arden UI and Core integration
 - Originator and decision owner: requesting maintainer in this task; individual attribution unknown
 - Record author: Arden implementation agent
 - Approval evidence: maintainer requested Notion-like selection actions, specified the three prompts, then explicitly asked to implement the UI in Arden on 2026-11-24
-- Source baseline: Arden `origin/staging` `cb77c9f9dc78a4791fe7f9d6a75df8312595669f`; approved Arden `origin/main` `9fa3d34a19a559318eff87b4487f2113e6ee5a49`; Arden-AI `origin/main` `34fc6f9d639215c8b23ea7da93e1d1d4db979dbe`
+- Source baseline: Arden `origin/staging` `871e96012ec519acc6002e537bfea2872e46cc21`; approved Arden `origin/main` `9fa3d34a19a559318eff87b4487f2113e6ee5a49`; Arden-AI `origin/main` `34fc6f9d639215c8b23ea7da93e1d1d4db979dbe`
 - Affected repositories: Arden; consumes Arden-AI's merged writing-action contract
 - Related Linear issue: none found in available task context; tracking remains to be assigned
 
@@ -21,12 +21,12 @@ Improve Writing preserves meaning, formatting, links, code and inline structures
 
 | ID | Observable requirement | Current evidence | Remaining |
 | --- | --- | --- | --- |
-| F22-AC1 | Selection and right-click expose exactly the three actions in private notes and shared text drafts | UI implementation and focused private-note tests | Genuine Electron and signed-in browser walkthrough |
+| F22-AC1 | Selection and right-click expose exactly the three actions in private notes and shared text drafts; native context menu remains available when AI actions are disabled | UI implementation and focused private-note tests | Genuine Electron and signed-in browser walkthrough |
 | F22-AC2 | Improve/Reformat return a preview; only explicit Replace changes selected text, leaving outside text intact | Focused UI test; rich editor uses captured ProseMirror range and body fingerprint | Browser acceptance for rich formatting and multiline text |
 | F22-AC3 | Explain answers in panel without editing and cites an exact note quote for page scope | Focused UI and Core tests | Provider-quality check |
-| F22-AC4 | Unauthenticated, nonmember, unapproved organization, malformed, stale-access and invalid-output paths do not release content | Focused Core and desktop allowlist tests | Live provider and deployment configuration check |
-| F22-AC5 | Empty/unchanged, loading, retry, Escape and stale selection are understandable and safe | UI state and cancellation implementation; focused no-change, stale-response and Escape tests | Keyboard, small-screen and native walkthrough |
+| F22-AC4 | Unauthenticated, nonmember, unapproved organization, malformed (including non-string status), stale-access and invalid-output paths do not release content | Focused Core, UI API parser and desktop allowlist tests | Live provider and deployment configuration check |
+| F22-AC5 | Empty/unchanged, loading, retry, Escape and stale selection are understandable and safe; changing or discarding the page draft clears its previous writing result | UI state and cancellation implementation; focused no-change, stale-response, discarded-body and Escape tests | Keyboard, small-screen and native walkthrough |
 
 ## Delivery
 
-Implementation branch `feat/editor-writing-actions` is based on Arden `staging` `cb77c9f`. Workspace typecheck, tests and production build pass locally. The Arden-AI endpoint is merged to its main; Arden UI/Core has not been merged or deployed. This record does not change reader AI RA-06, review, publication or storage contracts.
+Implementation branch `feat/editor-writing-actions` includes Arden `staging` `871e960`. Workspace typecheck and relevant Core/UI regression tests pass locally. The Arden-AI endpoint is merged to its main; Arden UI/Core has not been merged or deployed. This record does not change reader AI RA-06, review, publication or storage contracts.

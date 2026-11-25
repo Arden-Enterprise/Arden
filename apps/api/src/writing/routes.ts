@@ -20,7 +20,7 @@ function validResult(value: unknown, input: Body): value is Result {
   const result = value as Record<string, unknown>;
   return Object.keys(result).sort().join() === "action,contractVersion,requestId,sourceQuote,status,text"
     && result.contractVersion === 1 && result.requestId === input.requestId && result.action === input.action
-    && ["CHANGED", "UNCHANGED", "EXPLAINED"].includes(String(result.status))
+    && typeof result.status === "string" && ["CHANGED", "UNCHANGED", "EXPLAINED"].includes(result.status)
     && (input.action === "EXPLAIN") === (result.status === "EXPLAINED")
     && typeof result.text === "string" && Boolean(result.text.trim()) && result.text.length <= 24_000
     && typeof result.sourceQuote === "string" && result.sourceQuote.length <= 300

@@ -13,10 +13,13 @@ function harness(enabled = true) {
   const membershipId = randomUUID();
   const membership = vi.fn(async (actor: string, org: string) =>
     actor === userId && org === organizationId ? { membershipId, userId, organizationId } : null);
-  const writing = vi.fn(async (input: Record<string, unknown>) => ({
-    contractVersion: 1, requestId: input.requestId, action: input.action,
-    status: "CHANGED", text: "Better text.", sourceQuote: "",
-  }));
+  const writing = vi.fn(async (request: unknown): Promise<unknown> => {
+    const input = request as Record<string, unknown>;
+    return {
+      contractVersion: 1, requestId: input.requestId, action: input.action,
+      status: "CHANGED", text: "Better text.", sourceQuote: "",
+    };
+  });
   registerWritingRoutes(app, { requireActiveMembership: membership }, { writing },
     async request => ({ userId: request.headers["x-other-user"] ? randomUUID() : userId }),
     "^[0-9a-f-]{36}$", new Set(enabled ? [organizationId] : []));
@@ -60,16 +63,18 @@ it("rejects extra fields, invalid scope and oversized content before inference",
 
 it("withholds AI output if access changes during generation or the response is invalid", async () => {
   const h = harness();
-  h.writing.mockImplementationOnce(async input => {
+  h.writing.mockImplementationOnce(async request => {
     h.membership.mockResolvedValueOnce(null);
+    const input = request as Record<string, unknown>;
     return { contractVersion: 1, requestId: input.requestId, action: input.action,
       status: "CHANGED", text: "Private output", sourceQuote: "" };
   });
   expect((await h.run()).json()).toMatchObject({ error: { code: "ACCESS_CHANGED" } });
   const invalid = harness();
-  invalid.writing.mockResolvedValueOnce({ contractVersion: 1, requestId: randomUUID(), action: "IMPROVE",
-    status: "CHANGED", text: "Forged output", sourceQuote: "" });
-  expect((await invalid.run()).json()).toMatchObject({ error: { code: "WRITING_UNAVAILABLE" } });
+  invalid.writing.mockResolvedValueOnce({ contractVersion: 1, requestId: invalid.payload.requestId,
+    action: "IMPROVE", status: ["CHANGED"], text: "See https://attacker.example", sourceQuote: "" });
+  expect((await invalid.run({ payload: { ...invalid.payload, text: "See https://trusted.example" } })).json())
+    .toMatchObject({ error: { code: "WRITING_UNAVAILABLE" } });
 });
 
 it("requires an exact page quote for Explain", async () => {

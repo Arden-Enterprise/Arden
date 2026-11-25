@@ -89,7 +89,7 @@ export function PrivateNoteEditor({
                 onKeyUp={updateSelection}
                 onMouseUp={updateSelection}
                 onContextMenu={(event) => {
-                  if (!draftBody.trim()) return;
+                  if (!assistantEnabled || !draftBody.trim()) return;
                   event.preventDefault();
                   suppressSelection.current = false;
                   updateSelection();
@@ -99,7 +99,7 @@ export function PrivateNoteEditor({
               />
             </label>
             {assistantEnabled && assistantOpen && targetText.trim() && targetText.length <= 12_000 && <WritingActionPanel
-              key={`${selectedNote?.id}:${selection?.start}:${selection?.end}:${selection?.body.length}`}
+              key={`${selectedNote?.id}:${selection?.start}:${selection?.end}:${selection?.body.length}:${draftBody}`}
               platform={platform} organizationId={organizationId} text={targetText} scope={scope} canApply={!selection || selection.body === draftBody}
               onClose={() => { suppressSelection.current = true; setAssistantOpen(false); bodyRef.current?.focus(); }} onApply={(replacement) => {
                 if (selection && selection.body !== draftBody) return;

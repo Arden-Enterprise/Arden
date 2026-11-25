@@ -12,7 +12,7 @@ export async function runWritingAction(platform: Platform, organizationId: strin
   if (!response || typeof response !== "object") throw new ApiError(502, "Writing assistant returned an invalid result.");
   const value = response as Record<string, unknown>;
   if (value.contractVersion !== 1 || value.requestId !== requestId || value.action !== action
-    || !["CHANGED", "UNCHANGED", "EXPLAINED"].includes(String(value.status))
+    || typeof value.status !== "string" || !["CHANGED", "UNCHANGED", "EXPLAINED"].includes(value.status)
     || (action === "EXPLAIN") !== (value.status === "EXPLAINED")
     || typeof value.text !== "string" || !value.text.trim() || value.text.length > 24_000
     || typeof value.sourceQuote !== "string" || value.sourceQuote.length > 300

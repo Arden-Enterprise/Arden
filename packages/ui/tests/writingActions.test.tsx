@@ -11,11 +11,15 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-function Note() {
-  const [body, setBody] = useState("Alpha selected omega.");
+function Note({ assistantEnabled = true, initialBody = "Alpha selected omega.", discardBody }: {
+  assistantEnabled?: boolean; initialBody?: string; discardBody?: string;
+} = {}) {
+  const [body, setBody] = useState(initialBody);
   return <PrivateNoteEditor selectedNote={{ id: "note", title: "Note", body, updatedLabel: "Saved" }}
-    draftTitle="Note" draftBody={body} isDirty={false} savedMessage="" toolbar={null}
-    platform="web" organizationId="123e4567-e89b-42d3-a456-426614174000" assistantEnabled onTitleChange={() => {}} onBodyChange={setBody} />;
+    draftTitle="Note" draftBody={body} isDirty={false} savedMessage=""
+    toolbar={discardBody === undefined ? null : <button type="button" onClick={() => setBody(discardBody)}>Discard draft</button>}
+    platform="web" organizationId="123e4567-e89b-42d3-a456-426614174000" assistantEnabled={assistantEnabled}
+    onTitleChange={() => {}} onBodyChange={setBody} />;
 }
 
 it("replaces only the selected text after explicit Apply", async () => {
@@ -88,6 +92,13 @@ it("right-click without a selection uses the current note", async () => {
   expect(run).toHaveBeenCalledWith("web", expect.any(String), "EXPLAIN", "Alpha selected omega.", "PAGE", expect.any(AbortSignal));
 });
 
+it("keeps the native context menu when AI writing is disabled", () => {
+  render(<Note assistantEnabled={false} />);
+  const editor = screen.getByRole("textbox", { name: "Note content" });
+  expect(fireEvent.contextMenu(editor)).toBe(true);
+  expect(screen.queryByRole("region", { name: "Writing assistant" })).toBeNull();
+});
+
 it("reports no change without a Replace action", async () => {
   vi.spyOn(api, "runWritingAction").mockResolvedValue({ status: "UNCHANGED", text: "No changes needed.", sourceQuote: "" });
   render(<Note />);
@@ -110,4 +121,16 @@ it("discards an in-flight suggestion when the note changes", async () => {
   await act(async () => { finish({ status: "CHANGED", text: "Stale result", sourceQuote: "" }); });
   expect(editor.value).toBe("Updated elsewhere.");
   expect(screen.queryByText("Stale result")).toBeNull();
+});
+
+it("clears a whole-note result when the draft body is discarded", async () => {
+  vi.spyOn(api, "runWritingAction").mockResolvedValue({ status: "CHANGED", text: "Generated replacement", sourceQuote: "" });
+  render(<Note initialBody="Unsaved draft." discardBody="Saved content." />);
+  fireEvent.click(screen.getByRole("button", { name: "AI writing" }));
+  fireEvent.click(screen.getByRole("button", { name: "Improve Writing" }));
+  await screen.findByText("Generated replacement");
+  fireEvent.click(screen.getByRole("button", { name: "Discard draft" }));
+  expect((screen.getByRole("textbox", { name: "Note content" }) as HTMLTextAreaElement).value).toBe("Saved content.");
+  expect(screen.queryByText("Generated replacement")).toBeNull();
+  expect(screen.getByRole("button", { name: "Improve Writing" })).toBeTruthy();
 });
