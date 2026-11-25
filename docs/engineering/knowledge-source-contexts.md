@@ -37,6 +37,8 @@ the question and selected excerpts to OpenAI with response storage
 disabled. The Core handler logs only request and error identifiers. Review the
 deployment's provider and observability settings before enabling a real tenant.
 
+F22 writing actions send a bounded text selection (or the current note body when no text is selected) through Core to Arden-AI. The client supplies this text, so Core cannot prove it came from a shared draft rather than a private note. The same organization opt-in therefore gates all writing actions. Core checks active membership before and after inference, returns only validated output, and does not persist the input or log its text. The UI requires explicit Replace for edits; Explain remains a chat response. See [F22](../product/writing-actions.md).
+
 ## Verification
 
 F13-SC4 covers exact-note authorization, revision freshness, quote validation,

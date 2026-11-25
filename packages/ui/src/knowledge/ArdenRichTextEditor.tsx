@@ -4,6 +4,8 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { useEffect, useId, useRef, useState } from "react";
 import { parseArdenDocument, serializeArdenDocument } from "./ardenDocumentModel";
 import { ardenDocumentSchema } from "./ardenDocumentSchema";
+import type { Platform } from "../shared/types";
+import { WritingActionPanel } from "../shared/WritingActionPanel";
 
 type ArdenEditor = BlockNoteEditor<
   typeof ardenDocumentSchema.blockSchema,
@@ -17,6 +19,8 @@ type Props = {
   disabled?: boolean;
   maxLength?: number;
   onChange?: (body: string) => void;
+  platform?: Platform;
+  organizationId?: string;
 };
 
 type TextSize = "paragraph" | "heading-3" | "heading-2";
@@ -145,7 +149,9 @@ function TextSizeMenu({ value, disabled, onChange }: { value: TextSize; disabled
   </div>;
 }
 
-function ArdenFormattingToolbar({ editor, disabled, revision }: { editor: ArdenEditor; disabled: boolean; revision: number }) {
+function ArdenFormattingToolbar({ editor, disabled, revision, writingEnabled, onWriting }: {
+  editor: ArdenEditor; disabled: boolean; revision: number; writingEnabled: boolean; onWriting: () => void;
+}) {
   void revision;
   const styles = editor.getActiveStyles();
   const block = editor.getTextCursorPosition().block;
@@ -168,6 +174,10 @@ function ArdenFormattingToolbar({ editor, disabled, revision }: { editor: ArdenE
       <ToolbarButton className="arden-format-block" label="Numbered list" active={block.type === "numberedListItem"} disabled={disabled} onActivate={() => toggleBlock(editor, "numberedListItem")}>1.</ToolbarButton>
       <ToolbarButton className="arden-format-block" label="Quote" active={block.type === "quote"} disabled={disabled} onActivate={() => toggleBlock(editor, "quote")}>“</ToolbarButton>
     </div>
+    {writingEnabled && <><span className="arden-format-divider" aria-hidden="true" />
+      <button type="button" title="Select up to 12,000 characters to use AI writing"
+        disabled={disabled || !editor.getSelectedText().trim() || editor.getSelectedText().length > 12_000}
+        onMouseDown={event => event.preventDefault()} onClick={onWriting}>AI writing</button></>}
   </div>;
 }
 
@@ -193,12 +203,32 @@ const disabledBlockNoteUi = {
   attributionTooltip: false,
 } as const;
 
-export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLength = 131_072, onChange }: Props) {
+type WritingSelection = { text: string; from: number; to: number; body: string; plain: boolean; wholeBlock: boolean };
+
+function captureWritingSelection(editor: ArdenEditor): WritingSelection | null {
+  const text = editor.getSelectedText();
+  const state = editor._tiptapEditor.state;
+  const { from, to, $from, $to } = state.selection;
+  if (!text.trim() || from === to || text.length > 12_000) return null;
+  const sameBlock = $from.parent === $to.parent && $from.parent.isTextblock;
+  let plain = sameBlock;
+  state.doc.nodesBetween(from, to, node => {
+    if (node.isText && node.marks.length > 0) plain = false;
+  });
+  return { text, from, to, body: serializeArdenDocument(editor.document), plain,
+    wholeBlock: sameBlock && from === $from.start() && to === $to.end() };
+}
+
+export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLength = 131_072, onChange, platform, organizationId }: Props) {
   const { editor, initialDocument } = useArdenEditor(body, instanceKey);
   const acceptedBody = useRef(body);
   const reverting = useRef(false);
   const [selectionRevision, setSelectionRevision] = useState(0);
   const [limitReached, setLimitReached] = useState(false);
+  const [selectionTooLong, setSelectionTooLong] = useState(false);
+  const [writingSelection, setWritingSelection] = useState<WritingSelection | null>(null);
+  const [writingOpen, setWritingOpen] = useState(false);
+  const suppressSelection = useRef(false);
 
   useEffect(() => { acceptedBody.current = body; }, [body]);
 
@@ -219,16 +249,57 @@ export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLe
     }
     acceptedBody.current = encoded;
     setLimitReached(false);
+    setWritingOpen(false);
+    setWritingSelection(null);
     setSelectionRevision((value) => value + 1);
     onChange?.(encoded);
   };
 
   return <div className={`arden-rich-text-shell${disabled ? " is-disabled" : ""}`}>
-    <ArdenFormattingToolbar editor={editor} disabled={disabled} revision={selectionRevision} />
-    <BlockNoteView editor={editor} theme="dark" editable={!disabled} onChange={handleChange}
-      onSelectionChange={() => setSelectionRevision((value) => value + 1)} className="arden-blocknote-editor"
-      {...disabledBlockNoteUi} />
+    <ArdenFormattingToolbar editor={editor} disabled={disabled} revision={selectionRevision}
+      writingEnabled={Boolean(platform && organizationId)} onWriting={() => {
+        suppressSelection.current = false;
+        setWritingSelection(captureWritingSelection(editor)); setWritingOpen(true);
+      }} />
+    <div onMouseDownCapture={() => { suppressSelection.current = false; }}
+      onKeyDownCapture={(event) => { if (event.key !== "Escape") suppressSelection.current = false; }}
+      onContextMenu={(event) => {
+      if (disabled || !platform || !organizationId) return;
+      const captured = captureWritingSelection(editor);
+      if (!captured) return;
+      event.preventDefault();
+      suppressSelection.current = false;
+      setWritingSelection(captured);
+      setWritingOpen(true);
+    }}><BlockNoteView editor={editor} theme="dark" editable={!disabled} onChange={handleChange}
+      onSelectionChange={() => {
+        setSelectionRevision((value) => value + 1);
+        setSelectionTooLong(editor.getSelectedText().length > 12_000);
+        if (suppressSelection.current) return;
+        const captured = captureWritingSelection(editor);
+        if (captured && platform && organizationId && !disabled) { setWritingSelection(captured); setWritingOpen(true); }
+      }} className="arden-blocknote-editor"
+      {...disabledBlockNoteUi} /></div>
+    {platform && organizationId && writingOpen && writingSelection && <WritingActionPanel
+      key={`${writingSelection.from}:${writingSelection.to}:${writingSelection.body.length}`}
+      platform={platform} organizationId={organizationId} text={writingSelection.text} scope="SELECTION"
+      canApply={action => !disabled && writingSelection.body === serializeArdenDocument(editor.document)
+        && writingSelection.plain && (action !== "REFORMAT" || writingSelection.wholeBlock)}
+      onClose={() => { suppressSelection.current = true; setWritingOpen(false); editor.focus(); }} onApply={(replacement, action) => {
+        if (writingSelection.body !== serializeArdenDocument(editor.document) || !writingSelection.plain) return;
+        if (action === "REFORMAT") {
+          if (!writingSelection.wholeBlock) return;
+          editor._tiptapEditor.commands.setTextSelection({ from: writingSelection.from, to: writingSelection.to });
+          editor.pasteMarkdown(replacement);
+        } else {
+          const tiptap = editor._tiptapEditor;
+          tiptap.view.dispatch(tiptap.state.tr.insertText(replacement, writingSelection.from, writingSelection.to));
+        }
+        suppressSelection.current = true;
+        setWritingOpen(false); setWritingSelection(null); editor.focus();
+      }} />}
     {limitReached && <p className="arden-document-limit" role="status">Edit not applied. Document limit: {maxLength.toLocaleString()} characters, including formatting.</p>}
+    {selectionTooLong && <p className="arden-document-limit" role="status">Select up to 12,000 characters to use AI writing.</p>}
   </div>;
 }
 

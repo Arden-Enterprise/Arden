@@ -219,6 +219,8 @@ References: [GitHub App permissions](https://docs.github.com/en/apps/creating-gi
 
 ## 11. OpenAI and the Arden-AI gateway
 
+F22 editable-text writing actions use Core's authenticated, organization-scoped `POST /api/v1/organizations/:organizationId/ai/writing-actions` proxy to Arden-AI's internal `POST /v1/writing-actions` contract v1. The renderer never calls Arden-AI directly. The request carries at most 12,000 characters; Core validates the bounded result and rechecks membership. The existing private-note AI organization opt-in also gates shared-draft writing because client-supplied text has no trustworthy provenance. See [F22](../product/writing-actions.md) and the [data-flow boundary](knowledge-source-contexts.md).
+
 - All inference/retrieval goes through the private Python `Arden-AI` service; clients and models do not receive database/connector credentials. Use explicit OpenAI chat and embedding profiles, capability checks, context limits, timeouts, concurrency, retries and cancellation.
 - Only send authorized query/context and necessary provenance. Keep user-selected context inspectable; citations resolve server-side to retrieved exact versions, not model-invented IDs/URLs.
 - The demo intentionally uses the OpenAI API for embeddings and generation. Send only the authorized

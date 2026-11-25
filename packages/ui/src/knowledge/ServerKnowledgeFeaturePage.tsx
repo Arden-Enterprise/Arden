@@ -1202,7 +1202,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             {newFile && !newFileError && <div className="knowledge-selected-pdf"><strong>{newFile.name}</strong><span>{(newFile.size / 1024 / 1024).toFixed(1)} MB · ready to upload</span><button type="button" disabled={busy} onClick={() => { chooseFile(null); if (fileInput.current) fileInput.current.value = ""; }}>Remove</button></div>}
           </div> : <div className="arden-document-field"><span>Document text</span>
             <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor key="new-shared-knowledge"
-              body={newBody} instanceKey="new-shared-knowledge" disabled={busy} onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
+              body={newBody} instanceKey="new-shared-knowledge" disabled={busy} platform={platform} organizationId={organizationId}
+              onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
           </div>}
           <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button>
             <button type="button" className="secondary-button" disabled={busy} onClick={cancelCreation}>Cancel</button>
@@ -1233,7 +1234,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                 <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor
                   key={`${draft.id}:${draft.currentVersion.version}`} body={editor.body}
                   instanceKey={`${draft.id}:${draft.currentVersion.version}`}
-                  disabled={busy} onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
+                  disabled={busy} platform={platform} organizationId={organizationId}
+                  onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
               </div>}
             </div>
           </article>

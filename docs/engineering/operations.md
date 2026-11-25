@@ -127,7 +127,7 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `ARDEN_CORE_URL` | `http://127.0.0.1:3001` for local desktop | Public HTTPS Core origin for the Windows desktop process; loopback HTTP is allowed only for local development |
 | `ARDEN_AI_URL` | Unset | Private HTTP(S) origin of Arden-AI, with no path or credentials; configure together with the service token |
 | `ARDEN_AI_SERVICE_TOKEN` | Unset | Server-only shared credential for Core/worker to call Arden-AI; never expose it to web/desktop clients |
-| `ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS` | Unset | Comma-separated organization UUIDs that have opted in to the configured provider handling Private questions and note excerpts |
+| `ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS` | Unset | Comma-separated organization UUIDs that have opted in to the configured provider handling Private questions, note excerpts and client-supplied AI writing text; writing actions for shared drafts are also gated because Core cannot verify text provenance |
 | `ARDEN_TEST_DATABASE_URL` | Unset | Optional real-PostgreSQL integration target; must be a disposable, pre-migrated database named `arden_test_*` |
 | `ARDEN_LOCAL_FLOW1_TEST_MODE` | Unset | Manual local browser-test auth; only `true` with loopback API/PostgreSQL, database `arden_test_*`, no Supabase config, and non-production mode |
 | `ARDEN_LOCAL_TEST_USERS` | Unset | JSON list of synthetic `@example.test` accounts, required only in fenced local Mainflow 1 test mode; keep the passwords in the launching shell, not files/Git |
