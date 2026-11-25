@@ -1,6 +1,6 @@
 /**
- * Import a PDF as a private note (spec F03-PDF). The text is read in this browser with the bundled
- * pdf.js and saved as an ordinary text note; the PDF file itself is never uploaded or stored.
+ * Import a PDF into a private note (spec F03-PDF). The text is read in this browser with the bundled
+ * pdf.js and becomes ordinary note text; the PDF file itself is never uploaded or stored.
  */
 
 /** Matches the API's private-note body limit (UTF-8 bytes). */
@@ -76,10 +76,36 @@ export function buildImportedNote(fileName: string, metadataTitle: string | null
   return { title, body, importedPages, totalPages: pages.length, truncated: importedPages < pages.length };
 }
 
+/** The text of one PDF, before it is fitted into a note. */
+export type PdfText = { fileName: string; metadataTitle: string | null; pages: string[] };
+
+/**
+ * Adds a PDF's text to a note's current draft (spec F03-PDF revision 2). An empty note receives the text;
+ * a note with text keeps it and gets the PDF after a blank line. A note still called "Untitled private note"
+ * (or with no title) takes the PDF's title. The note limit counts the text already there.
+ */
+export function mergePdfIntoNote(current: { title: string; body: string }, pdf: PdfText, untitled: string,
+  maxBytes = NOTE_BODY_MAX_BYTES): { title: string; body: string; imported: ImportedNote } {
+  const existing = current.body.replace(/\s+$/, "");
+  const separator = existing ? "\n\n" : "";
+  const room = maxBytes - utf8Bytes(existing + separator);
+  if (room <= 0) throw new PdfImportError("This note is full. Import the PDF into an empty note instead.");
+  const imported = buildImportedNote(pdf.fileName, pdf.metadataTitle, pdf.pages, room);
+  if (!imported.body) throw new PdfImportError("There isn’t enough room left in this note. Import the PDF into an empty note instead.");
+  const keepTitle = current.title.trim() && current.title.trim() !== untitled;
+  return { title: keepTitle ? current.title : imported.title, body: existing + separator + imported.body, imported };
+}
+
 type PdfRuntime = typeof import("../knowledge/pdfRuntime");
 
-/** Reads every page's text with pdf.js; maps password and corrupt-file failures to clear messages. */
+/** Reads every page's text with pdf.js and fits it into a new note's limit. */
 export async function readPdfFile(file: File, load: () => Promise<PdfRuntime> = () => import("../knowledge/pdfRuntime")): Promise<ImportedNote> {
+  const pdf = await readPdfText(file, load);
+  return buildImportedNote(pdf.fileName, pdf.metadataTitle, pdf.pages);
+}
+
+/** Reads every page's text with pdf.js; maps password and corrupt-file failures to clear messages. */
+export async function readPdfText(file: File, load: () => Promise<PdfRuntime> = () => import("../knowledge/pdfRuntime")): Promise<PdfText> {
   const isPdfName = /\.pdf$/i.test(file.name);
   if (file.type !== "application/pdf" && !isPdfName) throw new PdfImportError("Choose a PDF file.");
   if (file.size === 0) throw new PdfImportError("This PDF is empty.");
@@ -101,7 +127,10 @@ export async function readPdfFile(file: File, load: () => Promise<PdfRuntime> = 
       const info = (await document.getMetadata()).info as { Title?: unknown } | undefined;
       metadataTitle = typeof info?.Title === "string" ? info.Title : null;
     } catch { metadataTitle = null; }
-    return buildImportedNote(file.name, metadataTitle, pages);
+    if (!pages.some((page) => page.replace(/\u0000/g, "").trim())) {
+      throw new PdfImportError("This PDF has no selectable text, for example because it is a scan. Arden can’t read scanned pages yet.");
+    }
+    return { fileName: file.name, metadataTitle, pages };
   } catch (cause) {
     if (cause instanceof PdfImportError) throw cause;
     const name = cause instanceof Error ? cause.name : "";
