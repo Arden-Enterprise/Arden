@@ -42,10 +42,17 @@ describe("decision 0023 Administration → Documents", () => {
     fireEvent.click(within(row).getByRole("button", { name: "Inspect" }));
     const dialog = screen.getByRole("dialog", { name: "Inspect document" });
     expect(within(dialog).getByText(/won’t\s+become a reader/)).toBeTruthy();
+    // Compact reason dialog: the document title describes the dialog and focus starts in the reason field.
+    expect(within(dialog).getByText("Salary bands").id).toBe(dialog.getAttribute("aria-describedby"));
+    const field = within(dialog).getByRole("textbox", { name: /Reason/ });
+    expect(globalThis.document.activeElement).toBe(field);
+    expect(within(dialog).getByText("0 / 1000")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Open" }));
-    expect(within(dialog).getByText("Enter a reason.")).toBeTruthy();
+    expect(within(dialog).getByRole("alert").textContent).toBe("Enter a reason.");
+    expect(field.getAttribute("aria-invalid")).toBe("true");
     expect(open).not.toHaveBeenCalled();
-    fireEvent.change(within(dialog).getByRole("textbox", { name: /Reason/ }), { target: { value: " Reported leak " } });
+    fireEvent.change(field, { target: { value: " Reported leak " } });
+    expect(within(dialog).getByText("15 / 1000")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Open" }));
     await waitFor(() => expect(open).toHaveBeenCalledWith("web", "org", "doc", "Reported leak"));
     expect(load).toHaveBeenCalledWith("web", "org", "inspection");

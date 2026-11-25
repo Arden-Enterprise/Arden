@@ -1,4 +1,5 @@
 import type { Platform } from "./types";
+import { rememberReturnPath } from "../app/workspaceRoute";
 import type { KnowledgeMetadata, PublicationScope, KnowledgeType } from "@arden/domain";
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
@@ -581,6 +582,8 @@ export async function signIn(platform: Platform, email: string, password: string
 
 export async function beginGoogleSignIn(platform: Platform): Promise<CurrentSession | null> {
   if (platform === "web") {
+    // Google returns to `/`; keep the workspace page the member was opening so sign-in lands there.
+    rememberReturnPath(window.location.pathname);
     window.location.assign("/api/v1/auth/google/start?client=web");
     return null;
   }

@@ -99,6 +99,8 @@
 /* ---------- Navigation island ---------- */
 .arden-app-shell .app-sidebar {
   top: 0;
+  /* Above the page on every view, so popovers opened from the sidebar (a note's ··· menu) are never covered. */
+  z-index: 4;
   gap: 2px;
   width: calc(100% + var(--arden-shell-gap));
   height: 100dvh;

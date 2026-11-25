@@ -8,6 +8,20 @@ const idempotencyKey = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const sharedDraftPath = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
 
 describe("desktop API request allowlist", () => {
+  it("allows only a bounded writing action body with a Core-owned deadline", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/writing-actions`;
+    const payload = { requestId: idempotencyKey, action: "IMPROVE", scope: "SELECTION", text: "A sentence." };
+    const request = { path, method: "POST" as const, body: JSON.stringify(payload) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 90_000);
+    for (const body of ["{}", JSON.stringify({ ...payload, text: " " }), JSON.stringify({ ...payload, text: "x".repeat(12_001) }),
+      JSON.stringify({ ...payload, scope: "ALL" }), JSON.stringify({ ...payload, source: "private-note" })]) {
+      assert.equal(validateDesktopApiRequest({ ...request, body }), false);
+    }
+    for (const change of [{ method: "GET" }, { path: `${path}?all=1` }, { timeoutMs: 60_000 }, { idempotencyKey }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+  });
   it("allows only versioned placement reads and mutations", () => {
     const path = `/api/v1/organizations/${organizationId}/knowledge/catalog/placements/${sourcePrivateVersionId}`;
     assert.equal(validateDesktopApiRequest({ path, method: "GET" }), true);
