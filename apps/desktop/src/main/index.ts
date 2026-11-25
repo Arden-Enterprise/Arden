@@ -46,6 +46,14 @@ function isTrustedRenderer(event: Electron.IpcMainInvokeEvent): boolean {
     : url.startsWith("file://");
 }
 
+ipcMain.handle("arden:editor:paste", (event) => {
+  if (!isTrustedRenderer(event) || !BrowserWindow.fromWebContents(event.sender)?.isFocused()
+    || event.sender.focusedFrame !== event.sender.mainFrame) {
+    throw new Error("Desktop paste is unavailable");
+  }
+  event.sender.paste();
+});
+
 function trustedApiOrigin(): string {
   const configured = process.env.ARDEN_CORE_URL ?? (app.isPackaged ? "" : "http://127.0.0.1:3001");
   if (!configured) throw new Error("ARDEN_CORE_URL is required for the desktop client");

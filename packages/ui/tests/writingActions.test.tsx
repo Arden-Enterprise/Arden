@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { PrivateNoteEditor } from "../src/personal-workspace/PrivateNoteEditor";
 import * as api from "../src/shared/writing-action-api";
@@ -97,6 +97,66 @@ it("keeps the native context menu when AI writing is disabled", () => {
   const editor = screen.getByRole("textbox", { name: "Note content" });
   expect(fireEvent.contextMenu(editor)).toBe(true);
   expect(screen.queryByRole("region", { name: "Writing assistant" })).toBeNull();
+});
+
+it("places the compact context menu next to the pointer and focuses it from Shift+F10", () => {
+  render(<Note />);
+  const editor = screen.getByRole("textbox", { name: "Note content" });
+  fireEvent.contextMenu(editor, { button: 2, clientX: 125, clientY: 140 });
+  const menu = screen.getByRole("region", { name: "Writing assistant" });
+  expect(menu.style.left).toBe("125px");
+  expect(menu.style.top).toBe("146px");
+  expect(menu.classList.contains("is-expanded")).toBe(false);
+  fireEvent.keyDown(editor, { key: "Escape" });
+  fireEvent.keyDown(editor, { key: "F10", shiftKey: true });
+  const paste = screen.getByRole("button", { name: "Paste" });
+  expect(document.activeElement).toBe(paste);
+  fireEvent.keyDown(paste, { key: "Escape" });
+  expect(document.activeElement).toBe(editor);
+});
+
+it("copies and cuts the captured selection through the editor's native command", async () => {
+  render(<Note />);
+  const editor = screen.getByRole("textbox", { name: "Note content" }) as HTMLTextAreaElement;
+  const command = vi.fn(() => {
+    expect(document.activeElement).toBe(editor);
+    expect(editor.value.slice(editor.selectionStart, editor.selectionEnd)).toBe("selected");
+    return true;
+  });
+  const original = Object.getOwnPropertyDescriptor(document, "execCommand");
+  Object.defineProperty(document, "execCommand", { configurable: true, value: command });
+  try {
+    for (const action of ["Copy", "Cut"]) {
+      editor.setSelectionRange(6, 14);
+      fireEvent.contextMenu(editor, { button: 2, clientX: 120, clientY: 150 });
+      fireEvent.click(screen.getByRole("button", { name: action }));
+      await waitFor(() => expect(screen.queryByRole("region", { name: "Writing assistant" })).toBeNull());
+    }
+    expect(command.mock.calls).toEqual([["copy"], ["cut"]]);
+  } finally {
+    if (original) Object.defineProperty(document, "execCommand", original);
+    else Reflect.deleteProperty(document, "execCommand");
+  }
+});
+
+it("pastes into the selected range and at the caret in an empty note", async () => {
+  const readText = vi.fn().mockResolvedValue("pasted");
+  vi.stubGlobal("navigator", { clipboard: { readText } });
+  for (const [body, start, end, expected] of [
+    ["Alpha selected omega.", 6, 14, "Alpha pasted omega."],
+    ["", 0, 0, "pasted"],
+  ] as const) {
+    const note = render(<Note initialBody={body} />);
+    const editor = screen.getByRole("textbox", { name: "Note content" }) as HTMLTextAreaElement;
+    editor.setSelectionRange(start, end);
+    fireEvent.contextMenu(editor, { button: 2, clientX: 120, clientY: 150 });
+    if (!body) expect(screen.queryByRole("button", { name: "Improve Writing" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Paste" }));
+    await waitFor(() => expect(editor.value).toBe(expected));
+    expect(screen.queryByRole("region", { name: "Writing assistant" })).toBeNull();
+    note.unmount();
+  }
+  expect(readText).toHaveBeenCalledTimes(2);
 });
 
 it("reports no change without a Replace action", async () => {

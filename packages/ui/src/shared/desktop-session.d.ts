@@ -11,6 +11,7 @@ declare global {
       }>;
       clearSession(): Promise<void>;
       startGoogleSignIn(): Promise<void>;
+      pasteIntoEditor?(): Promise<void>;
       startNotificationStream?(organizationId: string): Promise<void>;
       stopNotificationStream?(organizationId?: string): Promise<void>;
       subscribeNotificationEvents?(listener: (notificationId: string) => void): () => void;
