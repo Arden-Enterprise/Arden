@@ -6,8 +6,10 @@ import { ApiError, dismissPublicationReport, listClosedPublicationReports, listG
 import type { Platform } from "../shared/types";
 import { importOpenMaintenanceReports } from "../maintenance/maintenance-client";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
+import type { IconName } from "../shared/Icon";
 import { KnowledgeDialog } from "./KnowledgeDialog";
 import { libraryDateLabel } from "./libraryDisplay";
+import { ReasonField, ReasonNotice } from "./ReasonField";
 import { PdfDocument } from "./PdfDocument";
 
 const ArdenDocumentView = lazy(() => import("./ArdenRichTextEditor").then((module) => ({ default: module.ArdenDocumentView })));
@@ -21,10 +23,10 @@ export function governanceReadersLabel(mode: GovernanceReaderMode, departmentId:
   return "Selected members";
 }
 
-/** One required reason (1-1000 characters) before an action that is recorded with it. */
-export function ReasonDialog({ title, effect, label, placeholder, submitLabel, danger = false, onSubmit, onClose }: {
-  title: string; effect: ReactNode; label: string; placeholder: string; submitLabel: string; danger?: boolean;
-  onSubmit: (reason: string) => Promise<void>; onClose: () => void;
+/** One required reason (1-1000 characters) before an action that is recorded with it, in the compact dialog island. */
+export function ReasonDialog({ title, subtitle, icon, notice, noticeIcon, label, placeholder, submitLabel, danger = false, onSubmit, onClose }: {
+  title: string; subtitle: string; icon: IconName; notice: ReactNode; noticeIcon: IconName; label: string; placeholder: string;
+  submitLabel: string; danger?: boolean; onSubmit: (reason: string) => Promise<void>; onClose: () => void;
 }) {
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
@@ -37,17 +39,18 @@ export function ReasonDialog({ title, effect, label, placeholder, submitLabel, d
     setBusy(true); setError("");
     try { await onSubmit(reason.trim()); } catch (cause) { setError(failure(cause, "Couldn’t complete this action.")); setBusy(false); }
   };
-  return <KnowledgeDialog title={title} dismissible={!busy} onClose={onClose}>
-    <form className="publication-change-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      <div className="publication-change-effect">{effect}</div>
-      <label className="island-field publication-change-reason">{label} *
-        <textarea rows={4} maxLength={1000} value={reason} disabled={busy} aria-invalid={attempted && missing}
-          placeholder={placeholder} onChange={(event) => setReason(event.target.value)} />
-        <small className={attempted && missing ? "field-error" : ""} role={attempted && missing ? "alert" : undefined}>
-          {attempted && missing ? "Enter a reason." : `${reason.length}/1000`}</small>
-      </label>
-      {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-      <div className="publication-change-actions">
+  const tone = danger ? "danger" : "default";
+  const noticeBlock = <ReasonNotice icon={noticeIcon} tone={tone}>{notice}</ReasonNotice>;
+  return <KnowledgeDialog title={title} subtitle={subtitle} icon={icon} tone={tone} compact dismissible={!busy} onClose={onClose}>
+    <form className="reason-dialog-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+      <div className="reason-dialog-body">
+        {danger && noticeBlock}
+        <ReasonField label={label} value={reason} placeholder={placeholder} busy={busy} showMissing={attempted && missing}
+          onChange={setReason} />
+        {!danger && noticeBlock}
+        {error && <p role="alert" className="knowledge-live-error">{error}</p>}
+      </div>
+      <div className="reason-dialog-footer">
         <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
         <button type="submit" className={danger ? "primary-button governance-danger" : "primary-button"} disabled={busy}>
           {busy ? "Working…" : submitLabel}</button>
@@ -77,11 +80,10 @@ type WithdrawTarget = { documentId: string; title: string };
 function WithdrawPublicationDialog({ target, platform, organizationId, onDone, onClose }: {
   target: WithdrawTarget; platform: Platform; organizationId: string; onDone: () => void; onClose: () => void;
 }) {
-  return <ReasonDialog title="Withdraw publication" danger label="Reason" submitLabel="Withdraw"
-    placeholder="Why must this document stop being used?"
-    effect={<><p><strong>{target.title}</strong></p><p>It leaves the Library, search and Ask Arden at once. Its versions stay in
-      history, the author sees your reason, and publishing it again needs a new review. Copies people already
-      downloaded cannot be recalled.</p></>}
+  return <ReasonDialog title="Withdraw publication" subtitle={target.title} icon="warning" noticeIcon="warning" danger
+    label="Reason" submitLabel="Withdraw" placeholder="Why must this document stop being used?"
+    notice={<p>It leaves the Library, search and Ask Arden at once. Its versions stay in history, the author sees your
+      reason, and publishing it again needs a new review. Copies people already downloaded cannot be recalled.</p>}
     onClose={onClose}
     onSubmit={async (reason) => { await withdrawPublication(platform, organizationId, target.documentId, reason); onDone(); }} />;
 }
@@ -283,10 +285,10 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
           </IslandCell>
         </IslandRow>)}
       </IslandTable> : <div className="island island-empty"><h3>{items.length ? "No matching documents" : "No published documents"}</h3></div>}
-    {inspectTarget && <ReasonDialog title="Inspect document" label="Reason" submitLabel="Open"
-      placeholder="Why do you need to open this document?"
-      effect={<><p><strong>{inspectTarget.title}</strong></p><p>Your reason is recorded before the document opens. You won’t
-        become a reader: it stays out of your Library and Ask Arden.</p></>}
+    {inspectTarget && <ReasonDialog title="Inspect document" subtitle={inspectTarget.title} icon="shield" noticeIcon="shield"
+      label="Reason" submitLabel="Open" placeholder="Why do you need to open this document?"
+      notice={<p>Your reason is recorded before the document opens. You won’t become a reader: it stays out of your
+        Library and Ask Arden.</p>}
       onClose={() => setInspectTarget(null)}
       onSubmit={async (reason) => {
         const id = await openGovernanceInspection(platform, organizationId, inspectTarget.documentId, reason);
