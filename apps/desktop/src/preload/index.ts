@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("ardenDesktop", {
   requestApi: (request: DesktopApiRequest): Promise<DesktopApiResponse> => ipcRenderer.invoke("arden:api-request", request),
   clearSession: (): Promise<void> => ipcRenderer.invoke("arden:session:clear"),
   startGoogleSignIn: (): Promise<void> => ipcRenderer.invoke("arden:auth:google"),
+  pasteIntoEditor: (): Promise<void> => ipcRenderer.invoke("arden:editor:paste"),
   startNotificationStream: (organizationId: string): Promise<void> => ipcRenderer.invoke("arden:notifications:start", organizationId),
   stopNotificationStream: (organizationId?: string): Promise<void> => ipcRenderer.invoke("arden:notifications:stop", organizationId),
   subscribeNotificationEvents: (listener: (notificationId: string) => void): (() => void) => {

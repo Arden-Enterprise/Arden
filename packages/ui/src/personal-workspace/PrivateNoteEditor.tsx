@@ -3,6 +3,8 @@ import { useAutosizeTextarea } from "../shared/useAutosizeTextarea";
 import { Icon } from "../shared/Icon";
 import type { Platform, PrivateNote } from "../shared/types";
 import { WritingActionPanel } from "../shared/WritingActionPanel";
+import { pointAnchor, textareaSelectionAnchor, type EditorActionAnchor } from "../shared/editor-action-anchor";
+import { runEditorClipboard } from "../shared/editor-clipboard";
 
 type PrivateNoteEditorProps = {
   selectedNote: PrivateNote | null;
@@ -40,15 +42,37 @@ export function PrivateNoteEditor({
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const suppressSelection = useRef(false);
   const [selection, setSelection] = useState<{ start: number; end: number; body: string } | null>(null);
-  const [assistantOpen, setAssistantOpen] = useState(false);
-  const updateSelection = () => {
-    if (suppressSelection.current) return;
+  const [popup, setPopup] = useState<{
+    source: HTMLElement; anchor: EditorActionAnchor; kind: "selection" | "toolbar" | "context";
+    clipboard?: { start: number; end: number; value: string; draft: string }; keyboard?: boolean;
+  } | null>(null);
+  const closePopup = (restoreFocus: boolean) => {
+    suppressSelection.current = true;
+    setPopup(null);
+    if (restoreFocus) (popup?.source ?? bodyRef.current)?.focus({ preventScroll: true });
+  };
+  const updateSelection = (fallback?: EditorActionAnchor) => {
+    if (!assistantEnabled || suppressSelection.current) return;
     const target = bodyRef.current;
     if (!target) return;
-    if (target.selectionEnd > target.selectionStart) {
-      setSelection({ start: target.selectionStart, end: target.selectionEnd, body: target.value });
-      setAssistantOpen(true);
-    } else setSelection(null);
+    const { selectionStart: start, selectionEnd: end, value } = target;
+    if (popup?.kind === "context" && start === popup.clipboard?.start && end === popup.clipboard.end) return;
+    if (start === end || !value.slice(start, end).trim()) {
+      setSelection(null);
+      if (popup?.kind !== "toolbar") setPopup(null);
+      return;
+    }
+    if (popup?.kind === "selection" && selection?.start === start && selection.end === end && selection.body === value) return;
+    setSelection({ start, end, body: value });
+    setPopup({ kind: "selection", source: target,
+      anchor: textareaSelectionAnchor(target, start, end, fallback ?? target.getBoundingClientRect()) });
+  };
+  const openContext = (target: HTMLTextAreaElement, point: EditorActionAnchor, keyboard: boolean) => {
+    const { selectionStart: start, selectionEnd: end, value } = target;
+    suppressSelection.current = true;
+    setSelection(start !== end ? { start, end, body: value } : null);
+    setPopup({ kind: "context", source: target, keyboard, clipboard: { start, end, value, draft: draftBody },
+      anchor: start !== end || keyboard ? textareaSelectionAnchor(target, start, end, point) : point });
   };
   const selectedText = selection && selection.body === draftBody ? draftBody.slice(selection.start, selection.end) : "";
   const targetText = selectedText || draftBody;
@@ -60,7 +84,14 @@ export function PrivateNoteEditor({
         <>
           <div className="private-editor-toolbar" role="toolbar" aria-label="Note actions">{toolbar}
             {assistantEnabled && <button type="button" className="secondary-button" disabled={!draftBody.trim()}
-              onClick={() => { suppressSelection.current = false; setSelection(null); setAssistantOpen(value => !value); }}>AI writing</button>}
+              onClick={event => {
+                suppressSelection.current = false;
+                setSelection(null);
+                const source = event.currentTarget;
+                const keyboard = event.detail === 0;
+                const anchor = source.getBoundingClientRect();
+                setPopup(current => current?.kind === "toolbar" ? null : { kind: "toolbar", source, anchor, keyboard });
+              }}>AI writing</button>}
           </div>
           <div className="note-editor-page">
             {header}
@@ -82,38 +113,67 @@ export function PrivateNoteEditor({
               <textarea
                 ref={bodyRef}
                 value={draftBody}
-                onChange={(event) => { setAssistantOpen(false); setSelection(null); onBodyChange(event.target.value); }}
-                onSelect={updateSelection}
+                onChange={(event) => { setPopup(null); setSelection(null); onBodyChange(event.target.value); }}
+                onSelect={() => updateSelection()}
                 onMouseDown={() => { suppressSelection.current = false; }}
-                onKeyDown={(event) => { if (event.key !== "Escape") suppressSelection.current = false; }}
-                onKeyUp={updateSelection}
-                onMouseUp={updateSelection}
-                onContextMenu={(event) => {
-                  if (!assistantEnabled || !draftBody.trim()) return;
-                  event.preventDefault();
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") return;
                   suppressSelection.current = false;
-                  updateSelection();
-                  setAssistantOpen(true);
+                  if (assistantEnabled && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
+                    event.preventDefault();
+                    openContext(event.currentTarget, event.currentTarget.getBoundingClientRect(), true);
+                  }
+                }}
+                onKeyUp={() => updateSelection()}
+                onMouseUp={event => { if (event.button === 0) updateSelection(pointAnchor(event.clientX, event.clientY)); }}
+                onContextMenu={(event) => {
+                  if (!assistantEnabled) return;
+                  event.preventDefault();
+                  const keyboard = !event.clientX && !event.clientY && event.button === 0;
+                  openContext(event.currentTarget, keyboard ? event.currentTarget.getBoundingClientRect()
+                    : pointAnchor(event.clientX, event.clientY), keyboard);
                 }}
                 placeholder="Write a private note…"
               />
             </label>
-            {assistantEnabled && assistantOpen && targetText.trim() && targetText.length <= 12_000 && <WritingActionPanel
-              key={`${selectedNote?.id}:${selection?.start}:${selection?.end}:${selection?.body.length}:${draftBody}`}
-              platform={platform} organizationId={organizationId} text={targetText} scope={scope} canApply={!selection || selection.body === draftBody}
-              onClose={() => { suppressSelection.current = true; setAssistantOpen(false); bodyRef.current?.focus(); }} onApply={(replacement) => {
+            {assistantEnabled && popup && (popup.clipboard ? popup.clipboard.draft === draftBody : targetText.trim()) && <WritingActionPanel
+              key={`${selectedNote?.id}:${popup.kind}:${selection?.start}:${selection?.end}:${draftBody}`}
+              platform={platform} organizationId={organizationId} text={targetText} scope={scope}
+              anchor={popup.anchor} source={popup.source} focusOnOpen={popup.keyboard}
+              canApply={!selection || selection.body === draftBody}
+              clipboard={popup.clipboard && {
+                hasSelection: popup.clipboard.start !== popup.clipboard.end,
+                run: (action, signal) => {
+                  const { start, end, value } = popup.clipboard!;
+                  return runEditorClipboard(action, platform, signal, () => {
+                    const target = bodyRef.current;
+                    if (!target || target.value !== value) return false;
+                    suppressSelection.current = true;
+                    target.focus({ preventScroll: true });
+                    target.setSelectionRange(start, end);
+                    return true;
+                  }, text => {
+                    const target = bodyRef.current;
+                    if (!target) return;
+                    if (target.ownerDocument.execCommand?.("insertText", false, text)) return;
+                    target.setRangeText(text, start, end, "end");
+                    setPopup(null);
+                    setSelection(null);
+                    onBodyChange(target.value);
+                  });
+                },
+              }}
+              onClose={closePopup} onApply={(replacement) => {
                 if (selection && selection.body !== draftBody) return;
                 const next = selection ? draftBody.slice(0, selection.start) + replacement + draftBody.slice(selection.end) : replacement;
                 suppressSelection.current = true;
-                onBodyChange(next); setAssistantOpen(false); setSelection(null);
+                onBodyChange(next); setPopup(null); setSelection(null);
                 requestAnimationFrame(() => {
                   bodyRef.current?.focus();
                   const position = selection ? selection.start + replacement.length : replacement.length;
                   bodyRef.current?.setSelectionRange(position, position);
                 });
               }} />}
-            {assistantEnabled && assistantOpen && targetText.length > 12_000 &&
-              <p role="status">Select up to 12,000 characters to use AI writing.</p>}
           </div>
           <footer className="editor-footer" aria-live="polite">
             {savedMessage && <span>{savedMessage}</span>}
