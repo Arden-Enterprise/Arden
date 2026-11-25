@@ -84,7 +84,7 @@ describe("agent panel", () => {
     const privateRate = vi.spyOn(privateApi, "ratePrivateAnswer").mockResolvedValue({ feedback: "GOOD" });
     const source = { kind: "private-note" as const, id: "note-a", version: 2, title: "Handover notes" };
     const send = vi.spyOn(privateApi, "askPrivateNote").mockResolvedValue({
-      status: "ANSWERED", answer: "Return it on Friday.", feedbackToken: "fake-opaque-token", citations: [{ documentId: source.id, versionId: "version-a",
+      status: "ANSWERED", answer: "Return it on Friday.", feedbackToken: "fake-opaque-token", noteCoverage: "PARTIAL", citations: [{ documentId: source.id, versionId: "version-a",
         title: source.title, version: "Version 2", scope: "Private note", classification: "INTERNAL",
         excerpt: "Return the badge on Friday." }],
     });
@@ -94,6 +94,7 @@ describe("agent panel", () => {
     const panel = screen.getByRole("complementary", { name: "Ask Arden" });
     ask(panel, "When do I return the badge?");
     expect(await screen.findByText("Return it on Friday.")).toBeTruthy();
+    expect(screen.getByText("Based on selected passages. Other parts of this note were not reviewed.")).toBeTruthy();
     expect(send).toHaveBeenCalledWith("web", "org", source.id, 2, "When do I return the badge?", expect.any(String));
     expect(company).not.toHaveBeenCalled();
     fireEvent.click(within(panel).getByRole("button", { name: "Good response" }));

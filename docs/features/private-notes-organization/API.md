@@ -55,6 +55,10 @@ trashed notes are unavailable. The route accepts one saved revision, reads its p
 text by hash, and checks access and revision before inference and again before returning.
 A stale revision returns 409 `NOTE_CHANGED`. The handler sends bounded excerpts from
 that note to the configured Arden-AI service and returns `Cache-Control: no-store`.
+Recognized whole-note overview requests use the complete note within the evidence
+budget or sample across a longer note. Other questions rank passages by relevance.
+After inference, `noteCoverage` is `FULL` if the supplied evidence covers all
+non-whitespace text in the saved revision, and `PARTIAL` if any was omitted.
 Questions and replies are held only in the sidebar session. The route requires an
 organization opt-in via `ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS`. See the
 [AI context contract](../../engineering/knowledge-source-contexts.md).
