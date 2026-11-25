@@ -2,11 +2,11 @@ export const notificationTypes = [
   "REVIEW_REQUESTED", "REVIEW_APPROVED", "REVIEW_REJECTED", "PUBLICATION_ACTIVE",
   "PUBLICATION_FAILED", "DOCUMENT_SHARED_PERSONAL", "DOCUMENT_SHARED_GROUP",
   "PRIMARY_DEPARTMENT_CHANGED", "REVIEWER_GRANT_CREATED", "REVIEWER_GRANT_REVOKED",
-  "PUBLICATION_EXPIRING", "PUBLICATION_RENEWAL_ON_BEHALF",
+  "PUBLICATION_EXPIRING", "PUBLICATION_RENEWAL_ON_BEHALF", "DOCUMENT_SHARED_DIRECT",
 ] as const;
 
 export type NotificationType = typeof notificationTypes[number];
-export type NotificationResourceType = "SUBMISSION" | "PUBLICATION" | "DOCUMENT" | "DEPARTMENT" | "REVIEWER_GRANT";
+export type NotificationResourceType = "SUBMISSION" | "PUBLICATION" | "DOCUMENT" | "DEPARTMENT" | "REVIEWER_GRANT" | "PRIVATE_ITEM";
 export type NotificationRecord = {
   id: string;
   type: NotificationType;

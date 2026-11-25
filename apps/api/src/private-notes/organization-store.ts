@@ -410,6 +410,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
         WHERE d.draft_id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL`,
       [draftId, owner.workspaceId, batchId]);
       if (!trashed.rowCount) return null;
+      await revokeBatchShares(client, owner.membershipId, batchId);
       await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_ITEM_TRASHED",
         { batchId, kind: "note", itemCount: 1, requestId });
       return requireEntry(await trashEntries(client, owner.workspaceId, batchId));
@@ -432,6 +433,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       await client.query(`UPDATE private_collection c SET trashed_at = now(), trash_batch_id = $3
         WHERE c.workspace_id = $1 AND c.collection_id = ANY($2::uuid[]) AND ${activeCollection}`,
       [workspaceId, subtree, batchId]);
+      await revokeBatchShares(client, owner.membershipId, batchId);
       await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_ITEM_TRASHED",
         { batchId, kind: "collection", itemCount: subtree.length + (notes.rowCount ?? 0), requestId });
       return requireEntry(await trashEntries(client, workspaceId, batchId));
@@ -745,6 +747,17 @@ async function contentObjects(client: PoolClient, draftIds: string[]): Promise<P
   const byDraft = new Map<string, string[]>(draftIds.map((id) => [id, []]));
   for (const row of versions.rows) byDraft.get(row.draft_id)?.push(row.source_uri);
   return [...byDraft].map(([draftId, sourceUris]) => ({ draftId, sourceUris }));
+}
+
+/**
+ * Decision 0034: moving an item to trash ends its direct shares for good; restoring it does not share it again.
+ * Returns how many shares were revoked.
+ */
+async function revokeBatchShares(client: PoolClient, ownerMembershipId: string, batchId: string): Promise<number> {
+  const revoked = await client.query(`UPDATE private_item_share s SET revoked_at = now(), revoked_by_membership_id = $1
+    WHERE s.owner_membership_id = $1 AND s.revoked_at IS NULL
+      AND s.draft_id IN (SELECT d.draft_id FROM draft_document d WHERE d.trash_batch_id = $2)`, [ownerMembershipId, batchId]);
+  return revoked.rowCount ?? 0;
 }
 
 async function markErased(client: PoolClient, draftIds: string[], workspaceId: string | null): Promise<void> {

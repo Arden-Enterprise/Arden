@@ -4,7 +4,9 @@ export type KnowledgeHomeLocation =
   | { kind: "document"; id: string }
   | { kind: "draft"; id: string }
   | { kind: "create" }
-  | { kind: "report"; caseId: string };
+  | { kind: "report"; caseId: string }
+  /** Decision 0034: a private item shared directly with this member (read only, not reviewed). */
+  | { kind: "shared"; id: string };
 
 /** Where Reviews is: the publication queue or a submission, the maintenance queue or a case. */
 export type KnowledgeReviewLocation =

@@ -714,3 +714,23 @@
   .arden-app-shell .workspace-topbar.is-reader { display: grid; min-height: 64px; padding: 10px 12px 6px; }
   .arden-app-shell .workspace-topbar.is-reader .topbar-leading { display: block; }
 }
+/* Decision 0034: who has access to a private item, and adding people. */
+.share-people { display: grid; gap: 8px; }
+.share-recipients { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.share-recipients li { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0;
+  padding: 8px 10px; border: 1px solid var(--arden-border); border-radius: 8px; }
+.share-recipients .km-member-identity { display: grid; min-width: 0; }
+.share-recipients .km-member-identity strong, .share-recipients .km-member-identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-recipients .km-member-identity small { color: var(--arden-text-secondary); font-size: 12px; }
+.arden-app-shell .share-recipients .secondary-button { flex: none; height: 28px; padding: 0 10px; font-size: 12px; }
+.share-add { display: grid; gap: 8px; }
+.share-add input[type="search"] { width: 100%; }
+/* Decision 0034: Organization Admin setting for sharing with people. */
+.admin-sharing { display: grid; gap: 12px; max-width: 640px; padding: 18px; }
+.admin-sharing h3 { margin: 0; font-size: 15px; }
+.admin-sharing .island-meta { margin: 0; }
+.admin-sharing-form { display: grid; gap: 10px; }
+.admin-sharing-form label { display: grid; gap: 6px; font-size: 13px; }
+.admin-sharing-form .admin-sharing-toggle { display: flex; align-items: center; gap: 8px; }
+.admin-sharing-form input[type="number"] { width: 120px; }
+.admin-sharing-form small { color: var(--arden-text-secondary); font-size: 12px; }

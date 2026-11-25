@@ -128,3 +128,24 @@ Rules:
 - `POST /knowledge/drafts` from a PDF item's version creates a shared PDF draft holding a copy of the file and seals the version (migration 0069 keeps the sealed version's text immutable too).
 - The private AI side panel answers a PDF item from its extracted text; a PDF without text returns 422 `DOCUMENT_QUESTION_UNSUPPORTED`.
 - The desktop allow-list adds exactly `POST /drafts/pdf`, `GET /drafts/:id/pdf` and `PUT /drafts/:id/pdf` (with `If-Match`), with the 7.1 MB PDF body and response limits.
+
+## Decision 0034: sharing with people (spec F03-SHR)
+
+| Method | Path | Body | Success |
+| --- | --- | --- | --- |
+| GET | `/drafts/:id/shares` | — | 200 `{ enabled, recipientLimit, recipients: [{ shareId, membershipId, name, email, active, sharedAt }] }`, owner only. |
+| POST | `/drafts/:id/shares` | `{ recipientMembershipIds: uuid[1..100] }` | 201 when someone was added, 200 when all already had access. 400 `INVALID_RECIPIENTS` (self, inactive or another organization), 409 `DIRECT_SHARE_LIMIT`, 409 `DIRECT_SHARING_DISABLED`. |
+| POST | `/drafts/:id/shares/:shareId/revoke`, `/drafts/:id/shares/revoke-all` | — | 200 with the remaining recipients. |
+| GET | `/api/v1/organizations/:organizationId/shared-with-me` | — | 200 `{ items: [{ id, title, kind, ownerName, sharedAt, updatedAt, reviewed: false }] }`, newest first, at most 200. |
+| GET | `/api/v1/organizations/:organizationId/shared-with-me/:id` | — | 200 the item with `version` and the current text `body` (empty for a PDF). |
+| GET | `/api/v1/organizations/:organizationId/shared-with-me/:id/pdf` | — | 200 `{ id, version, pdfBase64 }`. |
+| GET / PUT | `/api/v1/organizations/:organizationId/direct-sharing` | PUT `{ enabled, recipientLimit: 1..100 }` | Every active member reads; only an Organization Admin writes (404 otherwise). |
+
+Rules:
+
+- Migration 0070 stores grants in `private_item_share` (revoke only, never delete) and the setting in `organization_direct_share_setting` (no row means enabled, 10 people).
+- RLS gives a recipient SELECT on the shared item and its current version only, while the share is active, both members are active and sharing is on. Owner-only writes are unchanged.
+- Moving an item to trash revokes its shares; restore does not share again. Purge keeps the revoked rows.
+- Each new grant writes one `DOCUMENT_SHARED_DIRECT` notice (title and owner name, no content); Core shows its details only while the item is still shared with the reader.
+- Audit events `PRIVATE_ITEM_SHARED`, `PRIVATE_ITEM_SHARE_REVOKED` and `DIRECT_SHARE_SETTINGS_UPDATED` carry identifiers and counts only.
+- The desktop allow-list adds exactly these routes; the recipient PDF read has the 7.1 MB response limit.

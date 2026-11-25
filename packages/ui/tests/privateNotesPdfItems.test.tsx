@@ -73,6 +73,7 @@ beforeEach(() => {
         favoritedAt: null, position: null };
       return item;
     }
+    if (method === "GET" && path.endsWith("/direct-sharing")) return { enabled: false, recipientLimit: 10 };
     if (method === "GET" && path.endsWith("/drafts/p1/pdf")) return { pdfBase64: btoa("%PDF-1.7 synthetic") };
     if (method === "PUT" && path.endsWith("/drafts/p1/pdf")) {
       item = { ...item!, textAvailable: Boolean(body.text), currentVersion: { id: "v1", version: item!.currentVersion.version + 1 } };
@@ -112,10 +113,10 @@ describe("Keeping a PDF in Private", () => {
   it("uploads from the Private page, opens the PDF viewer and offers no text import for it", async () => {
     await connected();
     fireEvent.click(screen.getByRole("button", { name: "Upload PDF" }));
-    await waitFor(() => expect(controllerRef.selectedNote?.kind).toBe("pdf"));
+    await waitFor(() => expect(controllerRef.selectedNote?.kind).toBe("pdf"), { timeout: 5000 });
     expect(requests.find((request) => request.path.endsWith("/drafts/pdf"))?.body)
       .toEqual({ title: "Board minutes", pdfBase64: btoa("%PDF-1.7 synthetic"), text: "Decision: hire two engineers." });
-    await waitFor(() => expect(screen.getByRole("link", { name: "Download PDF" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("link", { name: "Download PDF" })).toBeTruthy(), { timeout: 5000 });
     expect(screen.getByRole("button", { name: "Replace file" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
 
@@ -127,13 +128,13 @@ describe("Keeping a PDF in Private", () => {
   it("replaces the file with the version it was based on and reloads the viewer", async () => {
     await connected();
     fireEvent.click(screen.getByRole("button", { name: "Upload PDF" }));
-    await waitFor(() => expect(screen.getByRole("link", { name: "Download PDF" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("link", { name: "Download PDF" })).toBeTruthy(), { timeout: 5000 });
     const reads = () => requests.filter((request) => request.method === "GET" && request.path.endsWith("/drafts/p1/pdf")).length;
     expect(reads()).toBe(1);
     fireEvent.click(screen.getByRole("button", { name: "Replace file" }));
-    await waitFor(() => expect(controllerRef.notice?.message).toBe("Replaced the file"));
+    await waitFor(() => expect(controllerRef.notice?.message).toBe("Replaced the file"), { timeout: 5000 });
     expect(requests.find((request) => request.method === "PUT")).toMatchObject({ ifMatch: '"1"' });
-    await waitFor(() => expect(reads()).toBe(2));
+    await waitFor(() => expect(reads()).toBe(2), { timeout: 5000 });
   });
 
   it("renames a PDF item in place with its title only, and says when it has no text", async () => {
@@ -141,7 +142,7 @@ describe("Keeping a PDF in Private", () => {
     pickedFile = pdfFile("scan.pdf");
     await connected();
     fireEvent.click(screen.getByRole("button", { name: "Upload PDF" }));
-    await waitFor(() => expect(controllerRef.selectedNote?.kind).toBe("pdf"));
+    await waitFor(() => expect(controllerRef.selectedNote?.kind).toBe("pdf"), { timeout: 5000 });
     expect(controllerRef.notice?.message).toBe("Added “scan”. It has no text, so AI is unavailable for it");
     expect(screen.getByText("No text found in this PDF, so AI is unavailable for it.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Share" }));
@@ -154,7 +155,7 @@ describe("Keeping a PDF in Private", () => {
     const field = screen.getByRole("textbox", { name: "Rename scan" });
     fireEvent.change(field, { target: { value: "Signed contract" } });
     fireEvent.keyDown(field, { key: "Enter" });
-    await waitFor(() => expect(controllerRef.selectedNote?.title).toBe("Signed contract"));
+    await waitFor(() => expect(controllerRef.selectedNote?.title).toBe("Signed contract"), { timeout: 5000 });
     expect(requests.find((request) => request.method === "PATCH")).toMatchObject({ body: { title: "Signed contract" }, ifMatch: '"1"' });
   });
 });

@@ -7,8 +7,8 @@ export type ShareStep = "choices" | "people" | "contribute";
 type ShareChoice = {
   /** Explains why the choice is unavailable; the choice is then disabled. */
   unavailableReason?: string;
-  /** Renders the choice; `onBack` returns to the two choices. */
-  render: (onBack: () => void) => ReactNode;
+  /** Renders the choice; `onBack` returns to the two choices and `show` opens another step. */
+  render: (onBack: () => void, show: (step: ShareStep) => void) => ReactNode;
 };
 
 /**
@@ -35,8 +35,8 @@ export function SharePrivateItemPanel({ title, people, contribute, initialStep =
   useEffect(() => { if (step === "choices") heading.current?.focus(); }, [step]);
 
   const back = () => setStep("choices");
-  if (step === "people" && people && !people.unavailableReason) return <>{people.render(back)}</>;
-  if (step === "contribute" && !contribute.unavailableReason) return <>{contribute.render(back)}</>;
+  if (step === "people" && people && !people.unavailableReason) return <>{people.render(back, setStep)}</>;
+  if (step === "contribute" && !contribute.unavailableReason) return <>{contribute.render(back, setStep)}</>;
 
   return <div className="contribute-island share-island" role="dialog" aria-labelledby={titleId}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>

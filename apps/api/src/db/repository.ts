@@ -8,6 +8,7 @@ import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
+import { PgDirectShareStore, type DirectShareStore } from "../private-notes/direct-share-store.js";
 import { PgPrivateOrganizationStore, isActiveCollection, lockTree, type PrivateOrganizationStore,
   type PrivateTrashRetentionStore } from "../private-notes/organization-store.js";
 import type { MaintenancePort } from "../maintenance/case-service.js";
@@ -700,6 +701,8 @@ export interface ArdenDataRepository {
   ratePrivateAnswer?(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean>;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
+  /** Decision 0034: unreviewed, view-only sharing of private items with named members. */
+  readonly directShares?: DirectShareStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
   createOrganization(userId: string, email: string, fullName: string | null, setup: OrganizationSetup, requestId: string): Promise<CreatedOrganization>;
@@ -839,6 +842,7 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly systemAdministration: SystemAdministrationStore;
   readonly maintenance: MaintenancePort;
   readonly privateOrganization: PgPrivateOrganizationStore;
+  readonly directShares: PgDirectShareStore;
   /** System-only retention capability for the in-process 30-day purge loop. */
   readonly privateTrashRetention: PrivateTrashRetentionStore;
   constructor(private readonly pool: Pool, content?: { read(sourceUri: string, expectedHash: string): Promise<string> }) {
@@ -853,6 +857,8 @@ export class ArdenRepository implements ArdenDataRepository {
     this.privateOrganization = new PgPrivateOrganizationStore((user, org, work) => this.withActorContext(user, org, work),
       (work) => this.withPrivateTrashRetention(work));
     this.privateTrashRetention = this.privateOrganization;
+    this.directShares = new PgDirectShareStore((user, org, work) => this.withActorContext(user, org, work),
+      (user, org, work) => this.withOrganizationAdmin(user, org, work));
   }
 
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {

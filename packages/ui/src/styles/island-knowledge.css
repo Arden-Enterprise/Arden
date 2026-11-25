@@ -562,3 +562,19 @@ button.review-row:disabled { cursor: progress; }
   /* Narrow and phone layouts drop AUTHOR first. */
   .library-register .library-row-author { display: none; }
 }
+
+/* Decision 0034: private items shared directly with this member, apart from approved publications. */
+.direct-shares { display: grid; gap: 10px; margin-top: 20px; }
+.direct-shares-heading h2 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
+.direct-shares-heading .island-meta { margin: 0; }
+.direct-share-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.arden-app-shell .direct-share-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  width: 100%; padding: 10px 12px; border: 1px solid var(--arden-border); border-radius: 10px; background: var(--arden-surface);
+  color: var(--arden-text-primary); text-align: left; cursor: pointer; }
+.arden-app-shell .direct-share-row:hover { border-color: var(--arden-border-strong); background: var(--arden-surface-hover); }
+.arden-app-shell .direct-share-row:focus-visible { outline: 2px solid var(--arden-violet); outline-offset: 2px; }
+.direct-share-copy { display: grid; gap: 2px; min-width: 0; }
+.direct-share-copy strong, .direct-share-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.direct-share-copy span { color: var(--arden-text-secondary); font-size: 12px; }
+.shared-item-label { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--arden-warning); font-size: 13px; }
+.shared-item-text { max-width: 760px; color: var(--arden-text-primary); font-size: 15px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }

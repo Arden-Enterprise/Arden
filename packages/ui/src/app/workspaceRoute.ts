@@ -44,6 +44,7 @@ export function parseWorkspacePath(pathname: string): WorkspaceRoute | null {
     case "documents": return second === undefined && id(first) ? { view: "knowledge", at: { kind: "document", id: first! } } : null;
     case "drafts": return second === undefined && id(first) ? { view: "knowledge", at: { kind: "draft", id: first! } } : null;
     case "reports": return second === undefined && id(first) ? { view: "knowledge", at: { kind: "report", caseId: first! } } : null;
+    case "shared": return second === undefined && id(first) ? { view: "knowledge", at: { kind: "shared", id: first! } } : null;
     case "reviews":
       if (first === undefined) return { view: "review-queue", at: { kind: "reviews" } };
       if (first === "maintenance") {
@@ -88,6 +89,7 @@ function homePath(at: KnowledgeHomeLocation): string {
     case "document": return `/documents/${encodeURIComponent(at.id)}`;
     case "draft": return `/drafts/${encodeURIComponent(at.id)}`;
     case "report": return `/reports/${encodeURIComponent(at.caseId)}`;
+    case "shared": return `/shared/${encodeURIComponent(at.id)}`;
   }
 }
 

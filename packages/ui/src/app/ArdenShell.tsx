@@ -734,6 +734,11 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (target.view === "review-queue") {
       setRequestedReviewId(target.id);
       navigate("review-queue");
+    } else if (target.view === "shared-item") {
+      setRequestedReviewId(null);
+      setKnowledgeCitationTarget(null);
+      setKnowledgeRouteRequest({ location: { kind: "shared", id: target.itemId }, navigationId: crypto.randomUUID() });
+      navigate("knowledge");
     } else if (target.view === "contribution") {
       setRequestedReviewId(null);
       setKnowledgeCitationTarget(null);

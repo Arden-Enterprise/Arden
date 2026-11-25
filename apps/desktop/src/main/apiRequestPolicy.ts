@@ -14,6 +14,12 @@ const privateNoteQuestionPath = new RegExp(`^/api/v1/organizations/${uuid}/priva
 /** Decision 0034: original PDFs kept in Private (upload, read and replace the file). */
 const privatePdfCreate = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/pdf$`);
 const privatePdfFile = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/pdf$`);
+/** Decision 0034: direct shares (owner list/share/revoke, recipient reads, organization setting). */
+const directShareCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/shares$`);
+const directShareRevoke = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/shares/(${uuid}/revoke|revoke-all)$`);
+const sharedWithMe = new RegExp(`^/api/v1/organizations/${uuid}/shared-with-me(?:/${uuid})?$`);
+const sharedWithMePdf = new RegExp(`^/api/v1/organizations/${uuid}/shared-with-me/${uuid}/pdf$`);
+const directSharingSetting = new RegExp(`^/api/v1/organizations/${uuid}/direct-sharing$`);
 // Decision 0029 private notes organization: collections, favorites and trash; spec F03-ARR order and archive. No DELETE method.
 const privateCollectionCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections$`);
 const privateCollectionItem = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections/${uuid}$`);
@@ -100,7 +106,7 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
 
 export function desktopApiResponseLimit(request: DesktopApiRequest): number {
   const pdfCreate = request.method === "POST" && pdfKnowledgeDraft.test(request.path);
-  const privatePdfRead = request.method === "GET" && privatePdfFile.test(request.path);
+  const privatePdfRead = request.method === "GET" && (privatePdfFile.test(request.path) || sharedWithMePdf.test(request.path));
   const knowledgeDetail = ((request.method === "GET" || request.method === "PATCH")
     && (knowledgeDraftItem.test(request.path) || knowledgeDraftVersionItem.test(request.path)))
     || (request.method === "GET" && (knowledgeReviewItem.test(request.path)
@@ -190,6 +196,12 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     (privatePdfCreate.test(url.pathname) && request.method === "POST" && Boolean(request.body) && !request.ifMatch)
     || (privatePdfFile.test(url.pathname) && request.method === "GET" && request.body === undefined && !request.ifMatch)
     || (privatePdfFile.test(url.pathname) && request.method === "PUT" && Boolean(request.body) && Boolean(request.ifMatch)));
+  const directShareRequest = !request.ifMatch && !request.idempotencyKey && !url.search && (
+    ((directShareCollection.test(url.pathname) || sharedWithMe.test(url.pathname) || sharedWithMePdf.test(url.pathname)
+      || directSharingSetting.test(url.pathname)) && request.method === "GET" && request.body === undefined)
+    || (directShareCollection.test(url.pathname) && request.method === "POST" && Boolean(request.body))
+    || (directShareRevoke.test(url.pathname) && request.method === "POST" && request.body === undefined)
+    || (directSharingSetting.test(url.pathname) && request.method === "PUT" && Boolean(request.body)));
   const sharedDraftCreate = sharedDraftPath.test(url.pathname) && request.method === "POST" &&
     Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   const knowledgeGet = (knowledgeCollection.test(url.pathname) || knowledgeDraftItem.test(url.pathname)
@@ -278,7 +290,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     (url.pathname === "/api/v1/auth/sign-in" && request.method === "POST") ||
     (url.pathname === "/api/v1/auth/sign-out" && request.method === "POST") ||
     (url.pathname === "/api/v1/me" && request.method === "GET") ||
-    privateDraftRequest || privatePdfRequest
+    privateDraftRequest || privatePdfRequest || directShareRequest
   ) && !request.idempotencyKey;
   const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
   const catalogGet = knowledgeCatalogRead.test(url.pathname) && request.method === "GET"

@@ -229,6 +229,33 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ ...request, path: "https://other.invalid/api/v1/me" }), false);
   });
 
+  it("allows exactly the decision 0034 direct-share routes", () => {
+    const organization = `/api/v1/organizations/${organizationId}`;
+    const id = sourcePrivateVersionId;
+    const shares = `${organization}/private-workspace/drafts/${id}/shares`;
+    const allowed = [
+      { path: shares, method: "GET" },
+      { path: shares, method: "POST", body: JSON.stringify({ recipientMembershipIds: [id] }) },
+      { path: `${shares}/${id}/revoke`, method: "POST" },
+      { path: `${shares}/revoke-all`, method: "POST" },
+      { path: `${organization}/shared-with-me`, method: "GET" },
+      { path: `${organization}/shared-with-me/${id}`, method: "GET" },
+      { path: `${organization}/shared-with-me/${id}/pdf`, method: "GET" },
+      { path: `${organization}/direct-sharing`, method: "GET" },
+      { path: `${organization}/direct-sharing`, method: "PUT", body: JSON.stringify({ enabled: true, recipientLimit: 10 }) },
+    ];
+    for (const request of allowed) assert.equal(validateDesktopApiRequest(request), true, `${request.method} ${request.path}`);
+    assert.equal(desktopApiResponseLimit({ path: `${organization}/shared-with-me/${id}/pdf`, method: "GET" }), 7_100_000);
+    const refused = [
+      { path: `${shares}/revoke-all`, method: "POST", body: "{}" },
+      { path: `${organization}/shared-with-me/${id}`, method: "PATCH", body: "{}", ifMatch: '"1"' },
+      { path: `${organization}/shared-with-me?all=1`, method: "GET" },
+      { path: `${organization}/direct-sharing`, method: "POST", body: "{}" },
+      { path: shares, method: "PUT", body: "{}" },
+    ];
+    for (const request of refused) assert.equal(validateDesktopApiRequest(request), false, `${request.method} ${request.path}`);
+  });
+
   it("allows exactly the decision 0034 private PDF routes and their size limits", () => {
     const base = `/api/v1/organizations/${organizationId}/private-workspace/drafts`;
     const id = sourcePrivateVersionId;

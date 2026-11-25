@@ -1,5 +1,12 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { PdfDocument } from "../knowledge/PdfDocument";
+import { PdfDocument, PdfViewer, usePdfObjectUrl } from "../knowledge/PdfDocument";
+
+/** The browser viewer without its own toolbar (download, print), as in the governed reader. */
+function ViewOnlyPdf({ base64, title }: { base64: string; title: string }) {
+  const url = usePdfObjectUrl(base64);
+  return url ? <div className="knowledge-pdf-document"><PdfViewer url={url} title={title} readerChrome /></div>
+    : <p role="status">Preparing PDF preview…</p>;
+}
 
 type PdfLoad = { state: "loading" } | { state: "ready"; base64: string } | { state: "error"; message: string };
 
@@ -41,7 +48,8 @@ export function PrivatePdfView({ itemId, title, revision, heading, toolbar, load
       {load.state === "loading" && <p className="island-meta" role="status">Opening the PDF…</p>}
       {load.state === "error" && <p className="admin-feedback is-error" role="alert">{load.message}{" "}
         <button type="button" className="pn-link-button" onClick={() => setAttempt((value) => value + 1)}>Try again</button></p>}
-      {load.state === "ready" && <PdfDocument base64={load.base64} title={title} showToolbar={allowDownload} />}
+      {load.state === "ready" && (allowDownload ? <PdfDocument base64={load.base64} title={title} />
+        : <ViewOnlyPdf base64={load.base64} title={title} />)}
     </div>
   </section>;
 }

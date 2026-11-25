@@ -28,6 +28,7 @@ import { MaintenanceCaseService } from "./maintenance/case-service.js";
 import { MaintenanceError } from "./maintenance/contracts.js";
 import { registerMaintenanceRoutes } from "./maintenance/routes.js";
 import { registerPrivateOrganizationRoutes, representNoteSummary, representPrivateNote } from "./private-notes/organization-routes.js";
+import { registerDirectShareRoutes } from "./private-notes/direct-share-routes.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -127,6 +128,9 @@ export function buildApp(dependencies: AppDependencies) {
     store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
   registerPrivateOrganizationRoutes(app, { store: dependencies.repository.privateOrganization,
     storage: dependencies.storage, requestActor, uuidPattern });
+  if (dependencies.repository.directShares) {
+    registerDirectShareRoutes(app, { store: dependencies.repository.directShares, storage: dependencies.storage, requestActor, uuidPattern });
+  }
   const maintenanceMode = process.env.ARDEN_MAINTENANCE_ANALYSIS_ADAPTER;
   const maintenanceAdapter = maintenanceMode === "http" || maintenanceMode === "http-provider"
     ? httpAnalysisAdapter(process.env.ARDEN_AI_URL ?? "", process.env.ARDEN_AI_SERVICE_TOKEN ?? "",

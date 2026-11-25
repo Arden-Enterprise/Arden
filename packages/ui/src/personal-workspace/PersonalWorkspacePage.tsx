@@ -7,6 +7,8 @@ import { WorkspaceTopbar, type ContextControlProps, type TopbarCrumb } from "../
 import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 import { ContributePrivateNoteDialog, type ContributionAttempt } from "./ContributePrivateNoteDialog";
 import { SharePrivateItemPanel } from "./SharePrivateItemPanel";
+import { SharePeoplePanel } from "./SharePeoplePanel";
+import { loadDirectSharing, type DirectShareSettings } from "../shared/direct-share-api";
 import type { CreatedKnowledgeDraft } from "../shared/api-client";
 import type { PrivateNotesController } from "./usePrivateNotes";
 import type { Platform } from "../shared/types";
@@ -77,6 +79,15 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   const selectedId = controller.selectedNote?.id;
   // The Share panel belongs to one item; opening another item closes it.
   useEffect(() => { setShareOpen(false); }, [selectedId]);
+  // Decision 0034: Share with people is offered only while the organization allows direct sharing.
+  const [directSharing, setDirectSharing] = useState<DirectShareSettings | null>(null);
+  useEffect(() => {
+    if (!shareOpen || !controller.serverBacked || !organizationId) return;
+    let present = true;
+    void loadDirectSharing(platform, organizationId).then((settings) => { if (present) setDirectSharing(settings); })
+      .catch(() => { if (present) setDirectSharing({ enabled: false, recipientLimit: 0 }); });
+    return () => { present = false; };
+  }, [shareOpen, controller.serverBacked, platform, organizationId]);
   const [discarding, setDiscarding] = useState(false);
   const [dismissedNotice, setDismissedNotice] = useState(0);
   const { state, selectedNote, draft, isDirty, serverBacked, loading, saving, error, saveMessage, focus, collections, actionError, busyAction } = controller;
@@ -108,6 +119,10 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
     key={selectedNote.id}
     title={selectedNote.title}
     onClose={() => setShareOpen(false)}
+    people={directSharing?.enabled && sourceVersionId ? {
+      render: (back, show) => <SharePeoplePanel platform={platform} organizationId={organizationId}
+        item={{ id: selectedNote.id, title: selectedNote.title }} onBack={back} onContribute={() => show("contribute")} />,
+    } : undefined}
     contribute={{
       unavailableReason: !sourceVersionId || isDirty ? "Save your changes before contributing a copy." : undefined,
       render: (back) => <ContributePrivateNoteDialog
