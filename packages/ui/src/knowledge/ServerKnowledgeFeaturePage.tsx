@@ -51,6 +51,7 @@ import { ApprovedReadersField, approvedReadersReady } from "./ApprovedReadersFie
 import { PublicationChangeDialog, publicationChangeSentMessage, type PublicationChangeType } from "./PublicationChangeDialog";
 import { OnBehalfRenewalDecision, RenewPublicationDialog, renewalStatus } from "./RenewPublicationDialog";
 import type { KnowledgeReaderTarget, KnowledgeCitationReference } from "./knowledgeCitation";
+import type { KnowledgeHomeLocation, KnowledgeLocation, KnowledgeReviewLocation, KnowledgeRoute, KnowledgeRouteRequest } from "./knowledgeRoute";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
   .then((module) => ({ default: module.ArdenRichTextEditor })));
@@ -86,6 +87,12 @@ type Props = ContextControlProps & {
   /** Decision 0032: open My Contributions with this document selected. */
   requestedContributionId?: string | null;
   onContributionTargetHandled?: () => void;
+  /** Shows a location from the address bar (browser Back/Forward or an opened link). */
+  routeRequest?: KnowledgeRouteRequest | null;
+  /** Reports what Home and Reviews show so the shell can keep the address bar in step. */
+  onRouteChange?: (route: KnowledgeRoute, options: { replace: boolean }) => void;
+  /** Called once a route request has been shown, refused or has failed. */
+  onRouteSettled?: () => void;
   onAssignedReviewCount?: (count: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
   awaitingAssignment?: boolean;
@@ -132,7 +139,7 @@ export function ServerKnowledgeFeaturePage(props: Props) {
 }
 function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   view, active, createdDraftId, citationTarget, requestedReviewId, onReviewTargetHandled,
-  requestedContributionId, onContributionTargetHandled,
+  requestedContributionId, onContributionTargetHandled, routeRequest, onRouteChange, onRouteSettled,
   onAssignedReviewCount, onDirtyChange, awaitingAssignment = false,
   onOpenPrivateNotes, canUsePrivateWorkspace = false, contextOpen, onToggleContext, onOpenReviews }: Props) {
   const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
@@ -243,6 +250,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const reviewBodyRef = useRef<HTMLDivElement>(null);
   const pendingNextReview = useRef<string | null>(null);
   const readerReturnId = useRef<string | null>(null);
+  const replaceRoute = useRef(false);
   useEffect(() => {
     if (screen !== "library" || !readerReturnId.current) return;
     const id = readerReturnId.current;
@@ -631,7 +639,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     finally { setBusy(false); }
   };
 
-  const openDraft = (id: string) => void run(async () => {
+  const openDraft = (id: string) => run(async () => {
     setReplacementPdf(null);
     const loaded = await loadKnowledgeDraft(platform, organizationId, id);
     submitRequestKey.current = null;
@@ -669,6 +677,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       : await createNewKnowledgeDraft(platform, organizationId,
         { title: newTitle.trim(), body: newBody }, key);
     createRequestKey.current = null;
+    replaceRoute.current = true;
     setDraft(created); setEditor(valuesFromDraft(created)); setScreen("editor");
     setNewTitle(""); setNewBody(serializeSemanticDocument(
       plainTextToSemanticDocument("", () => crypto.randomUUID()),
@@ -751,6 +760,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     decisionRequest.current = { action, readers: signature, key };
     const result = await decideKnowledgeReview(platform, organizationId, review, action, comment.trim() || null, key,
       readers ?? undefined);
+    replaceRoute.current = true;
     decisionRequest.current = null; setReview(null); setDecisionToConfirm(null);
     await refresh();
     setMessage(result.status === "APPROVED"
@@ -772,12 +782,13 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     let present = true;
     void loadKnowledgeReview(platform, organizationId, next).then((loaded) => {
       if (!present) return;
+      replaceRoute.current = true;
       setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
     }).catch((cause: unknown) => { if (present) setError(errorMessage(cause)); });
     return () => { present = false; };
   }, [busy, review, reviews, platform, organizationId]);
 
-  const openPublished = (id: string) => void run(async () => {
+  const openPublished = (id: string) => run(async () => {
     try {
       const loaded = await loadPublishedKnowledge(platform, organizationId, id);
       setOpenedCitation(null); setDocument(loaded); setScreen("document");
@@ -912,6 +923,71 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const backToAllReviews = () => guardDiscard(Boolean(comment.trim()), () => {
     setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
   });
+  // Full-page screens have their own address; tabs, filters and dialogs stay in memory.
+  const homeLocation: KnowledgeHomeLocation = screen === "document" && document ? { kind: "document", id: document.id }
+    : screen === "editor" && draft ? { kind: "draft", id: draft.id }
+      : screen === "create" ? { kind: "create" }
+        : libraryTab === "reports" && caseSurface === "reports" && maintenanceCase ? { kind: "report", caseId: maintenanceCase.caseId }
+          : { kind: "home" };
+  const reviewLocation: KnowledgeReviewLocation = reviewSection === "maintenance"
+    ? caseSurface === "reviews" && maintenanceCase ? { kind: "maintenance-case", caseId: maintenanceCase.caseId } : { kind: "maintenance" }
+    : review ? { kind: "review", id: review.id } : { kind: "reviews" };
+  const routeKey = JSON.stringify([homeLocation, reviewLocation]);
+  useEffect(() => {
+    // A screen that replaces the one before it (a created draft, the next review after a decision) takes its history entry.
+    onRouteChange?.({ home: homeLocation, reviews: reviewLocation }, { replace: replaceRoute.current });
+    replaceRoute.current = false;
+  }, [routeKey, onRouteChange]);
+
+  const closeHomeScreen = () => {
+    if (screen === "document" && document) readerReturnId.current = document.id;
+    if (screen === "editor") {
+      if (draft) setEditor(valuesFromDraft(draft));
+      setReplacementPdf(null); setLibraryTab("drafts"); void refresh();
+    }
+    if (screen === "create") resetCreation();
+    if (caseSurface === "reports" && maintenanceCase) leaveMaintenanceCase();
+    setOpenedCitation(null); setError(""); setScreen("library");
+  };
+  const closeReview = () => { setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null; };
+  const showLocation = (location: KnowledgeLocation) => {
+    const settle = () => onRouteSettled?.();
+    const homeDirty = (screen === "create" && creationDirty) || (screen === "editor" && dirty);
+    const reviewDirty = Boolean(review && comment.trim());
+    // Unsaved work keeps its screen behind the discard dialog; the shell restores the address meanwhile.
+    const show = (changed: boolean, action: () => void | Promise<void>) => {
+      if (busy) { settle(); return; }
+      if (changed) { setDiscardAction(() => () => { void action(); }); settle(); return; }
+      void Promise.resolve(action()).finally(settle);
+    };
+    switch (location.kind) {
+      case "home": return show(homeDirty, closeHomeScreen);
+      case "document": return show(homeDirty, () => openPublished(location.id));
+      case "draft": return show(homeDirty, () => openDraft(location.id));
+      case "create": return show(homeDirty, () => { if (screen !== "create") openCreate("text"); });
+      case "report": return show(homeDirty, async () => {
+        closeHomeScreen(); setLibraryTab("reports");
+        await openMaintenanceCase(location.caseId, "reports");
+      });
+      case "reviews": return show(reviewDirty, () => { closeReview(); setReviewSection("publication"); leaveMaintenanceCase(); });
+      case "review": return show(reviewDirty, () => run(async () => {
+        const loaded = await loadKnowledgeReview(platform, organizationId, location.id);
+        setReviewSection("publication"); leaveMaintenanceCase();
+        setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
+      }));
+      case "maintenance": return show(false, () => { setReviewSection("maintenance"); if (caseSurface === "reviews") leaveMaintenanceCase(); });
+      case "maintenance-case": return show(false, async () => {
+        setReviewSection("maintenance");
+        await openMaintenanceCase(location.caseId, "reviews");
+      });
+    }
+  };
+  const handledRoute = useRef<string | null>(null);
+  useEffect(() => {
+    if (!routeRequest || handledRoute.current === routeRequest.navigationId) return;
+    handledRoute.current = routeRequest.navigationId;
+    showLocation(routeRequest.location);
+  }, [routeRequest]);
   const loadMoreHistory = () => {
     if (!maintenanceCase || !maintenanceHistory?.nextCursor) return;
     const request = caseLoad.current.request;
@@ -1220,7 +1296,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             {newFile && !newFileError && <div className="knowledge-selected-pdf"><strong>{newFile.name}</strong><span>{(newFile.size / 1024 / 1024).toFixed(1)} MB · ready to upload</span><button type="button" disabled={busy} onClick={() => { chooseFile(null); if (fileInput.current) fileInput.current.value = ""; }}>Remove</button></div>}
           </div> : <div className="arden-document-field"><span>Document text</span>
             <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor key="new-shared-knowledge"
-              body={newBody} instanceKey="new-shared-knowledge" disabled={busy} onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
+              body={newBody} instanceKey="new-shared-knowledge" disabled={busy} platform={platform} organizationId={organizationId}
+              onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
           </div>}
           <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button>
             <button type="button" className="secondary-button" disabled={busy} onClick={cancelCreation}>Cancel</button>
@@ -1251,7 +1328,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                 <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor
                   key={`${draft.id}:${draft.currentVersion.version}`} body={editor.body}
                   instanceKey={`${draft.id}:${draft.currentVersion.version}`}
-                  disabled={busy} onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
+                  disabled={busy} platform={platform} organizationId={organizationId}
+                  onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
               </div>}
             </div>
           </article>

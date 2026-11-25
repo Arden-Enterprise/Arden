@@ -25,12 +25,23 @@ describe("persisted Ask Arden history", () => {
     fireEvent.click(screen.getByRole("button", { name: "History", exact: true }));
     fireEvent.click(await screen.findByRole("button", { name: /^MFA discussion/ }));
     expect(await screen.findByText("Unavailable", { exact: true })).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Answer actions" })).toBeNull();
     expect(screen.queryByLabelText("Sources")).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Knowledge version scope" })).toBeNull();
     send("What changes next?");
     await screen.findByText("No guidance.");
     expect(ask.mock.calls[0]).toMatchObject(["web", "org", "What changes next?", { conversationId: "saved", expectedRevision: 1 }]);
     expect(ask.mock.calls[0]![3]).not.toHaveProperty("versionScope");
+  });
+
+  it("restores a saved feedback selection when reopening a conversation", async () => {
+    vi.spyOn(api, "listAiConversations").mockResolvedValue([summary]);
+    vi.spyOn(api, "loadAiConversation").mockResolvedValue({ ...saved, turns: [{ ...saved.turns[0]!,
+      status: "ANSWERED", answer: "Use MFA.", feedback: "BAD" }] });
+    render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
+    fireEvent.click(screen.getByRole("button", { name: "History", exact: true }));
+    fireEvent.click(await screen.findByRole("button", { name: /^MFA discussion/ }));
+    expect((await screen.findByRole("button", { name: "Bad response" })).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("preserves the request ID for a retry after an uncertain network result", async () => {

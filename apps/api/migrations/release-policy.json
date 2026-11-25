@@ -393,7 +393,19 @@
     },
     {
       "id": "0066",
-      "filename": "0066_expired_document_renewal.sql",
+      "filename": "0066_ai_turn_feedback.sql",
+      "sha256": "8998207456d95043ca162d42b403d9a27342ceddd12c13f26cab7d24413cd95f",
+      "rollout": "operator"
+    },
+    {
+      "id": "0067",
+      "filename": "0067_private_ai_feedback.sql",
+      "sha256": "d16f4464601be1488459aee48f418bfefcbefef3456ea352030763535ffb1c41",
+      "rollout": "operator"
+    },
+    {
+      "id": "0068",
+      "filename": "0068_expired_document_renewal.sql",
       "sha256": "4c6d46ca3f9d5d55d3be392ebd4620437aa10c9272a4a53b0b3a12bb45239542",
       "rollout": "operator"
     }

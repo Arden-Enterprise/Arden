@@ -71,9 +71,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0038_admin_only_direct_withdrawal', '0039_in_app_notifications', '0040_flat_collection_placement',
           '0041_verified_legacy_metadata_repair', '0042_remove_knowledge_topics',
           '0061_document_share_notifications', '0062_private_notes_organization_and_trash',
-          '0064_private_notes_order_and_archive', '0065_private_note_live_version',
-          '0066_expired_document_renewal')`);
-    if (migration.rows[0]?.count !== "33") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0064_private_notes_order_and_archive', '0065_private_note_live_version', '0066_ai_turn_feedback',
+          '0067_private_ai_feedback', '0068_expired_document_renewal')`);
+    if (migration.rows[0]?.count !== "35") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {
@@ -310,6 +310,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     await expect(repository.getDraft(ids.owner, ids.organization, created.id)).resolves.toMatchObject({ title: "Private" });
     await expect(repository.getDraft(ids.manager, ids.organization, created.id)).resolves.toBeNull();
+    await expect(repository.getDraft(ids.owner, ids.organization, created.id, { forQuestion: true })).resolves.toMatchObject({ currentVersion: 1 });
+    await expect(repository.getDraft(ids.owner, randomUUID(), created.id, { forQuestion: true })).resolves.toBeNull();
+    await expect(repository.getDraft(ids.manager, ids.organization, created.id, { forQuestion: true })).resolves.toBeNull();
     await expect(repository.listDrafts(ids.manager, ids.organization, 10, null)).resolves.toMatchObject({ items: [] });
     // Decision0010 makes private-workspace creation an active Member capability.
     // It never gives the Member access to somebody else's private originals.
@@ -1319,6 +1322,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     // F03-ARR-AC3: archive hides the note from the list without touching its saved time.
     const archived = await store.setNoteArchived(ids.owner, ids.organization, third!.id, true, "arr-archive");
     expect(archived).toMatchObject({ id: third!.id, archivedAt: expect.any(Date) });
+    await expect(repository.getDraft(ids.owner, ids.organization, third!.id, { forQuestion: true })).resolves.toBeNull();
     expect(await savedAt(third!.id)).toBe(thirdSaved);
     const listed = await repository.listDrafts(ids.owner, ids.organization, 100, null);
     expect(listed!.items.map((item) => item.id)).not.toContain(third!.id);

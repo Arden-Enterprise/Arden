@@ -1205,7 +1205,7 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
     });
   });
 
-  describe("decision 0032 expired visibility and renewal (migration 0066)", () => {
+  describe("decision 0032 expired visibility and renewal (migration 0068)", () => {
     const createdGrants: string[] = [];
     afterEach(async () => {
       const pending = createdGrants.splice(0);

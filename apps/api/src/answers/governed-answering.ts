@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { ArdenDataRepository, AuthorizedAiSource } from "../db/repository.js";
 import { canRead } from "../target-readers/policy.js";
 import type { AskArdenClient } from "./ai-client.js";
-import type { Conversation, ConversationStore, ConversationTurn } from "./conversation-store.js";
+import type { AnswerFeedback, Conversation, ConversationStore, ConversationTurn } from "./conversation-store.js";
 import { citationPage } from "./citation-page.js";
 import { evidenceMatchesManifest, GovernedAnswerError, parseGenerationResponse, parseRetrievalResponse, sourceLabel,
   type DialogueTurn, type Evidence, type EvidenceReference, type PublicCitation, type StoredAnswer } from "./governed-contracts.js";
@@ -87,7 +87,7 @@ export class GovernedAnswering {
   }
 
   async answer(user: string, organization: string, input: AnswerInput): Promise<StoredAnswer & {
-    conversationId: string; revision: number; turnId: string }> {
+    conversationId: string; revision: number; turnId: string; feedback?: AnswerFeedback }> {
     const ai = this.ai;
     if (!ai) throw new Error("AI provider is unavailable");
     const before = await this.sources(user, organization);
@@ -100,7 +100,7 @@ export class GovernedAnswering {
         || replay.sequence !== input.expectedRevision + 1) throw new GovernedAnswerError("CONFLICT");
       if (!await this.referencesAvailable(user, organization, replay.evidence)) throw unavailable();
       return { status: replay.status, answer: replay.answer, citations: replay.citations,
-        conversationId: input.conversationId, revision: conversation.revision, turnId: replay.id };
+        conversationId: input.conversationId, revision: conversation.revision, turnId: replay.id, feedback: replay.feedback };
     }
     if (conversation.revision !== input.expectedRevision) throw new GovernedAnswerError("CONFLICT");
     const context = await this.context(user, organization, conversation);

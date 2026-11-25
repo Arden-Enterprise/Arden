@@ -1,7 +1,7 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { metadataSubmissionErrors, validKnowledgeMetadata, type KnowledgeMetadata } from "@arden/domain";
 import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledge/catalog-store.js";
-import { PgConversationStore, type ConversationStore } from "../answers/conversation-store.js";
+import { PgConversationStore, type AnswerFeedback, type ConversationStore } from "../answers/conversation-store.js";
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
@@ -646,7 +646,7 @@ const publishedKnowledgeSelect = `
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
   const management = currentManagement(row.management);
   return {
-    // A reviewed renewal (0066) replaces the frozen Valid until; the snapshot itself is never rewritten.
+    // A reviewed renewal (0068) replaces the frozen Valid until; the snapshot itself is never rewritten.
     management: management ? { ...management, expirationDate: row.expiration_date } : null,
     id: row.published_version_id,
     draftId: row.shared_draft_id,
@@ -694,6 +694,7 @@ export interface ArdenDataRepository {
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
   readonly systemAdministration?: SystemAdministrationStore;
+  ratePrivateAnswer?(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean>;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
@@ -710,7 +711,7 @@ export interface ArdenDataRepository {
   deleteDepartment(userId: string, organizationId: string, departmentId: string, requestId: string): Promise<DeleteDepartmentResult>;
   changePrimaryDepartment(userId: string, organizationId: string, membershipId: string, departmentId: string, requestId: string): Promise<boolean>;
   listDrafts(userId: string, organizationId: string, limit: number, cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null>;
-  getDraft(userId: string, organizationId: string, draftId: string): Promise<PrivateDraft | null>;
+  getDraft(userId: string, organizationId: string, draftId: string, options?: { forQuestion: boolean }): Promise<PrivateDraft | null>;
   canCreateDraft(userId: string, organizationId: string): Promise<boolean>;
   createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, requestId: string): Promise<PrivateDraft | null>;
   canUpdateDraft(userId: string, organizationId: string, draftId: string): Promise<boolean>;
@@ -1510,8 +1511,8 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query(`SELECT set_config('arden.actor_id', $1, true),
         set_config('arden.organization_id', '', true), set_config('arden.org_admin', 'false', true),
         set_config('arden.instance_admin', 'false', true)`, [userId]);
-      const administrator = await client.query(`SELECT 1 FROM system_administrator
-        WHERE user_id = $1 AND status = 'ACTIVE'`, [userId]);
+      const administrator = await client.query(`SELECT 1 FROM system_administrator sa JOIN user_account ua USING (user_id)
+        WHERE sa.user_id = $1 AND sa.status = 'ACTIVE' AND ua.status = 'ACTIVE'`, [userId]);
       if (!administrator.rowCount) {
         await client.query("ROLLBACK");
         return null;
@@ -1526,6 +1527,19 @@ export class ArdenRepository implements ArdenDataRepository {
     } finally {
       client.release();
     }
+  }
+
+  async ratePrivateAnswer(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean> {
+    return this.withActorContext(userId, organizationId, async client => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return false;
+      await client.query("SELECT set_config('arden.private_feedback_key', $1, true)", [voteKey]);
+      await client.query(`
+        INSERT INTO private_ai_feedback(vote_key, feedback, rated_at)
+        VALUES ($1, $2::text, CASE WHEN $2 IS NULL THEN NULL ELSE now() END)
+        ON CONFLICT (vote_key) DO UPDATE SET feedback = EXCLUDED.feedback, rated_at = EXCLUDED.rated_at
+        WHERE private_ai_feedback.feedback IS DISTINCT FROM EXCLUDED.feedback`, [voteKey, feedback]);
+      return true;
+    });
   }
 
   async listDrafts(userId: string, organizationId: string, limit: number, cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null> {
@@ -1579,7 +1593,7 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async getDraft(userId: string, organizationId: string, draftId: string): Promise<PrivateDraft | null> {
+  async getDraft(userId: string, organizationId: string, draftId: string, options?: { forQuestion: boolean }): Promise<PrivateDraft | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
     const result = await client.query<{
       draft_id: string;
@@ -1603,7 +1617,11 @@ export class ArdenRepository implements ArdenDataRepository {
         JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
        WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
-         AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ"]);
+         AND (NOT $5::boolean OR (d.archived_at IS NULL AND EXISTS (
+           SELECT 1 FROM organization o JOIN user_account ua ON ua.user_id = om.user_id
+            WHERE o.organization_id = om.organization_id AND o.status = 'ACTIVE' AND ua.status = 'ACTIVE'
+         )))
+         AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ", options?.forQuestion ?? false]);
     const row = result.rows[0];
     return row ? {
       id: row.draft_id,
@@ -2568,7 +2586,7 @@ export class ArdenRepository implements ArdenDataRepository {
           membershipId, plan.decision, plan.comment, idempotencyKey,
           row.shared_draft_version_id, row.content_hash, approvedSelectionId]);
       } catch (error) {
-        // Decision 0032: a renewal asked on the author's behalf waits for the author first (0066 validator).
+        // Decision 0032: a renewal asked on the author's behalf waits for the author first (0068 validator).
         if (sqlStateOf(error) === "AR032") {
           await client.query("ROLLBACK TO SAVEPOINT review_decision_insert");
           return { kind: "denied", reason: "AUTHOR_DECISION_WINDOW" };
@@ -2642,7 +2660,7 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  /** Decision 0032: asks for a reviewed renewal as the author, or on the author's behalf (0066 re-checks). */
+  /** Decision 0032: asks for a reviewed renewal as the author, or on the author's behalf (0068 re-checks). */
   async requestPublicationRenewal(userId: string, organizationId: string, documentId: string,
     input: PublicationRenewalInput, requestId: string): Promise<RequestPublicationRenewalResult> {
     const reason = input.reason.trim();

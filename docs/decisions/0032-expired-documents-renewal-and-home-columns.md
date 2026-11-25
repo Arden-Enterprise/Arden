@@ -5,7 +5,7 @@ Date: 2026-11-24
 Decision owner/approval: project maintainer (repository user), approved in the project conversation on 2026-11-24 after the alternatives (automatic withdrawal at expiry, Admin direct renewal, keeping expired documents listed with an Expired status, and the existing Home column set) were discussed. Team consultation: not recorded.
 Brainstorm originator / record author: project maintainer; record written by Claude (coding agent) from the agreed rules.
 Approval evidence and exact source revision: maintainer approval in that conversation, against `origin/staging` `adcfac5`.
-Implementation: partial, branch `feat/expired-document-visibility` only (migration `0066_expired_document_renewal.sql`, API and UI); not merged, released or deployed. Evidence is listed under Verification.
+Implementation: partial, branch `feat/expired-document-visibility` only (migration `0068_expired_document_renewal.sql`, API and UI); not merged, released or deployed. Evidence is listed under Verification.
 Amended by: [0033](0033-reviewer-self-approval.md) (renewal decision order, B2/B4; edited in place because 0032 is unmerged).
 Supersedes / superseded by: supersedes [0022](0022-home-start-page-and-reader-validity.md) item 4 (one status vocabulary shown on Home) and the Home column list in 0022; extends [0024](0024-admin-only-direct-withdrawal.md) (withdrawal of expired documents) and [0025](0025-in-app-notifications.md) (two new in-app notice types). Expiry stays inclusive through its UTC day as in [0030](0030-published-date-ai-sources.md). Everything else in those records stays in force.
 
@@ -66,7 +66,7 @@ Published content stays published, the author's private originals stay private, 
 - Data: `shared_submission` gains `renewal_expiration_date`, `on_behalf_of_author` and `author_decides_until` (the author's priority window, fixed when an on-behalf request is created); `publication_validity_renewal` records an approved date per published version (a newer content version uses its own Valid until). `arden_notification` gains `PUBLICATION_EXPIRING` and `PUBLICATION_RENEWAL_ON_BEHALF` with `expires_on` and `request_reason`.
 - Authority is re-derived in reviewed `SECURITY DEFINER` routines from the actor context and existing routine owners are kept. Under 0033 the review-decision insert policy no longer excludes the submitter (a matching grant or Admin is still required), and an active author may read renewal requests made on their behalf; no other RLS policy changes. Reader hiding is applied in the reader projection; publication RLS itself is unchanged, so responsible views, governance, maintenance and notifications keep working.
 - An expired document is no longer "readable" for the Admin governance catalog, so an Admin opens it through the audited inspection (0023) rather than the reader.
-- Operators apply 0066 as the trusted superuser (operator-class) after backup and rehearsal; old Core cannot use the new request type but is not broken by the added columns.
+- Operators apply 0068 as the trusted superuser (operator-class) after backup and rehearsal; old Core cannot use the new request type but is not broken by the added columns.
 
 ## Verification and rollout
 
@@ -74,7 +74,7 @@ Planned and obtained evidence is recorded in the branch PR; at the time of writi
 
 ## Rules and documentation updates
 
-- [Operations](../engineering/operations.md) (migration 0066 rollout note)
+- [Operations](../engineering/operations.md) (migration 0068 rollout note)
 - [Mainflow 2 workflow](../engineering/mainflow-2-workflow.md) migration table
 - [DESIGN.md](../../DESIGN.md) Home table and reader validity
 - [Owner repair inventory](../../deploy/release/security-definer-owner-repair.sql)

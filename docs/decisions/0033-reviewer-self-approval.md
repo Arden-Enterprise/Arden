@@ -5,7 +5,7 @@ Date: 2026-11-24
 Decision owner/approval: project maintainer, explicitly approved in the project conversation on 2026-11-24 after the segregation-of-duties trade-off (ISO 9001 approver definition versus ISO/IEC 27001 Annex A control 5.3) was explained. Team consultation: not recorded.
 Brainstorm originator / record author: project maintainer; record written by Claude (coding agent).
 Approval evidence and exact source revision: maintainer approval in that conversation, against branch `feat/expired-document-visibility` at `90e436a` (base `origin/staging` `adcfac5`).
-Implementation: branch `feat/expired-document-visibility` only (amended migration `0066_expired_document_renewal.sql`, API, UI, tests); not merged, released or deployed.
+Implementation: branch `feat/expired-document-visibility` only (amended migration `0068_expired_document_renewal.sql`, API, UI, tests); not merged, released or deployed.
 Supersedes / superseded by: supersedes the rule that an ordinary reviewer "cannot self-review" / "never decides their own submission" in [0011](0011-permission-aware-publication-and-semantic-documents.md), [0015](0015-organization-wide-reviewer-grants.md), [Mainflow 2 workflow §1 and §3](../engineering/mainflow-2-workflow.md) and F05-AC2 in [identity and access](../product/identity-and-access.md). Grant scopes (0013–0015), legacy frozen rules and Organization Admin authority are unchanged. Amends the renewal decision order in [0032](0032-expired-documents-renewal-and-home-columns.md).
 
 ## Context and requirement
@@ -35,7 +35,7 @@ Small organizations often have one reviewer per department, who also writes that
 
 ## Boundaries and consequences
 
-- Database: migration 0066 (amended in place; never published or applied to a shared database) removes the submitter exclusion from `validate_review_decision`, the review-decision insert policy, `review_submission_authors` and `submission_proposed_reader_directory`; the grant check stays. `shared_submission.author_decides_until` fixes the author's window when an on-behalf request is created; the validator refuses other deciders during it (SQLSTATE `AR032`, API `409 AUTHOR_DECISION_WINDOW`). The author's own decision runs only through the reviewed routine `decide_on_behalf_renewal`, which needs no reviewer grant; an author may read renewal requests made on their behalf.
+- Database: migration 0068 (amended in place; never published or applied to a shared database) removes the submitter exclusion from `validate_review_decision`, the review-decision insert policy, `review_submission_authors` and `submission_proposed_reader_directory`; the grant check stays. `shared_submission.author_decides_until` fixes the author's window when an on-behalf request is created; the validator refuses other deciders during it (SQLSTATE `AR032`, API `409 AUTHOR_DECISION_WINDOW`). The author's own decision runs only through the reviewed routine `decide_on_behalf_renewal`, which needs no reviewer grant; an author may read renewal requests made on their behalf.
 - Reviewer queues list the reviewer's own submissions when the grant matches.
 - Maintenance case review (Flow 4, `maintenance_reviewer_eligible`) and the responsible reviewer's read-only view keep excluding the author; they are not review decisions on submissions and are out of scope here.
 

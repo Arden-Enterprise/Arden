@@ -7,19 +7,30 @@ import { ChatComposer } from "../ask-arden/ChatComposer";
 import { ChatMessages } from "../ask-arden/ChatMessages";
 import { CitationSourcesPanel } from "../ask-arden/CitationSourcesPanel";
 import { NewChatDialog } from "../ask-arden/NewChatDialog";
-import { useArdenChat } from "../ask-arden/useArdenChat";
+import { useArdenChat, type ChatSource } from "../ask-arden/useArdenChat";
 
 const ardenMark = new URL("../assets/arden-logo-white.png", import.meta.url).href;
 
-export function AgentPanel({ open, platform, organizationId, onClose, onOpenAskArden, onOpenCitation }: {
+type AgentPanelProps = {
   open: boolean;
   platform: Platform;
   organizationId: string | null;
+  source: ChatSource;
   onClose: () => void;
   onOpenAskArden: () => void;
   onOpenCitation?: (citation: KnowledgeCitationReference) => void;
-}) {
-  const chat = useArdenChat({ platform, organizationId });
+};
+
+export function AgentPanel(props: AgentPanelProps) {
+  const { source } = props;
+  const sourceKey = source.kind === "private-note" ? `${source.id}:${source.version}` : source.kind;
+  return <AgentPanelContent key={sourceKey} {...props} />;
+}
+
+function AgentPanelContent({ open, platform, organizationId, source, onClose, onOpenAskArden, onOpenCitation }: AgentPanelProps) {
+  const chat = useArdenChat({ platform, organizationId, source });
+  const noteTitle = source.kind === "private-note" ? source.title : undefined;
+  const prompts = chat.privateNote ? ["Summarize this note", "What are the key points?", "What action items are listed?"] : starterPrompts;
   const [resetting, setResetting] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -27,8 +38,8 @@ export function AgentPanel({ open, platform, organizationId, onClose, onOpenAskA
   const focusComposer = () => requestAnimationFrame(() => composerRef.current?.focus());
 
   useEffect(() => {
-    if (open) requestAnimationFrame(() => composerRef.current?.focus());
-  }, [open]);
+    if (open && !chat.privateNote) requestAnimationFrame(() => composerRef.current?.focus());
+  }, [open, chat.privateNote]);
   useEffect(() => {
     const scroller = scrollRef.current;
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
@@ -46,32 +57,36 @@ export function AgentPanel({ open, platform, organizationId, onClose, onOpenAskA
       <img className="agent-panel-mark" src={ardenMark} alt="" />
       <div className="agent-panel-title">
         <strong>Ask Arden</strong>
-        <span>{chat.empty ? "New chat" : chat.threadTitle}</span>
+        <span title={noteTitle}>{noteTitle ?? (chat.empty ? "New chat" : chat.threadTitle)}</span>
       </div>
       <button type="button" className="agent-panel-action" aria-label="New chat" title="New chat" disabled={chat.empty && !chat.draft}
         onClick={() => setResetting(true)}><Icon name="edit" size={15} /></button>
-      <button type="button" className="agent-panel-action" aria-label="Open Ask Arden" title="Open Ask Arden" onClick={onOpenAskArden}>
-        <Icon name="open-external" size={15} /></button>
+      {!chat.privateNote && <button type="button" className="agent-panel-action" aria-label="Open Ask Arden" title="Open Ask Arden" onClick={onOpenAskArden}>
+        <Icon name="open-external" size={15} /></button>}
       <button type="button" className="agent-panel-action" aria-label="Close Ask Arden" title="Close" onClick={close}>
         <Icon name="close" size={15} /></button>
     </header>
     <div ref={scrollRef} className="agent-panel-scroll" aria-live="polite">
       {chat.empty ? <div className="agent-panel-empty">
         <img className="agent-panel-empty-mark" src={ardenMark} alt="" />
-        <h2>Ask about your knowledge</h2>
-        <p>{chat.canAsk ? "Answers use only documents you can read, with sources." : "Open an organization to ask Arden."}</p>
+        <h2>{chat.privateNote ? "Ask this note" : "Ask about your knowledge"}</h2>
+        <p>{source.kind === "private-note"
+          ? "Arden sends your question and passages from this saved note to the configured AI service. Each question stands on its own."
+          : source.kind === "private-empty" ? source.hint
+          : chat.canAsk ? "Answers use only documents you can read, with sources." : "Open an organization to ask Arden."}</p>
         {chat.canAsk && <div className="agent-panel-starters" aria-label="Starter prompts">
-          {starterPrompts.map((prompt, index) => <button key={prompt} type="button" style={{ "--i": index } as CSSProperties}
+          {prompts.map((prompt, index) => <button key={prompt} type="button" style={{ "--i": index } as CSSProperties}
             onClick={() => { chat.setDraft(prompt); focusComposer(); }}>
             <Icon name={index === 0 ? "review" : index === 1 ? "search" : "people"} size={14} /><span>{prompt}</span>
           </button>)}
         </div>}
-      </div> : <ChatMessages chat={chat} />}
+      </div> : <ChatMessages chat={chat} sourcesId={sourcesId} />}
     </div>
-    <ChatComposer chat={chat} placement="panel" composerRef={composerRef} />
-    {/* In the narrow panel the Sources view covers the chat; Close or Escape returns to the chip. */}
-    {chat.sourcePanel && <CitationSourcesPanel id={sourcesId} citations={chat.sourcePanel.citations}
-      selected={chat.sourcePanel.selected} onOpenDocument={onOpenCitation} onClose={chat.closeSources} />}
+    {source.kind !== "private-empty" && <ChatComposer chat={chat} placement="panel" composerRef={composerRef} />}
+    {/* In the narrow panel, Close or Escape returns focus to the source control that opened the overlay. */}
+    {chat.sourcePanel && <CitationSourcesPanel key={chat.sourcePanel.messageId} id={sourcesId} citations={chat.sourcePanel.citations}
+      selected={chat.sourcePanel.selected} hideOpenDocument={chat.privateNote}
+      onOpenDocument={chat.privateNote ? undefined : onOpenCitation} onClose={chat.closeSources} />}
     {resetting && <NewChatDialog hasDraft={Boolean(chat.draft.trim())} onCancel={() => setResetting(false)} onConfirm={startNewChat} />}
   </aside>;
 }

@@ -169,7 +169,16 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
     await expect(conversations.append(member, org, id, 1, { ...turn, id: randomUUID(), requestId: randomUUID(),
       evidence: [{ ...ref, snapshotContentHash: "0".repeat(64) }] })).rejects.toMatchObject({ code: "ACCESS_CHANGED" });
     expect(await conversations.load(member, org, id)).toEqual(before);
+    const savedTurnId = before!.turns[0].id;
+    expect(await conversations.setFeedback(owner, org, id, savedTurnId, "GOOD")).toBe(false);
+    expect(await conversations.setFeedback(member, randomUUID(), id, savedTurnId, "GOOD")).toBe(false);
+    expect(await conversations.setFeedback(member, org, id, savedTurnId, "BAD")).toBe(true);
+    expect(await conversations.load(member, org, id)).toMatchObject({ revision: 1,
+      turns: [{ id: savedTurnId, answer: "Use MFA.", feedback: "BAD" }] });
+    expect(await conversations.setFeedback(member, org, id, savedTurnId, null)).toBe(true);
+    expect(await conversations.load(member, org, id)).toEqual(before);
     await pool!.query("UPDATE arden.organization_membership SET status='SUSPENDED' WHERE membership_id=$1", [memberId]);
+    expect(await conversations.setFeedback(member, org, id, savedTurnId, "GOOD")).toBe(false);
     expect(await repo!.readerSources.resolve(member, org, ref.publishedVersionId)).toBeNull();
     expect(await conversations.load(member, org, id)).toBeNull();
     expect(await repo!.listAuthorizedAiSources(member, org)).toBeNull();

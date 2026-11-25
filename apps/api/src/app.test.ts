@@ -162,6 +162,16 @@ describe("API auth and private draft routes", () => {
     expect(loaded.json().turns).toHaveLength(1);
     expect(loaded.json().turns[0]).not.toHaveProperty("evidence");
     expect(loaded.json().turns[0]).not.toHaveProperty("versionScope");
+    const feedbackUrl = `${base}/conversations/${versionId}/turns/${answer.json().turnId}/feedback`;
+    const rate = (feedback: unknown, cookie = owner) => app.inject({ method: "PUT", url: feedbackUrl,
+      headers: { ...headers, cookie }, payload: { feedback } });
+    expect((await rate("BAD", other)).statusCode).toBe(404);
+    expect((await rate("INVALID")).statusCode).toBe(400);
+    expect((await rate("GOOD")).json()).toEqual({ feedback: "GOOD" });
+    expect((await rate("BAD")).json()).toEqual({ feedback: "BAD" });
+    const rated = await app.inject({ method: "GET", url: `${base}/conversations/${versionId}`, headers });
+    expect(rated.json()).toMatchObject({ revision: 1, turns: [{ feedback: "BAD" }] });
+    expect((await rate(null)).json()).toEqual({ feedback: null });
     for (const versionScope of ["CURRENT", "UPCOMING", "COMPARE"]) {
       expect((await app.inject({ method: "POST", url: `${base}/answers`, headers,
         payload: { ...payload, versionScope } })).statusCode).toBe(400);
@@ -224,6 +234,7 @@ describe("API auth and private draft routes", () => {
       actor: { id: ownerId, email: "owner@example.test", fullName: "Owner" },
       account: { passwordSetupRequired: false },
       sessionExpiresAt: expect.any(String),
+      systemAdmin: true,
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
         status: "active", departmentId: null, departmentName: null, roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
@@ -868,6 +879,20 @@ describe("API auth and private draft routes", () => {
       headers: { cookie: ordinaryMember } });
     expect(denied.statusCode).toBe(404);
     expect(denied.json().error.code).toBe("SYSTEM_ADMINISTRATION_UNAVAILABLE");
+
+    const feedbackUrl = "/api/v1/system/analytics/private-feedback";
+    const analytics = await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: candidate } });
+    expect(analytics.statusCode).toBe(200);
+    expect(analytics.headers["cache-control"]).toBe("no-store");
+    expect(analytics.json()).toEqual({ weeks: [{ weekStart: "2026-11-23", good: 2, bad: 1 }] });
+    expect((await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: ordinaryMember } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: feedbackUrl })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: `${feedbackUrl}?userId=${ownerId}`, headers: { cookie: candidate } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: candidate } })).json().systemAdmin).toBe(true);
+    expect((await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: ordinaryMember } })).json().systemAdmin).toBeUndefined();
+    await app.inject({ method: "POST", url: `/api/v1/system/administrators/${systemAdminCandidateId}/revoke`,
+      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: {} });
+    expect((await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: candidate } })).statusCode).toBe(404);
   });
 
   it("does not allow revoking the last active Arden System Admin", async () => {
@@ -2851,6 +2876,15 @@ class MemorySystemAdministrationStore implements SystemAdministrationStore {
     if (!this.administrators.some(item => item.userId === actorUserId && item.status === "ACTIVE")) {
       throw new SystemAdministrationError("SYSTEM_ADMINISTRATION_UNAVAILABLE");
     }
+  }
+
+  async canAccess(actorUserId: string) {
+    return this.administrators.some(item => item.userId === actorUserId && item.status === "ACTIVE");
+  }
+
+  async privateFeedback(actorUserId: string) {
+    this.authorize(actorUserId);
+    return [{ weekStart: "2026-11-23", good: 2, bad: 1 }];
   }
 
   async overview(actorUserId: string) {

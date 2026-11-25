@@ -1,4 +1,5 @@
 import type { Platform } from "./types";
+import { rememberReturnPath } from "../app/workspaceRoute";
 import type { KnowledgeMetadata, PublicationScope, KnowledgeType } from "@arden/domain";
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
@@ -46,6 +47,7 @@ export type CurrentSession = {
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
   testMode?: boolean;
+  systemAdmin?: boolean;
 };
 export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
@@ -235,10 +237,13 @@ export type ReviewerGrant = {
   validUntil: string | null;
   status: "ACTIVE" | "INACTIVE";
 };
+export type AnswerFeedback = "GOOD" | "BAD" | null;
 export type AskArdenAnswer = {
   conversationId?: string;
   revision?: number;
   turnId?: string;
+  feedback?: AnswerFeedback;
+  feedbackToken?: string;
   status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
   answer: string;
   citations: Array<{
@@ -260,6 +265,7 @@ export type AiConversation = AiConversationSummary & { turns: Array<{
   id: string; requestId: string; question: string; sequence: number; answer: string;
   status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE";
   citations: AskArdenAnswer["citations"];
+  feedback?: AnswerFeedback;
 }> };
 
 function knowledgePath(organizationId: string): string {
@@ -566,6 +572,18 @@ export function loadAiConversation(platform: Platform, organizationId: string, i
   return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${id}`);
 }
 
+export function rateAiAnswer(platform: Platform, organizationId: string, conversationId: string, turnId: string,
+  feedback: AnswerFeedback): Promise<{ feedback: AnswerFeedback }> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${conversationId}/turns/${turnId}/feedback`, {
+    method: "PUT", body: JSON.stringify({ feedback }),
+  });
+}
+
+export type PrivateFeedbackWeek = { weekStart: string; good: number; bad: number };
+export function loadPrivateFeedbackAnalytics(platform: Platform): Promise<{ weeks: PrivateFeedbackWeek[] }> {
+  return request(platform, "/api/v1/system/analytics/private-feedback");
+}
+
 export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {
   const result = await request<{ items: ReviewerGrant[] }>(platform, `${knowledgePath(organizationId)}/reviewer-grants`);
   return result.items;
@@ -608,6 +626,8 @@ export async function signIn(platform: Platform, email: string, password: string
 
 export async function beginGoogleSignIn(platform: Platform): Promise<CurrentSession | null> {
   if (platform === "web") {
+    // Google returns to `/`; keep the workspace page the member was opening so sign-in lands there.
+    rememberReturnPath(window.location.pathname);
     window.location.assign("/api/v1/auth/google/start?client=web");
     return null;
   }

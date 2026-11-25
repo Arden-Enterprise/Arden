@@ -1,12 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { ApiError, askArden, listAiConversations, loadAiConversation, type AiConversation,
+import { ApiError, askArden, listAiConversations, loadAiConversation, rateAiAnswer, type AiConversation, type AnswerFeedback,
   type AiConversationSummary } from "../shared/api-client";
 import type { Platform } from "../shared/types";
+import { askPrivateNote, ratePrivateAnswer } from "../shared/private-workspace-api";
 import { answerMessage, type AnswerCitation, type AskArdenMessage } from "./askArdenModel";
 
 export type ArdenChat = ReturnType<typeof useArdenChat>;
 
-export function useArdenChat({ platform, organizationId }: { platform: Platform; organizationId: string | null }) {
+export type ChatSource =
+  | { kind: "company" }
+  | { kind: "private-note"; id: string; version: number; title: string }
+  | { kind: "private-empty"; hint: string };
+
+export function useArdenChat({ platform, organizationId, source }: {
+  platform: Platform; organizationId: string | null; source: ChatSource;
+}) {
+  const canAsk = Boolean(organizationId) && source.kind !== "private-empty";
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<AskArdenMessage[]>([]);
   const [pending, setPending] = useState(false);
@@ -16,7 +25,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [openingId, setOpeningId] = useState<string | null>(null);
-  const [sources, setSources] = useState<{ messageId: string; citation: AnswerCitation } | null>(null);
+  const [sources, setSources] = useState<{ messageId: string; citation: AnswerCitation | null } | null>(null);
   const sourcesOpener = useRef<HTMLElement | null>(null);
   const conversation = useRef<{ id: string; revision: number }>({ id: crypto.randomUUID(), revision: 0 });
   const retryRequest = useRef<{ query: string; id: string; conversationId: string; revision: number } | null>(null);
@@ -39,13 +48,14 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     setMessages(saved.turns.flatMap((turn) => [
       { id: `${turn.id}-question`, role: "member" as const, body: turn.question },
       { id: turn.id, role: "assistant" as const, body: turn.answer, citations: turn.citations,
+        savedTurn: { conversationId: saved.id, turnId: turn.id }, feedback: turn.feedback,
         insufficientEvidence: turn.status === "INSUFFICIENT_EVIDENCE", unavailable: turn.status === "UNAVAILABLE" },
     ]));
   };
 
   /** Opens a saved chat from History, or reloads the current one; an error stays where the request started. */
   const openConversation = async (id: string, fromHistory = false): Promise<boolean> => {
-    if (!organizationId || pending) return false;
+    if (!organizationId || pending || source.kind !== "company") return false;
     const generation = ++requestGeneration.current;
     // Reloading the open chat keeps an unsent follow-up; switching chats starts from an empty draft.
     const sameChat = id === conversation.current.id;
@@ -65,7 +75,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   };
 
   const loadHistory = async () => {
-    if (!organizationId) return;
+    if (!organizationId || source.kind !== "company") return;
     const generation = ++requestGeneration.current;
     setHistoryLoading(true); setHistoryError(null);
     try {
@@ -77,15 +87,15 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   };
 
   const openHistory = () => {
-    if (!organizationId || pending) return;
+    if (!organizationId || pending || source.kind !== "company") return;
     setHistoryOpen(true); void loadHistory();
   };
 
   const closeHistory = () => { requestGeneration.current++; setHistoryOpen(false); setHistoryLoading(false); setOpeningId(null); };
 
   /** Shows an answer's sources beside the chat; Open in document stays the governed reader path. */
-  const showSources = (messageId: string, citation: AnswerCitation) => {
-    sourcesOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const showSources = (messageId: string, opener: HTMLElement, citation: AnswerCitation | null = null) => {
+    sourcesOpener.current = opener;
     setSources({ messageId, citation });
   };
   const closeSources = () => {
@@ -96,11 +106,23 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
   };
   const sourceMessage = sources ? messages.find((message) => message.id === sources.messageId) : undefined;
   const sourcePanel = sources && sourceMessage?.citations?.length
-    ? { citations: sourceMessage.citations, selected: sources.citation } : null;
+    ? { messageId: sources.messageId, citations: sourceMessage.citations, selected: sources.citation } : null;
+
+  const rateAnswer = async (message: AskArdenMessage, feedback: AnswerFeedback) => {
+    if (!organizationId) throw new Error("This answer cannot be rated.");
+    const { savedTurn, privateFeedbackToken } = message;
+    const result = source.kind === "private-note" && privateFeedbackToken
+      ? await ratePrivateAnswer(platform, organizationId, privateFeedbackToken, feedback)
+      : source.kind === "company" && savedTurn
+        ? await rateAiAnswer(platform, organizationId, savedTurn.conversationId, savedTurn.turnId, feedback)
+        : null;
+    if (!result) throw new Error("This answer cannot be rated.");
+    setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, feedback: result.feedback } : entry));
+  };
 
   const submit = async () => {
     const query = draft.trim();
-    if (!query || pending || !organizationId) return;
+    if (!query || pending || !organizationId || source.kind === "private-empty") return;
     const generation = ++requestGeneration.current;
     setHistoryLoading(false);
     const last = messages.at(-1);
@@ -116,6 +138,13 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     setError(null);
     setPending(true);
     try {
+      if (source.kind === "private-note") {
+        const answer = await askPrivateNote(platform, organizationId, source.id, source.version, query, crypto.randomUUID());
+        if (generation === requestGeneration.current) {
+          setMessages((current) => [...current, answerMessage(answer, crypto.randomUUID())]);
+        }
+        return;
+      }
       const previous = retryRequest.current;
       const conversationId = conversation.current.id;
       // A retry replays the original turn, so it keeps the revision it was first sent with.
@@ -124,8 +153,7 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
       const requestId = retry?.id ?? crypto.randomUUID();
       const expectedRevision = retry?.revision ?? conversation.current.revision;
       retryRequest.current = { query, id: requestId, conversationId, revision: expectedRevision };
-      const answer = await askArden(platform, organizationId, query, { conversationId,
-        expectedRevision, requestId });
+      const answer = await askArden(platform, organizationId, query, { conversationId, expectedRevision, requestId });
       if (generation !== requestGeneration.current) {
         // A stopped request can still commit; keep the revision so the next prompt does not conflict.
         if (answer.conversationId === conversationId && conversation.current.id === conversationId
@@ -137,7 +165,8 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
       if (!answer.conversationId || answer.revision === undefined) throw new Error("Conversation persistence is unavailable.");
       conversation.current = { id: answer.conversationId, revision: answer.revision };
       retryRequest.current = null;
-      setMessages((current) => [...current, answerMessage(answer, crypto.randomUUID())]);
+      const answerId = answer.turnId ?? crypto.randomUUID();
+      setMessages((current) => [...current, answerMessage(answer, answerId)]);
     } catch (cause) {
       if (generation === requestGeneration.current) {
         setError(cause instanceof ApiError ? cause.message : "Ask Arden could not prepare an answer.");
@@ -179,8 +208,8 @@ export function useArdenChat({ platform, organizationId }: { platform: Platform;
     empty: messages.length === 0,
     currentId: messages.length ? conversation.current.id : null,
     threadTitle: messages.find((message) => message.role === "member")?.body ?? "New conversation",
-    canAsk: Boolean(organizationId),
-    submit, reset, stopWaiting, openHistory, closeHistory, openConversation, loadHistory, showSources, closeSources,
+    canAsk, privateNote: source.kind !== "company",
+    submit, reset, stopWaiting, openHistory, closeHistory, openConversation, loadHistory, showSources, closeSources, rateAnswer,
     toggleHistory: () => { if (historyOpen) closeHistory(); else openHistory(); },
     reloadConversation: () => openConversation(conversation.current.id),
   };

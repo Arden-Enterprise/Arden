@@ -41,6 +41,19 @@ describe("paired v2 HTTP adapter", () => {
     expect(fetch.mock.calls[0][1].headers.authorization).toBe("Bearer test-only");
     expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual(fixture.request);
   });
+  it("forwards writing text only to the authenticated internal v1 route with a bounded deadline", async () => {
+    const input = { contractVersion: 1, requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      action: "IMPROVE", scope: "SELECTION", text: "A sentence." };
+    const output = { ...input, status: "CHANGED", text: "A better sentence.", sourceQuote: "" };
+    const fetch = vi.fn().mockResolvedValue(Response.json(output));
+    vi.stubGlobal("fetch", fetch);
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    expect(await new HttpAskArdenClient("http://ai.example.test", "test-only").writing(input)).toEqual(output);
+    expect(String(fetch.mock.calls[0][0])).toBe("http://ai.example.test/v1/writing-actions");
+    expect(fetch.mock.calls[0][1].headers.authorization).toBe("Bearer test-only");
+    expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual(input);
+    expect(timeout).toHaveBeenCalledWith(65_000);
+  });
   it("uses separate authenticated retrieval/generation routes without an old-answer fallback", async () => {
     const fetch = vi.fn().mockResolvedValueOnce(Response.json(golden.retrievalResponse))
       .mockResolvedValueOnce(Response.json(golden.generationResponse));

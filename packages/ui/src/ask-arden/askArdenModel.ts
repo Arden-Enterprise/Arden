@@ -1,10 +1,13 @@
-import type { AskArdenAnswer } from "../shared/api-client";
+import type { AnswerFeedback, AskArdenAnswer } from "../shared/api-client";
 
 export type AskArdenMessage = {
   id: string;
   role: "member" | "assistant";
   body: string;
   citations?: AskArdenAnswer["citations"];
+  savedTurn?: { conversationId: string; turnId: string };
+  feedback?: AnswerFeedback;
+  privateFeedbackToken?: string;
   insufficientEvidence?: boolean;
   unavailable?: boolean;
   /** The request failed before an answer was saved; sending the same text retries it. */
@@ -24,17 +27,18 @@ export function answerMessage(answer: AskArdenAnswer, id: string): AskArdenMessa
     body: answer.answer,
     citations: answer.citations.length ? answer.citations : undefined,
     insufficientEvidence: answer.status === "INSUFFICIENT_EVIDENCE",
+    ...(answer.conversationId && answer.turnId ? { savedTurn: { conversationId: answer.conversationId, turnId: answer.turnId } } : {}),
+    ...(answer.feedback !== undefined ? { feedback: answer.feedback } : {}),
+    ...(answer.feedbackToken ? { privateFeedbackToken: answer.feedbackToken } : {}),
   };
 }
 
 export type AnswerCitation = AskArdenAnswer["citations"][number];
 
-/** One document cited at a point in the answer, with every passage from it that supports that point. */
-export type CitedSource = { key: string; label: string; title: string; citations: AnswerCitation[] };
 /** A run of answer text with the light Markdown emphasis models use; the delimiters themselves are removed. */
 export type InlinePart = { text: string; strong?: boolean; emphasis?: boolean; code?: boolean };
 /** One sentence: `text` is what the reader sees, `parts` the same text with its emphasis. */
-export type AnswerSegment = { text: string; parts: InlinePart[]; trailing: string; sources: CitedSource[] };
+export type AnswerSegment = { text: string; parts: InlinePart[]; trailing: string; sourceNumbers: number[] };
 export type AnswerLine = AnswerSegment[];
 export type AnswerBlock =
   | { kind: "paragraph"; lines: AnswerLine[] }
@@ -42,15 +46,6 @@ export type AnswerBlock =
   | { kind: "list"; ordered: boolean; start: number; items: AnswerLine[] };
 
 const markerPattern = /\s?\[(\d{1,2})\]/g;
-const stopWords = new Set(["the", "and", "for", "are", "was", "were", "with", "that", "this", "from", "have", "has", "not",
-  "but", "can", "may", "must", "should", "will", "its", "their", "they", "you", "your", "our", "all", "any", "each", "into",
-  "than", "then", "when", "which", "who", "what", "how", "also", "been", "being", "per", "via",
-  "của", "và", "các", "những", "là", "cho", "với", "được", "trong", "một", "có", "không", "này", "khi", "để", "theo", "từ"]);
-
-function tokens(text: string): Set<string> {
-  const words = text.normalize("NFKC").toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  return new Set(words.filter((word) => (word.length > 2 || /\p{N}/u.test(word)) && !stopWords.has(word)));
-}
 
 function sentences(paragraph: string): string[] {
   const Segmenter = (Intl as { Segmenter?: typeof Intl.Segmenter }).Segmenter;
@@ -142,74 +137,20 @@ function styledParts(text: string, styles: Style[], from: number, to: number): I
   return parts;
 }
 
-/** Decision 0021: documents are named by title; a Document Code is never shown. */
-function sourceLabel(citation: AnswerCitation): string {
-  return citation.title;
-}
-
-function uniqueCitations(citations: readonly AnswerCitation[]): AnswerCitation[] {
-  const seen = new Set<string>();
-  return citations.filter((citation) => {
-    const key = `${citation.versionId}\u0000${citation.blockId ?? ""}\u0000${citation.excerpt}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function groupByDocument(citations: readonly AnswerCitation[]): CitedSource[] {
-  const groups = new Map<string, CitedSource>();
-  for (const citation of uniqueCitations(citations)) {
-    const group = groups.get(citation.versionId);
-    if (group) group.citations.push(citation);
-    else groups.set(citation.versionId, { key: citation.versionId, label: sourceLabel(citation), title: citation.title, citations: [citation] });
-  }
-  return [...groups.values()];
-}
-
-/**
- * Places citations inline, after the sentence each one supports. Answers that number their sources with
- * `[n]` markers are placed exactly; otherwise each quote goes after the sentence sharing most of its words,
- * and a quote that matches no sentence is placed at the end of the answer. Headings, lists and inline emphasis
- * are kept as structure rather than shown as Markdown characters.
- */
+/** Render explicit source markers. The Sources panel also lists passages without a marker. */
 export function layoutCitedAnswer(answer: string, citations: readonly AnswerCitation[]): AnswerBlock[] {
   const lines = answerLines(answer);
   if (!lines.length) lines.push({ kind: "plain", text: answer, chunk: 0 });
   const units = lines.map((line) => sentences(line.text));
   for (const unit of units) if (!unit.length) unit.push("");
-  const assigned = units.map((unit) => unit.map(() => [] as AnswerCitation[]));
-  const usesMarkers = [...answer.matchAll(markerPattern)].some((match) => Number(match[1]) >= 1 && Number(match[1]) <= citations.length);
-
-  const texts = units.map((unit, u) => unit.map((sentence, s) => {
-    if (!usesMarkers) return sentence;
-    return sentence.replace(markerPattern, (marker, number: string) => {
-      const citation = citations[Number(number) - 1];
-      if (!citation) return marker;
-      assigned[u]![s]!.push(citation);
+  const assigned = units.map((unit) => unit.map(() => new Set<number>()));
+  const texts = units.map((unit, u) => unit.map((sentence, s) =>
+    sentence.replace(markerPattern, (marker, number: string) => {
+      const index = Number(number);
+      if (!citations[index - 1]) return marker;
+      assigned[u]![s]!.add(index);
       return "";
-    });
-  }));
-
-  if (usesMarkers) {
-    const placed = new Set(assigned.flat(2));
-    for (const citation of citations) if (!placed.has(citation)) assigned.at(-1)!.at(-1)!.push(citation);
-  } else {
-    const sentenceTokens = texts.map((unit) => unit.map(tokens));
-    for (const citation of citations) {
-      const quote = tokens(citation.excerpt);
-      let best: { u: number; s: number; score: number } | null = null;
-      sentenceTokens.forEach((unit, u) => unit.forEach((words, s) => {
-        let shared = 0;
-        for (const word of words) if (quote.has(word)) shared++;
-        const score = words.size ? shared / Math.sqrt(words.size) : 0;
-        if (shared >= 2 && (!best || score > best.score)) best = { u, s, score };
-      }));
-      const target = best as { u: number; s: number } | null;
-      if (target) assigned[target.u]![target.s]!.push(citation);
-      else assigned.at(-1)!.at(-1)!.push(citation);
-    }
-  }
+    })));
 
   const laidOut: AnswerLine[] = texts.map((unit, u) => {
     const line = unit.join(""), styles = inlineStyles(line);
@@ -219,7 +160,7 @@ export function layoutCitedAnswer(answer: string, citations: readonly AnswerCita
       const parts = styledParts(line, styles, offset, offset + visible);
       offset += sentence.length;
       return { text: parts.map((part) => part.text).join(""), parts, trailing: sentence.slice(visible),
-        sources: groupByDocument(assigned[u]![s]!) };
+        sourceNumbers: [...assigned[u]![s]!] };
     });
   });
 
@@ -235,4 +176,14 @@ export function layoutCitedAnswer(answer: string, citations: readonly AnswerCita
     } else blocks.push({ kind: "paragraph", lines: [content] });
   });
   return blocks;
+}
+
+/** Preserve paragraphs and list structure when copying the visible answer as plain text. */
+export function copyableAnswer(answer: string, citations: readonly AnswerCitation[]): string {
+  const line = (segments: AnswerLine) => segments.map(({ text, trailing }) => text + trailing).join("");
+  return layoutCitedAnswer(answer, citations).map(block => {
+    if (block.kind === "heading") return line(block.line);
+    if (block.kind === "paragraph") return block.lines.map(line).join("\n");
+    return block.items.map((item, index) => `${block.ordered ? `${block.start + index}.` : "-"} ${line(item)}`).join("\n");
+  }).join("\n\n").trim();
 }

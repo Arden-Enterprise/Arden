@@ -8,6 +8,20 @@ const idempotencyKey = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const sharedDraftPath = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
 
 describe("desktop API request allowlist", () => {
+  it("allows only a bounded writing action body with a Core-owned deadline", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/writing-actions`;
+    const payload = { requestId: idempotencyKey, action: "IMPROVE", scope: "SELECTION", text: "A sentence." };
+    const request = { path, method: "POST" as const, body: JSON.stringify(payload) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 90_000);
+    for (const body of ["{}", JSON.stringify({ ...payload, text: " " }), JSON.stringify({ ...payload, text: "x".repeat(12_001) }),
+      JSON.stringify({ ...payload, scope: "ALL" }), JSON.stringify({ ...payload, source: "private-note" })]) {
+      assert.equal(validateDesktopApiRequest({ ...request, body }), false);
+    }
+    for (const change of [{ method: "GET" }, { path: `${path}?all=1` }, { timeoutMs: 60_000 }, { idempotencyKey }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+  });
   it("allows only versioned placement reads and mutations", () => {
     const path = `/api/v1/organizations/${organizationId}/knowledge/catalog/placements/${sourcePrivateVersionId}`;
     assert.equal(validateDesktopApiRequest({ path, method: "GET" }), true);
@@ -62,6 +76,20 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${path}/access?all=1`, method: "GET" }), false);
     assert.equal(desktopApiTimeout({ path: "/api/v1/me", method: "GET" }), undefined);
   });
+  it("allows questions for one saved private note revision without a scope override", () => {
+    const path = `/api/v1/organizations/${organizationId}/private-workspace/drafts/${sourcePrivateVersionId}/questions`;
+    const payload = { requestId: idempotencyKey, query: "Summarize this note", expectedVersion: 2 };
+    const request = { path, method: "POST" as const, body: JSON.stringify(payload) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 240_000);
+    for (const expectedVersion of [undefined, "2", 0, -1, 1.5, 2_147_483_648]) {
+      assert.equal(validateDesktopApiRequest({ ...request, body: JSON.stringify({ ...payload, expectedVersion }) }), false);
+    }
+    for (const change of [{ path: `${path}?scope=all` }, { method: "GET" }, { timeoutMs: 45_000 },
+      { body: JSON.stringify({ ...payload, source: "company" }) }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+  });
   it("allows only exact bodyless private conversation reads", () => {
     const list = `/api/v1/organizations/${organizationId}/ai/conversations`;
     for (const path of [list, `${list}/${sourcePrivateVersionId}`]) {
@@ -73,6 +101,30 @@ describe("desktop API request allowlist", () => {
     }
     assert.equal(validateDesktopApiRequest({ path: `${list}/not-a-uuid`, method: "GET" }), false);
     assert.equal(validateDesktopApiRequest({ path: `${list}/${sourcePrivateVersionId}/turns`, method: "GET" }), false);
+  });
+  it("allows an exact Company turn feedback update", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/conversations/${sourcePrivateVersionId}/turns/${idempotencyKey}/feedback`;
+    for (const feedback of ["GOOD", "BAD", null]) {
+      assert.equal(validateDesktopApiRequest({ path, method: "PUT", body: JSON.stringify({ feedback }) }), true);
+    }
+    const request = { path, method: "PUT", body: '{"feedback":"GOOD"}' };
+    for (const change of [{ method: "POST" }, { path: `${path}?all=1` }, { body: '{"feedback":true}' },
+      { body: '{"feedback":"BAD","answer":"sensitive text"}' }, { ifMatch: '"1"' }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+  });
+  it("limits private feedback and analytics to their exact IPC shapes", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/private-feedback`;
+    const token = `${idempotencyKey}.1795500000000.${"A".repeat(43)}`;
+    const request = { path, method: "PUT", body: JSON.stringify({ token, feedback: "GOOD" }) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    for (const change of [{ path: `${path}?all=1` }, { method: "POST" },
+      { body: JSON.stringify({ token, feedback: "BAD", documentId: sourcePrivateVersionId }) }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+    const analytics = { path: "/api/v1/system/analytics/private-feedback", method: "GET" };
+    assert.equal(validateDesktopApiRequest(analytics), true);
+    assert.equal(validateDesktopApiRequest({ ...analytics, path: `${analytics.path}?all=1` }), false);
   });
   it("permits only the scoped bodyless submission withdrawal action", () => {
     const path = `/api/v1/organizations/${organizationId}/knowledge/submissions/${sourcePrivateVersionId}/withdraw`;

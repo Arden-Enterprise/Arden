@@ -1,12 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { AppSidebar } from "./AppSidebar";
 import { MobileTabIsland } from "./MobileTabIsland";
 import { AgentPanel } from "./AgentPanel";
+import type { ChatSource } from "../ask-arden/useArdenChat";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
 import { SignInPage } from "../sign-in/SignInPage";
 import { clearRecoveryTokens, readRecoveryTokens, storeRecoveryTokens } from "../sign-in/recovery-session";
 import { SetPasswordPage } from "../sign-in/SetPasswordPage";
 import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
+import { SystemFeedbackPage } from "../sign-in/SystemFeedbackPage";
 import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
 import { AskArdenPage } from "../ask-arden/AskArdenPage";
 import type { KnowledgeCitationReference, KnowledgeReaderTarget } from "../knowledge/knowledgeCitation";
@@ -31,6 +33,8 @@ import type { Platform, PrivateCollection, PrivateNote, WorkspaceView } from "..
 import { IslandConfirm } from "../shared/IslandConfirm";
 import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership, type NotificationTarget } from "../shared/api-client";
 import { needsDepartmentAssignment } from "../shared/membershipAssignment";
+import { emptyKnowledgeRoute, sameKnowledgeLocation, type KnowledgeRoute, type KnowledgeRouteRequest } from "../knowledge/knowledgeRoute";
+import { allowedRoute, homeRoute, parseWorkspacePath, routeForView, takeReturnPath, workspacePath, type PrivateLocation, type WorkspaceRoute } from "./workspaceRoute";
 
 type ArdenShellProps = { platform: Platform };
 
@@ -64,7 +68,7 @@ const initialCollections: PrivateCollection[] = [
   { id: "sample-discovery", title: "Discovery", parentId: null, favoritedAt: null },
 ];
 
-type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
+type EntryView = "sign-in" | "password-setup" | "workspace-select" | "system-feedback" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
 
 /**
  * Extracts a 43-character invitation token from the URL path `/invite/:token`.
@@ -193,8 +197,123 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [requestedReviewId, setRequestedReviewId] = useState<string | null>(null);
   const [requestedContributionId, setRequestedContributionId] = useState<string | null>(null);
   const restoreStarted = useRef(false);
+  // The web address mirrors the open workspace screen so browser Back/Forward and reload work. The desktop app has
+  // no address bar and loads from a file URL, so it keeps navigation in memory only.
+  const routing = platform === "web" && typeof window !== "undefined";
+  const [knowledgeRoute, setKnowledgeRoute] = useState<KnowledgeRoute>(emptyKnowledgeRoute);
+  const [knowledgeRouteRequest, setKnowledgeRouteRequest] = useState<KnowledgeRouteRequest | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [askRouteRequest, setAskRouteRequest] = useState<{ conversationId: string | null; navigationId: string } | null>(null);
+  const [routeSync, setRouteSync] = useState(0);
+  /** Address the browser moved to that the screens are still catching up with (a document or chat loading). */
+  const historyTarget = useRef<string | null>(null);
+  const replaceNextRoute = useRef(false);
+  const deferredRoute = useRef<WorkspaceRoute | null>(null);
+  /** A Private location from the address that waits for the notes to load. */
+  const waitingPrivateRoute = useRef<PrivateLocation | null>(null);
+  /** A Back/Forward held behind the Administration discard dialog. */
+  const routeAfterDiscard = useRef<WorkspaceRoute | null>(null);
+  const handleHistoryNavigation = useRef<(() => void) | null>(null);
+  handleHistoryNavigation.current = null;
+  /** A feature reported a new location after this render: the address waits for the render that includes it. */
+  const reportedSinceRender = useRef(false);
+  reportedSinceRender.current = false;
+
+  const focus = privateNotes.focus;
+  /** Private shows a note but none is chosen yet; it picks one as soon as the notes are on screen. */
+  const privateUnselected = focus.kind === "note" && !privateNotes.selectedNote;
+  const wasPrivateUnselected = useRef(false);
+  const privateLocation: PrivateLocation = focus.kind === "note"
+    ? privateNotes.selectedNote ? { kind: "note", id: privateNotes.selectedNote.id } : { kind: "root" }
+    : focus.kind === "collection" ? { kind: "collection", id: focus.id } : { kind: focus.kind };
+
+  /** A screen finished handling an address (shown, refused or failed): record what it now shows in place. */
+  const settleRoute = useCallback(() => {
+    // Often called while the screen's own update is still to render; the address follows that render.
+    reportedSinceRender.current = true;
+    historyTarget.current = null;
+    replaceNextRoute.current = true;
+    setRouteSync((tick) => tick + 1);
+  }, []);
+  const replaceWhenReported = (replace: boolean) => {
+    reportedSinceRender.current = true;
+    if (replace && historyTarget.current === null) replaceNextRoute.current = true;
+    setRouteSync((tick) => tick + 1);
+  };
+  const onKnowledgeRouteChange = useCallback((route: KnowledgeRoute, options: { replace: boolean }) => {
+    setKnowledgeRoute((current) => sameKnowledgeLocation(current.home, route.home) && sameKnowledgeLocation(current.reviews, route.reviews) ? current : route);
+    replaceWhenReported(options.replace);
+  }, []);
+  const onConversationChange = useCallback((id: string | null, options: { replace: boolean }) => {
+    setConversationId(id);
+    replaceWhenReported(options.replace);
+  }, []);
+
+  /** Shows a Private location now; a missing note or collection opens the Private root. */
+  const showPrivateLocation = (at: PrivateLocation) => {
+    if (at.kind === "note" && privateNotes.state.notes.some((note) => note.id === at.id)) privateNotes.openNote(at.id);
+    else if (at.kind === "collection" && privateNotes.collections.some((collection) => collection.id === at.id)) privateNotes.openCollection(at.id);
+    else if (at.kind === "trash") privateNotes.openTrash();
+    else if (at.kind === "archive") privateNotes.openArchive();
+    else privateNotes.openRoot();
+  };
+  useEffect(() => {
+    const at = waitingPrivateRoute.current;
+    if (!at || privateNotes.loading) return;
+    waitingPrivateRoute.current = null;
+    showPrivateLocation(at);
+    settleRoute();
+  }, [privateNotes.loading, routeSync]);
+
+  /** Asks the screens of a route to show its location; the view itself is set by the caller. */
+  const requestRouteLocation = (route: WorkspaceRoute) => {
+    const navigationId = crypto.randomUUID();
+    if (route.view === "knowledge" && !sameKnowledgeLocation(route.at, knowledgeRoute.home)) {
+      setKnowledgeRouteRequest({ location: route.at, navigationId });
+    } else if (route.view === "review-queue" && !sameKnowledgeLocation(route.at, knowledgeRoute.reviews)) {
+      setKnowledgeRouteRequest({ location: route.at, navigationId });
+    } else if (route.view === "ask-arden" && route.conversationId !== conversationId) {
+      setAskRouteRequest({ conversationId: route.conversationId, navigationId });
+    } else if (route.view === "personal-workspace" && JSON.stringify(route.at) !== JSON.stringify(privateLocation)) {
+      waitingPrivateRoute.current = route.at;
+      setRouteSync((tick) => tick + 1);
+    }
+  };
 
   useEffect(() => { setRequestedReviewId(null); }, [serverOrganizationId, serverSession?.actor.id]);
+  // Declared after the reset above so a location from the address survives entering the organization.
+  useEffect(() => {
+    const route = deferredRoute.current;
+    deferredRoute.current = null;
+    if (route) requestRouteLocation(route);
+  }, [serverOrganizationId, serverSession?.actor.id]);
+
+  useEffect(() => {
+    if (!routing) return;
+    const onPopState = () => handleHistoryNavigation.current?.();
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [routing]);
+
+  const currentRoutePath = entryView === "workspace"
+    ? workspacePath(routeForView(activeView, { knowledge: knowledgeRoute, conversationId, private: privateLocation })) : null;
+  useEffect(() => {
+    if (reportedSinceRender.current) return;
+    // Private choosing its first note is part of opening Private, not a page of its own.
+    const replace = replaceNextRoute.current || (activeView === "personal-workspace" && wasPrivateUnselected.current && !privateUnselected);
+    replaceNextRoute.current = false;
+    wasPrivateUnselected.current = activeView === "personal-workspace" && privateUnselected;
+    if (!routing || currentRoutePath === null || waitingPrivateRoute.current) return;
+    if (historyTarget.current !== null) {
+      if (historyTarget.current === currentRoutePath) historyTarget.current = null;
+      return;
+    }
+    if (window.location.pathname === currentRoutePath) return;
+    try {
+      if (replace) window.history.replaceState(null, "", currentRoutePath);
+      else window.history.pushState(null, "", currentRoutePath);
+    } catch {}
+  }, [routing, currentRoutePath, routeSync]);
 
   /**
    * Activates the selected organization workspace for the signed-in member.
@@ -212,9 +331,29 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setAssignedReviewCount(undefined);
     setContributionAttempt(null);
     setKnowledgeCitationTarget(null);
+    setKnowledgeRoute(emptyKnowledgeRoute);
+    setKnowledgeRouteRequest(null);
+    setConversationId(null);
+    setAskRouteRequest(null);
+    waitingPrivateRoute.current = null;
     setOrganization(null);
     setPreviewRole(null);
-    setActiveView("knowledge");
+    // Open the screen the address names (a reload, a shared link, or the page kept across Google sign-in),
+    // falling back to Home when this member cannot open it.
+    const returnPath = routing ? takeReturnPath() : null;
+    const currentPath = routing ? window.location.pathname === "/" && returnPath ? returnPath : window.location.pathname : "/";
+    const requested = parseWorkspacePath(currentPath) ?? homeRoute;
+    const route = allowedRoute(requested, {
+      admin: membership.roleCodes.includes("ORG_ADMIN"),
+      privateNotes: membership.canUsePrivateWorkspace && !needsDepartmentAssignment(membership),
+    });
+    if (routing) {
+      const path = workspacePath(route);
+      if (window.location.pathname !== path) { try { window.history.replaceState(null, "", path); } catch {} }
+      historyTarget.current = path;
+    }
+    deferredRoute.current = route;
+    setActiveView(route.view);
     setEntryView("workspace");
     if (membership.canUsePrivateWorkspace) {
       void privateNotes.connectServer(platform, membership.organization.id);
@@ -478,12 +617,16 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     );
   }
 
+  if (entryView === "system-feedback" && serverSession?.systemAdmin) {
+    return <SystemFeedbackPage platform={platform} onBack={() => setEntryView("workspace-select")} />;
+  }
   if (entryView === "workspace-select") {
     if (serverSession) {
       return <WorkspaceSelectPage
         organizationName="organization"
         memberships={serverSession.memberships}
         testMode={serverSession.testMode}
+        onOpenSystemFeedback={serverSession.systemAdmin ? () => setEntryView("system-feedback") : undefined}
         onCreateOrganization={async (name, departmentName) => {
           await apiCreateOrganization(platform, name, departmentName);
           await acceptServerSession(await currentSession(platform));
@@ -526,6 +669,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
    * @param view Target workspace view
    */
   const navigate = (view: WorkspaceView) => {
+    historyTarget.current = null;
     setNavOpen(false);
     if (invitationBatchSending && activeView === "organization-access" && view !== activeView) {
       setIslandToast({ message: "Wait for invitations to finish before leaving Administration.", onDismiss: () => setIslandToast(null) });
@@ -539,6 +683,46 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     }
     setOrganizationDirty(false);
     setActiveView(view);
+  };
+
+  /** Restores the address of the screen still shown after a Back or Forward that was refused. */
+  const keepCurrentRoute = () => {
+    historyTarget.current = null;
+    setRouteSync((tick) => tick + 1);
+  };
+
+  /** Shows a route that came from the address bar, as browser Back/Forward does. */
+  const showRoute = (route: WorkspaceRoute) => {
+    historyTarget.current = workspacePath(route);
+    requestRouteLocation(route);
+    if (route.view !== activeView) {
+      if (route.view !== "knowledge") setKnowledgeCitationTarget(null);
+      if (route.view === "ask-arden") setContextOpen(false);
+      setOrganizationDirty(false);
+      setActiveView(route.view);
+    }
+  };
+
+  handleHistoryNavigation.current = () => {
+    if (!currentRoutePath || window.location.pathname === currentRoutePath) return;
+    const requested = parseWorkspacePath(window.location.pathname) ?? homeRoute;
+    const route = allowedRoute(requested, { admin: liveAdmin || (!serverSession && previewRole === "admin"), privateNotes: canUsePrivateNotes });
+    const path = workspacePath(route);
+    if (path !== window.location.pathname) { try { window.history.replaceState(null, "", path); } catch {} }
+    if (path === currentRoutePath) return;
+    const leavingAdministration = activeView === "organization-access" && route.view !== activeView;
+    if (invitationBatchSending && leavingAdministration) {
+      setIslandToast({ message: "Wait for invitations to finish before leaving Administration.", onDismiss: () => setIslandToast(null) });
+      keepCurrentRoute();
+      return;
+    }
+    if (organizationDirty && leavingAdministration) {
+      routeAfterDiscard.current = route;
+      setPendingAction(route.view);
+      keepCurrentRoute();
+      return;
+    }
+    showRoute(route);
   };
 
   const openNotificationTarget = (target: NotificationTarget) => {
@@ -585,6 +769,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   };
 
   const showWorkspaceSelector = () => {
+    historyTarget.current = null;
+    if (routing && window.location.pathname !== "/") { try { window.history.replaceState(null, "", "/"); } catch {} }
     setKnowledgeDirty(false);
     setServerOrganizationId(null);
     setContributionAttempt(null);
@@ -630,6 +816,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
   // Demo sessions always have the in-memory notes; signed-in members need a private workspace in this organization.
   const canUsePrivateNotes = !isUnassignedMember && (!serverSession || Boolean(activeMembership?.canUsePrivateWorkspace));
+  const privateNote = privateNotes.focus.kind === "note" ? privateNotes.selectedNote : null;
+  const privateVersion = privateNotes.selectedVersion;
+  const chatSource: ChatSource = activeView !== "personal-workspace" ? { kind: "company" }
+    : canUsePrivateNotes && privateNotes.serverBacked && privateNote?.sourceVersionId && privateVersion
+      && !privateNotes.isDirty && !privateNotes.autosaving
+      ? { kind: "private-note", id: privateNote.id, title: privateNote.title, version: privateVersion }
+      : { kind: "private-empty", hint: privateNote && (privateNotes.isDirty || privateNotes.autosaving)
+        ? "Save this note before asking Arden." : "Open a saved note in Private to ask Arden." };
   const trashConfirm = privateNotes.trashConfirm;
 
   return (
@@ -673,7 +867,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       <ErrorBoundary>
         <div className="workspace-feature-slot" hidden={activeView !== "ask-arden"}>
           <AskArdenPage key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`}
-            active={activeView === "ask-arden"} platform={platform} organizationId={serverOrganizationId} onOpenCitation={openKnowledgeCitation} />
+            active={activeView === "ask-arden"} platform={platform} organizationId={serverOrganizationId} onOpenCitation={openKnowledgeCitation}
+            routeRequest={askRouteRequest} onConversationChange={onConversationChange} onRouteSettled={settleRoute} />
         </div>
         {isUnassignedMember && !isKnowledgeView && activeView !== "ask-arden" ? (
           <WaitingRoomPage
@@ -711,13 +906,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           canUsePrivateWorkspace={activeMembership?.canUsePrivateWorkspace ?? false}
           onOpenPrivateNotes={() => navigate("personal-workspace")}
           onDirtyChange={setKnowledgeDirty}
+          routeRequest={knowledgeRouteRequest} onRouteChange={onKnowledgeRouteChange} onRouteSettled={settleRoute}
           onNavigate={navigate} {...contextControl} />
       </div>
       </ErrorBoundary>
 
       {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close Ask Arden" onClick={contextControl.onToggleContext} />}
       <AgentPanel key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`} open={contextOpen}
-        platform={platform} organizationId={serverOrganizationId} onClose={closeContext}
+        platform={platform} organizationId={serverOrganizationId} onClose={closeContext} source={chatSource}
         onOpenAskArden={() => navigate("ask-arden")}
         onOpenCitation={(citation) => { if (contextOverlay) setContextOpen(false); openKnowledgeCitation(citation); }} />
       {trashConfirm && <IslandConfirm
@@ -748,7 +944,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       {pendingAction && (
         <DiscardChangesDialog
           exiting={pendingAction === "exit"}
-          onCancel={() => setPendingAction(null)}
+          onCancel={() => {
+            routeAfterDiscard.current = null;
+            setPendingAction(null);
+          }}
           onDiscard={() => {
             if (pendingAction === "exit") finishSignOut();
             else if (pendingAction === "setup") { setOrganizationDirty(false); setEntryView("setup"); }
@@ -756,10 +955,17 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
               setOrganizationDirty(false);
               showWorkspaceSelector();
             }
+            else if (routeAfterDiscard.current) {
+              historyTarget.current = null;
+              requestRouteLocation(routeAfterDiscard.current);
+              setOrganizationDirty(false);
+              setActiveView(routeAfterDiscard.current.view);
+            }
             else {
               setOrganizationDirty(false);
               setActiveView(pendingAction);
             }
+            routeAfterDiscard.current = null;
             setPendingAction(null);
           }}
         />
