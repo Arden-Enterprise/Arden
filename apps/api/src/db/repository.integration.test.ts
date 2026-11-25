@@ -72,8 +72,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           '0041_verified_legacy_metadata_repair', '0042_remove_knowledge_topics',
           '0061_document_share_notifications', '0062_private_notes_organization_and_trash',
           '0064_private_notes_order_and_archive', '0065_private_note_live_version', '0066_ai_turn_feedback',
-          '0067_private_ai_feedback')`);
-    if (migration.rows[0]?.count !== "34") throw new Error("Apply the current schema migrations to the isolated test database first");
+          '0067_private_ai_feedback', '0068_expired_document_renewal')`);
+    if (migration.rows[0]?.count !== "35") throw new Error("Apply the current schema migrations to the isolated test database first");
 
     const client = await pool.connect();
     try {

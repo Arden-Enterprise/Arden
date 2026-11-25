@@ -720,6 +720,12 @@ export function buildApp(dependencies: AppDependencies) {
         if (result.errorReason === "BASE_DEPARTMENT") {
           return reply.code(409).send(safeError("CANNOT_DELETE_BASE_DEPARTMENT", "The base department of the organization cannot be deleted.", request.id));
         }
+        if (result.errorReason === "OWNS_PUBLICATIONS") {
+          const count = result.publicationCount;
+          return reply.code(409).send({ error: { code: "DEPARTMENT_OWNS_PUBLICATIONS", requestId: request.id,
+            message: `This department owns ${count} published ${count === 1 ? "document" : "documents"}. Withdraw them before deleting it.`,
+            publicationCount: count } });
+        }
         return reply.code(404).send(resourceNotAvailable(request.id));
       }
       return reply.code(200).send({ departmentId: request.params.departmentId, status: "archived", unassignedCount: result.unassignedCount ?? 0, reassignedCount: result.reassignedCount ?? 0 });
@@ -1529,7 +1535,8 @@ export function buildApp(dependencies: AppDependencies) {
           "Describe the problem in 1 to 1000 characters.", request.id));
         const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
         const publication = actor ? await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId) : null;
-        if (!actor || !publication || !canRead(actor, { organizationId, readers: publication.targetReaders })) {
+        if (!actor || !publication || publication.expired
+          || !canRead(actor, { organizationId, readers: publication.targetReaders })) {
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
         if (dependencies.repository.maintenance) {
@@ -1677,6 +1684,66 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
       }
     });
+
+  // Decision 0032 B: a reviewed renewal of the current publication's Valid until (no content, reader or owner change).
+  app.post<{ Params: { organizationId: string; documentId: string }; Body: { expirationDate: string | null; reason: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/renewal", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern },
+        } },
+        headers: { type: "object", required: ["idempotency-key"], properties: {
+          "idempotency-key": { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", additionalProperties: false, required: ["expirationDate", "reason"], properties: {
+          expirationDate: { type: ["string", "null"], maxLength: 10 },
+          reason: { type: "string", minLength: 1, maxLength: 4000 },
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.requestPublicationRenewal(context.userId,
+          request.params.organizationId, request.params.documentId, { expirationDate: request.body.expirationDate,
+            reason: request.body.reason, idempotencyKey: request.headers["idempotency-key"] as string }, request.id);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "invalid-reason") return reply.code(400).send(safeError("INVALID_REASON",
+          "Give a reason of 1 to 1000 characters.", request.id));
+        if (result.kind === "invalid-date") return reply.code(400).send(safeError("INVALID_EXPIRATION_DATE",
+          "Choose a Valid until date after today, or no expiry.", request.id));
+        if (result.kind === "not-renewable") return reply.code(409).send(safeError("NOT_RENEWABLE",
+          "This document has no expiry to renew.", request.id));
+        if (result.kind === "not-yet") return reply.code(409).send(safeError("RENEWAL_NOT_YET_AVAILABLE",
+          "You can renew on the author's behalf from 7 days before the document expires.", request.id));
+        if (result.kind === "pending") return reply.code(409).send(safeError("RENEWAL_PENDING",
+          "A renewal is already waiting for review.", request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(result.kind === "requested" ? 201 : 200).send(representSubmission(result.submission));
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication renewal request failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0032 A4: validity of the current publications the caller is responsible for (metadata only).
+  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/renewals", {
+    schema: { params: { type: "object", required: ["organizationId"], properties: {
+      organizationId: { type: "string", pattern: uuidPattern },
+    } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const items = await dependencies.repository.listPublicationRenewalState(context.userId, request.params.organizationId);
+      if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+      reply.header("Cache-Control", "no-store");
+      return { items };
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication renewal state failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
 
   app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/submissions", {
     schema: { params: { type: "object", required: ["organizationId"], properties: {
@@ -1895,6 +1962,10 @@ export function buildApp(dependencies: AppDependencies) {
           return reply.code(400).send(safeError("READERS_NOT_SUPPORTED",
             "This submission uses audiences; approve it without approved readers.", request.id));
         }
+        if (result.reason === "AUTHOR_DECISION_WINDOW") {
+          return reply.code(409).send(safeError("AUTHOR_DECISION_WINDOW",
+            "The author decides this renewal first. Reviewers can decide it after 3 days or once the document expires.", request.id));
+        }
         if (result.reason === "PUBLICATION_CHANGED") {
           return reply.code(409).send(safeError("PUBLICATION_CHANGED",
             "This document changed since the request was made, or a newer version is still being prepared.", request.id));
@@ -1963,6 +2034,17 @@ export function buildApp(dependencies: AppDependencies) {
         };
         const publication = await readablePublication();
         if (!publication) return reply.code(404).send(resourceNotAvailable(request.id));
+        // Decision 0032 A3: an old link to an expired publication explains instead of showing the content.
+        if (publication.expired) {
+          reply.header("Cache-Control", "no-store");
+          const expiredOn = publication.management?.expirationDate ?? null;
+          const owner = publication.responsibleDepartmentName;
+          const shown = expiredOn ? new Date(`${expiredOn}T00:00:00Z`).toLocaleDateString("en-US",
+            { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : null;
+          return reply.code(410).send({ error: { code: "DOCUMENT_EXPIRED", requestId: request.id,
+            message: `This document expired${shown ? ` on ${shown}` : ""}. Contact ${owner ?? "the owner department"}.`,
+            expiredOn, ownerDepartmentName: owner, title: publication.title } });
+        }
         const mimeType = publication.sourceUri.endsWith(".pdf") ? "application/pdf" : "text/plain";
         const content = await readKnowledgeContent(dependencies.storage, publication.sourceUri, publication.contentHash, mimeType);
         const stillAuthorized = await readablePublication();
@@ -2417,6 +2499,8 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     publicationFailure: submission.publicationFailure,
     withdrawal: submission.withdrawal ? { by: submission.withdrawal.by, reason: submission.withdrawal.reason,
       at: submission.withdrawal.at.toISOString() } : null,
+
+    ...(submission.renewal ? { renewal: submission.renewal } : {}),
   };
 }
 

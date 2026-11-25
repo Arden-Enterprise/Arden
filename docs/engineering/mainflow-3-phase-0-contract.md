@@ -49,7 +49,7 @@ Existing endpoints may still map some stable meanings through the common safe-er
 | --- | --- |
 | Author edits while review is pending | New working version; submitted snapshot/hash unchanged |
 | Concurrent second submit | Exactly one pending candidate; loser receives conflict |
-| Ordinary reviewer self-review | Denied and not present in queue |
+| Ordinary reviewer self-review | Allowed with a matching current grant since [decision 0033](../decisions/0033-reviewer-self-approval.md) (previously denied and not present in queue) |
 | Organization Admin self-approval | Allowed; `selfApproved: true` audit evidence |
 | Reject | Candidate closes; no publication/index activation |
 | Approve | Candidate is `PREPARING`; no current pointer change |

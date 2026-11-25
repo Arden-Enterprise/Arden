@@ -27,7 +27,7 @@ export type ReviewDecisionFacts = {
    */
   readers?: { proposed: ReaderSelection | null; facts: SelectionFacts };
   /** T6.1/T6.2: what the submission asks for. Omitted means CONTENT. */
-  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
   /**
    * T6.2: for a change request, whether it still names the current publication and whether a newer approved
    * version is being prepared (which a withdrawal would race). Omitted for a change request refuses approval.
@@ -50,7 +50,7 @@ export type ApprovedReadersPlan = { proposed: ReaderSelection; approved: ReaderS
 export type ReviewDecisionPlan =
   | { kind: "DENIED"; reason: "INVALID_SNAPSHOT" | "STALE_SNAPSHOT" | "NOT_AUTHORIZED" | "AUDIENCE_NOT_ENFORCEABLE"
       | "UNSUPPORTED_POLICY" | "COMMENT_REQUIRED" | "INVALID_REQUEST" | "READERS_NOT_SUPPORTED" | "READERS_WIDENED"
-      | "PUBLICATION_CHANGED" }
+      | "PUBLICATION_CHANGED" | "AUTHOR_DECISION_WINDOW" }
   | { kind: "DENIED"; reason: "INVALID_READERS"; field: ApprovedReadersField; message: string }
   | { kind: "RECORD_ONLY"; decision: "REJECTED"; comment: string }
   | { kind: "APPROVE_FOR_PREPARATION"; decision: "APPROVED"; submissionId: string; snapshotVersionId: string;

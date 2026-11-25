@@ -21,8 +21,8 @@ All routes below are under `/api/v1/organizations/:organizationId/knowledge` and
 | Actor | Can do |
 |---|---|
 | **Author** | Owns their working drafts and their submission history. Cannot read another author's draft. |
-| **Department reviewer** | Holds an active `DEPARTMENT` reviewer grant for one department. Decides department- and group-only snapshots owned by that department. Never decides their own submission. |
-| **Organization reviewer** | Holds an active `ORGANIZATION` reviewer grant. Decides snapshots readable by the whole organization, from any department. Never decides their own submission. |
+| **Department reviewer** | Holds an active `DEPARTMENT` reviewer grant for one department. Decides department- and group-only snapshots owned by that department, including their own (decision 0033; audited `selfApproved: true`, not shown in the UI). |
+| **Organization reviewer** | Holds an active `ORGANIZATION` reviewer grant. Decides snapshots readable by the whole organization, from any department, including their own (decision 0033). |
 | **Organization Admin** | Creates and deactivates grants. May inspect and decide every pending submission, including their own; a self-approval is audited with `selfApproved: true` (0011). Admin status grants no published-content readership by itself. |
 | **Reader** | Any member whose current audience membership admits them to the active publication. |
 
@@ -170,7 +170,7 @@ with synthetic API boundaries for all three request types.
 
 - Scopes are disjoint (0015). An organization grant does not decide department or group snapshots, and a department grant does not decide new organization-wide snapshots.
 - Group composition never changes who reviews.
-- Grant tags and the validity window must match. Ordinary reviewers cannot decide their own submission.
+- Grant tags and the validity window must match. Since decision 0033 a reviewer whose current grant matches may decide their own submission of any type; a wrong-scope grant is still refused. Renewals asked on behalf of an active author are decided by that author alone for 3 days or until expiry (decision 0032), then by matching reviewers and Admins.
 - **Transition:** submissions that existed before migration 0022 carry `review_rule = LEGACY`.
   - A legacy organization-wide submission may also be decided by a Department grant for the responsible department with level `SPECIALIST` or `SENIOR`.
   - Legacy `CONFIDENTIAL` and `RESTRICTED` values keep their classification checks; `RESTRICTED` still needs `SPECIALIST` or `SENIOR`.
@@ -323,6 +323,7 @@ The migration ledger is `apps/api/migrations`. Flow 2 relies on:
 | `0038_admin_only_direct_withdrawal.sql` | Decision 0024: forward replacement of `withdraw_publication_directly`; only current Organization Admin may withdraw directly, with reason/audit and Admin provenance. Reviewer read/report handling and reviewed author requests are unchanged. No new trusted function (32 total); operator-class. |
 | `0039_in_app_notifications.sql` | Decision 0025: durable inbox/read state, source-transaction triggers and an outbox for authorization-filtered notification events. Adds `notify_arden_notification` (33 postgres-owned SECURITY DEFINER routines total) and a non-bypass worker role with column-limited outbox updates; operator-class. Realtime transports only opaque IDs and is configured separately. |
 | `0061_document_share_notifications.sql` | F21-AC10: approved `READER_CHANGE` on an existing publication notifies active approved recipients who pass the frozen audience; `SELECTED_MEMBERS` emits `DOCUMENT_SHARED_PERSONAL`, and `DEPARTMENT`/`ORGANIZATION` emit `DOCUMENT_SHARED_GROUP`. Activation has no share event. Message includes requester name and publication title without body/excerpt; Core rechecks current access before returning details. Adds `notify_arden_publication_share` (35 routines in the current 0001–0043 owner inventory); operator-class. |
+| `0068_expired_document_renewal.sql` | Decision 0032: expired publications stay current but leave reader listings and AI; `RENEWAL` change requests (author any time; responsible reviewer or Organization Admin on the author's behalf from 7 days before expiry, or at once for an inactive author) change only Valid until after an authorized decision; idempotent 30/7-day in-app reminders; active-author display names for Home. Decision 0033: removes the submitter exclusion from review decisions (grant still required) and adds the author's priority window for on-behalf renewals (`author_decides_until`, SQLSTATE `AR032`, `decide_on_behalf_renewal`). Change requests (`READER_CHANGE`, `WITHDRAWAL`, `RENEWAL`) check their target through `publication_change_target_state`, so a covering reviewer need not be a reader and does not become one. Replaces 6 and adds 6 reviewed definer routines (53 in the owner inventory); operator-class. |
 
 Run migrations before starting an API build that depends on them. The 0022 code reads `reviewer_grant.scope` and `shared_submission.review_rule`. The 0024 code reads `shared_draft.draft_selection_id`, the submission selection columns and `publication_reader_selection_id()`.
 

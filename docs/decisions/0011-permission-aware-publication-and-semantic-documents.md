@@ -4,6 +4,7 @@ Status: accepted
 Date: 2026-10-21
 Decision owner/approval: project lead, explicitly approved during Mainflow 3 Phase 0
 Implementation: partial — review contract, mutable drafts, clean-content reset and Semantic Document v1 implemented; indexing/activation follows in ARD-55/ARD-56
+Superseded in part by: [0033](0033-reviewer-self-approval.md) — a reviewer with a matching current grant may now decide their own submission (the "ordinary reviewers cannot self-review" rule below is historical).
 Refined by: [0023](0023-organization-admin-governance-access.md) (governance catalog and audited inspection) and [0024](0024-admin-only-direct-withdrawal.md) (Admin-only direct withdrawal with reason/audit; supersedes 0023's reviewer-direct-withdrawal authority).
 Supersedes: the immediate-activation portion of [0007](0007-automatic-publication-after-final-approval.md), request-revision wording in [0008](0008-three-level-knowledge-classification.md), and conflicting reviewer/admin wording in [0010](0010-audiences-and-system-administration.md)
 

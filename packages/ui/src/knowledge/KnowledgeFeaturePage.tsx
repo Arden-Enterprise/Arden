@@ -26,6 +26,8 @@ export type KnowledgeFeaturePageProps = ContextControlProps & {
   citationTarget?: KnowledgeReaderTarget | null;
   requestedReviewId?: string | null;
   onReviewTargetHandled?: () => void;
+  requestedContributionId?: string | null;
+  onContributionTargetHandled?: () => void;
   routeRequest?: KnowledgeRouteRequest | null;
   onRouteChange?: (route: KnowledgeRoute, options: { replace: boolean }) => void;
   onRouteSettled?: () => void;
@@ -45,6 +47,7 @@ export function KnowledgeFeaturePage(props: KnowledgeFeaturePageProps) {
       createdDraftId={props.createdDraft?.id ?? null} onAssignedReviewCount={props.onAssignedReviewCount}
       onDirtyChange={props.onDirtyChange}
       citationTarget={props.citationTarget} requestedReviewId={props.requestedReviewId}
+      requestedContributionId={props.requestedContributionId} onContributionTargetHandled={props.onContributionTargetHandled}
       onReviewTargetHandled={props.onReviewTargetHandled} routeRequest={props.routeRequest} onRouteChange={props.onRouteChange} onRouteSettled={props.onRouteSettled}
       awaitingAssignment={props.awaitingAssignment}
       canUsePrivateWorkspace={props.canUsePrivateWorkspace} onOpenPrivateNotes={props.onOpenPrivateNotes}

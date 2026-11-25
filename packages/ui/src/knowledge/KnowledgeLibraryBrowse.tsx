@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { knowledgeTypes, validityStatus } from "@arden/domain";
 import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
@@ -20,39 +21,76 @@ export function filterLibrary(items: PublishedKnowledge[], catalog: KnowledgeCat
     .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt) || a.id.localeCompare(b.id));
 }
 
-/** One status vocabulary for Home and the reader: Current, Expires in N days, Expired. */
+/** Validity words for My Contributions, Administration and the reader: Current, Expires in N days, Expired. */
 export function validityLabel({ status, daysLeft }: ReturnType<typeof validityStatus>): string {
   if (status === "Expiring soon") return daysLeft === 0 ? "Expires today" : `Expires in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}`;
   return status;
 }
 
-/** Same chip tones as the reader: sage Current, amber Expires soon, coral Expired. */
-const statusTone: Record<ReturnType<typeof validityStatus>["status"], string> = {
-  Current: "effective", "Expiring soon": "expiring", Expired: "expired",
-};
+export const todayIso = () => new Date().toLocaleDateString("en-CA");
+
+/** Decision 0032: readers see only a small amber clock for a document expiring in 30 days or less. */
+export function expiringLabel(item: Pick<PublishedKnowledge, "management">, today = todayIso()): string | null {
+  const validity = validityStatus(item.management, today);
+  if (validity.status !== "Expiring soon" || !item.management?.expirationDate) return null;
+  return `${validityLabel(validity)} · ${libraryDateLabel(`${item.management.expirationDate}T00:00:00`)}`;
+}
+
+function ClockIcon() {
+  return <svg className="arden-icon" width={14} height={14} viewBox="0 0 24 24" aria-hidden="true" focusable="false"
+    fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>;
+}
+
+export type RegisterSortKey = "title" | "type" | "owner" | "author" | "updated";
+export type RegisterSort = { key: RegisterSortKey; direction: "ascending" | "descending" };
+export const defaultRegisterSort: RegisterSort = { key: "updated", direction: "descending" };
+const sortColumns: Array<{ key: RegisterSortKey; label: string }> = [
+  { key: "title", label: "DOCUMENT" }, { key: "type", label: "TYPE" }, { key: "owner", label: "OWNER" },
+  { key: "author", label: "AUTHOR" }, { key: "updated", label: "UPDATED" }];
+
+export function sortRegister(items: PublishedKnowledge[], sort: RegisterSort): PublishedKnowledge[] {
+  const text = (item: PublishedKnowledge) => ({ title: item.title, type: item.management?.type ?? "",
+    owner: item.responsibleDepartmentName ?? "", author: item.authorName ?? "", updated: "" })[sort.key];
+  const sign = sort.direction === "ascending" ? 1 : -1;
+  return [...items].sort((a, b) => {
+    const order = sort.key === "updated" ? Date.parse(a.publishedAt) - Date.parse(b.publishedAt)
+      // Missing values ("—") stay last in either direction.
+      : !text(a) !== !text(b) ? (text(a) ? -1 : 1) * sign : text(a).localeCompare(text(b), undefined, { sensitivity: "base" });
+    return order * sign || a.id.localeCompare(b.id);
+  });
+}
 
 function DocumentRegister({ items, onOpen, recent = false, showReaders = false }: { items: PublishedKnowledge[]; onOpen: (id: string) => void; recent?: boolean; showReaders?: boolean }) {
-  return <IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={940}
-    columns="minmax(270px, 2.8fr) minmax(120px, 1fr) minmax(130px, 1fr) 70px 115px 140px"
-    headers={["DOCUMENT", "TYPE", "OWNER", "VERSION", recent ? "PUBLISHED" : "VALID UNTIL", "STATUS"]}>
-    {items.map(item => {
-      const validity = validityStatus(item.management, new Date().toLocaleDateString("en-CA"));
+  const [sort, setSort] = useState<RegisterSort>(defaultRegisterSort);
+  const sorted = sortRegister(items, sort);
+  const today = todayIso();
+  const toggle = (key: RegisterSortKey) => setSort((current) => current.key === key
+    ? { key, direction: current.direction === "ascending" ? "descending" : "ascending" }
+    : { key, direction: key === "updated" ? "descending" : "ascending" });
+  return <IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={760} className="library-register"
+    columns="minmax(260px, 2.6fr) minmax(110px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) 120px"
+    sort={{ index: sortColumns.findIndex((column) => column.key === sort.key), direction: sort.direction }}
+    headers={sortColumns.map((column) => <button type="button" className="library-sort" onClick={() => toggle(column.key)}
+      aria-label={`Sort by ${column.label.toLowerCase()}`}>{column.label}{sort.key === column.key
+        && <Icon name={sort.direction === "ascending" ? "arrow-up" : "arrow-down"} size={11} />}</button>)}>
+    {sorted.map(item => {
+      const expiring = expiringLabel(item, today);
       const release = item.management?.releaseKind;
       const releaseTag = recent && release ? release === "UPDATED" ? "Updated" : "New" : null;
       return <IslandRow key={item.id} className="library-row">
         <IslandCell className="island-row-cell is-name"><button className="island-row-name library-row-name" type="button" data-publication-id={item.id} aria-label={`Read ${item.title}`}
           title={item.title} onClick={() => onOpen(item.id)}>
           <span className="library-row-icon"><Icon name="document" size={17} /></span><span className="library-row-copy">
-            <strong className="library-row-title">{item.title}</strong>
+            <span className="library-row-heading"><strong className="library-row-title">{item.title}</strong>
+              {expiring && <span className="library-row-expiring" role="img" aria-label={expiring} title={expiring}><ClockIcon /></span>}</span>
             {/* The meta line exists only when it says something; an empty line would add height to every row. */}
             {(showReaders || releaseTag) && <span className="library-row-meta">{showReaders && (item.targetReaders?.mode === "DEPARTMENT" ? "Department readers" : "Selected readers")}
               {releaseTag && <span className="km-release">{releaseTag}</span>}</span>}
           </span></button></IslandCell>
         <IslandCell className="library-row-secondary">{item.management?.type ?? "—"}</IslandCell>
         <IslandCell className="library-row-secondary">{item.responsibleDepartmentName ?? "—"}</IslandCell>
-        <IslandCell className="library-row-secondary">{item.management?.version || "—"}</IslandCell>
-        <IslandCell className="library-row-date">{recent ? libraryDateLabel(item.publishedAt) : item.management?.expirationDate ? libraryDateLabel(`${item.management.expirationDate}T00:00:00`) : <span className="km-no-expiry">No expiry</span>}</IslandCell>
-        <IslandCell><span className={`island-chip knowledge-reader-status library-row-status is-${statusTone[validity.status]}`}>{validityLabel(validity)}</span></IslandCell>
+        <IslandCell className="library-row-secondary library-row-author">{item.authorName || "—"}</IslandCell>
+        <IslandCell className="library-row-date">{libraryDateLabel(item.publishedAt)}</IslandCell>
       </IslandRow>;
     })}
   </IslandTable>;
@@ -102,7 +140,7 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
           {unavailableCollection && filters.collectionId !== "unassigned" && <option value={filters.collectionId} disabled>Unavailable collection</option>}
           {collections.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
         {Object.values(filters).some(Boolean) && <button type="button" className="km-text-button" onClick={() => onFilters(emptyLibraryFilters())}>Clear filters</button>}
-      </div>{!unavailableCollection && <span className="island-meta" role="status">{filtered.length} documents · newest first</span>}</div>
+      </div>{!unavailableCollection && <span className="island-meta" role="status">{filtered.length} documents</span>}</div>
       {unavailableCollection ? <p role="status" className="island-note is-warning">Collection unavailable. Clear filters to browse documents.</p>
         : filtered.length ? <DocumentRegister items={filtered} onOpen={onOpen} showReaders={showReaders} /> : <div className="island island-empty"><h3>{items.length ? "No results" : "No documents available"}</h3><p>{items.length ? "Try another search or filter." : "Published documents will appear here."}</p></div>}
     </>}

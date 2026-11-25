@@ -53,6 +53,20 @@ describe("planReviewDecision", () => {
       .toMatchObject({ kind: "APPROVE_FOR_PREPARATION" });
   });
 
+  it("lets a requester with a matching grant decide their own renewal and other requests (decision 0033)", () => {
+    const current = { targetIsCurrent: true, newerVersionPreparing: false };
+    for (const requestType of ["CONTENT", "READER_CHANGE", "WITHDRAWAL", "RENEWAL"] as const) {
+      const own = { ...facts, requestType, publicationChange: current,
+        submission: { ...facts.submission, submittedByMembershipId: "reviewer" } };
+      expect(planReviewDecision(own, request)).toMatchObject({ kind: "APPROVE_FOR_PREPARATION", decision: "APPROVED" });
+      expect(planReviewDecision({ ...own, reviewerGrants: [{ ...grant, departmentId: "hr" }] }, request))
+        .toEqual({ kind: "DENIED", reason: "NOT_AUTHORIZED" });
+    }
+    const renewal = { ...facts, requestType: "RENEWAL" as const, publicationChange: current };
+    expect(planReviewDecision({ ...renewal, publicationChange: { ...current, targetIsCurrent: false } }, request))
+      .toEqual({ kind: "DENIED", reason: "PUBLICATION_CHANGED" });
+  });
+
   it("never publishes the wrong or corrupted snapshot", () => {
     expect(planReviewDecision(facts, { ...request, expectedSnapshotVersionId: "version-1" })).toEqual({ kind: "DENIED", reason: "STALE_SNAPSHOT" });
     expect(planReviewDecision(facts, { ...request, expectedContentHash: "b".repeat(64) })).toEqual({ kind: "DENIED", reason: "STALE_SNAPSHOT" });

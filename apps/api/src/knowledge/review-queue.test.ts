@@ -33,8 +33,9 @@ describe("listAssignedReviews", () => {
       { ...candidate, submissionId: "revoked", reviewerGrants: [{ ...grant, status: "INACTIVE" }] },
       { ...candidate, submissionId: "expired", reviewerGrants: [{ ...grant, validUntil: now }] },
     ] });
-    expect(result.map((item) => item.submissionId)).toEqual(["submission-1"]);
-    expect(result[0]).toEqual({
+    // Decision 0033: the reviewer's own submission is listed like any other when the grant matches.
+    expect(result.map((item) => item.submissionId)).toEqual(["self", "submission-1"]);
+    expect(result.find((item) => item.submissionId === "submission-1")).toEqual({
       submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide",
       departmentId: "engineering", classification: "INTERNAL", submittedAt: candidate.submittedAt,
       approvalBlocked: false, versionNo: 3, requestType: "CONTENT", authorName: null,

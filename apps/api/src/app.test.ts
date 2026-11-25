@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftUpdateResult, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult, type RetryKnowledgePublicationResult, type GovernancePublication, type GovernanceInspectionView, type GovernanceDocumentView, type PublicationReport, type OpenGovernanceInspectionResult, type DirectWithdrawalResult, type ReportPublicationResult, type PublicationChangeInput, type RequestPublicationChangeResult } from "./db/repository.js";
+import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftUpdateResult, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult, type RetryKnowledgePublicationResult, type GovernancePublication, type GovernanceInspectionView, type GovernanceDocumentView, type PublicationReport, type OpenGovernanceInspectionResult, type DirectWithdrawalResult, type ReportPublicationResult, type PublicationChangeInput, type RequestPublicationChangeResult, type PublicationRenewalInput, type PublicationRenewalState, type RequestPublicationRenewalResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -2601,6 +2601,101 @@ describe("API auth and private draft routes", () => {
       requestReason: "The policy was replaced" });
   });
 
+  it("refuses to delete a department that still owns current publications (0032 D)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const url = `/api/v1/organizations/${organizationId}/departments/${salesDepartmentId}/delete`;
+    repository.departmentPublications = 3;
+    const refused = await app.inject({ method: "POST", url, headers: { cookie: owner, origin: "http://localhost:5180" } });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toMatchObject({ code: "DEPARTMENT_OWNS_PUBLICATIONS", publicationCount: 3,
+      message: "This department owns 3 published documents. Withdraw them before deleting it." });
+    repository.departmentPublications = 0;
+    expect((await app.inject({ method: "POST", url, headers: { cookie: owner, origin: "http://localhost:5180" } })).statusCode).toBe(200);
+  });
+
+  it("refuses a reviewer decision during the author's renewal window with a safe 409 (0032)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    repository.authorDecisionWindow = true;
+    const response = await app.inject({ method: "POST",
+      url: `/api/v1/organizations/${organizationId}/knowledge/reviews/c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1/decisions`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "idempotency-key": "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2" },
+      payload: { action: "APPROVE", expectedSnapshotVersionId: sharedVersionId, expectedContentHash: "a".repeat(64) } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("AUTHOR_DECISION_WINDOW");
+    repository.authorDecisionWindow = false;
+  });
+
+  it("hides an expired publication from readers and explains an old link instead of serving it (0032 A)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const headers = { cookie: owner, origin: "http://localhost:5180" };
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const stored = await storage.write("Expired body");
+    const publicationId = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2";
+    repository.publication = { id: publicationId, draftId: sharedDraftId, title: "Travel policy", classification: "INTERNAL",
+      responsibleDepartmentId: salesDepartmentId, responsibleDepartmentName: "Sales", contentHash: stored.contentHash,
+      sourceUri: stored.sourceUri, audienceRoleIds: [], targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
+      management: { type: "Policy & Standard", version: "1.0", expirationDate: "2026-11-01", changeNote: "" },
+      publishedAt: new Date("2026-10-01T00:00:00.000Z"), validFrom: new Date("2026-10-01T00:00:00.000Z"), validUntil: null,
+      expired: true, authorName: "Avery Author" };
+    const listed = await app.inject({ method: "GET", url: `${root}/published`, headers });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().items).toEqual([]);
+    const opened = await app.inject({ method: "GET", url: `${root}/published/${publicationId}`, headers });
+    expect(opened.statusCode).toBe(410);
+    expect(opened.json().error).toMatchObject({ code: "DOCUMENT_EXPIRED", expiredOn: "2026-11-01", ownerDepartmentName: "Sales",
+      message: "This document expired on Nov 1, 2026. Contact Sales." });
+    expect(JSON.stringify(opened.json())).not.toContain("Expired body");
+    const reported = await app.inject({ method: "POST", url: `${root}/published/${publicationId}/reports`, headers,
+      payload: { message: "Out of date" } });
+    expect(reported.statusCode).toBe(404);
+
+    repository.publication = { ...repository.publication!, expired: false };
+    const current = await app.inject({ method: "GET", url: `${root}/published`, headers });
+    expect(current.json().items[0]).toMatchObject({ id: publicationId, authorName: "Avery Author",
+      management: { expirationDate: "2026-11-01" } });
+    expect((await app.inject({ method: "GET", url: `${root}/published/${publicationId}`, headers })).statusCode).toBe(200);
+  });
+
+  it("accepts a reviewed renewal request with an idempotency key and maps refusals (0032 B)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const url = `/api/v1/organizations/${organizationId}/knowledge/documents/${sharedDraftId}/renewal`;
+    const headers = { cookie: owner, origin: "http://localhost:5180", "idempotency-key": "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1" };
+    const send = (payload: object, extra: Record<string, string> = headers) => app.inject({ method: "POST", url, headers: extra, payload });
+    expect((await send({ expirationDate: "2027-06-30", reason: "Still valid" }, { cookie: owner, origin: "http://localhost:5180" })).statusCode).toBe(400);
+    expect((await send({ expirationDate: "2027-06-30" })).statusCode).toBe(400);
+    expect((await send({ expirationDate: "2027-06-30", reason: "Still valid", readers: [] })).statusCode).toBe(400);
+    repository.sharedSubmission = { id: "abababab-abab-4aba-8aba-abababababab", draftId: sharedDraftId,
+      snapshotVersionId: sharedVersionId, title: "Runbook", classification: "INTERNAL",
+      responsibleDepartmentId: salesDepartmentId, targetScopeType: "ORGANIZATION", targetDepartmentId: null,
+      audienceRoleIds: [], proposedTargetReaders: null, approvedTargetReaders: null, contentHash: "a".repeat(64),
+      status: "APPROVED", publicationState: "ACTIVE", submittedAt: new Date("2026-11-10T09:00:00.000Z"),
+      publishedVersionId: "efefefef-efef-4efe-8efe-efefefefefef", decisionComment: null,
+      requestType: "CONTENT", requestReason: null, publicationFailure: null, withdrawal: null };
+    const requested = await send({ expirationDate: "2027-06-30", reason: " Reviewed again " });
+    expect(requested.statusCode).toBe(201);
+    expect(requested.json()).toMatchObject({ status: "PENDING_REVIEW", requestType: "RENEWAL", requestReason: "Reviewed again",
+      renewal: { expirationDate: "2027-06-30", onBehalfOfAuthor: false } });
+    expect(repository.renewalInputs.at(-1)).toEqual({ expirationDate: "2027-06-30", reason: " Reviewed again ",
+      idempotencyKey: "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1" });
+    const refusals: Array<[RequestPublicationRenewalResult["kind"], number, string]> = [
+      ["not-yet", 409, "RENEWAL_NOT_YET_AVAILABLE"], ["pending", 409, "RENEWAL_PENDING"],
+      ["not-renewable", 409, "NOT_RENEWABLE"], ["invalid-date", 400, "INVALID_EXPIRATION_DATE"],
+      ["invalid-reason", 400, "INVALID_REASON"], ["not-found", 404, "RESOURCE_NOT_AVAILABLE"]];
+    for (const [kind, status, code] of refusals) {
+      repository.renewalResult = kind;
+      const refused = await send({ expirationDate: null, reason: "Keep it" });
+      expect(refused.statusCode).toBe(status);
+      expect(refused.json().error.code).toBe(code);
+    }
+    repository.renewalState = [{ documentId: sharedDraftId, publishedVersionId: "efefefef-efef-4efe-8efe-efefefefefef",
+      title: "Runbook", responsibleDepartmentId: salesDepartmentId, expirationDate: "2026-11-30", renewalPending: false,
+      authorActive: true, isAuthor: true, canRenew: true, authorName: "Avery Author", pending: null }];
+    const state = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/renewals`,
+      headers: { cookie: owner, origin: "http://localhost:5180" } });
+    expect(state.statusCode).toBe(200);
+    expect(state.json().items).toEqual(repository.renewalState);
+  });
+
   it("routes desktop-compatible sign-in through the same HttpOnly Supabase session", async () => {
     const response = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
@@ -2928,6 +3023,7 @@ class MemoryRepository implements ArdenDataRepository {
   async createDepartment(userId: string, requestedOrganization: string, _name: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
   async deleteDepartment(userId: string, requestedOrganization: string, _departmentId: string): Promise<DeleteDepartmentResult> {
     if (userId !== ownerId || requestedOrganization !== organizationId) return { success: false, errorReason: "NOT_FOUND" };
+    if (this.departmentPublications > 0) return { success: false, errorReason: "OWNS_PUBLICATIONS", publicationCount: this.departmentPublications };
     return { success: true, unassignedCount: 0, reassignedCount: 0 };
   }
   async changePrimaryDepartment(userId: string, requestedOrganization: string, _membershipId: string, _departmentId: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
@@ -3319,6 +3415,7 @@ class MemoryRepository implements ArdenDataRepository {
   async decideReview(userId: string, requestedOrganization: string, submissionId: string, action: ReviewAction,
     expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
     idempotencyKey: string, _requestId?: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult> {
+    if (this.authorDecisionWindow) return { kind: "denied", reason: "AUTHOR_DECISION_WINDOW" };
     const submission = this.sharedSubmission;
     if (this.reviewRequestKey === idempotencyKey && submission && submissionId === submission.id) {
       const expected = approvedReaders === undefined ? submission.proposedTargetReaders
@@ -3363,7 +3460,37 @@ class MemoryRepository implements ArdenDataRepository {
 
   async listPublishedKnowledge(userId: string, requestedOrganization: string): Promise<PublishedKnowledge[] | null> {
     if (requestedOrganization !== organizationId) return null;
-    return userId === ownerId && this.publication ? [this.publication] : [];
+    // Same rule as the database projection: expired publications leave reader listings (decision 0032).
+    return userId === ownerId && this.publication && !this.publication.expired ? [this.publication] : [];
+  }
+
+  departmentPublications = 0;
+  authorDecisionWindow = false;
+  renewalState: PublicationRenewalState[] = [];
+  renewalResult: RequestPublicationRenewalResult["kind"] = "requested";
+  renewalInputs: PublicationRenewalInput[] = [];
+  reminderRuns = 0;
+  async listPublicationRenewalState(userId: string, requestedOrganization: string): Promise<PublicationRenewalState[] | null> {
+    if (requestedOrganization !== organizationId) return null;
+    return userId === ownerId ? this.renewalState : [];
+  }
+
+  async requestPublicationRenewal(userId: string, requestedOrganization: string, documentId: string,
+    input: PublicationRenewalInput): Promise<RequestPublicationRenewalResult> {
+    if (userId !== ownerId || requestedOrganization !== organizationId || documentId !== sharedDraftId) return { kind: "not-found" };
+    this.renewalInputs.push(input);
+    if (this.renewalResult !== "requested" && this.renewalResult !== "replayed") return { kind: this.renewalResult };
+    const released = this.sharedSubmission;
+    if (!released) return { kind: "not-found" };
+    this.sharedSubmission = { ...released, id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1", status: "PENDING_REVIEW",
+      publicationState: "NONE", requestType: "RENEWAL", requestReason: input.reason.trim(),
+      renewal: { expirationDate: input.expirationDate, onBehalfOfAuthor: false } };
+    return { kind: this.renewalResult, submission: this.sharedSubmission };
+  }
+
+  async enqueuePublicationExpiryReminders(): Promise<number> {
+    this.reminderRuns += 1;
+    return 0;
   }
 
   async getPublishedKnowledge(userId: string, requestedOrganization: string, publishedVersionId: string): Promise<PublishedKnowledge | null> {
