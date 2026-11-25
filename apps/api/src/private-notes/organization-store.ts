@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
-import type { DraftListItem, PrivateDraft, StoredContentFields } from "../db/repository.js";
+import type { DraftListItem, PrivateDraft, StoredContentFields, StoredTextFields } from "../db/repository.js";
 
 /** Decision 0029: owner-private collections, favorites and trash for private notes. */
 export type PrivateCollection = {
@@ -43,6 +43,8 @@ export type PrivateNoteSource = {
   sourceUri: string;
   mimeType: string;
   contentHash: string;
+  /** Decision 0034: extracted text of a PDF item, when it has any. */
+  text: StoredTextFields | null;
 };
 
 export type PrivateCollectionSubtree = {
@@ -117,6 +119,7 @@ type NoteSummaryRow = {
 type NoteSourceRow = {
   draft_id: string; title: string; collection_id: string | null; draft_version_id: string;
   source_uri: string; mime_type: string; content_hash: string;
+  text_source_uri: string | null; text_content_hash: string | null;
 };
 type BatchItemRow = {
   kind: "note" | "collection"; id: string; parent_id: string | null; trashed_at: Date;
@@ -341,7 +344,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
         id: created.draftId, organizationId, title, versionId: created.versionId,
         sourceUri: copy.sourceUri, mimeType: copy.mimeType, contentHash: copy.contentHash, currentVersion: 1,
         createdAt: created.createdAt, updatedAt: created.updatedAt,
-        collectionId: current.collectionId, favoritedAt: null, position: null,
+        collectionId: current.collectionId, favoritedAt: null, position: null, text: copy.text ?? null,
       };
     });
   }
@@ -614,7 +617,8 @@ async function noteSources(client: PoolClient, workspaceId: string,
   filter: { draftIds: string[] } | { collectionIds: string[] }): Promise<PrivateNoteSource[]> {
   const byDraft = "draftIds" in filter;
   const result = await client.query<NoteSourceRow>(`
-    SELECT d.draft_id, d.title, d.collection_id, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash
+    SELECT d.draft_id, d.title, d.collection_id, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash,
+           v.text_source_uri, v.text_content_hash
       FROM draft_document d
       JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
      WHERE d.workspace_id = $1 AND ${treeNote}
@@ -623,6 +627,7 @@ async function noteSources(client: PoolClient, workspaceId: string,
   return result.rows.map((row) => ({
     id: row.draft_id, title: row.title, collectionId: row.collection_id, versionId: row.draft_version_id,
     sourceUri: row.source_uri, mimeType: row.mime_type, contentHash: row.content_hash,
+    text: row.text_source_uri && row.text_content_hash ? { sourceUri: row.text_source_uri, contentHash: row.text_content_hash } : null,
   }));
 }
 
@@ -642,9 +647,9 @@ async function insertNoteCopy(client: PoolClient, owner: Owner, collectionId: st
   const draftId = draft.rows[0]?.draft_id;
   if (!draftId) throw new Error("Private note copy returned no row");
   const version = await client.query<{ draft_version_id: string }>(`INSERT INTO draft_version
-      (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id)
-    VALUES ($1, 1, $2, $3, $4, $5) RETURNING draft_version_id`,
-  [draftId, copy.sourceUri, copy.mimeType, copy.contentHash, owner.membershipId]);
+      (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id, text_source_uri, text_content_hash)
+    VALUES ($1, 1, $2, $3, $4, $5, $6, $7) RETURNING draft_version_id`,
+  [draftId, copy.sourceUri, copy.mimeType, copy.contentHash, owner.membershipId, copy.text?.sourceUri ?? null, copy.text?.contentHash ?? null]);
   const versionId = version.rows[0]?.draft_version_id;
   if (!versionId) throw new Error("Private note copy version returned no row");
   const timestamps = await client.query<{ created_at: Date; updated_at: Date }>(`SELECT created_at, updated_at
@@ -731,8 +736,12 @@ async function tombstoneBatch(client: PoolClient, workspaceId: string, batchId: 
 
 async function contentObjects(client: PoolClient, draftIds: string[]): Promise<PurgedPrivateContent> {
   if (draftIds.length === 0) return [];
-  const versions = await client.query<{ draft_id: string; source_uri: string }>(`SELECT DISTINCT draft_id, source_uri
-    FROM draft_version WHERE draft_id = ANY($1::uuid[]) ORDER BY draft_id, source_uri`, [draftIds]);
+  // Decision 0034: a PDF item's extracted text object is erased with its file.
+  const versions = await client.query<{ draft_id: string; source_uri: string }>(`SELECT DISTINCT draft_id, source_uri FROM (
+      SELECT draft_id, source_uri FROM draft_version WHERE draft_id = ANY($1::uuid[])
+      UNION ALL
+      SELECT draft_id, text_source_uri FROM draft_version WHERE draft_id = ANY($1::uuid[]) AND text_source_uri IS NOT NULL
+    ) objects ORDER BY draft_id, source_uri`, [draftIds]);
   const byDraft = new Map<string, string[]>(draftIds.map((id) => [id, []]));
   for (const row of versions.rows) byDraft.get(row.draft_id)?.push(row.source_uri);
   return [...byDraft].map(([draftId, sourceUris]) => ({ draftId, sourceUris }));

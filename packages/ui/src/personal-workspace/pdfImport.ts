@@ -141,6 +141,43 @@ export async function readPdfText(file: File, load: () => Promise<PdfRuntime> = 
   }
 }
 
+/** Decision 0034: an original PDF kept in Private has the same limit as a shared PDF draft. */
+export const PRIVATE_PDF_MAX_FILE_BYTES = 5 * 1024 * 1024;
+
+/** A PDF ready to keep in Private: its bytes, a title and the text the private AI side panel can read. */
+export type PdfUpload = { title: string; pdfBase64: string; text: string; textTruncated: boolean };
+
+function toBase64(data: Uint8Array): string {
+  let binary = "";
+  for (let offset = 0; offset < data.length; offset += 0x8000) {
+    binary += String.fromCharCode(...data.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+/**
+ * Prepares a PDF to keep in Private (spec F03-FILE). Unlike import, a PDF without a text layer is accepted:
+ * it is kept with empty text and the AI side panel is unavailable for it.
+ */
+export async function readPdfUpload(file: File, load: () => Promise<PdfRuntime> = () => import("../knowledge/pdfRuntime")): Promise<PdfUpload> {
+  if (file.type !== "application/pdf" && !/\.pdf$/i.test(file.name)) throw new PdfImportError("Choose a PDF file.");
+  if (file.size === 0) throw new PdfImportError("This PDF is empty.");
+  if (file.size > PRIVATE_PDF_MAX_FILE_BYTES) throw new PdfImportError("This PDF is larger than 5 MB. Choose a smaller file.");
+  const data = new Uint8Array(await file.arrayBuffer());
+  if (String.fromCharCode(...data.subarray(0, 5)) !== "%PDF-") throw new PdfImportError("This file isn’t a valid PDF.");
+  const pdfBase64 = toBase64(data);
+  try {
+    const pdf = await readPdfText(file, load);
+    const fitted = buildImportedNote(pdf.fileName, pdf.metadataTitle, pdf.pages);
+    return { title: fitted.title, pdfBase64, text: fitted.body, textTruncated: fitted.truncated };
+  } catch (cause) {
+    if (cause instanceof PdfImportError && /no selectable text/.test(cause.message)) {
+      return { title: importTitle(file.name), pdfBase64, text: "", textTruncated: false };
+    }
+    throw cause;
+  }
+}
+
 /** Opens the system file picker for one PDF; resolves null when the user cancels. Call from a click handler. */
 export function choosePdfFile(): Promise<File | null> {
   return new Promise((resolve) => {

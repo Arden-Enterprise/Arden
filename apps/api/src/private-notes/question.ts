@@ -127,10 +127,16 @@ export function registerPrivateNoteQuestion(app: FastifyInstance, repository: Pi
           return fail(503, "PRIVATE_NOTE_AI_DISABLED", "AI for Private notes is not enabled for this organization.");
         }
         if (!ai) return fail(503, "DOCUMENT_QUESTION_UNAVAILABLE", "Private note Q&A is unavailable.");
-        if (note.mimeType !== "text/plain") return fail(422, "DOCUMENT_QUESTION_UNSUPPORTED", "This note format is unsupported.");
+        // Decision 0034: a PDF item is answered from the text extracted when it was uploaded.
+        const textSource = note.mimeType === "text/plain" ? { sourceUri: note.sourceUri, contentHash: note.contentHash }
+          : note.mimeType === "application/pdf" ? note.text ?? null : null;
+        if (!textSource) {
+          return fail(422, "DOCUMENT_QUESTION_UNSUPPORTED", note.mimeType === "application/pdf"
+            ? "AI is unavailable for this file because it has no text." : "This note format is unsupported.");
+        }
         const lease = admission.reserve(context.userId, organizationId, draftId);
         try {
-          const body = await storage.read(note.sourceUri, note.contentHash);
+          const body = await storage.read(textSource.sourceUri, textSource.contentHash);
           const points = Array.from(body);
           const evidence = noteEvidence(note, body, points, query);
           let coveredUntil = 0;

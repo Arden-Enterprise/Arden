@@ -1378,9 +1378,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const second = object("2");
     const saved = await repository.updateDraft(ids.owner, ids.organization, note!.id, 1, { body: "two" }, second, "live-save-1");
     expect(saved).toMatchObject({ kind: "updated", draft: { currentVersion: 2, versionId: note!.versionId, sourceUri: second.sourceUri },
-      replacedSourceUri: first.sourceUri });
+      replacedSourceUris: [first.sourceUri] });
     const renamed = await repository.updateDraft(ids.owner, ids.organization, note!.id, 2, { title: "Live note renamed" }, null, "live-rename");
-    expect(renamed).toMatchObject({ kind: "updated", draft: { currentVersion: 3, versionId: note!.versionId }, replacedSourceUri: null });
+    expect(renamed).toMatchObject({ kind: "updated", draft: { currentVersion: 3, versionId: note!.versionId }, replacedSourceUris: [] });
     expect(await versions()).toEqual([{ draft_version_id: note!.versionId, version_no: 3, source_uri: second.sourceUri, sealed: false }]);
     await expect(repository.updateDraft(ids.owner, ids.organization, note!.id, 2, { body: "stale" }, object("9"), "live-stale"))
       .resolves.toEqual({ kind: "conflict", currentVersion: 3 });
@@ -1395,7 +1395,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect((await versions())[0]).toMatchObject({ sealed: true });
     const third = object("3");
     const afterContribution = await repository.updateDraft(ids.owner, ids.organization, note!.id, 3, { body: "three" }, third, "live-save-2");
-    expect(afterContribution).toMatchObject({ kind: "updated", draft: { currentVersion: 4 }, replacedSourceUri: null });
+    expect(afterContribution).toMatchObject({ kind: "updated", draft: { currentVersion: 4 }, replacedSourceUris: [] });
     if (afterContribution.kind !== "updated") return;
     expect(afterContribution.draft.versionId).not.toBe(note!.versionId);
     expect(await versions()).toEqual([
@@ -1430,6 +1430,68 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     // Another member can neither see nor overwrite the owner's open version.
     await expect(repository.updateDraft(ids.manager, ids.organization, note!.id, 4, { body: "x" }, object("8"), "live-steal"))
       .resolves.toEqual({ kind: "not-found" });
+  }, 30_000);
+
+  it("keeps a private PDF item with its extracted text, replaces both and seals them on contribution (decision 0034)", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+    const hash = (digit: string) => digit.repeat(64);
+    const pdfObject = (digit: string, withText: boolean) => ({
+      sourceUri: `arden-private-object://${randomUUID()}.pdf`, mimeType: "application/pdf" as const, contentHash: hash(digit),
+      text: withText ? { sourceUri: `arden-private-object://${randomUUID()}`, contentHash: hash(digit) } : null,
+    });
+    const first = pdfObject("a", true);
+    const item = await repository.createDraft(ids.owner, ids.organization, { title: "Board minutes", body: "" }, first, "pdf-create");
+    await expect(repository.getDraft(ids.owner, ids.organization, item!.id)).resolves.toMatchObject({
+      mimeType: "application/pdf", text: first.text });
+    // Only the owner reads it; another member, including a manager, sees nothing.
+    await expect(repository.getDraft(ids.manager, ids.organization, item!.id)).resolves.toBeNull();
+
+    // A text note and a PDF item never take each other's content; the title still changes.
+    const textObject = { sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain" as const, contentHash: hash("b") };
+    await expect(repository.updateDraft(ids.owner, ids.organization, item!.id, 1, { body: "typed" }, textObject, "pdf-as-text"))
+      .resolves.toEqual({ kind: "wrong-kind" });
+    await expect(repository.updateDraft(ids.owner, ids.organization, item!.id, 1, { title: "Board minutes 2026" }, null, "pdf-rename"))
+      .resolves.toMatchObject({ kind: "updated", draft: { currentVersion: 2, text: first.text }, replacedSourceUris: [] });
+
+    // Replacing the file overwrites the open version and reports both old objects for erasure.
+    const second = pdfObject("c", true);
+    await expect(repository.updateDraft(ids.owner, ids.organization, item!.id, 2, {}, second, "pdf-replace"))
+      .resolves.toMatchObject({ kind: "updated", draft: { currentVersion: 3, sourceUri: second.sourceUri, text: second.text },
+        replacedSourceUris: [first.sourceUri, first.text!.sourceUri] });
+
+    // Contribution copies the file into a shared PDF draft and seals the version with its text.
+    const source = await repository.getPrivateContributionSource(ids.owner, ids.organization, item!.versionId);
+    const contributed = await repository.createKnowledgeDraft(ids.owner, ids.organization, {
+      actorMembershipId: ids.ownerMembership, sourceVersionId: item!.versionId, classification: "INTERNAL", idempotencyKey: randomUUID(),
+      expectedSource: source!, copiedContent: { ...pdfObject("c", false), text: undefined }, requestId: "pdf-contribute",
+    });
+    expect(contributed).toMatchObject({ kind: "created", draft: { mimeType: "application/pdf" } });
+    const runtime = async (sql: string, values: unknown[]) => {
+      const client = await pool!.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE arden_runtime");
+        await client.query("SET LOCAL search_path TO arden, public");
+        await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [ids.owner, ids.organization]);
+        return await client.query(sql, values);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    await expect(runtime("UPDATE draft_version SET text_source_uri = NULL, text_content_hash = NULL WHERE draft_version_id = $1",
+      [item!.versionId])).rejects.toMatchObject({ code: "55000" });
+    // Extracted text belongs only to PDF versions.
+    const textNote = await repository.createDraft(ids.owner, ids.organization, { title: "Text-only", body: "words" },
+      { sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain", contentHash: hash("e") }, "pdf-text-note");
+    await expect(pool.query(`UPDATE arden.draft_version SET text_source_uri = 'arden-private-object://x', text_content_hash = $2
+      WHERE draft_version_id = $1`, [textNote!.versionId, hash("d")])).rejects.toMatchObject({ code: "23514" });
+
+    // Trash and purge report the file and its text object for erasure.
+    const store = repository.privateOrganization;
+    const batch = await store.trashNote(ids.owner, ids.organization, item!.id, "pdf-trash");
+    const purged = await store.purgeTrash(ids.owner, ids.organization, batch!.batchId, "pdf-purge");
+    expect(purged).toEqual([{ draftId: item!.id, sourceUris: [second.sourceUri, second.text!.sourceUri].sort() }]);
   }, 30_000);
 });
 

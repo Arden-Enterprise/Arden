@@ -61,6 +61,21 @@ describe("exact private note questions", () => {
       startOffset: 11, excerpt: "Return the badge on Friday." }], noteCoverage: "FULL" });
   });
 
+  it("answers a PDF item from its extracted text and refuses a PDF without text (decision 0034)", async () => {
+    const h = harness();
+    const text = { sourceUri: `arden-private-object://${randomUUID()}`, contentHash: h.note.contentHash };
+    Object.assign(h.note, { mimeType: "application/pdf", sourceUri: `arden-private-object://${randomUUID()}.pdf`, text });
+    const answered = await h.ask();
+    expect(answered.statusCode).toBe(200);
+    expect(h.read.mock.calls).toEqual([[text.sourceUri, text.contentHash]]);
+
+    Object.assign(h.note, { text: null });
+    const refused = await h.ask({ payload: { ...h.payload, requestId: randomUUID() } });
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json().error.message).toBe("AI is unavailable for this file because it has no text.");
+    expect(h.read).toHaveBeenCalledTimes(1);
+  });
+
   it("reports partial coverage when a long note has text outside the selected passages", async () => {
     const h = harness("Return the badge on Friday. " + "🟣".repeat(9000) + " Final decision.");
     const result = await h.ask();

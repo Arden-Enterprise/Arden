@@ -4,7 +4,7 @@ import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meet
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
   type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
-  type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type GovernanceDocumentView } from "./db/repository.js";
+  type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type GovernanceDocumentView, type StoredContentFields } from "./db/repository.js";
 import { newSessionExpiry, readSessionExpiry, sealSession } from "./auth/session-timebox.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
@@ -942,18 +942,26 @@ export function buildApp(dependencies: AppDependencies) {
         context.userId, organizationId, request.body.sourcePrivateVersionId,
       );
       if (!source) return reply.code(404).send(resourceNotAvailable(request.id));
-      if (source.mimeType !== "text/plain" || !isValidText(source.title, 800, maxTitleCodePoints)) {
+      const isPdf = source.mimeType === "application/pdf";
+      if ((source.mimeType !== "text/plain" && !isPdf) || !isValidText(source.title, 800, maxTitleCodePoints)) {
         return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note version cannot be copied.", request.id));
       }
-      const body = await dependencies.storage.read(source.sourceUri, source.contentHash);
-      if (!isValidText(body, maxBodyBytes, maxBodyBytes)) {
-        return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note version cannot be copied.", request.id));
+      // Decision 0034: a private PDF item is contributed as a shared PDF draft holding a copy of the same file.
+      let semanticBody = "";
+      if (isPdf) {
+        copied = await dependencies.storage.writePdf(await dependencies.storage.readPdf(source.sourceUri, source.contentHash));
+      } else {
+        const body = await dependencies.storage.read(source.sourceUri, source.contentHash);
+        if (!isValidText(body, maxBodyBytes, maxBodyBytes)) {
+          return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note version cannot be copied.", request.id));
+        }
+        const normalized = normalizeSharedDraftBody(body);
+        if (!normalized) {
+          return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note uses an unsupported Arden document envelope.", request.id));
+        }
+        semanticBody = normalized;
+        copied = await dependencies.storage.write(semanticBody);
       }
-      const semanticBody = normalizeSharedDraftBody(body);
-      if (!semanticBody) {
-        return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note uses an unsupported Arden document envelope.", request.id));
-      }
-      copied = await dependencies.storage.write(semanticBody);
       creationAttempted = true;
       const result = await dependencies.repository.createKnowledgeDraft(context.userId, organizationId, {
         actorMembershipId: actor.membershipId,
@@ -976,10 +984,14 @@ export function buildApp(dependencies: AppDependencies) {
         await dependencies.storage.remove(copied.sourceUri);
         copied = null;
       }
-      const responseBody = result.kind === "created" ? semanticBody
-        : await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
       reply.header("Cache-Control", "no-store");
       reply.header("ETag", etag(result.draft.currentVersion));
+      if (result.draft.mimeType === "application/pdf") {
+        const pdfBase64 = (await dependencies.storage.readPdf(result.draft.sourceUri, result.draft.contentHash)).toString("base64");
+        return reply.code(result.kind === "created" ? 201 : 200).send({ ...representSharedDraft(result.draft, ""), pdfBase64 });
+      }
+      const responseBody = result.kind === "created" ? semanticBody
+        : await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
       // Same representation as the other draft-creation routes and the draft detail.
       return reply.code(result.kind === "created" ? 201 : 200).send(representSharedDraft(result.draft, responseBody));
     } catch (error) {
@@ -2191,16 +2203,150 @@ export function buildApp(dependencies: AppDependencies) {
         if (stored) await dependencies.storage.remove(stored.sourceUri);
         return reply.code(412).send(safeError("VERSION_CONFLICT", "This note changed. Reload it before saving again.", request.id));
       }
-      if (result.replacedSourceUri) {
-        // Decision 0031: the overwritten open version's old content is no longer reachable.
-        try { await dependencies.storage.remove(result.replacedSourceUri); }
-        catch (error) { request.log.warn({ errorType: safeErrorType(error), requestId: request.id }, "Replaced private content could not be erased"); }
+      if (result.kind === "wrong-kind") {
+        if (stored) await dependencies.storage.remove(stored.sourceUri);
+        return reply.code(409).send(safeError("PDF_ITEM_NOT_EDITABLE", "A PDF can't be edited as text. Rename it or replace the file.", request.id));
       }
+      await eraseReplaced(result.replacedSourceUris, request);
       const representation = await representDraft(result.draft, dependencies.storage);
       reply.header("ETag", etag(result.draft.currentVersion));
       return representation;
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Private draft update failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  /** Decision 0031: content objects an overwrite made unreachable; failures are logged, not reported to the caller. */
+  async function eraseReplaced(sourceUris: string[], request: FastifyRequest) {
+    for (const sourceUri of sourceUris) {
+      try { await dependencies.storage.remove(sourceUri); }
+      catch (error) { request.log.warn({ errorType: safeErrorType(error), requestId: request.id }, "Replaced private content could not be erased"); }
+    }
+  }
+
+  // Decision 0034 (spec F03-FILE): an original PDF kept in Private next to notes.
+  const pdfItemBody = {
+    type: "object", additionalProperties: false, required: ["pdfBase64"],
+    properties: {
+      title: { type: "string", maxLength: 800 },
+      pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
+      // Text the browser extracted for the owner's private AI; empty for a PDF without a text layer.
+      text: { type: "string", maxLength: maxBodyBytes },
+      collectionId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
+    },
+  } as const;
+  const pdfItemBodyLimit = maxPdfBase64Length + maxBodyBytes * 6 + 4096;
+  type PdfItemBody = { title?: string; pdfBase64: string; text?: string; collectionId?: string | null };
+  /** Validates the upload and stores the file and its text; returns null for an invalid request. */
+  const storePdfItem = async (body: PdfItemBody): Promise<StoredContentFields | "invalid"> => {
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(body.pdfBase64)) return "invalid";
+    const bytes = decodePdfBase64(body.pdfBase64);
+    const text = body.text?.trim() ? body.text : null;
+    if (!bytes || (text !== null && !isValidText(text, maxBodyBytes, maxBodyBytes))) return "invalid";
+    const file = await dependencies.storage.writePdf(bytes);
+    if (text === null) return file;
+    try {
+      const stored = await dependencies.storage.write(text);
+      return { ...file, text: { sourceUri: stored.sourceUri, contentHash: stored.contentHash } };
+    } catch (error) {
+      await dependencies.storage.remove(file.sourceUri);
+      throw error;
+    }
+  };
+  const removeStored = async (stored: StoredContentFields) => {
+    await dependencies.storage.remove(stored.sourceUri);
+    if (stored.text) await dependencies.storage.remove(stored.text.sourceUri);
+  };
+  const draftParams = {
+    type: "object", required: ["organizationId", "draftId"],
+    properties: { organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern } },
+  } as const;
+
+  app.post<{ Params: { organizationId: string }; Body: PdfItemBody }>("/api/v1/organizations/:organizationId/private-workspace/drafts/pdf", {
+    bodyLimit: pdfItemBodyLimit,
+    schema: { params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
+      body: { ...pdfItemBody, required: ["title", "pdfBase64"] } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    const { organizationId } = request.params;
+    const title = request.body.title ?? "";
+    if (!isValidText(title, 800, maxTitleCodePoints)) return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
+    let stored: StoredContentFields | null = null;
+    try {
+      if (!await dependencies.repository.canCreateDraft(context.userId, organizationId)) {
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      const result = await storePdfItem(request.body);
+      if (result === "invalid") return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
+      stored = result;
+      const draft = await dependencies.repository.createDraft(context.userId, organizationId,
+        { title: title.trim() || "Untitled PDF", body: "", collectionId: request.body.collectionId ?? null }, stored, request.id);
+      if (!draft) {
+        await removeStored(stored);
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      reply.header("Location", `/api/v1/organizations/${organizationId}/private-workspace/drafts/${draft.id}`);
+      reply.header("ETag", etag(draft.currentVersion));
+      return reply.code(201).send(representPrivateNote(draft, ""));
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Private PDF creation failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.get<{ Params: { organizationId: string; draftId: string } }>("/api/v1/organizations/:organizationId/private-workspace/drafts/:draftId/pdf", {
+    schema: { params: draftParams },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const draft = await dependencies.repository.getDraft(context.userId, request.params.organizationId, request.params.draftId);
+      if (!draft || draft.mimeType !== "application/pdf") return reply.code(404).send(resourceNotAvailable(request.id));
+      const bytes = await dependencies.storage.readPdf(draft.sourceUri, draft.contentHash);
+      reply.header("Cache-Control", "no-store");
+      reply.header("ETag", etag(draft.currentVersion));
+      return { id: draft.id, version: draft.currentVersion, contentHash: draft.contentHash, pdfBase64: bytes.toString("base64") };
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Private PDF read failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.put<{ Params: { organizationId: string; draftId: string }; Body: PdfItemBody }>("/api/v1/organizations/:organizationId/private-workspace/drafts/:draftId/pdf", {
+    bodyLimit: pdfItemBodyLimit,
+    schema: { params: draftParams, body: pdfItemBody,
+      headers: { type: "object", properties: { "if-match": { type: "string", maxLength: 64 } } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    const expectedVersion = parseEtag(request.headers["if-match"]);
+    if (expectedVersion === "missing") return reply.code(428).send(safeError("PRECONDITION_REQUIRED", "Reload the file before replacing it.", request.id));
+    if (expectedVersion === null) return reply.code(400).send(safeError("INVALID_REQUEST", "The version precondition is invalid.", request.id));
+    const { organizationId, draftId } = request.params;
+    let stored: StoredContentFields | null = null;
+    try {
+      if (!await dependencies.repository.canUpdateDraft(context.userId, organizationId, draftId)) {
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      const result = await storePdfItem(request.body);
+      if (result === "invalid") return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
+      stored = result;
+      const title = request.body.title?.trim();
+      const update = await dependencies.repository.updateDraft(context.userId, organizationId, draftId, expectedVersion,
+        title ? { title } : {}, stored, request.id);
+      if (update.kind !== "updated") {
+        await removeStored(stored);
+        if (update.kind === "conflict") return reply.code(412).send(safeError("VERSION_CONFLICT", "This file changed. Reload it before replacing it.", request.id));
+        if (update.kind === "wrong-kind") return reply.code(409).send(safeError("NOT_A_PDF_ITEM", "Only a PDF item can take a PDF file.", request.id));
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      await eraseReplaced(update.replacedSourceUris, request);
+      reply.header("ETag", etag(update.draft.currentVersion));
+      return representPrivateNote(update.draft, "");
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Private PDF replacement failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
   });
@@ -2376,6 +2522,8 @@ function hasTrustedOrigin(request: FastifyRequest, trustedOrigins: string[]): bo
 }
 
 async function representDraft(draft: PrivateDraft, storage: PrivateContentStorage) {
+  // Decision 0034: a PDF item's file is read separately (GET …/pdf) so lists and saves stay small.
+  if (draft.mimeType === "application/pdf") return representPrivateNote(draft, "");
   return representPrivateNote(draft, await storage.read(draft.sourceUri, draft.contentHash));
 }
 

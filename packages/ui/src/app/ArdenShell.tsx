@@ -824,6 +824,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const privateNote = privateNotes.focus.kind === "note" ? privateNotes.selectedNote : null;
   const privateVersion = privateNotes.selectedVersion;
   const chatSource: ChatSource = activeView !== "personal-workspace" ? { kind: "company" }
+    // Decision 0034: a PDF without text has nothing the side panel can read.
+    : privateNote?.kind === "pdf" && !privateNote.textAvailable
+      ? { kind: "private-empty", hint: "This PDF has no text, so AI is unavailable for it." }
     : canUsePrivateNotes && privateNotes.serverBacked && privateNote?.sourceVersionId && privateVersion
       && !privateNotes.isDirty && !privateNotes.autosaving
       ? { kind: "private-note", id: privateNote.id, title: privateNote.title, version: privateVersion }

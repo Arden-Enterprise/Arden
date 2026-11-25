@@ -18,8 +18,17 @@ export type PrivateNoteSummary = {
   position?: number | null;
   /** Set only on an archive response for an archived note. */
   archivedAt?: string | null;
+  /** Decision 0034: "pdf" for an original PDF kept in Private. */
+  kind?: "note" | "pdf";
 };
-export type PrivateNoteRecord = PrivateNoteSummary & { body: string; version?: number };
+export type PrivateNoteRecord = PrivateNoteSummary & {
+  body: string;
+  version?: number;
+  /** For a PDF item: whether text was extracted for the private AI side panel. */
+  textAvailable?: boolean;
+};
+/** An original PDF in Private (decision 0034). `text` is what the browser extracted; empty for a scan. */
+export type PrivatePdfUpload = { title: string; pdfBase64: string; text: string };
 
 export function askPrivateNote(platform: Platform, organizationId: string, noteId: string,
   expectedVersion: number, query: string, requestId: string): Promise<AskArdenAnswer> {
@@ -89,12 +98,30 @@ export function createPrivateNote(platform: Platform, organizationId: string,
   return apiRequest<PrivateNoteRecord>(platform, `${base(organizationId)}/drafts`, json("POST", body));
 }
 
-/** Content edits and renames create a new version and must carry the version they were based on. */
+/** Content edits and renames create a new version and must carry the version they were based on. A PDF item takes a title only. */
 export function updatePrivateNote(platform: Platform, organizationId: string, noteId: string, version: number,
-  input: { title: string; body: string }): Promise<PrivateNoteRecord> {
+  input: { title: string; body?: string }): Promise<PrivateNoteRecord> {
   return apiRequest<PrivateNoteRecord>(platform, `${base(organizationId)}/drafts/${noteId}`, {
     ...json("PATCH", input), headers: { "If-Match": `"${version}"` },
   });
+}
+
+export function createPrivatePdf(platform: Platform, organizationId: string,
+  input: PrivatePdfUpload & { collectionId?: string | null }): Promise<PrivateNoteRecord> {
+  const body = input.collectionId ? input : { title: input.title, pdfBase64: input.pdfBase64, text: input.text };
+  return apiRequest<PrivateNoteRecord>(platform, `${base(organizationId)}/drafts/pdf`, json("POST", body));
+}
+
+/** Replaces a PDF item's file; the item keeps its title unless one is given. */
+export function replacePrivatePdf(platform: Platform, organizationId: string, noteId: string, version: number,
+  input: { pdfBase64: string; text: string }): Promise<PrivateNoteRecord> {
+  return apiRequest<PrivateNoteRecord>(platform, `${base(organizationId)}/drafts/${noteId}/pdf`, {
+    ...json("PUT", input), headers: { "If-Match": `"${version}"` },
+  });
+}
+
+export async function loadPrivatePdf(platform: Platform, organizationId: string, noteId: string): Promise<string> {
+  return (await apiRequest<{ pdfBase64: string }>(platform, `${base(organizationId)}/drafts/${noteId}/pdf`)).pdfBase64;
 }
 
 export async function listPrivateCollections(platform: Platform, organizationId: string): Promise<PrivateCollectionRecord[]> {

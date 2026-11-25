@@ -11,6 +11,9 @@ const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f
 const uuidPattern = new RegExp(`^${uuid}$`);
 const privateDraftPath = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts(?:/${uuid})?$`);
 const privateNoteQuestionPath = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/questions$`);
+/** Decision 0034: original PDFs kept in Private (upload, read and replace the file). */
+const privatePdfCreate = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/pdf$`);
+const privatePdfFile = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/pdf$`);
 // Decision 0029 private notes organization: collections, favorites and trash; spec F03-ARR order and archive. No DELETE method.
 const privateCollectionCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections$`);
 const privateCollectionItem = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections/${uuid}$`);
@@ -83,7 +86,9 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
   if (typeof request.path !== "string" || request.path.length > 2048 || !request.path.startsWith("/") || request.path.startsWith("//")) return false;
   if (request.method !== "GET" && request.method !== "POST" && request.method !== "PATCH" && request.method !== "PUT") return false;
   const pdfUpload = typeof request.path === "string" && (pdfKnowledgeDraft.test(request.path)
-    || (request.method === "PATCH" && knowledgeDraftItem.test(request.path)));
+    || (request.method === "PATCH" && knowledgeDraftItem.test(request.path))
+    || (request.method === "POST" && privatePdfCreate.test(request.path))
+    || (request.method === "PUT" && privatePdfFile.test(request.path)));
   if (request.body !== undefined && (typeof request.body !== "string" || Buffer.byteLength(request.body, "utf8") >
     (pdfUpload ? 7_100_000 : 128 * 1024))) return false;
   if (request.ifMatch !== undefined && (typeof request.ifMatch !== "string" || request.ifMatch.length > 80)) return false;
@@ -95,11 +100,12 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
 
 export function desktopApiResponseLimit(request: DesktopApiRequest): number {
   const pdfCreate = request.method === "POST" && pdfKnowledgeDraft.test(request.path);
+  const privatePdfRead = request.method === "GET" && privatePdfFile.test(request.path);
   const knowledgeDetail = ((request.method === "GET" || request.method === "PATCH")
     && (knowledgeDraftItem.test(request.path) || knowledgeDraftVersionItem.test(request.path)))
     || (request.method === "GET" && (knowledgeReviewItem.test(request.path)
       || publishedKnowledgeItem.test(request.path)));
-  return pdfCreate || knowledgeDetail ? 7_100_000 : 1024 * 1024;
+  return pdfCreate || knowledgeDetail || privatePdfRead ? 7_100_000 : 1024 * 1024;
 }
 
 /** Reader deadlines are main-owned; other routes retain the validated renderer bound. */
@@ -180,6 +186,10 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     || (privateCollectionItem.test(url.pathname) && request.method === "PATCH" && Boolean(request.body))
     || (privateFavoritePlacement.test(url.pathname) && request.method === "PUT" && Boolean(request.body))
     || (privateItemAction.test(url.pathname) && request.method === "POST" && (request.body === undefined || request.body === "{}")));
+  const privatePdfRequest = !request.idempotencyKey && !url.search && (
+    (privatePdfCreate.test(url.pathname) && request.method === "POST" && Boolean(request.body) && !request.ifMatch)
+    || (privatePdfFile.test(url.pathname) && request.method === "GET" && request.body === undefined && !request.ifMatch)
+    || (privatePdfFile.test(url.pathname) && request.method === "PUT" && Boolean(request.body) && Boolean(request.ifMatch)));
   const sharedDraftCreate = sharedDraftPath.test(url.pathname) && request.method === "POST" &&
     Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   const knowledgeGet = (knowledgeCollection.test(url.pathname) || knowledgeDraftItem.test(url.pathname)
@@ -268,7 +278,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     (url.pathname === "/api/v1/auth/sign-in" && request.method === "POST") ||
     (url.pathname === "/api/v1/auth/sign-out" && request.method === "POST") ||
     (url.pathname === "/api/v1/me" && request.method === "GET") ||
-    privateDraftRequest
+    privateDraftRequest || privatePdfRequest
   ) && !request.idempotencyKey;
   const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
   const catalogGet = knowledgeCatalogRead.test(url.pathname) && request.method === "GET"

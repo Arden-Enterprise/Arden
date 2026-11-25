@@ -229,6 +229,22 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ ...request, path: "https://other.invalid/api/v1/me" }), false);
   });
 
+  it("allows exactly the decision 0034 private PDF routes and their size limits", () => {
+    const base = `/api/v1/organizations/${organizationId}/private-workspace/drafts`;
+    const id = sourcePrivateVersionId;
+    const upload = JSON.stringify({ title: "Minutes", pdfBase64: "a".repeat(6_900_000), text: "" });
+    assert.equal(validateDesktopApiRequest({ path: `${base}/pdf`, method: "POST", body: upload }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "PUT", body: upload, ifMatch: '"2"' }), true);
+    assert.equal(desktopApiResponseLimit({ path: `${base}/${id}/pdf`, method: "GET" }), 7_100_000);
+    // Replacing needs the version it was based on; no other method, query or oversized body is accepted.
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "PUT", body: upload }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "PATCH", body: upload, ifMatch: '"2"' }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/pdf?x=1`, method: "POST", body: upload }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/pdf`, method: "POST", body: "a".repeat(7_200_000) }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}`, method: "PATCH", body: upload, ifMatch: '"2"' }), false);
+  });
+
   it("allows exactly the decision 0029 and F03-ARR private-notes organization routes and methods", () => {
     const base = `/api/v1/organizations/${organizationId}/private-workspace`;
     const id = sourcePrivateVersionId;

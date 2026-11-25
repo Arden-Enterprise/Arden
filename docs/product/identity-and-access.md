@@ -198,7 +198,7 @@ Goal: keep an original PDF in Private so that it can be organized, read, contrib
 
 Scope:
 
-1. **Upload PDF** in Private (header and collection `+`) creates a PDF item next to notes. Maximum 5 MB. The server checks the file type and size; the file goes to protected private storage and is served only through Core after authorization, using short-lived signed access.
+1. **Upload PDF** on the Private page and on a collection page creates a PDF item next to notes. Maximum 5 MB. The server checks the file type and size; the file goes to protected private storage and is served only through owner-checked Core routes (`GET …/drafts/:id/pdf`, no-store), never through a public URL. *Implementation note:* this matches the existing shared PDF reader instead of the signed links first written here; the access boundary is unchanged.
 2. The PDF's text is extracted for the title (PDF title, otherwise file name), search and the private AI side panel. A PDF without a text layer is accepted and labelled "No text found — AI is unavailable for this file" (no OCR).
 3. The file cannot be edited. **Replace file** stores a new file as the item's live version under ADR 0031; a version sealed by contribution is kept; the replaced unsealed object is erased.
 4. PDF items take part in collections, favorites, ordering, archive and the 30-day trash like notes; purge erases every stored file of the item.
@@ -209,13 +209,13 @@ Out of scope: annotating PDFs, other file types, OCR, files over 5 MB.
 
 | ID | Observable requirement, including failure/denial cases | Implementation reference | Evidence actually obtained | Remaining/owner |
 | --- | --- | --- | --- | --- |
-| F03-FILE-AC1 | Uploading a valid PDF up to 5 MB creates an item that opens in the PDF viewer and survives reload; non-PDF, oversized, damaged and password-protected files are rejected with explicit errors and leave nothing stored. | Not implemented | Not run | Phase 2 |
-| F03-FILE-AC2 | Only the owner (and, after F03-SHR, active recipients) can obtain the file; signed access expires; another member, Org Admin and System Admin get 404 without metadata. | Not implemented | Not run | Phase 2; real-PostgreSQL and storage checks required |
-| F03-FILE-AC3 | Replace file keeps one live version, keeps contribution-sealed versions and erases the replaced unsealed object. | Not implemented | Not run | Phase 2 |
-| F03-FILE-AC4 | PDF items work with collections, favorites, ordering, archive, trash, restore and purge; purge erases the stored files. | Not implemented | Not run | Phase 2 |
-| F03-FILE-AC5 | Search and the private AI side panel use the extracted text; a PDF without text shows the AI-unavailable label. | Not implemented | Not run | Phase 2 |
-| F03-FILE-AC6 | Contribute creates a shared PDF draft with the same file; the private item is unchanged; a PDF without text shows a warning first. | Not implemented | Not run | Phase 2 |
-| F03-FILE-AC7 | Upload, view and replace work on web and the Windows desktop app, by keyboard and at phone width. | Not implemented | Not run | Phase 2 |
+| F03-FILE-AC1 | Uploading a valid PDF up to 5 MB creates an item that opens in the PDF viewer and survives reload; non-PDF, oversized, damaged and password-protected files are rejected with explicit errors and leave nothing stored. | Phase 2 (`feat/private-pdf-items`): migration 0069, `POST/GET/PUT …/drafts[/:id]/pdf`, `PrivatePdfView.tsx`, `readPdfUpload`. | API tests (valid, not-a-PDF and over-5 MB uploads leave no objects); UI tests (upload, viewer, size limit). Reload and damaged/password files in a real browser not checked. | Browser and Electron acceptance |
+| F03-FILE-AC2 | Only the owner (and, after F03-SHR, active recipients) can obtain the file; another member, Org Admin and System Admin get 404 without metadata. | Owner-only RLS and route checks unchanged; `GET …/pdf` 404 for others. | API test (other member 404); real-PostgreSQL case (manager reads nothing). Org/System Admin not run separately. | Phase 3 adds recipients |
+| F03-FILE-AC3 | Replace file keeps one live version, keeps contribution-sealed versions and erases the replaced unsealed object. | `updateDraft` reports the replaced file and text objects; trigger in 0069. | Real-PostgreSQL case (overwrite reports both objects, sealed text update rejected 55000, text only on PDF versions 23514); API test (stale 412, old objects erased); UI test (If-Match, viewer reload). | None |
+| F03-FILE-AC4 | PDF items work with collections, favorites, ordering, archive, trash, restore and purge; purge erases the stored files. | Same draft rows; duplicate copies file and text; purge lists the text object. | Real-PostgreSQL case (purge returns file and text). Favorites, ordering and archive reuse note paths without PDF-specific tests. | Browser check |
+| F03-FILE-AC5 | Search and the private AI side panel use the extracted text; a PDF without text shows the AI-unavailable label. | `question.ts` reads the text object; Ask panel hint and page notice for PDFs without text. Private search is title-only today, so it is unchanged. | Question test (answers from text, 422 without text); UI test (notice). | Live provider check |
+| F03-FILE-AC6 | Contribute creates a shared PDF draft with the same file; the private item is unchanged; a PDF without text shows a warning first. | Contribution route copies the PDF; the Share panel's contribution preview says the file is copied. | Real-PostgreSQL case (shared PDF draft created, version sealed); UI test (no-text warning in the contribution form). | Browser check |
+| F03-FILE-AC7 | Upload, view and replace work on web and the Windows desktop app, by keyboard and at phone width. | Desktop allow-list routes and limits. | Desktop policy test. Browser/Electron not yet run. | Browser and Electron acceptance |
 
 ## F04 Published audiences
 
