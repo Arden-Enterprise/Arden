@@ -107,19 +107,33 @@ button.knowledge-row:hover { border-color: var(--arden-line-strong); background:
 
 .arden-document-field { display: grid; gap: 8px; min-width: 0; color: var(--arden-text-secondary); font-size: 13px; }
 .arden-rich-text-shell { position: relative; min-width: 0; overflow: hidden; border: 1px solid var(--arden-control-border); border-radius: 6px; background: var(--arden-elevated); }
-.arden-app-shell .writing-action-panel { position: fixed; inset: auto; margin: 0; z-index: 32; width: min(160px, calc(100vw - 16px)); overflow: auto; padding: 4px; border: 1px solid var(--arden-line-strong); border-radius: 8px; color: var(--arden-text-primary); background: var(--arden-elevated); box-shadow: 0 8px 24px rgb(0 0 0 / 35%); }
+.arden-app-shell .writing-action-panel { position: fixed; inset: auto; margin: 0; z-index: 32; width: min(220px, calc(100vw - 16px)); overflow: auto; padding: 5px; border: 1px solid var(--arden-line-strong); border-radius: 10px; color: var(--arden-text-primary); background: var(--arden-elevated); box-shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 14px 36px rgb(0 0 0 / 42%); animation: writing-menu-in var(--arden-motion-quick, 120ms) ease-out; }
+@keyframes writing-menu-in { from { opacity: 0; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .arden-app-shell .writing-action-panel { animation: none; } }
 .arden-app-shell .writing-action-panel.is-expanded { width: min(300px, calc(100vw - 16px)); padding: 8px; }
 .arden-app-shell .writing-action-head, .arden-app-shell .writing-action-result-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .arden-app-shell .writing-action-head button { min-width: 28px; min-height: 28px; border: 0; color: var(--arden-text-secondary); background: transparent; font-size: 18px; }
+.arden-app-shell .writing-action-format { display: flex; gap: 2px; padding: 1px; }
+.arden-app-shell .writing-action-format button { flex: 1 1 0; min-width: 0; height: 30px; padding: 0; border: 0; border-radius: 6px; color: var(--arden-text-secondary); background: transparent; font: 500 14px/1 var(--arden-font-body); }
+.arden-app-shell .writing-action-format .writing-format-bold { font-weight: 750; }
+.arden-app-shell .writing-action-format .writing-format-italic { font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 15px; }
+.arden-app-shell .writing-action-format .writing-format-strike { text-decoration: line-through; }
+.arden-app-shell .writing-action-format .writing-format-code { font: 600 12px/1 ui-monospace, "Cascadia Code", Consolas, monospace; }
+.arden-app-shell .writing-action-format button:hover:not(:disabled), .arden-app-shell .writing-action-format button:focus-visible { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+.arden-app-shell .writing-action-format button.is-active { color: var(--arden-accent); background: var(--arden-accent-subtle); }
 .arden-app-shell .writing-action-options { display: grid; gap: 1px; }
 .arden-app-shell .writing-action-clipboard { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.arden-app-shell .writing-action-options + .writing-action-options { border-top: 1px solid var(--arden-line); margin-top: 4px; padding-top: 4px; }
-.arden-app-shell .writing-action-options button { min-height: 26px; padding: 3px 7px; border: 0; border-radius: 4px; color: var(--arden-text-primary); background: transparent; font-size: 13px; line-height: 1.2; text-align: left; }
-.arden-app-shell .writing-action-clipboard button { padding-inline: 4px; text-align: center; }
+.arden-app-shell .writing-action-panel > * + :is(.writing-action-options, .writing-action-format) { border-top: 1px solid var(--arden-line); margin-top: 5px; padding-top: 5px; }
+.arden-app-shell .writing-action-label { padding: 3px 8px 4px; color: var(--arden-text-muted); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+.arden-app-shell .writing-action-options button { display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 4px 8px; border: 0; border-radius: 6px; color: var(--arden-text-primary); background: transparent; font-size: 13px; line-height: 1.2; text-align: left; }
+.arden-app-shell .writing-action-icon { flex: none; color: var(--arden-text-muted); }
+.arden-app-shell .writing-action-ai button:first-of-type .writing-action-icon { color: var(--arden-accent); }
+.arden-app-shell .writing-action-options button:disabled { color: var(--arden-text-disabled); }
+.arden-app-shell .writing-action-clipboard button { justify-content: center; padding-inline: 4px; text-align: center; }
 @media (pointer: coarse) {
-  .arden-app-shell .writing-action-options button { min-height: 44px; }
+  .arden-app-shell .writing-action-options button, .arden-app-shell .writing-action-format button { min-height: 44px; }
 }
-.arden-app-shell .writing-action-options button:hover:not(:disabled), .arden-app-shell .writing-action-options button:focus-visible { background: var(--arden-accent-subtle); }
+.arden-app-shell .writing-action-options button:hover:not(:disabled), .arden-app-shell .writing-action-options button:focus-visible { background: var(--arden-surface-hover); }
 .arden-app-shell .writing-action-panel p { color: var(--arden-text-secondary); font-size: 13px; line-height: 1.5; }
 .arden-app-shell .writing-action-chat, .arden-app-shell .writing-action-suggestion { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--arden-line); }
 .arden-app-shell .writing-action-chat span, .arden-app-shell .writing-action-suggestion span { color: var(--arden-accent); font-size: 12px; font-weight: 650; }

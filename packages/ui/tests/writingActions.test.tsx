@@ -59,6 +59,23 @@ it("uses current note context and shows an exact quote when no text is selected"
   expect((screen.getByRole("textbox", { name: "Note content" }) as HTMLTextAreaElement).value).toBe("Alpha selected omega.");
 });
 
+it("formats the selection from the menu and from shortcuts, even without AI writing", async () => {
+  render(<Note assistantEnabled={false} />);
+  const editor = screen.getByRole("textbox", { name: "Note content" }) as HTMLTextAreaElement;
+  editor.setSelectionRange(6, 14);
+  fireEvent.select(editor);
+  expect(screen.queryByRole("button", { name: "Improve Writing" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Bold" }));
+  expect(editor.value).toBe("Alpha **selected** omega.");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Bold" }).getAttribute("aria-pressed")).toBe("true"));
+  expect(editor.value.slice(editor.selectionStart, editor.selectionEnd)).toBe("selected");
+  fireEvent.keyDown(editor, { key: "b", ctrlKey: true });
+  expect(editor.value).toBe("Alpha selected omega.");
+  await waitFor(() => expect(editor.value.slice(editor.selectionStart, editor.selectionEnd)).toBe("selected"));
+  fireEvent.keyDown(editor, { key: "i", ctrlKey: true });
+  expect(editor.value).toBe("Alpha _selected_ omega.");
+});
+
 it("closes a selection menu with Escape and preserves the note", () => {
   render(<Note />);
   const editor = screen.getByRole("textbox", { name: "Note content" }) as HTMLTextAreaElement;
