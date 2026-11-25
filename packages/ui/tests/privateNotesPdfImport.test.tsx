@@ -25,7 +25,7 @@ vi.mock("../src/knowledge/pdfRuntime", () => ({
   }),
 }));
 
-/** Spec F03-PDF: import a PDF's text as a new private note. */
+/** Spec F03-PDF: import a PDF's text into a private note. */
 const pdfFile = (name = "Quarterly_report.pdf", body = "%PDF-1.7 synthetic") => new File([body], name, { type: "application/pdf" });
 type FakePage = { items: Array<{ str: string; hasEOL?: boolean } | { type: string }> };
 function fakeRuntime(pages: FakePage[], options: { title?: string; fail?: Error } = {}) {
@@ -95,14 +95,14 @@ describe("PDF text to note", () => {
 const collections: PrivateCollection[] = [{ id: "c1", title: "Capstone", parentId: null, favoritedAt: null }];
 const notes: PrivateNote[] = [{ id: "n1", title: "Existing", body: "", updatedLabel: "Saved", collectionId: "c1" }];
 let controllerRef: PrivateNotesController;
-function Workspace({ connect }: { connect?: boolean }) {
+function Workspace({ connect, onOpen }: { connect?: boolean; onOpen?: () => void }) {
   const controller = usePrivateNotes(connect ? [] : notes, connect ? [] : collections);
   controllerRef = controller;
   return createElement("div", { className: "arden-app-shell" },
     createElement(AppSidebar, {
-      activeView: "personal-workspace", platform: "web", previewRole: "member", organization: null,
+      activeView: onOpen ? "knowledge" : "personal-workspace", platform: "web", previewRole: "member", organization: null,
       memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
-      privateNotes: { controller, pageVisible: true, onOpen: vi.fn() },
+      privateNotes: { controller, pageVisible: !onOpen, onOpen: onOpen ?? vi.fn() },
     }),
     createElement(PersonalWorkspacePage, {
       controller, platform: "web", organizationId: connect ? "org" : "", contributionAttempt: null,
@@ -135,6 +135,30 @@ describe("PDF text into an existing note", () => {
 });
 
 describe("Import PDF in Private Notes", () => {
+  it("opens Private after a successful sidebar import from another page", async () => {
+    const onOpen = vi.fn();
+    runtimeMock.pages = [{ items: [{ str: "PDF text" }] }];
+    vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(function(this: HTMLInputElement) {
+      Object.defineProperty(this, "files", { value: [pdfFile()] });
+      this.dispatchEvent(new Event("change"));
+    });
+    render(createElement(Workspace, { onOpen }));
+    fireEvent.click(within(tree()).getByRole("button", { name: "Expand Capstone" }));
+    fireEvent.click(within(tree()).getByRole("button", { name: "More actions for Existing" }));
+    fireEvent.click(within(screen.getByRole("menu")).getByRole("menuitem", { name: "Import PDF" }));
+    await waitFor(() => expect(controllerRef.draft.body).toBe("PDF text"));
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("describes a partial first page when a note is nearly full", async () => {
+    runtimeMock.pages = [{ items: [{ str: "One line", hasEOL: true }, { str: "A second line" }] }];
+    render(createElement(Workspace));
+    await act(() => controllerRef.editBody("a".repeat(99_988)));
+    await act(async () => { await controllerRef.importPdf("n1", pdfFile()); });
+    expect(controllerRef.draft.body.endsWith("\n\nOne line")).toBe(true);
+    expect(controllerRef.notice?.message).toBe("Imported part of the first page: the rest doesn’t fit in this note");
+  });
+
   it("offers Import PDF in a note's ··· menu only, opening the file picker", () => {
     const click = vi.spyOn(HTMLInputElement.prototype, "click").mockImplementation(() => undefined);
     render(createElement(Workspace));

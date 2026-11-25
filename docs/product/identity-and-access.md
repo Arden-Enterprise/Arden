@@ -135,8 +135,8 @@ Out of scope: dragging collections or reordering them manually, reordering Favor
 
 | Acceptance ID | Complete path to verify | Evidence / remaining |
 | --- | --- | --- |
-| F03-PDF-AC1 | Import PDF from a note's `···` (sidebar or header) puts the PDF's text into that note, opens it, names an untitled note after the PDF, and the text is saved by autosave or Save and survives reload. Collections offer no Import PDF. | UI tests (menu placement; controller import → `PATCH` of the same note, no new note). Browser on the real API not yet repeated for revision 2. |
-| F03-PDF-AC2 | A note with text keeps it and the PDF is added after a blank line; long PDFs are cut at whole pages within the remaining room and the user is told; a full note, scans, password-protected, damaged, empty, non-PDF and oversized files show an explicit error and leave the note unchanged. | Unit tests with a pdf.js stand-in; not exercised in the browser with real scanned or encrypted files. |
+| F03-PDF-AC1 | Import PDF from a note's `···` (sidebar or header) puts the PDF's text into that note, opens it, names an untitled note after the PDF, and the text is saved by autosave or Save and survives reload. Collections offer no Import PDF. | UI tests cover menu placement, navigation after import from another page, and a `PATCH` to the same note. Browser on the real API not yet repeated for revision 2. |
+| F03-PDF-AC2 | A note with text keeps it and the PDF is added after a blank line. Long PDFs keep the pages that fit. When only part of the first page fits at a line break, the notice describes that partial import. A full note, scans, password-protected, damaged, empty, non-PDF and oversized files show an explicit error and leave the note unchanged. | Unit and UI tests with a pdf.js stand-in cover the remaining capacity and partial-page notice. Real scans and encrypted PDFs have yet to be checked in the browser. |
 | F03-PDF-AC3 | Works on the web and in the Windows desktop app. | Not yet run for revision 2; Electron not run (it uses the same pdf.js worker as the knowledge PDF reader). |
 
 ### F03-SAVE Autosave with one live version

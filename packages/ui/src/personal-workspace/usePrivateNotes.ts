@@ -350,15 +350,17 @@ export function usePrivateNotes(initialNotes: PrivateNote[], initialCollections:
     dispatch({ type: "edit", field: "body", value: body });
     dispatch({ type: "edit", field: "title", value: title });
     const pages = `${imported.totalPages} ${imported.totalPages === 1 ? "page" : "pages"}`;
+    const included = imported.importedPages === 0 ? "part of the first page" : `the first ${imported.importedPages} of ${pages}`;
     announce(imported.truncated
-      ? `Imported the first ${imported.importedPages} of ${pages}: the rest doesn’t fit in this note`
+      ? `Imported ${included}: the rest doesn’t fit in this note`
       : `Imported “${imported.title}” (${pages})`);
   }, "The PDF couldn’t be imported.");
 
   /** Opens the file picker (must run inside the click) and imports the chosen PDF into the note. */
   const pickPdf = async (noteId: string) => {
+    const generation = loadGeneration.current;
     const file = await choosePdfFile();
-    return file ? importPdf(noteId, file) : false;
+    return file && generation === loadGeneration.current ? importPdf(noteId, file) : false;
   };
 
   const createCollection = (parentId: string | null = null, where: RenameTarget["where"] = "tree") => run("create-collection",
