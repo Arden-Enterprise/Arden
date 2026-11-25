@@ -20,6 +20,7 @@
     "tests/knowledgeManagement.test.tsx",
     "tests/collectionManagement.test.tsx",
     "tests/workspaceRouting.test.tsx",
-    "tests/knowledgeRoute.test.tsx"
+    "tests/knowledgeRoute.test.tsx",
+    "tests/privateNotesShare.test.tsx"
   ]
 }

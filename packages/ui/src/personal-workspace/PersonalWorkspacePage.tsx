@@ -6,6 +6,7 @@ import { PrivateNoteEditor } from "./PrivateNoteEditor";
 import { WorkspaceTopbar, type ContextControlProps, type TopbarCrumb } from "../shared/WorkspaceTopbar";
 import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 import { ContributePrivateNoteDialog, type ContributionAttempt } from "./ContributePrivateNoteDialog";
+import { SharePrivateItemPanel } from "./SharePrivateItemPanel";
 import type { CreatedKnowledgeDraft } from "../shared/api-client";
 import type { PrivateNotesController } from "./usePrivateNotes";
 import type { Platform } from "../shared/types";
@@ -68,7 +69,10 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   onContributionAttemptChange: (attempt: ContributionAttempt | null) => void;
   onKnowledgeDraftCreated: (draft: CreatedKnowledgeDraft) => void;
 } & ContextControlProps) {
-  const [contributionOpen, setContributionOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const selectedId = controller.selectedNote?.id;
+  // The Share panel belongs to one item; opening another item closes it.
+  useEffect(() => { setShareOpen(false); }, [selectedId]);
   const [discarding, setDiscarding] = useState(false);
   const [dismissedNotice, setDismissedNotice] = useState(0);
   const { state, selectedNote, draft, isDirty, serverBacked, loading, saving, error, saveMessage, focus, collections, actionError, busyAction } = controller;
@@ -94,16 +98,25 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
 
   const open = (item: TreeItem) => { if (item.kind === "note") controller.openNote(item.id); else controller.openCollection(item.id); };
 
-  // Contributing a copy opens inside this page's status island rather than a modal dialog.
-  const contributionPanel = contributionOpen && serverBacked && selectedNote && sourceVersionId && !isDirty ? <ContributePrivateNoteDialog
-    key={sourceVersionId}
-    platform={platform}
-    organizationId={organizationId}
-    source={{ title: selectedNote.title, body: selectedNote.body, versionId: sourceVersionId }}
-    attempt={matchingAttempt}
-    onAttemptChange={onContributionAttemptChange}
-    onClose={() => setContributionOpen(false)}
-    onCreated={(created) => { onContributionAttemptChange(null); setContributionOpen(false); onKnowledgeDraftCreated(created); }}
+  // Decision 0034: one Share button. Its panel opens inside this page's status island rather than a modal dialog;
+  // contributing a copy is one of its choices.
+  const sharePanel = shareOpen && serverBacked && selectedNote ? <SharePrivateItemPanel
+    key={selectedNote.id}
+    title={selectedNote.title}
+    onClose={() => setShareOpen(false)}
+    contribute={{
+      unavailableReason: !sourceVersionId || isDirty ? "Save your changes before contributing a copy." : undefined,
+      render: (back) => <ContributePrivateNoteDialog
+        key={sourceVersionId}
+        platform={platform}
+        organizationId={organizationId}
+        source={{ title: selectedNote.title, body: selectedNote.body, versionId: sourceVersionId ?? "" }}
+        attempt={matchingAttempt}
+        onAttemptChange={onContributionAttemptChange}
+        onClose={back}
+        onCreated={(created) => { onContributionAttemptChange(null); setShareOpen(false); onKnowledgeDraftCreated(created); }}
+      />,
+    }}
   /> : undefined;
 
   const headerMenu = (item: TreeItem) => <ItemActionsMenu placement="below" triggerClassName="pn-icon-button pn-header-button"
@@ -114,7 +127,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
 
   return (
     <main id="arden-main" className="workspace-page" aria-labelledby="personal-workspace-title" tabIndex={-1}>
-      <WorkspaceTopbar breadcrumb={breadcrumb} crumbs={crumbs} previewLabel={serverBacked ? undefined : "Demo"} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={contributionPanel} />
+      <WorkspaceTopbar breadcrumb={breadcrumb} crumbs={crumbs} previewLabel={serverBacked ? undefined : "Demo"} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={sharePanel} />
       <WorkspacePageContent className="personal-content is-single is-editing-note" header={<WorkspacePageHeader className="personal-title-row"
         eyebrow="WORK"
         title="Private"
@@ -135,7 +148,8 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
               <span className="private-state" aria-live="polite">{controller.autosaving ? "Saving…" : isDirty ? "Unsaved changes" : serverBacked ? "Saved" : "Saved · Demo"}</span>
               <span className="note-toolbar-spacer" />
               {isDirty && <button type="button" className="secondary-button" disabled={saving} onClick={() => setDiscarding(true)}>Discard changes</button>}
-              {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}><Icon name="layers" size={14} />Create review draft</button>}
+              {serverBacked && <button type="button" className="secondary-button" disabled={pending || saving} aria-haspopup="dialog" aria-expanded={shareOpen}
+                onClick={() => setShareOpen(true)}><Icon name="people" size={14} />Share</button>}
               {headerMenu(current)}
               <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : "Save"}</button>
             </>}

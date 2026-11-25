@@ -180,7 +180,7 @@ Paths:
 
 | ID | Observable requirement, including failure/denial cases | Implementation reference | Evidence actually obtained | Remaining/owner |
 | --- | --- | --- | --- | --- |
-| F03-SHR-AC1 | Share opens both choices with their consequences; Contribute opens the unchanged contribution form. | Not implemented | Not run | Phase 1 |
+| F03-SHR-AC1 | Share opens both choices with their consequences; Contribute opens the unchanged contribution form. | Phase 1 (`feat/share-button`): `SharePrivateItemPanel.tsx` replaces the note toolbar's Create review draft button; Contribute opens `ContributePrivateNoteDialog` and Cancel returns to the choices. | `packages/ui/tests/privateNotesShare.test.tsx` (3 cases: choices and consequence text, contribute/back/create, save-first reason and Escape); UI suite 612 passed. Share with people arrives in phase 3. | Browser and Electron acceptance |
 | F03-SHR-AC2 | The owner shares a note or PDF item with several members in one action; each recipient can open the current saved content read-only, and sees later saves after reload. | Not implemented | Not run | Phase 3 |
 | F03-SHR-AC3 | Only individual active members of the same organization can be chosen; departments, groups, inactive members and other organizations are rejected by Core, not only hidden in the UI. | Not implemented | Not run | Phase 3 |
 | F03-SHR-AC4 | A recipient cannot edit, re-share, contribute, move, list the owner's other items or read the owner's collections; another member, Org Admin and System Admin still cannot read the item (404, no metadata). | Not implemented | Not run | Phase 3; real-PostgreSQL RLS case required |
