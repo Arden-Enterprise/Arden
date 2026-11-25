@@ -25,7 +25,7 @@ PROMPTS = {
         "Explain only the supplied word, phrase or passage like the reader is five years old. "
         "Use short, accessible language. Define necessary jargon. "
         "Reply in chat; never propose a document edit. For PAGE scope, return an exact short "
-        "source_quote copied from the page as the citation. For SELECTION scope, leave it empty."
+        "source_quote copied from the page as the citation."
     ),
 }
 
@@ -37,10 +37,13 @@ SYSTEM_PROMPT = (
 )
 
 
-class WritingOutput(BaseModel):
+class WritingTextOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: Literal["CHANGED", "UNCHANGED", "EXPLAINED"]
     text: str = Field(min_length=1, max_length=24_000)
+
+
+class WritingOutput(WritingTextOutput):
     source_quote: str = Field(max_length=300)
 
 
