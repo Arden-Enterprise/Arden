@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { AppSidebar } from "./AppSidebar";
+import { ASK_PANEL_MAX, askPanelMaxFor, clampAskPanelWidth, defaultAskPanelWidth, readAskPanelWidth, writeAskPanelWidth } from "./askPanelWidth";
 import { MobileTabIsland } from "./MobileTabIsland";
 import { AgentPanel } from "./AgentPanel";
 import type { ChatSource } from "../ask-arden/useArdenChat";
@@ -185,6 +186,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [islandToast, setIslandToast] = useState<StatusIslandToast | null>(null);
   const [islandConfirm, setIslandConfirm] = useState<StatusIslandConfirm | null>(null);
   const [contextOverlay, setContextOverlay] = useState(false);
+  // Spec F13-RESIZE: the docked panel's chosen width (null = stylesheet default) and the widest it may be now.
+  const [askPanelWidth, setAskPanelWidth] = useState<number | null>(readAskPanelWidth);
+  const [askPanelMax, setAskPanelMax] = useState(ASK_PANEL_MAX);
   const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
   const shellRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -436,6 +440,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       // Dock Ask Arden beside the page (the page narrows, as in Notion) while the page keeps a readable width; float it otherwise.
       const pageWidth = shell.getBoundingClientRect().width - sidebarWidth;
       setContextOverlay(window.innerWidth < 900 || pageWidth - 360 < 520);
+      setAskPanelMax(askPanelMaxFor(pageWidth));
     };
     const observer = new ResizeObserver(measure);
     observer.observe(shell); observer.observe(sidebar); measure();
@@ -825,7 +830,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       onOpenTarget={openNotificationTarget}>
     <WorkspaceNavigationContext.Provider value={{ open: navOpen, setOpen: setNavOpen }}>
     <StatusIslandContext.Provider value={{ toast: islandToast, setToast: setIslandToast, confirm: islandConfirm, setConfirm: setIslandConfirm }}>
-    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${navCollapsed ? " is-nav-collapsed" : ""}`}>
+    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${navCollapsed ? " is-nav-collapsed" : ""}`}
+      style={askPanelWidth === null ? undefined : { "--arden-context-width": `${clampAskPanelWidth(askPanelWidth, askPanelMax)}px` } as CSSProperties}>
       <a className="skip-link" href="#arden-main">Skip to content</a>
       <AppSidebar
         activeView={activeView}
@@ -908,7 +914,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       <AgentPanel key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`} open={contextOpen}
         platform={platform} organizationId={serverOrganizationId} onClose={closeContext} source={chatSource}
         onOpenAskArden={() => navigate("ask-arden")}
-        onOpenCitation={(citation) => { if (contextOverlay) setContextOpen(false); openKnowledgeCitation(citation); }} />
+        onOpenCitation={(citation) => { if (contextOverlay) setContextOpen(false); openKnowledgeCitation(citation); }}
+        resize={contextOverlay ? undefined : {
+          width: clampAskPanelWidth(askPanelWidth ?? defaultAskPanelWidth(window.innerWidth), askPanelMax),
+          max: askPanelMax,
+          onChange: setAskPanelWidth,
+          onCommit: writeAskPanelWidth,
+          onReset: () => { setAskPanelWidth(null); writeAskPanelWidth(null); },
+        }} />
       {trashConfirm && <IslandConfirm
         title={trashConfirm.kind === "collection" ? "Move collection to trash?" : "Move note to trash?"}
         description="Unsaved changes will be lost."
