@@ -18,9 +18,15 @@ type AskArdenPageProps = {
   platform: Platform;
   organizationId: string | null;
   onOpenCitation?: (citation: KnowledgeCitationReference) => void;
+  /** Opens a saved chat (or a new one for null) from the address bar, handled once per navigation. */
+  routeRequest?: { conversationId: string | null; navigationId: string } | null;
+  /** Reports the open saved chat; a first question turns the new chat into a saved one in place. */
+  onConversationChange?: (conversationId: string | null, options: { replace: boolean }) => void;
+  /** Called once a route request has been shown, refused or has failed. */
+  onRouteSettled?: () => void;
 };
 
-export function AskArdenPage({ platform, organizationId, onOpenCitation, active = true }: AskArdenPageProps) {
+export function AskArdenPage({ platform, organizationId, onOpenCitation, active = true, routeRequest, onConversationChange, onRouteSettled }: AskArdenPageProps) {
   const chat = useArdenChat({ platform, organizationId, source: { kind: "company" } });
   const [examplesVisible, setExamplesVisible] = useState(true);
   const [resetting, setResetting] = useState(false);
@@ -29,6 +35,27 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
   const historyId = useId(), sourcesId = useId();
   const navigation = useWorkspaceNavigation();
   const focusComposer = () => requestAnimationFrame(() => composerRef.current?.focus());
+
+  const openingSaved = useRef(false);
+  const reportedId = useRef<string | null>(null);
+  useEffect(() => {
+    // Asking the first question saves the new chat under its id: the address changes in place, not as a new page.
+    const replace = reportedId.current === null && chat.currentId !== null && !openingSaved.current;
+    openingSaved.current = false;
+    reportedId.current = chat.currentId;
+    onConversationChange?.(chat.currentId, { replace });
+  }, [chat.currentId, onConversationChange]);
+  const handledRoute = useRef<string | null>(null);
+  useEffect(() => {
+    if (!routeRequest || handledRoute.current === routeRequest.navigationId) return;
+    handledRoute.current = routeRequest.navigationId;
+    const target = routeRequest.conversationId;
+    // A waiting answer is never abandoned by Back; the address returns to this chat instead.
+    if (target === chat.currentId || chat.pending) { onRouteSettled?.(); return; }
+    if (!target) { chat.reset(); onRouteSettled?.(); return; }
+    openingSaved.current = true;
+    void chat.openConversation(target).finally(() => onRouteSettled?.());
+  }, [routeRequest]);
 
   const ask = (prompt: string) => {
     chat.setDraft(prompt);
@@ -66,7 +93,7 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
             disabled={chat.pending && !chat.historyOpen} onClick={chat.toggleHistory}>History <Icon name="arrow-down" size={11} /></button>
           {chat.historyOpen && <ChatHistoryPopover id={historyId} anchor={historyButton} items={chat.history}
             loading={chat.historyLoading} error={chat.historyError} currentId={chat.currentId} openingId={chat.openingId}
-            onOpen={(id) => { void chat.openConversation(id, true).then((opened) => { if (opened) focusComposer(); }); }}
+            onOpen={(id) => { openingSaved.current = true; void chat.openConversation(id, true).then((opened) => { if (opened) focusComposer(); }); }}
             onRetry={() => void chat.loadHistory()} onClose={chat.closeHistory} />}
         </span>
         {!chat.empty && <button type="button" className="island-link-button" disabled={chat.pending || chat.historyLoading}
