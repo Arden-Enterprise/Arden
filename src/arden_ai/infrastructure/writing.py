@@ -11,6 +11,7 @@ from arden_ai.application.writing import (
     SYSTEM_PROMPT,
     InvalidWritingOutput,
     WritingOutput,
+    WritingTextOutput,
 )
 from arden_ai.contracts.writing import WritingRequest
 from arden_ai.infrastructure.settings import Settings
@@ -31,7 +32,12 @@ class OpenAIWritingProvider:
             output_version="responses/v1",
             store=False,
         )
-        self._structured = model.with_structured_output(
+        self._text = model.with_structured_output(
+            WritingTextOutput,
+            method="json_schema",
+            strict=True,
+        )
+        self._page_explanation = model.with_structured_output(
             WritingOutput,
             method="json_schema",
             strict=True,
@@ -40,8 +46,10 @@ class OpenAIWritingProvider:
     async def generate(self, request: WritingRequest) -> object:
         instruction = PROMPTS[request.action]
         payload = json.dumps({"scope": request.scope, "text": request.text}, ensure_ascii=False)
+        needs_quote = request.action == "EXPLAIN" and request.scope == "PAGE"
+        output = self._page_explanation if needs_quote else self._text
         try:
-            return await self._structured.ainvoke(
+            result = await output.ainvoke(
                 [
                     SystemMessage(content=f"{SYSTEM_PROMPT}\n{instruction}"),
                     HumanMessage(content=payload),
@@ -49,3 +57,8 @@ class OpenAIWritingProvider:
             )
         except OutputParserException as error:
             raise InvalidWritingOutput("provider output was invalid") from error
+        if needs_quote:
+            return result
+        if not isinstance(result, WritingTextOutput):
+            raise InvalidWritingOutput("provider output was invalid")
+        return WritingOutput(status=result.status, text=result.text, source_quote="")
