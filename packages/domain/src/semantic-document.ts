@@ -229,3 +229,101 @@ export function plainTextToSemanticDocument(body: string, idForLine: (index: num
     })),
   };
 }
+
+const inlinePlainText = (items: SemanticInline[]) =>
+  items.map((item) => item.type === "text" ? item.text : item.content.map((part) => part.text).join("")).join("");
+
+function semanticBlockLines(block: SemanticBlock): string[] {
+  const own = block.type === "table" ? block.content.map((row) => row.cells.map(inlinePlainText).join(" | "))
+    : block.type === "asset" ? [`[Asset: ${block.props.label ?? block.props.assetVersionId}]`]
+      : block.type === "code" ? block.content.map((part) => part.text).join("").split("\n")
+        : [inlinePlainText(block.content)];
+  return [...own, ...block.children.flatMap(semanticBlockLines)];
+}
+
+/** Readable text of a Semantic Document: one line per block, styles dropped. */
+export function semanticDocumentText(document: SemanticDocument): string {
+  return document.blocks.flatMap(semanticBlockLines).join("\n");
+}
+
+/**
+ * Text of a stored body: an Arden Semantic Document becomes its readable text, any other body
+ * (legacy plain or Markdown text) is returned as written, and a malformed Arden document is null.
+ */
+export function semanticBodyText(body: string): string | null {
+  if (!body.startsWith(ARDEN_DOCUMENT_PREFIX)) return body;
+  const parsed = parseSemanticDocument(body);
+  return parsed.ok ? semanticDocumentText(parsed.document) : null;
+}
+
+type InlineMarker = { open: string; close: string; style: SemanticTextStyle };
+const inlineMarkers: InlineMarker[] = [
+  { open: "`", close: "`", style: "code" },
+  { open: "**", close: "**", style: "bold" },
+  { open: "__", close: "__", style: "bold" },
+  { open: "~~", close: "~~", style: "strike" },
+  { open: "*", close: "*", style: "italic" },
+  { open: "_", close: "_", style: "italic" },
+];
+const wordCharacter = /[\p{L}\p{N}]/u;
+
+function closingMarker(text: string, marker: InlineMarker, from: number): number {
+  for (let index = text.indexOf(marker.close, from); index !== -1; index = text.indexOf(marker.close, index + 1)) {
+    if (index === from || /\s/.test(text[index - 1]!)) continue;
+    // "_" inside a word (snake_case) is not emphasis.
+    if (marker.open === "_" && wordCharacter.test(text[index + 1] ?? "")) continue;
+    if (marker.open === "*" && text[index + 1] === "*") { index += 1; continue; }
+    return index;
+  }
+  return -1;
+}
+
+function markdownInline(text: string, styles: SemanticText["styles"] = {}): SemanticText[] {
+  const result: SemanticText[] = [];
+  const push = (value: string, style: SemanticText["styles"]) => {
+    if (!value) return;
+    const last = result.at(-1);
+    if (last && JSON.stringify(last.styles) === JSON.stringify(style)) last.text += value;
+    else result.push({ type: "text", text: value, styles: { ...style } });
+  };
+  let plain = "";
+  let index = 0;
+  while (index < text.length) {
+    const marker = inlineMarkers.find((candidate) => text.startsWith(candidate.open, index)
+      && !/\s/.test(text[index + candidate.open.length] ?? " ")
+      && !(candidate.open === "_" && wordCharacter.test(text[index - 1] ?? "")));
+    const close = marker ? closingMarker(text, marker, index + marker.open.length) : -1;
+    if (!marker || close === -1) { plain += text[index]; index += 1; continue; }
+    push(plain, styles); plain = "";
+    const inner = text.slice(index + marker.open.length, close);
+    const nested = { ...styles, [marker.style]: true as const };
+    if (marker.style === "code") push(inner, nested);
+    else for (const part of markdownInline(inner, nested)) push(part.text, part.styles);
+    index = close + marker.close.length;
+  }
+  push(plain, styles);
+  return result;
+}
+
+/**
+ * Converts a legacy Markdown note (one block per line, as the plain-text editor showed it) into a
+ * Semantic Document: headings, bullet/numbered lists, quotes and bold, italic, strikethrough and code.
+ */
+export function markdownToSemanticDocument(markdown: string, idForLine: (index: number) => string): SemanticDocument {
+  const lines = markdown.replace(/\r\n?/g, "\n").split("\n");
+  return {
+    schemaVersion: ARDEN_DOCUMENT_SCHEMA_VERSION,
+    blocks: lines.map((line, index): SemanticBlock => {
+      const base = { id: idForLine(index), children: [] as SemanticBlock[] };
+      const heading = line.match(/^\s{0,3}(#{1,6})\s+(.*)$/);
+      if (heading) return { ...base, type: "heading", props: { level: heading[1]!.length <= 2 ? 2 : 3 }, content: markdownInline(heading[2]!) };
+      const bullet = line.match(/^\s*[-*+]\s+(?:\[[ xX]\]\s+)?(.*)$/);
+      if (bullet) return { ...base, type: "bulletListItem", props: {}, content: markdownInline(bullet[1]!) };
+      const numbered = line.match(/^\s*\d+[.)]\s+(.*)$/);
+      if (numbered) return { ...base, type: "numberedListItem", props: {}, content: markdownInline(numbered[1]!) };
+      const quote = line.match(/^\s{0,3}>\s?(.*)$/);
+      if (quote) return { ...base, type: "quote", props: {}, content: markdownInline(quote[1]!) };
+      return { ...base, type: "paragraph", props: {}, content: markdownInline(line) };
+    }),
+  };
+}

@@ -13,6 +13,8 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
   return { ...actual, restoreSession: vi.fn(), apiRequest: vi.fn() };
 });
 
+vi.mock("../src/knowledge/ArdenRichTextEditor", () => import("./richEditorStub"));
+
 describe("workspace routes", () => {
   it("round-trips every workspace screen through its path", () => {
     const paths = ["/", "/new", "/documents/version-1", "/drafts/draft-1", "/reports/case-1",
@@ -179,7 +181,7 @@ describe("ArdenShell browser history", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "Note A" })[0]);
     await waitFor(() => expect(window.location.pathname).toBe("/private/notes/note-a"));
-    expect(screen.getByDisplayValue("Note A")).toBeTruthy();
+    expect(await screen.findByDisplayValue("Note A")).toBeTruthy();
 
     window.history.back();
     await waitFor(() => expect(window.location.pathname).toBe("/private/notes/note-b"));

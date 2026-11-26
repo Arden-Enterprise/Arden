@@ -11,6 +11,7 @@ import { trashMeta } from "../src/personal-workspace/PrivateNotesTrash";
 import type { PrivateCollection, PrivateNote } from "../src/shared/types";
 import { installTestDialogs } from "./dialogTestSupport";
 
+vi.mock("../src/knowledge/ArdenRichTextEditor", () => import("./richEditorStub"));
 vi.mock("../src/shared/useAutosizeTextarea", () => ({ useAutosizeTextarea: () => ({ current: null }) }));
 
 const collections: PrivateCollection[] = [
@@ -227,7 +228,7 @@ describe("Private tree in demo mode", () => {
   it("asks before trashing a note with unsaved edits", async () => {
     render(createElement(Workspace));
     fireEvent.click(within(tree()).getByRole("button", { name: "Loose idea" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Note content" }), { target: { value: "Unsaved" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Note content" }), { target: { value: "Unsaved" } });
     openRowMenu("Loose idea");
     await act(async () => fireEvent.click(menuItem("Move to trash")));
     expect(controllerRef.trashConfirm).toEqual({ kind: "note", id: "n1" });
