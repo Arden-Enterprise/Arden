@@ -6,7 +6,10 @@ import { installTestDialogs } from "./dialogTestSupport";
 import * as api from "../src/shared/api-client";
 import { ServerKnowledgeFeaturePage } from "../src/knowledge/ServerKnowledgeFeaturePage";
 
-vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({ ArdenDocumentView: () => null, ArdenRichTextEditor: () => null }));
+vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({
+  ArdenDocumentView: () => createElement("div", { className: "arden-blocknote-document" }, "Managers approve claims."),
+  ArdenRichTextEditor: () => null,
+}));
 vi.mock("../src/shared/WorkspaceTopbar", () => ({ WorkspaceTopbar: () => null }));
 
 let restoreDialogs: () => void;
@@ -67,15 +70,19 @@ describe("T2.2 reviewer approves fewer readers", () => {
     const ai = vi.spyOn(api, "runSubmissionReview").mockResolvedValue({
       contractVersion: 1, requestId: "request", snapshotVersionId: detail.snapshotVersionId,
       snapshotContentHash: detail.contentHash,
-      summary: [{ text: "Describes the reimbursement process.", citation: { excerpt: "Managers approve claims.", page: 2 } }],
-      checks: [{ category: "CLARITY", text: "Verify which manager approves.", citation: { excerpt: "Managers approve claims.", page: 2 } }],
+      summary: [{ text: "Describes the reimbursement process.", citation: { excerpt: "Managers approve claims.", page: null } }],
+      checks: [{ category: "CLARITY", text: "Verify which manager approves.", citation: { excerpt: "Managers approve claims.", page: null } }],
     });
     const decide = await openReview(detail);
     expect(ai).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Review with AI" }));
     const result = await screen.findByRole("region", { name: "AI review results" });
     expect(within(result).getByText("Describes the reimbursement process.")).toBeTruthy();
-    expect(within(result).getAllByText("Source excerpt · page 2")).toHaveLength(2);
+    const open = within(result).getByRole("button", { name: "Open check 1 source" });
+    fireEvent.click(open);
+    await waitFor(() => expect(screen.getByText("Managers approve claims.").classList.contains("is-review-source")).toBe(true));
+    expect(open.getAttribute("aria-current")).toBe("location");
+    expect(within(result).queryByText("Managers approve claims.")).toBeNull();
     expect(decide).not.toHaveBeenCalled();
     await confirmApproval();
     await waitFor(() => expect(decide).toHaveBeenCalledOnce());
