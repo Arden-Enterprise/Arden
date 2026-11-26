@@ -28,10 +28,33 @@ function segments(value: string, start: number, end: number): Segment[] {
   return result;
 }
 
-function wrapping(value: string, { start, end }: Segment, marker: string): "inside" | "outside" | null {
-  const size = marker.length;
-  if (end - start > size * 2 && value.startsWith(marker, start) && value.endsWith(marker, end)) return "inside";
-  if (start >= size && value.startsWith(marker, start - size) && value.startsWith(marker, end)) return "outside";
+type MarkerPair = { open: number; close: number };
+
+const formatMarkers = Object.values(markers);
+
+function wrapping(value: string, { start, end }: Segment, marker: string): MarkerPair | null {
+  // A selection may include the marker pair or sit inside one or more nested pairs.
+  let left = start;
+  let right = end;
+  while (left < right) {
+    const candidate = formatMarkers.find(item => right - left > item.length * 2
+      && value.startsWith(item, left) && value.startsWith(item, right - item.length));
+    if (!candidate) break;
+    if (candidate === marker) return { open: left, close: right - marker.length };
+    if (candidate === markers.code) break;
+    left += candidate.length;
+    right -= candidate.length;
+  }
+  left = start;
+  right = end;
+  while (left > 0 && right < value.length) {
+    const candidate = formatMarkers.find(item => left >= item.length
+      && value.startsWith(item, left - item.length) && value.startsWith(item, right));
+    if (!candidate) break;
+    if (candidate === marker) return { open: left - marker.length, close: right };
+    left -= candidate.length;
+    right += candidate.length;
+  }
   return null;
 }
 
@@ -69,16 +92,25 @@ export function toggleInlineFormat(value: string, start: number, end: number, fo
     let outerStart = part.start;
     let outerEnd = part.end;
     let inner = value.slice(part.start, part.end);
+    let selectedStart = 0;
+    let selectedEnd = inner.length;
     let added = "";
-    if (remove && wrapped === "inside") inner = value.slice(part.start + marker.length, part.end - marker.length);
-    else if (remove && wrapped === "outside") { outerStart -= marker.length; outerEnd += marker.length; }
-    else if (!wrapped) added = marker;
+    if (remove && wrapped) {
+      const { open, close } = wrapped;
+      const size = marker.length;
+      outerStart = Math.min(part.start, open);
+      outerEnd = Math.max(part.end, close + size);
+      inner = value.slice(outerStart, open) + value.slice(open + size, close) + value.slice(close + size, outerEnd);
+      selectedStart = Math.max(part.start, open + size) - outerStart - size;
+      selectedEnd = Math.min(part.end, close) - outerStart - size;
+    } else if (!wrapped) {
+      added = marker;
+    }
     if (index === 0) from = outerStart;
     output += value.slice(cursor, outerStart) + added;
-    if (index === 0) selectionStart = output.length;
-    output += inner;
-    if (index === parts.length - 1) { selectionEnd = output.length; to = outerEnd; }
-    output += added;
+    if (index === 0) selectionStart = output.length + selectedStart;
+    if (index === parts.length - 1) { selectionEnd = output.length + selectedEnd; to = outerEnd; }
+    output += inner + added;
     cursor = outerEnd;
   });
   const tail = value.slice(cursor);

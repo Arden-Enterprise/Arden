@@ -31,3 +31,15 @@ it("formats every line and removes the format only when every line has it", () =
 it("ignores a whitespace-only selection", () => {
   expect(toggleInlineFormat("a   b", 1, 4, "bold")).toBeNull();
 });
+
+it("keeps both nested formats active and removes just the chosen marker pair", () => {
+  const value = "a **_selected_** z";
+  const start = value.indexOf("selected");
+  const end = start + "selected".length;
+  expect(activeInlineFormats(value, start, end)).toEqual({ bold: true, italic: true, strike: false, code: false });
+  const edit = toggleInlineFormat(value, start, end, "bold")!;
+  expect(edit.value).toBe("a _selected_ z");
+  expect(edit.value.slice(edit.start, edit.end)).toBe("selected");
+  expect(value.slice(0, edit.from) + edit.insert + value.slice(edit.to)).toBe(edit.value);
+  expect(toggleInlineFormat(value, 2, 16, "italic")!.value).toBe("a **selected** z");
+});
