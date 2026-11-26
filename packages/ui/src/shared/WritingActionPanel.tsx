@@ -4,10 +4,11 @@ import { ApiError } from "./api-client";
 import type { EditorActionAnchor } from "./editor-action-anchor";
 import type { EditorClipboardAction } from "./editor-clipboard";
 import type { Platform } from "./types";
-import type { InlineFormat } from "./markdownInlineFormat";
 
 const clipboardActions = [{ action: "cut", label: "Cut" }, { action: "copy", label: "Copy" },
   { action: "paste", label: "Paste" }] as const;
+
+export type InlineFormat = "bold" | "italic" | "strike" | "code";
 
 const formatButtons: { format: InlineFormat; label: string; shortcut: string; glyph: string }[] = [
   { format: "bold", label: "Bold", shortcut: "Ctrl+B", glyph: "B" },
@@ -41,7 +42,7 @@ export function WritingActionPanel({
   source: HTMLElement;
   focusOnOpen?: boolean;
   clipboard?: { hasSelection: boolean; run: (action: EditorClipboardAction, signal: AbortSignal) => Promise<void> };
-  /** Markdown formatting for the selected text, shown above the AI actions. */
+  /** Formatting for the selected text, shown above the AI actions. */
   formatting?: { active: Record<InlineFormat, boolean>; onToggle: (format: InlineFormat) => void };
   aiEnabled?: boolean;
 }) {

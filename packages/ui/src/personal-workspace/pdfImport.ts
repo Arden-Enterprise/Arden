@@ -1,3 +1,5 @@
+import { parseSemanticDocument, plainTextToSemanticDocument, semanticDocumentHasText, serializeSemanticDocument } from "@arden/domain";
+import { isRichNoteBody, utf8Bytes } from "./noteDocument";
 /**
  * Import a PDF into a private note (spec F03-PDF). The text is read in this browser with the bundled
  * pdf.js and becomes ordinary note text; the PDF file itself is never uploaded or stored.
@@ -36,7 +38,6 @@ export function pageText(items: PdfTextItem[]): string {
     .join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-const utf8Bytes = (value: string) => new TextEncoder().encode(value).length;
 
 /** "Quarterly report.pdf" -> "Quarterly report"; the PDF's own title wins when it has one. */
 export function importTitle(fileName: string, metadataTitle?: string | null): string {
@@ -86,6 +87,7 @@ export type PdfText = { fileName: string; metadataTitle: string | null; pages: s
  */
 export function mergePdfIntoNote(current: { title: string; body: string }, pdf: PdfText, untitled: string,
   maxBytes = NOTE_BODY_MAX_BYTES): { title: string; body: string; imported: ImportedNote } {
+  if (isRichNoteBody(current.body)) return mergePdfIntoRichNote(current, pdf, untitled, maxBytes);
   const existing = current.body.replace(/\s+$/, "");
   const separator = existing ? "\n\n" : "";
   const room = maxBytes - utf8Bytes(existing + separator);
@@ -94,6 +96,35 @@ export function mergePdfIntoNote(current: { title: string; body: string }, pdf: 
   if (!imported.body) throw new PdfImportError("There isn’t enough room left in this note. Import the PDF into an empty note instead.");
   const keepTitle = current.title.trim() && current.title.trim() !== untitled;
   return { title: keepTitle ? current.title : imported.title, body: existing + separator + imported.body, imported };
+}
+
+/**
+ * A rich note keeps its document and gains one plain paragraph per PDF line (a blank paragraph
+ * between). The encoded document must fit the note limit, so the text budget shrinks until it does.
+ */
+function mergePdfIntoRichNote(current: { title: string; body: string }, pdf: PdfText, untitled: string,
+  maxBytes: number): { title: string; body: string; imported: ImportedNote } {
+  const parsed = parseSemanticDocument(current.body);
+  if (!parsed.ok) throw new PdfImportError("This note can’t be opened, so the PDF wasn’t added.");
+  const existing = [...parsed.document.blocks];
+  while (existing.length && !semanticDocumentHasText({ ...parsed.document, blocks: existing.slice(-1) })
+    && existing.at(-1)!.type === "paragraph" && !existing.at(-1)!.children.length) existing.pop();
+  const encode = (text: string) => serializeSemanticDocument({ ...parsed.document, blocks: [...existing,
+    ...plainTextToSemanticDocument(existing.length ? `\n${text}` : text, () => crypto.randomUUID()).blocks] });
+  let room = maxBytes - utf8Bytes(current.body);
+  for (let attempt = 0; attempt < 12 && room > 0; attempt += 1) {
+    const imported = buildImportedNote(pdf.fileName, pdf.metadataTitle, pdf.pages, room);
+    if (!imported.body) break;
+    const body = encode(imported.body);
+    const size = utf8Bytes(body);
+    if (size <= maxBytes) {
+      const keepTitle = current.title.trim() && current.title.trim() !== untitled;
+      return { title: keepTitle ? current.title : imported.title, body, imported };
+    }
+    room -= Math.max(size - maxBytes, Math.ceil(room / 8));
+  }
+  throw new PdfImportError(room <= 0 ? "This note is full. Import the PDF into an empty note instead."
+    : "There isn’t enough room left in this note. Import the PDF into an empty note instead.");
 }
 
 type PdfRuntime = typeof import("../knowledge/pdfRuntime");

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { semanticBodyText } from "@arden/domain";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ArdenAiAnswerError, type AskArdenClient } from "../answers/ai-client.js";
 import { parseGenerationResponse, type GenerationRequest, type StoredAnswer } from "../answers/governed-contracts.js";
@@ -136,7 +137,10 @@ export function registerPrivateNoteQuestion(app: FastifyInstance, repository: Pi
         }
         const lease = admission.reserve(context.userId, organizationId, draftId);
         try {
-          const body = await storage.read(textSource.sourceUri, textSource.contentHash);
+          const stored = await storage.read(textSource.sourceUri, textSource.contentHash);
+          // A rich note is stored as an Arden Semantic Document; AI reads its text, never the encoding.
+          const body = note.mimeType === "text/plain" ? semanticBodyText(stored) : stored;
+          if (body === null) return fail(422, "DOCUMENT_QUESTION_UNSUPPORTED", "This note format is unsupported.");
           const points = Array.from(body);
           const evidence = noteEvidence(note, body, points, query);
           let coveredUntil = 0;
