@@ -424,7 +424,8 @@
   --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
 .pdf-reader-page .textLayer .markedContent { display: contents; }
-.pdf-reader-page .textLayer ::selection { background: rgb(139 130 246 / 30%); }
+/* The global selection colour would paint the invisible text runs over the page image. */
+.pdf-reader-page .textLayer ::selection { color: transparent; background: rgb(139 130 246 / 30%); }
 /* Marks sit inside a text run, so they flow with it instead of being positioned. */
 .pdf-reader-page .textLayer mark.pdf-citation-mark {
   position: static; margin: -1px 0; padding: 1px 0; border-radius: 2px; color: transparent;
