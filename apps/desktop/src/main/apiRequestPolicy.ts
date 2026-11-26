@@ -43,6 +43,7 @@ const governanceWithBody = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/
 const governanceDismiss = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reports/${uuid}/dismiss$`);
 const knowledgeReviewItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}$`);
 const knowledgeReviewDecision = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}/decisions$`);
+const knowledgeReviewAi = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}/ai-review$`);
 const publishedKnowledgeItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}$`);
 const readerSummaryPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}/summary$`);
 const readerSummaryAccess = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}/summary/access$`);
@@ -116,11 +117,24 @@ export function desktopApiResponseLimit(request: DesktopApiRequest): number {
 
 /** Reader deadlines are main-owned; other routes retain the validated renderer bound. */
 export function desktopApiTimeout(request: DesktopApiRequest): number | undefined {
+  if (request.method === "POST" && knowledgeReviewAi.test(request.path)) return 85_000;
   if (request.method === "POST" && writingActionPath.test(request.path)) return 90_000;
   if (request.method === "POST" && (readerQuestionPath.test(request.path) || privateNoteQuestionPath.test(request.path))) return 240_000;
   if (request.method === "POST" && readerSummaryPath.test(request.path)) return 300_000;
   if (request.method === "GET" && readerSummaryAccess.test(request.path)) return 30_000;
   return request.timeoutMs;
+}
+
+function reviewAiBody(body: string | undefined): boolean {
+  if (!body || body.length > 200) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      && Object.keys(value).sort().join() === "snapshotContentHash,snapshotVersionId"
+      && "snapshotVersionId" in value && typeof value.snapshotVersionId === "string" && uuidPattern.test(value.snapshotVersionId)
+      && "snapshotContentHash" in value && typeof value.snapshotContentHash === "string"
+      && /^[0-9a-f]{64}$/.test(value.snapshotContentHash);
+  } catch { return false; }
 }
 
 function summaryBody(body: string | undefined): boolean {
@@ -241,6 +255,8 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const writingAction = writingActionPath.test(url.pathname) && request.method === "POST" && !url.search
     && writingBody(request.body) && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
+  const reviewAi = knowledgeReviewAi.test(url.pathname) && request.method === "POST" && !url.search
+    && reviewAiBody(request.body) && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
   const aiConversationGet = aiConversationPath.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
   const privateAnswerFeedback = privateFeedbackPath.test(url.pathname);
@@ -324,7 +340,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const maintenanceWrite = maintenanceCommand.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   return (privateOrganizationRequest || placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
-    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || writingAction || aiConversationGet || aiFeedback || readerSummary || adminGet
+    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || writingAction || reviewAi || aiConversationGet || aiFeedback || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || maintenanceImportPost || maintenanceList || maintenanceCreate || maintenanceRead || maintenanceWrite

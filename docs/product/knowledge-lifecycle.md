@@ -36,6 +36,7 @@ Paths: complete metadata → freeze selected content/metadata/hash → assigned/
 | F09-AC1 | Submission binds exact content/version/hash, audience, responsibility and policy; stale or duplicate submission and parallel decision requests cannot alter the frozen snapshot. | Main slices exist; G1 governs mutable-draft/open-candidate behavior for later integration. |
 | F09-AC2 | Reviewer queue/detail/decisions recheck current authority, self-review policy and enforceable audience, without exposing another author's original. | G1/G3 affect self-approval and required review level; approval provenance must be resolved first. |
 | F09-AC3 | Every accepted outcome has correct author feedback, audit and next-step behavior. Reasons, cancellation authority, re-submission and required review stages follow the selected specification. | Main has Approve/Request Revision/Reject; branch has Approve/Reject and candidate cancellation. Neither can be silently dropped or combined. |
+| F09-AC4 (BM04 F-06 / DS-02a) | An authorized reviewer opens a pending content submission and requests AI review. The assistant gives a summary and optional checks with source excerpts from that snapshot. The reviewer chooses the outcome through the existing decision controls. | Test exact snapshot and grant checks, text/PDF citations, disabled/failure paths and the independent decision. [Integration contract](../engineering/reviewer-ai.md) |
 
 ## F10 Publication and activation
 

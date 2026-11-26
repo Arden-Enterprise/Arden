@@ -8,6 +8,16 @@ const idempotencyKey = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const sharedDraftPath = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
 
 describe("desktop API request allowlist", () => {
+  it("permits reviewer AI only with a snapshot identity and a main-owned timeout", () => {
+    const path = `/api/v1/organizations/${organizationId}/knowledge/reviews/${sourcePrivateVersionId}/ai-review`;
+    const input = { snapshotVersionId: sourcePrivateVersionId, snapshotContentHash: "a".repeat(64) };
+    const request = { path, method: "POST" as const, body: JSON.stringify(input) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 85_000);
+    assert.equal(validateDesktopApiRequest({ ...request, path: `${path}?scope=all` }), false);
+    assert.equal(validateDesktopApiRequest({ ...request, timeoutMs: 60_000 }), false);
+    assert.equal(validateDesktopApiRequest({ ...request, body: JSON.stringify({ ...input, content: "draft" }) }), false);
+  });
   it("allows only a bounded writing action body with a Core-owned deadline", () => {
     const path = `/api/v1/organizations/${organizationId}/ai/writing-actions`;
     const payload = { requestId: idempotencyKey, action: "IMPROVE", scope: "SELECTION", text: "A sentence." };

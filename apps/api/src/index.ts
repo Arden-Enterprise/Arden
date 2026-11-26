@@ -86,11 +86,15 @@ if (Boolean(aiUrl) !== Boolean(aiServiceToken)) {
   throw new Error("ARDEN_AI_URL and ARDEN_AI_SERVICE_TOKEN must be configured together");
 }
 const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServiceToken) : null;
-const privateNoteAiOrganizations = new Set((process.env.ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS ?? "")
-  .split(",").map(id => id.trim().toLowerCase()).filter(Boolean));
-if ([...privateNoteAiOrganizations].some(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))) {
-  throw new Error("ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS requires comma-separated organization UUIDs");
+function optedInOrganizations(variable: string): ReadonlySet<string> {
+  const ids = new Set((process.env[variable] ?? "").split(",").map(id => id.trim().toLowerCase()).filter(Boolean));
+  if ([...ids].some(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))) {
+    throw new Error(`${variable} requires comma-separated organization UUIDs`);
+  }
+  return ids;
 }
+const privateNoteAiOrganizations = optedInOrganizations("ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS");
+const reviewerAiOrganizations = optedInOrganizations("ARDEN_REVIEWER_AI_ORGANIZATIONS");
 const indexPool = askArden && indexDatabaseUrl
   ? new Pool({ connectionString: indexDatabaseUrl, max: 2, connectionTimeoutMillis: 10_000 }) : null;
 const contentStorage = new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot);
@@ -170,6 +174,7 @@ const app = buildApp({
   invitationMailer,
   askArden,
   privateNoteAiOrganizations,
+  reviewerAiOrganizations,
   readerAi: askArden,
   notificationRealtime,
   invitationDeliveryMode: smtpConfiguration ? "email" : "local-test-no-email",
