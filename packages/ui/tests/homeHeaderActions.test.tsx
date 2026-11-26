@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installTestDialogs } from "./dialogTestSupport";
 import * as api from "../src/shared/api-client";
@@ -22,6 +22,7 @@ describe("Home header actions", () => {
     vi.spyOn(api, "listKnowledgeReviewBoard").mockResolvedValue({ items: [], decided: [] });
     vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({ departments: [], audiences: [], primaryDepartmentId: null });
     vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: true, collections: [] });
+    vi.spyOn(api, "listPublicationRenewals").mockResolvedValue([]);
     render(createElement(ServerKnowledgeFeaturePage, { platform: "web", organizationId: "org", organizationName: "Test",
       active: true, view: "knowledge", createdDraftId: null, contextOpen: false, onToggleContext: vi.fn() }));
 
@@ -40,7 +41,7 @@ describe("Home header actions", () => {
     const refresh = screen.getByRole("button", { name: "Refresh" });
     expect(refresh.className).toContain("island-icon-button");
     const calls = listPublished.mock.calls.length;
-    fireEvent.click(refresh);
+    await act(async () => { fireEvent.click(refresh); });
     await waitFor(() => expect(listPublished.mock.calls.length).toBeGreaterThan(calls));
   });
 });
