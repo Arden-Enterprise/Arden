@@ -438,6 +438,12 @@
       "filename": "0073_grant_draft_version_size_update.sql",
       "sha256": "9c9cd8c187652b592e90cdb8e431b6f1a9bb7641c8fb9674d72e7af3cd3fcda5",
       "rollout": "operator"
+    },
+    {
+      "id": "0074",
+      "filename": "0074_system_admin_isolated_lifecycle.sql",
+      "sha256": "31a40b18b50ac2d9ee2ce1d2b53a17cefb7d2256accd6bb49d1bc417cff13e8e",
+      "rollout": "operator"
     }
   ]
 }
