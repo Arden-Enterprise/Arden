@@ -27,12 +27,16 @@ export function SignInPage({
   platform,
   onAuthenticated,
   onRecoveryComplete,
+  onOpenSystemConsole,
+  needsSystemSetup = false,
   initialMode = "sign-in",
   recoveryTokens = null,
 }: {
   platform: Platform;
   onAuthenticated: (session: CurrentSession) => Promise<void>;
   onRecoveryComplete?: () => void;
+  onOpenSystemConsole?: () => void;
+  needsSystemSetup?: boolean;
   initialMode?: SignInMode;
   recoveryTokens?: { accessToken: string; refreshToken: string } | null;
 }) {
@@ -310,6 +314,15 @@ export function SignInPage({
                   >
                     Forgot password?
                   </button>
+                  {onOpenSystemConsole && (
+                    <button
+                      type="button"
+                      className="auth-text-link"
+                      onClick={onOpenSystemConsole}
+                    >
+                      {needsSystemSetup ? "Initialize System Admin" : "System Console"}
+                    </button>
+                  )}
                 </div>
               </form>
             </>

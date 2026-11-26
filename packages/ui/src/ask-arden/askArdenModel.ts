@@ -11,6 +11,7 @@ export type AskArdenMessage = {
   noteCoverage?: "FULL" | "PARTIAL";
   insufficientEvidence?: boolean;
   unavailable?: boolean;
+  requestId?: string;
   /** The request failed before an answer was saved; sending the same text retries it. */
   unsent?: boolean;
 };
@@ -26,6 +27,7 @@ export function answerMessage(answer: AskArdenAnswer, id: string): AskArdenMessa
     id,
     role: "assistant",
     body: answer.answer,
+    requestId: answer.requestId,
     citations: answer.citations.length ? answer.citations : undefined,
     insufficientEvidence: answer.status === "INSUFFICIENT_EVIDENCE",
     ...(answer.conversationId && answer.turnId ? { savedTurn: { conversationId: answer.conversationId, turnId: answer.turnId } } : {}),

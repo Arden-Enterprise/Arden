@@ -9,6 +9,7 @@ import { ReaderSourcePreparation } from "./source-preparation.js";
 import type { ReaderSourceRecord } from "./source-store.js";
 import { parseReaderSummary, type ReaderSummaryResponse } from "./summary-contracts.js";
 import { ReaderSummary, SummaryAdmission } from "./summary.js";
+import { incompleteUsageMarker } from "../answers/usage-contracts.js";
 import { registerReaderSummaryRoutes } from "./routes.js";
 import { parsePublicReaderSummary, parseReaderSummaryAccess } from "../../../../packages/ui/src/shared/reader-summary-contracts.js";
 
@@ -28,6 +29,7 @@ function harness() {
     targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] }, publishedAt: new Date(0), validFrom: new Date(0), validUntil: null };
   const repository = { getTargetReaderActor: vi.fn(async () => ({ membershipId: id(11), organizationId: org,
     status: "ACTIVE" as const, departmentIds: [] })), getPublishedKnowledge: vi.fn(async () => publication as PublishedKnowledge | null),
+    recordAiUsageEvents: vi.fn(async () => true),
     readerSources: { resolve: vi.fn(async () => record as ReaderSourceRecord | null) } };
   const storage = { read: vi.fn(async () => input.request.snapshot.snapshotContent!), readPdf: vi.fn(async () => Buffer.alloc(0)) };
   const ai = { prepareReaderSource: vi.fn(async (_request: ReaderSourceRequest) => structuredClone(input.response) as unknown),
@@ -41,7 +43,9 @@ function harness() {
 describe("Reader Summary source-bound contract", () => {
   it("accepts the paired golden output and exposes original navigable codepoint citations only", async () => {
     const h = harness();
-    expect(parseReaderSummary(h.result, h.input.response)).toEqual(golden);
+    // The golden output reports no usage; a summary always calls a provider, so it is incomplete.
+    expect(parseReaderSummary(h.result, h.input.response)).toEqual({ ...golden,
+      usageEvents: [incompleteUsageMarker(h.input.response.requestId, "READER_SUMMARY")] });
     const response = await h.run(), citation = response.points[0].citations[0];
     expect(response.versionId).toBe(h.input.response.publishedVersionId);
     expect(citation.documentId).toBe(h.record.documentId);
@@ -260,7 +264,8 @@ describe("Summary reliability: per-document admission and in-flight recovery", (
     expect(h.ai.summarizeReaderSource).toHaveBeenCalledOnce(); expect(h.storage.read).toHaveBeenCalledOnce();
     expect(a.requestId).toBe(h.input.response.requestId); expect(b.requestId).toBe(id(99));
     expect(b.points).toEqual(a.points); expect(b.points).not.toBe(a.points);
-    expect(() => parsePublicReaderSummary(b, { organizationId: h.input.response.organizationId,
+    const { usageRequestId: _usageRequestId, usageEvents: _usageEvents, ...publicSummary } = b;
+    expect(() => parsePublicReaderSummary(publicSummary, { organizationId: h.input.response.organizationId,
       documentId: h.record.documentId, versionId: h.record.publishedVersionId,
       contentHash: h.record.source.snapshotContentHash }, id(99))).not.toThrow();
     await expect(h.run()).rejects.toMatchObject({ code: "BUSY", reason: "COOLDOWN" });

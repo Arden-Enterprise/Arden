@@ -245,3 +245,7 @@
   .ask-history-row { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) { .ask-history-spinner { animation: none; } }
+
+.ask-answer-feedback { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--arden-text-muted); font-size: 12px; }
+.ask-answer-feedback button { border: 1px solid var(--arden-border); border-radius: 999px; background: var(--arden-surface-raised); color: var(--arden-text-primary); padding: 4px 10px; }
+.ask-answer-feedback button:disabled { opacity: .65; }

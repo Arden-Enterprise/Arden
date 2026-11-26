@@ -25,6 +25,8 @@ function harness(body = "# Handover\nReturn the badge on Friday.", enabled = tru
     contractVersion: 2, requestId: input.requestId, status: "ANSWERED", answer: "Return the badge on Friday.",
     citations: [{ chunkId: input.evidence[0].chunkId, quote: "Return the badge on Friday." }],
     usedEvidence: input.evidence.map(passage => passage.chunkId),
+    usageContractVersion: 1,
+    usageEvents: [],
   }));
   const actor = async (request: import("fastify").FastifyRequest) => ({
     userId: request.headers["x-other-member"] ? randomUUID() : userId,

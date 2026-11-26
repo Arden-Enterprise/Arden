@@ -1,4 +1,5 @@
 import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,11 +13,11 @@ import { MemoryPrivateOrganizationStore } from "./private-notes/organization.tes
 import type { InvitationEmail, InvitationMailer } from "./email/smtp-mailer.js";
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
 import { AudienceGroupError, type AudienceGroup, type AudienceGroupStore } from "./audiences/store.js";
-import { SystemAdministrationError, type SystemAdministrator, type SystemAdministrationStore } from "./system-administration/store.js";
 import { parseSemanticDocument } from "@arden/domain";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { evidenceManifest, evidenceText, MemoryConversationStore } from "./answers/conversation.test-support.js";
 import type { RetrievalRequest, RetrievalResponse, GenerationRequest, GenerationResponse } from "./answers/governed-contracts.js";
+import type { ProviderUsageEvent } from "./answers/usage-contracts.js";
 import { validateSelection, type ReaderActor, type SelectionFacts, type TargetReadersInput } from "./target-readers/policy.js";
 import { resolveApprovedReaders, sameReaders } from "./target-readers/narrowing.js";
 
@@ -121,6 +122,9 @@ describe("API auth and private draft routes", () => {
     });
     expect(response.statusCode).toBe(200);
     expect(askArden.lastRequest?.allowedGenerationIds).toEqual([generationId]);
+    expect(repository.recordedUsageEvents).toHaveLength(2);
+    expect(repository.recordedUsageEvents.map(item => item.events[0]?.operation)).toEqual(["CHAT_RETRIEVAL", "CHAT_GENERATION"]);
+    expect(response.json().usageEvents).toBeUndefined();
     expect(response.json()).toMatchObject({ status: "ANSWERED", citations: [{
       documentId: sharedDraftId, versionId, blockId: "pdf-page-2", page: 2, title: "Security policy",
       version: "Version unavailable", scope: "Company-wide", classification: "INTERNAL",
@@ -231,10 +235,9 @@ describe("API auth and private draft routes", () => {
     const response = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      actor: { id: ownerId, email: "owner@example.test", fullName: "Owner" },
+      actor: { id: ownerId, email: "owner@example.test", fullName: "Owner", emailVerified: true },
       account: { passwordSetupRequired: false },
       sessionExpiresAt: expect.any(String),
-      systemAdmin: true,
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
         status: "active", departmentId: null, departmentName: null, roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
@@ -857,52 +860,26 @@ describe("API auth and private draft routes", () => {
     expect(repository.createdOrganization).toBeNull();
   });
 
-  it("keeps instance administration separate from organization administration", async () => {
-    const administrator = await desktopSession(app, "owner@example.test");
-    const overview = await app.inject({ method: "GET", url: "/api/v1/system/administrators",
-      headers: { cookie: administrator } });
-    expect(overview.statusCode).toBe(200);
-    expect(overview.json().administrators).toMatchObject([{ userId: ownerId, status: "ACTIVE" }]);
-    const granted = await app.inject({ method: "POST", url: "/api/v1/system/administrators",
-      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: { userId: systemAdminCandidateId } });
-    expect(granted.statusCode).toBe(201);
-    expect(granted.json()).toMatchObject({ userId: systemAdminCandidateId, status: "ACTIVE" });
-
-    const candidate = await desktopSession(app, "system-admin@example.test");
-    expect((await app.inject({ method: "GET", url: "/api/v1/system/administrators",
-      headers: { cookie: candidate } })).statusCode).toBe(200);
-    expect((await app.inject({ method: "GET",
-      url: `/api/v1/organizations/${organizationId}/administration`,
-      headers: { cookie: candidate } })).statusCode).toBe(404);
-
+  it("never accepts a member session on isolated System Admin routes", async () => {
+    // Decision 0010 (2026-11-27): System Admin identity is isolated from member accounts. A
+    // member session, even for a former Supabase-backed System Admin, carries no capability.
+    const owner = await desktopSession(app, "owner@example.test");
     const ordinaryMember = await desktopSession(app, "member@example.test");
-    const denied = await app.inject({ method: "GET", url: "/api/v1/system/administrators",
-      headers: { cookie: ordinaryMember } });
-    expect(denied.statusCode).toBe(404);
-    expect(denied.json().error.code).toBe("SYSTEM_ADMINISTRATION_UNAVAILABLE");
-
-    const feedbackUrl = "/api/v1/system/analytics/private-feedback";
-    const analytics = await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: candidate } });
-    expect(analytics.statusCode).toBe(200);
-    expect(analytics.headers["cache-control"]).toBe("no-store");
-    expect(analytics.json()).toEqual({ weeks: [{ weekStart: "2026-11-23", good: 2, bad: 1 }] });
-    expect((await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: ordinaryMember } })).statusCode).toBe(404);
-    expect((await app.inject({ method: "GET", url: feedbackUrl })).statusCode).toBe(401);
-    expect((await app.inject({ method: "GET", url: `${feedbackUrl}?userId=${ownerId}`, headers: { cookie: candidate } })).statusCode).toBe(400);
-    expect((await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: candidate } })).json().systemAdmin).toBe(true);
-    expect((await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: ordinaryMember } })).json().systemAdmin).toBeUndefined();
-    await app.inject({ method: "POST", url: `/api/v1/system/administrators/${systemAdminCandidateId}/revoke`,
-      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: {} });
-    expect((await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: candidate } })).statusCode).toBe(404);
-  });
-
-  it("does not allow revoking the last active Arden System Admin", async () => {
-    const administrator = await desktopSession(app, "owner@example.test");
-    const revoked = await app.inject({ method: "POST",
-      url: `/api/v1/system/administrators/${ownerId}/revoke`,
-      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: {} });
-    expect(revoked.statusCode).toBe(409);
-    expect(revoked.json().error.code).toBe("SYSTEM_ADMINISTRATOR_LAST_ACTIVE");
+    for (const cookie of [owner, ordinaryMember]) {
+      for (const url of ["/api/v1/system/administrators", "/api/v1/system/analytics/private-feedback",
+        "/api/v1/system/overview", "/api/v1/system/auth/me"]) {
+        const response = await app.inject({ method: "GET", url, headers: { cookie } });
+        expect([401, 404, 503]).toContain(response.statusCode);
+        expect(response.headers["cache-control"]).toBe("no-store");
+      }
+      const grant = await app.inject({ method: "POST", url: "/api/v1/system/administrators",
+        headers: { cookie, origin: "http://localhost:5180" },
+        payload: { email: "new-admin@example.test", fullName: "New Admin", password: "StrongPassword!1" } });
+      expect([404, 503]).toContain(grant.statusCode);
+      const me = (await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } })).json();
+      expect(me).not.toHaveProperty("systemAdmin");
+      expect(me).not.toHaveProperty("canAccessSystemConsole");
+    }
   });
 
   it("sends opaque invitations and accepts them only for the matching authenticated email once", async () => {
@@ -2947,53 +2924,6 @@ class MemoryAudienceGroupStore implements AudienceGroupStore {
   }
 }
 
-class MemorySystemAdministrationStore implements SystemAdministrationStore {
-  private administrators: SystemAdministrator[] = [{ userId: ownerId, status: "ACTIVE", grantedByUserId: null,
-    grantedAt: new Date("2026-10-20T00:00:00.000Z"), revokedByUserId: null, revokedAt: null }];
-
-  private authorize(actorUserId: string) {
-    if (!this.administrators.some(item => item.userId === actorUserId && item.status === "ACTIVE")) {
-      throw new SystemAdministrationError("SYSTEM_ADMINISTRATION_UNAVAILABLE");
-    }
-  }
-
-  async canAccess(actorUserId: string) {
-    return this.administrators.some(item => item.userId === actorUserId && item.status === "ACTIVE");
-  }
-
-  async privateFeedback(actorUserId: string) {
-    this.authorize(actorUserId);
-    return [{ weekStart: "2026-11-23", good: 2, bad: 1 }];
-  }
-
-  async overview(actorUserId: string) {
-    this.authorize(actorUserId);
-    return { administrators: this.administrators, recentEvents: [] };
-  }
-
-  async grant(actorUserId: string, targetUserId: string) {
-    this.authorize(actorUserId);
-    const administrator = { userId: targetUserId, status: "ACTIVE" as const,
-      grantedByUserId: actorUserId, grantedAt: new Date("2026-10-20T00:00:00.000Z"),
-      revokedByUserId: null, revokedAt: null };
-    this.administrators.push(administrator);
-    return administrator;
-  }
-
-  async revoke(actorUserId: string, targetUserId: string) {
-    this.authorize(actorUserId);
-    const administrator = this.administrators.find(item => item.userId === targetUserId);
-    if (!administrator) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
-    if (this.administrators.filter(item => item.status === "ACTIVE").length === 1) {
-      throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_LAST_ACTIVE");
-    }
-    const revoked = { ...administrator, status: "REVOKED" as const, revokedByUserId: actorUserId,
-      revokedAt: new Date("2026-10-20T00:01:00.000Z") };
-    Object.assign(administrator, revoked);
-    return revoked;
-  }
-}
-
 class FakeAskArdenClient implements AskArdenClient {
   lastRequest: RetrievalRequest | null = null;
   onAnswer: (() => void) | null = null;
@@ -3002,6 +2932,8 @@ class FakeAskArdenClient implements AskArdenClient {
   async retrieve(request: RetrievalRequest): Promise<RetrievalResponse> {
     this.lastRequest = request;
     return { contractVersion: 2, requestId: request.requestId, standaloneQuery: request.query, retrievalMode: "HYBRID",
+      usageContractVersion: 1, usageEvents: [{ eventId: randomUUID(), operation: "CHAT_RETRIEVAL", provider: "OPENAI",
+        model: "gpt-6-luna", inputTokens: 10, outputTokens: 0, latencyMs: 4, usageComplete: true }],
       evidence: [{ generationId, snapshotVersionId: sharedVersionId, snapshotContentHash: "a".repeat(64),
         chunkId: "b".repeat(64), content: evidenceText, ...evidenceManifest,
         sourceBlockIds: this.sourceBlockIds, parentSectionBlockId: null, label: "" }] };
@@ -3009,14 +2941,16 @@ class FakeAskArdenClient implements AskArdenClient {
   async generate(request: GenerationRequest): Promise<GenerationResponse> {
     this.onAnswer?.();
     return { contractVersion: 2, requestId: request.requestId, status: "ANSWERED", answer: "MFA is required by the security policy.",
-      citations: [{ chunkId: "b".repeat(64), quote: evidenceText }], usedEvidence: request.evidence.map((chunk) => chunk.chunkId) };
+      usageContractVersion: 1, usageEvents: [{ eventId: randomUUID(), operation: "CHAT_GENERATION", provider: "OPENAI",
+        model: "gpt-6-luna", inputTokens: 14, outputTokens: 8, latencyMs: 9, usageComplete: true }],
+      citations: [{ chunkId: "b".repeat(64), quote: evidenceText }],
+      usedEvidence: request.evidence.map((chunk) => chunk.chunkId) };
   }
 }
 
 class MemoryRepository implements ArdenDataRepository {
   readonly conversations = new MemoryConversationStore();
   readonly audienceGroups: AudienceGroupStore = new MemoryAudienceGroupStore();
-  readonly systemAdministration: SystemAdministrationStore = new MemorySystemAdministrationStore();
   readonly privateOrganization = new MemoryPrivateOrganizationStore({ organizationId, ownerId, memberIds: [otherId] });
   constructor() {
     this.privateOrganization.addNote({ id: draftId, title: "Review notes",
@@ -3033,6 +2967,7 @@ class MemoryRepository implements ArdenDataRepository {
   reviewerGrant: ReviewerGrantRecord | null = null;
   publication: PublishedKnowledge | null = null;
   authorizedAiSources: AuthorizedAiSource[] = [];
+  recordedUsageEvents: Array<{ userId: string; organizationId: string; requestId: string; events: ProviderUsageEvent[] }> = [];
   /** TargetReaderPolicy actors. Both synthetic users belong to the same organization. */
   readerActors = new Map<string, ReaderActor>([
     [ownerId, { membershipId: ownerId, organizationId, status: "ACTIVE", departmentIds: [salesDepartmentId] }],
@@ -3062,6 +2997,14 @@ class MemoryRepository implements ArdenDataRepository {
     return (userId === ownerId || userId === otherId) && requestedOrganization === organizationId
       ? { membershipId: userId, organizationId, userId } : null;
   }
+
+  async registerAccountProfile() { return true; }
+  async recordAiAnswerResult() { return true; }
+  async recordAiUsageEvents(userId: string, organizationId: string, requestId: string, events: ProviderUsageEvent[]) {
+    this.recordedUsageEvents.push({ userId, organizationId, requestId, events });
+    return true;
+  }
+  async submitAiAnswerFeedback() { return true; }
 
   async listMemberships(userId: string): Promise<MembershipSummary[]> {
     if (userId !== ownerId) return [];

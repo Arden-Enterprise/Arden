@@ -1,19 +1,25 @@
 import type { PoolClient } from "pg";
+import { systemAdministratorLifecycleLock, type SystemAuthDatabase } from "../system-auth/database.js";
+import { recordSystemAdministrationEvent } from "../system-auth/store.js";
 
+/** An isolated `arden_system.administrator` identity, never a Supabase/`arden.user_account` user. */
 export type SystemAdministrator = {
-  userId: string;
+  id: string;
+  email: string;
+  fullName: string;
   status: "ACTIVE" | "REVOKED";
-  grantedByUserId: string | null;
+  canManageSystemAdmins: boolean;
+  grantedByAdminId: string | null;
   grantedAt: Date;
-  revokedByUserId: string | null;
+  revokedByAdminId: string | null;
   revokedAt: Date | null;
 };
 
 export type SystemAdministrationEvent = {
   id: string;
-  actorUserId: string;
+  actorAdminId: string | null;
   eventType: string;
-  targetUserId: string | null;
+  targetAdminId: string | null;
   requestId: string;
   occurredAt: Date;
 };
@@ -22,134 +28,172 @@ export type SystemAdministrationOverview = {
   administrators: SystemAdministrator[];
   recentEvents: SystemAdministrationEvent[];
 };
-export type PrivateFeedbackWeek = { weekStart: string; good: number; bad: number };
 
 export type SystemAdministrationErrorCode =
   | "SYSTEM_ADMINISTRATION_UNAVAILABLE"
   | "SYSTEM_ADMINISTRATOR_CONFLICT"
-  | "SYSTEM_ADMINISTRATOR_LAST_ACTIVE";
+  | "SYSTEM_ADMINISTRATOR_LAST_ACTIVE"
+  | "SYSTEM_ADMINISTRATOR_LAST_MANAGER";
 
 export class SystemAdministrationError extends Error {
   constructor(readonly code: SystemAdministrationErrorCode) { super(code); }
 }
 
+export type SystemAdministrationActor = { adminId: string; sessionId: string };
+export type NewSystemAdministrator = { email: string; fullName: string; passwordHash: string };
+
 export interface SystemAdministrationStore {
-  canAccess(actorUserId: string): Promise<boolean>;
-  privateFeedback(actorUserId: string): Promise<PrivateFeedbackWeek[]>;
-  overview(actorUserId: string): Promise<SystemAdministrationOverview>;
-  grant(actorUserId: string, targetUserId: string, requestId: string): Promise<SystemAdministrator>;
-  revoke(actorUserId: string, targetUserId: string, requestId: string): Promise<SystemAdministrator>;
+  overview(actor: SystemAdministrationActor): Promise<SystemAdministrationOverview>;
+  grant(actor: SystemAdministrationActor, target: NewSystemAdministrator, requestId: string): Promise<SystemAdministrator>;
+  revoke(actor: SystemAdministrationActor, targetAdminId: string, requestId: string): Promise<SystemAdministrator>;
+  setManagerCapability(actor: SystemAdministrationActor, targetAdminId: string, enabled: boolean,
+    requestId: string): Promise<SystemAdministrator>;
 }
 
-type SystemAdminTransaction = <T>(actorUserId: string,
-  work: (client: PoolClient) => Promise<T>) => Promise<T | null>;
-
 type AdministratorRow = {
-  user_id: string;
+  admin_id: string;
+  email: string;
+  full_name: string;
   status: "ACTIVE" | "REVOKED";
-  granted_by_user_id: string | null;
+  can_manage_system_admins: boolean;
+  granted_by_admin_id: string | null;
   granted_at: Date;
-  revoked_by_user_id: string | null;
+  revoked_by_admin_id: string | null;
   revoked_at: Date | null;
 };
 
+const administratorColumns = `admin_id, email, full_name, status, can_manage_system_admins,
+  granted_by_admin_id, granted_at, revoked_by_admin_id, revoked_at`;
+
 function mapAdministrator(row: AdministratorRow): SystemAdministrator {
-  return { userId: row.user_id, status: row.status, grantedByUserId: row.granted_by_user_id,
-    grantedAt: row.granted_at, revokedByUserId: row.revoked_by_user_id, revokedAt: row.revoked_at };
+  return { id: row.admin_id, email: row.email, fullName: row.full_name, status: row.status,
+    canManageSystemAdmins: row.can_manage_system_admins, grantedByAdminId: row.granted_by_admin_id,
+    grantedAt: row.granted_at, revokedByAdminId: row.revoked_by_admin_id, revokedAt: row.revoked_at };
 }
 
+function lastAdministratorError(error: unknown): SystemAdministrationError | null {
+  if ((error as { code?: string }).code !== "23514") return null;
+  const message = (error as { message?: string }).message ?? "";
+  if (message.includes("last System Admin manager")) return new SystemAdministrationError("SYSTEM_ADMINISTRATOR_LAST_MANAGER");
+  if (message.includes("last active Arden System Admin")) return new SystemAdministrationError("SYSTEM_ADMINISTRATOR_LAST_ACTIVE");
+  return null;
+}
+
+/**
+ * MANAGE_SYSTEM_ADMINS operations on the isolated identity store. Every call serializes on
+ * the lifecycle lock and rechecks, inside the transaction, that the actor's session is live
+ * and the actor is still an active manager. The database trigger protects the last
+ * active administrator and the last active manager.
+ */
 export class PgSystemAdministrationStore implements SystemAdministrationStore {
-  constructor(private readonly withSystemAdmin: SystemAdminTransaction) {}
+  constructor(private readonly database: SystemAuthDatabase) {}
 
-  async canAccess(actorUserId: string): Promise<boolean> {
-    return (await this.withSystemAdmin(actorUserId, async () => true)) === true;
+  private manager<T>(actor: SystemAdministrationActor, work: (client: PoolClient) => Promise<T>): Promise<T> {
+    return this.database.transaction("manager", { actorId: actor.adminId, sessionId: actor.sessionId }, async (client) => {
+      await client.query(systemAdministratorLifecycleLock);
+      const current = await client.query(
+        `SELECT 1 FROM arden_system.administrator a
+           JOIN arden_system.admin_session s ON s.admin_id = a.admin_id
+          WHERE a.admin_id = $1 AND a.status = 'ACTIVE' AND a.can_manage_system_admins
+            AND s.session_id = $2 AND s.revoked_at IS NULL AND s.expires_at > now()`,
+        [actor.adminId, actor.sessionId],
+      );
+      if (!current.rowCount) throw new SystemAdministrationError("SYSTEM_ADMINISTRATION_UNAVAILABLE");
+      try {
+        return await work(client);
+      } catch (error) {
+        throw lastAdministratorError(error) ?? error;
+      }
+    });
   }
 
-  privateFeedback(actorUserId: string): Promise<PrivateFeedbackWeek[]> {
-    return this.transaction(actorUserId, async client => (await client.query<PrivateFeedbackWeek>(`
-      WITH cutoff AS (SELECT date_trunc('week', now() AT TIME ZONE 'UTC') AS current_week),
-      weeks AS (SELECT current_week + offset_week * interval '1 week' AS week_start
-        FROM cutoff CROSS JOIN generate_series(-11, 0) AS offset_week)
-      SELECT to_char(week_start, 'YYYY-MM-DD') AS "weekStart",
-        count(*) FILTER (WHERE feedback = 'GOOD')::integer AS good,
-        count(*) FILTER (WHERE feedback = 'BAD')::integer AS bad
-      FROM weeks LEFT JOIN private_ai_feedback
-        ON rated_at >= week_start AT TIME ZONE 'UTC'
-        AND rated_at < (week_start + interval '1 week') AT TIME ZONE 'UTC'
-      GROUP BY week_start ORDER BY week_start DESC`)).rows);
-  }
-
-  private async transaction<T>(actorUserId: string, work: (client: PoolClient) => Promise<T>) {
-    const result = await this.withSystemAdmin(actorUserId, work);
-    if (result === null) throw new SystemAdministrationError("SYSTEM_ADMINISTRATION_UNAVAILABLE");
-    return result;
-  }
-
-  private async read(client: PoolClient, userId: string) {
-    const result = await client.query<AdministratorRow>(`SELECT user_id, status, granted_by_user_id,
-      granted_at, revoked_by_user_id, revoked_at FROM system_administrator WHERE user_id = $1`, [userId]);
+  private async read(client: PoolClient, adminId: string): Promise<SystemAdministrator> {
+    const result = await client.query<AdministratorRow>(
+      `SELECT ${administratorColumns} FROM arden_system.administrator WHERE admin_id = $1`, [adminId]);
     const row = result.rows[0];
     if (!row) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
     return mapAdministrator(row);
   }
 
-  private async audit(client: PoolClient, actorUserId: string, eventType: string,
-    targetUserId: string, requestId: string) {
-    await client.query(`INSERT INTO system_administration_event(
-      actor_user_id, event_type, target_user_id, request_id)
-      VALUES ($1, $2, $3, $4)`, [actorUserId, eventType, targetUserId, requestId]);
-  }
-
-  async overview(actorUserId: string) {
-    return this.transaction(actorUserId, async client => {
-      const administrators = await client.query<AdministratorRow>(`SELECT user_id, status,
-        granted_by_user_id, granted_at, revoked_by_user_id, revoked_at
-        FROM system_administrator ORDER BY status, granted_at, user_id`);
-      const recentEvents = await client.query<{ id: string; actor_user_id: string; event_type: string;
-        target_user_id: string | null; request_id: string; occurred_at: Date }>(`SELECT
-        system_administration_event_id AS id, actor_user_id, event_type, target_user_id,
-        request_id, occurred_at FROM system_administration_event
-        ORDER BY occurred_at DESC, system_administration_event_id DESC LIMIT 100`);
-      return { administrators: administrators.rows.map(mapAdministrator), recentEvents: recentEvents.rows.map(row => ({
-        id: row.id, actorUserId: row.actor_user_id, eventType: row.event_type,
-        targetUserId: row.target_user_id, requestId: row.request_id, occurredAt: row.occurred_at,
-      })) };
+  overview(actor: SystemAdministrationActor) {
+    return this.manager(actor, async (client) => {
+      const administrators = await client.query<AdministratorRow>(
+        `SELECT ${administratorColumns} FROM arden_system.administrator ORDER BY status, granted_at, admin_id`);
+      const recentEvents = await client.query<{ event_id: string; actor_admin_id: string | null; event_type: string;
+        target_admin_id: string | null; request_id: string; occurred_at: Date }>(
+        `SELECT event_id, actor_admin_id, event_type, target_admin_id, request_id, occurred_at
+           FROM arden_system.administration_event ORDER BY occurred_at DESC, event_id DESC LIMIT 100`);
+      return {
+        administrators: administrators.rows.map(mapAdministrator),
+        recentEvents: recentEvents.rows.map((row) => ({ id: row.event_id, actorAdminId: row.actor_admin_id,
+          eventType: row.event_type, targetAdminId: row.target_admin_id, requestId: row.request_id,
+          occurredAt: row.occurred_at })),
+      };
     });
   }
 
-  async grant(actorUserId: string, targetUserId: string, requestId: string) {
-    return this.transaction(actorUserId, async client => {
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
-      const target = await client.query("SELECT 1 FROM user_account WHERE user_id = $1 AND status = 'ACTIVE'", [targetUserId]);
-      if (!target.rowCount) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
-      const changed = await client.query(`INSERT INTO system_administrator(
-          user_id, status, granted_by_user_id, granted_at)
-        VALUES ($1, 'ACTIVE', $2, now())
-        ON CONFLICT (user_id) DO UPDATE SET status = 'ACTIVE', granted_by_user_id = EXCLUDED.granted_by_user_id,
-          granted_at = now(), revoked_by_user_id = NULL, revoked_at = NULL, updated_at = now()
-        WHERE system_administrator.status = 'REVOKED'`, [targetUserId, actorUserId]);
+  /** Creates a monitoring-only administrator, or reactivates a revoked one with a new password. */
+  grant(actor: SystemAdministrationActor, target: NewSystemAdministrator, requestId: string) {
+    return this.manager(actor, async (client) => {
+      const changed = await client.query<{ admin_id: string }>(
+        `INSERT INTO arden_system.administrator (email, full_name, password_hash, status,
+           can_manage_system_admins, granted_by_admin_id, granted_at)
+         VALUES ($1, $2, $3, 'ACTIVE', false, $4, now())
+         ON CONFLICT (email) DO UPDATE SET status = 'ACTIVE', full_name = EXCLUDED.full_name,
+           password_hash = EXCLUDED.password_hash, can_manage_system_admins = false,
+           granted_by_admin_id = EXCLUDED.granted_by_admin_id, granted_at = now(),
+           revoked_by_admin_id = NULL, revoked_at = NULL, updated_at = now()
+         WHERE arden_system.administrator.status = 'REVOKED'
+         RETURNING admin_id`,
+        [target.email, target.fullName, target.passwordHash, actor.adminId],
+      );
+      const adminId = changed.rows[0]?.admin_id;
+      if (!adminId) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
+      await recordSystemAdministrationEvent(client, actor.adminId, "SYSTEM_ADMINISTRATOR_GRANTED", adminId, requestId,
+        { capabilities: ["INSTANCE_ADMIN"] });
+      return this.read(client, adminId);
+    });
+  }
+
+  revoke(actor: SystemAdministrationActor, targetAdminId: string, requestId: string) {
+    return this.manager(actor, async (client) => {
+      const changed = await client.query(
+        `UPDATE arden_system.administrator
+            SET status = 'REVOKED', can_manage_system_admins = false, revoked_by_admin_id = $2,
+                revoked_at = now(), updated_at = now()
+          WHERE admin_id = $1 AND status = 'ACTIVE'`,
+        [targetAdminId, actor.adminId],
+      );
       if (!changed.rowCount) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
-      await this.audit(client, actorUserId, "SYSTEM_ADMINISTRATOR_GRANTED", targetUserId, requestId);
-      return this.read(client, targetUserId);
+      // Revocation ends every live session of the target immediately.
+      await client.query(
+        "UPDATE arden_system.admin_session SET revoked_at = now() WHERE admin_id = $1 AND revoked_at IS NULL",
+        [targetAdminId],
+      );
+      await recordSystemAdministrationEvent(client, actor.adminId, "SYSTEM_ADMINISTRATOR_REVOKED", targetAdminId, requestId);
+      return this.read(client, targetAdminId);
     });
   }
 
-  async revoke(actorUserId: string, targetUserId: string, requestId: string) {
-    return this.transaction(actorUserId, async client => {
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
-      try {
-        const changed = await client.query(`UPDATE system_administrator
-          SET status = 'REVOKED', revoked_by_user_id = $2, revoked_at = now(), updated_at = now()
-          WHERE user_id = $1 AND status = 'ACTIVE'`, [targetUserId, actorUserId]);
-        if (!changed.rowCount) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
-      } catch (error) {
-        if ((error as { code?: string }).code === "23514") {
-          throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_LAST_ACTIVE");
-        }
-        throw error;
+  setManagerCapability(actor: SystemAdministrationActor, targetAdminId: string, enabled: boolean, requestId: string) {
+    return this.manager(actor, async (client) => {
+      const changed = await client.query(
+        `UPDATE arden_system.administrator SET can_manage_system_admins = $2, updated_at = now()
+          WHERE admin_id = $1 AND status = 'ACTIVE' AND can_manage_system_admins IS DISTINCT FROM $2`,
+        [targetAdminId, enabled],
+      );
+      if (!changed.rowCount) {
+        const current = await client.query(
+          `SELECT 1 FROM arden_system.administrator
+            WHERE admin_id = $1 AND status = 'ACTIVE' AND can_manage_system_admins = $2`,
+          [targetAdminId, enabled],
+        );
+        if (!current.rowCount) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
+        return this.read(client, targetAdminId);
       }
-      await this.audit(client, actorUserId, "SYSTEM_ADMINISTRATOR_REVOKED", targetUserId, requestId);
-      return this.read(client, targetUserId);
+      await recordSystemAdministrationEvent(client, actor.adminId,
+        enabled ? "SYSTEM_ADMIN_MANAGER_ENABLED" : "SYSTEM_ADMIN_MANAGER_DISABLED", targetAdminId, requestId);
+      return this.read(client, targetAdminId);
     });
   }
 }

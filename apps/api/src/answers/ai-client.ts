@@ -31,7 +31,7 @@ export class HttpAskArdenClient implements AskArdenClient {
 
   async retrieve(request: RetrievalRequest): Promise<RetrievalResponse> {
     return parseRetrievalResponse(await this.post("/v2/retrievals", request, maxResponseBytes,
-      request.purpose === "READER_QUESTION" ? 75_000 : this.timeoutMs), request.requestId);
+      request.purpose === "READER_QUESTION" ? 75_000 : this.timeoutMs), request.requestId, request.purpose);
   }
 
   async prepareReaderSource(request: ReaderSourceRequest): Promise<unknown> {
