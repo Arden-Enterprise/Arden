@@ -242,7 +242,8 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
       prepare: async () => structuredClone(prepared) };
     const output = { ...prepared, status: "COMPLETED", coverage: [{ startOffset: 0, endOffset: text.length }],
       usedChunkIds: prepared.chunks.map(chunk => chunk.chunkId), points: [{ kind: "KEY_POINT", text: "Use MFA.",
-        citations: [{ chunkId: prepared.chunks[0].chunkId, quote: text }] }] };
+        citations: [{ chunkId: prepared.chunks[0].chunkId, quote: text }] }],
+      usageContractVersion: 1, usageEvents: [] };
     const { compilerVersion: _compiler, chunkingVersion: _chunker, markdown: _text, chunks: _chunks, ...response } = output;
     const allowed = new ReaderSummary(source, { summarizeReaderSource: async () => response });
     expect((await allowed.summarize(member, org, ref.publishedVersionId, requestId)).points[0].citations[0].versionId).toBe(ref.publishedVersionId);

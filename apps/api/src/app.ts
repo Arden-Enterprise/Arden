@@ -635,16 +635,17 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     try {
-      const [memberships, canAccessSystemConsole] = await Promise.all([
+      const [memberships, canAccessSystemConsole, systemAdmin] = await Promise.all([
         dependencies.repository.listMemberships(context.userId),
         dependencies.repository.systemConsole?.canAccess(context.userId) ?? Promise.resolve(false),
+        dependencies.repository.systemAdministration?.canAccess(context.userId) ?? Promise.resolve(false),
       ]);
       const pendingInvitationToken = readPendingInvitationCookie(request.headers.cookie, dependencies.secureCookies);
       return {
         actor: { id: context.userId, email: context.email, fullName: context.fullName, emailVerified: context.emailVerified },
         account: { passwordSetupRequired: Boolean(context.passwordSetupRequired) },
         canAccessSystemConsole,
-        ...(canAccessSystemConsole ? { systemAdmin: true } : {}),
+        ...(systemAdmin ? { systemAdmin: true } : {}),
         ...(context.sessionExpiresAt ? { sessionExpiresAt: new Date(context.sessionExpiresAt * 1000).toISOString() } : {}),
         ...(dependencies.testActor ? { testMode: true } : {}),
         ...(pendingInvitationToken ? { pendingInvitationToken } : {}),

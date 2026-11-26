@@ -432,6 +432,12 @@
       "filename": "0072_system_admin_isolated_identity.sql",
       "sha256": "c5f9e37c11b60f9de15141ac24306cd868d22f592affa534e231fb6ed63a3848",
       "rollout": "operator"
+    },
+    {
+      "id": "0073",
+      "filename": "0073_grant_draft_version_size_update.sql",
+      "sha256": "ea8e30aa3fe0ac1413c5e25fdef9446eb2c259a81205d357d4473ce90e0a0bb1",
+      "rollout": "operator"
     }
   ]
 }
