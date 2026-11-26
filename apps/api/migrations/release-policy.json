@@ -424,7 +424,7 @@
     {
       "id": "0071",
       "filename": "0071_system_console_least_privilege.sql",
-      "sha256": "7e96b251087cee68f338cadb2e8d1217a3d5c7eeb7504c6a05232d50afec3899",
+      "sha256": "943614a515db94fb8a5782c33aef1256255b038b735f1913c127a2b4fc94b417",
       "rollout": "operator"
     },
     {

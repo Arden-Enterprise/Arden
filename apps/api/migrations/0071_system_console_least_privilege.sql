@@ -201,6 +201,7 @@ WITH CHECK (organization_id = NULLIF(current_setting('arden.organization_id', tr
 -- manager transaction. It replaces the former instance-wide account read.
 DROP POLICY user_account_instance_admin_read ON user_account;
 DROP POLICY system_administrator_instance_access ON system_administrator;
+DROP POLICY system_administrator_self_read ON system_administrator;
 CREATE POLICY system_administrator_manager_access ON system_administrator FOR ALL TO arden_runtime
 USING (current_setting('arden.instance_admin', true) = 'true'
     AND current_setting('arden.manage_system_admins', true) = 'true')
