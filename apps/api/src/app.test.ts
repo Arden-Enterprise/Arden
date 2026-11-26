@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1222,6 +1222,85 @@ describe("API auth and private draft routes", () => {
     expect(updated.headers.etag).toBe('"3"');
     expect(updated.json().body).toBe("Revised body");
     expect(repository.currentBody).toBe("Revised body");
+  });
+
+  describe("private PDF items (decision 0034, spec F03-FILE)", () => {
+    const pdf = (marker: string) => Buffer.from(`%PDF-1.4\n${marker}\n%%EOF\n`).toString("base64");
+    const base = `/api/v1/organizations/${organizationId}/private-workspace/drafts`;
+    const objects = async () => (await readdir(root)).sort();
+
+    it("keeps an original PDF with its extracted text and serves the file only to the owner", async () => {
+      const session = await desktopSession(app, "owner@example.test");
+      const headers = { cookie: session, origin: "http://localhost:5180" };
+      const created = await app.inject({ method: "POST", url: `${base}/pdf`, headers,
+        payload: { title: " Board minutes ", pdfBase64: pdf("minutes"), text: "Decision: hire two engineers." } });
+      expect(created.statusCode).toBe(201);
+      expect(created.json()).toMatchObject({ title: "Board minutes", body: "", kind: "pdf", textAvailable: true,
+        currentVersion: { mimeType: "application/pdf" } });
+      expect((await objects()).filter((name) => name.endsWith(".pdf"))).toHaveLength(1);
+      expect((await objects()).filter((name) => name.endsWith(".txt"))).toHaveLength(1);
+
+      const read = await app.inject({ method: "GET", url: `${base}/${draftId}`, headers: { cookie: session } });
+      expect(read.json()).toMatchObject({ kind: "pdf", body: "", textAvailable: true });
+      const file = await app.inject({ method: "GET", url: `${base}/${draftId}/pdf`, headers: { cookie: session } });
+      expect(file.statusCode).toBe(200);
+      expect(file.headers["cache-control"]).toBe("no-store");
+      expect(file.json().pdfBase64).toBe(pdf("minutes"));
+
+      const other = await desktopSession(app, "other@example.test");
+      const denied = await app.inject({ method: "GET", url: `${base}/${draftId}/pdf`, headers: { cookie: other } });
+      expect(denied.statusCode).toBe(404);
+      expect(JSON.stringify(denied.json())).not.toContain("minutes");
+    });
+
+    it("accepts a PDF without text and refuses files that are not PDFs or are too large, storing nothing", async () => {
+      const session = await desktopSession(app, "owner@example.test");
+      const headers = { cookie: session, origin: "http://localhost:5180" };
+      const scan = await app.inject({ method: "POST", url: `${base}/pdf`, headers, payload: { title: "Scan", pdfBase64: pdf("scan"), text: "  " } });
+      expect(scan.statusCode).toBe(201);
+      expect(scan.json()).toMatchObject({ kind: "pdf", textAvailable: false });
+      const before = await objects();
+      const notPdf = await app.inject({ method: "POST", url: `${base}/pdf`, headers,
+        payload: { title: "Fake", pdfBase64: Buffer.from("plain text, not a PDF").toString("base64") } });
+      expect(notPdf.statusCode).toBe(400);
+      expect(notPdf.json().error.code).toBe("INVALID_PDF");
+      const large = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(5 * 1024 * 1024), Buffer.from("\n%%EOF\n")]).toString("base64");
+      const oversized = await app.inject({ method: "POST", url: `${base}/pdf`, headers, payload: { title: "Big", pdfBase64: large } });
+      expect(oversized.statusCode).toBe(400);
+      expect(await objects()).toEqual(before);
+    });
+
+    it("replaces the file under a version check, erases the old objects and keeps text notes and PDFs apart", async () => {
+      const session = await desktopSession(app, "owner@example.test");
+      const headers = { cookie: session, origin: "http://localhost:5180" };
+      await app.inject({ method: "POST", url: `${base}/pdf`, headers, payload: { title: "Policy", pdfBase64: pdf("v1"), text: "First text" } });
+      const stale = await app.inject({ method: "PUT", url: `${base}/${draftId}/pdf`, headers: { ...headers, "if-match": '"7"' },
+        payload: { pdfBase64: pdf("v2"), text: "Second text" } });
+      expect(stale.statusCode).toBe(412);
+      expect((await objects()).filter((name) => name.endsWith(".pdf"))).toHaveLength(1);
+
+      const replaced = await app.inject({ method: "PUT", url: `${base}/${draftId}/pdf`, headers: { ...headers, "if-match": '"1"' },
+        payload: { pdfBase64: pdf("v2"), text: "Second text" } });
+      expect(replaced.statusCode).toBe(200);
+      expect(replaced.headers.etag).toBe('"2"');
+      const file = await app.inject({ method: "GET", url: `${base}/${draftId}/pdf`, headers: { cookie: session } });
+      expect(file.json().pdfBase64).toBe(pdf("v2"));
+
+      const asText = await app.inject({ method: "PATCH", url: `${base}/${draftId}`, headers: { ...headers, "if-match": '"2"' }, payload: { body: "typed" } });
+      expect(asText.statusCode).toBe(409);
+      expect(asText.json().error.code).toBe("PDF_ITEM_NOT_EDITABLE");
+      const renamed = await app.inject({ method: "PATCH", url: `${base}/${draftId}`, headers: { ...headers, "if-match": '"2"' }, payload: { title: "Policy 2027" } });
+      expect(renamed.statusCode).toBe(200);
+      expect(renamed.json()).toMatchObject({ kind: "pdf", body: "" });
+
+      await app.inject({ method: "POST", url: base, headers, payload: { title: "Text note", body: "words" } });
+      const onText = await app.inject({ method: "PUT", url: `${base}/${draftId}/pdf`, headers: { ...headers, "if-match": '"1"' },
+        payload: { pdfBase64: pdf("v3") } });
+      expect(onText.statusCode).toBe(409);
+      expect(onText.json().error.code).toBe("NOT_A_PDF_ITEM");
+      const textNoteFile = await app.inject({ method: "GET", url: `${base}/${draftId}/pdf`, headers: { cookie: session } });
+      expect(textNoteFile.statusCode).toBe(404);
+    });
   });
 
   it("validates tenant identifiers, unknown fields, NULs, and oversized request bodies", async () => {
@@ -3526,18 +3605,17 @@ class MemoryRepository implements ArdenDataRepository {
   async updateDraft(_userId: string, _organization: string, _draft: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null): Promise<DraftUpdateResult> {
     if (this.privateOrganization.hidden(draftId)) return { kind: "not-found" };
     if (expectedVersion !== this.currentVersion) return { kind: "conflict", currentVersion: this.currentVersion };
+    if (content && content.mimeType !== this.currentSource.mimeType) return { kind: "wrong-kind" };
     this.currentVersion += 1;
     // Decision 0031: an open version is overwritten; its previous content object becomes unreachable.
     let replacedSourceUri: string | null = null;
-    if (patch.body !== undefined) {
-      this.currentBody = patch.body;
-      if (content) {
-        if (!this.sourceVersionSealed && content.sourceUri !== this.currentSource.sourceUri) replacedSourceUri = this.currentSource.sourceUri;
-        this.currentSource = content;
-      }
+    if (patch.body !== undefined) this.currentBody = patch.body;
+    if (content) {
+      if (!this.sourceVersionSealed && content.sourceUri !== this.currentSource.sourceUri) replacedSourceUri = this.currentSource.sourceUri;
+      this.currentSource = content;
     }
     const draft = { ...this.note(), title: patch.title ?? this.note().title };
-    return { kind: "updated", draft, replacedSourceUri };
+    return { kind: "updated", draft, replacedSourceUris: replacedSourceUri ? [replacedSourceUri] : [] };
   }
   /** Set when the note's version was contributed (decision 0031). */
   sourceVersionSealed = false;
@@ -3551,6 +3629,7 @@ class MemoryRepository implements ArdenDataRepository {
       collectionId: this.privateOrganization.notes.get(draftId)?.collectionId ?? null,
       favoritedAt: this.privateOrganization.notes.get(draftId)?.favoritedAt ?? null,
       position: this.privateOrganization.notes.get(draftId)?.position ?? null,
+      text: this.currentSource.text ?? null,
     };
   }
 }

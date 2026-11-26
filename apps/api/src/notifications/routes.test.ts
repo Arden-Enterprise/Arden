@@ -16,7 +16,7 @@ describe("notification routes", () => {
   afterEach(async () => { await Promise.all(apps.splice(0).map(app => app.close())); vi.restoreAllMocks(); });
 
   function makeApp(input: { reviewResourceIds?: string[]; reviewIds?: string[]; ownedSubmissionIds?: string[];
-    readablePublicationIds?: string[];
+    readablePublicationIds?: string[]; sharedItemIds?: string[];
     list?: NotificationStore["list"]; realtime?: boolean } = {}) {
     const app = Fastify();
     apps.push(app);
@@ -48,6 +48,7 @@ describe("notification routes", () => {
       listReadableCurrentPublicationIds: vi.fn(async (_userId, _organizationId, publishedVersionIds: readonly string[]) =>
         (input.readablePublicationIds ?? [sharedPublicationId]).filter(id => publishedVersionIds.includes(id))),
       requireActiveMembership: vi.fn(async () => ({ organizationId, membershipId: "ffffffff-ffff-4fff-8fff-ffffffffffff", userId })),
+      directShares: { listSharedWithMe: vi.fn(async () => (input.sharedItemIds ?? []).map(id => ({ id } as never))) },
     } as unknown as ArdenDataRepository;
     const secret = "ab".repeat(32);
     registerNotificationRoutes(app, {
@@ -178,6 +179,21 @@ describe("notification routes", () => {
     expect(JSON.stringify(hiddenResponse.json())).not.toContain(sharedPublicationId);
     expect(JSON.stringify(hiddenResponse.json())).not.toContain("Ava Patel");
     expect(JSON.stringify(hiddenResponse.json())).not.toContain("Contract review procedure");
+  });
+
+  it("names a direct share only while the item is still shared with the reader (decision 0034)", async () => {
+    const itemId = "14141414-1414-4141-8141-141414141414";
+    const direct = { id: "15151515-1515-4151-8151-151515151515", type: "DOCUMENT_SHARED_DIRECT" as const,
+      resourceType: "PRIVATE_ITEM" as const, resourceId: itemId, publicationTitle: "Onboarding plan", sharedByName: "Ava Patel",
+      createdAt: "2026-11-26T08:00:00.000Z", readAt: null };
+    const list = vi.fn(async () => ({ items: [direct], unreadCount: 1, nextCursor: null }));
+    const shared = await makeApp({ list, sharedItemIds: [itemId] }).app.inject(`/api/v1/organizations/${organizationId}/notifications`);
+    expect(shared.json().items).toEqual([expect.objectContaining({ type: "DOCUMENT_SHARED_DIRECT",
+      message: "Ava Patel shared “Onboarding plan” with you. It has not been reviewed.", target: { view: "shared-item", itemId } })]);
+    const revoked = await makeApp({ list, sharedItemIds: [] }).app.inject(`/api/v1/organizations/${organizationId}/notifications`);
+    expect(revoked.json().items[0]).toEqual(expect.objectContaining({ message: "This notification's item is no longer available." }));
+    expect(revoked.json().items[0]).not.toHaveProperty("target");
+    expect(JSON.stringify(revoked.json())).not.toMatch(/Onboarding plan|Ava Patel/);
   });
 
   it("rejects an invalid page cursor", async () => {

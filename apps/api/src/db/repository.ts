@@ -8,6 +8,7 @@ import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
+import { PgDirectShareStore, type DirectShareStore } from "../private-notes/direct-share-store.js";
 import { PgPrivateOrganizationStore, isActiveCollection, lockTree, type PrivateOrganizationStore,
   type PrivateTrashRetentionStore } from "../private-notes/organization-store.js";
 import type { MaintenancePort } from "../maintenance/case-service.js";
@@ -48,6 +49,8 @@ export type PrivateDraft = {
   favoritedAt: Date | null;
   /** Owner-chosen order inside the collection or root (spec F03-ARR); null sorts first. */
   position: number | null;
+  /** Decision 0034: text extracted from a PDF item, when it has any; always null for text notes. */
+  text?: StoredTextFields | null;
 };
 
 /** Decision 0029 note summary; trashed, archived and purged notes are never listed. */
@@ -66,11 +69,12 @@ export type DraftListItem = {
 };
 export type DraftWrite = { title: string; body: string; collectionId?: string | null };
 /**
- * Decision 0031: `replacedSourceUri` is the content object the save made unreachable (the open version was
+ * Decision 0031: `replacedSourceUris` are the content objects the save made unreachable (the open version was
  * overwritten and no other version uses it); the caller erases it after commit.
  */
 export type DraftUpdateResult = { kind: "not-found" } | { kind: "conflict"; currentVersion: number }
-  | { kind: "updated"; draft: PrivateDraft; replacedSourceUri: string | null };
+  | { kind: "wrong-kind" }
+  | { kind: "updated"; draft: PrivateDraft; replacedSourceUris: string[] };
 export type DraftPatch = { title?: string; body?: string };
 export type PrivateContributionSource = {
   versionId: string;
@@ -699,6 +703,8 @@ export interface ArdenDataRepository {
   ratePrivateAnswer?(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean>;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
+  /** Decision 0034: unreviewed, view-only sharing of private items with named members. */
+  readonly directShares?: DirectShareStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
   createOrganization(userId: string, email: string, fullName: string | null, setup: OrganizationSetup, requestId: string): Promise<CreatedOrganization>;
@@ -838,6 +844,7 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly systemAdministration: SystemAdministrationStore;
   readonly maintenance: MaintenancePort;
   readonly privateOrganization: PgPrivateOrganizationStore;
+  readonly directShares: PgDirectShareStore;
   /** System-only retention capability for the in-process 30-day purge loop. */
   readonly privateTrashRetention: PrivateTrashRetentionStore;
   constructor(private readonly pool: Pool, content?: { read(sourceUri: string, expectedHash: string): Promise<string> }) {
@@ -852,6 +859,8 @@ export class ArdenRepository implements ArdenDataRepository {
     this.privateOrganization = new PgPrivateOrganizationStore((user, org, work) => this.withActorContext(user, org, work),
       (work) => this.withPrivateTrashRetention(work));
     this.privateTrashRetention = this.privateOrganization;
+    this.directShares = new PgDirectShareStore((user, org, work) => this.withActorContext(user, org, work),
+      (user, org, work) => this.withOrganizationAdmin(user, org, work));
   }
 
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
@@ -1627,9 +1636,12 @@ export class ArdenRepository implements ArdenDataRepository {
       collection_id: string | null;
       favorited_at: Date | null;
       sort_position: number | null;
+      text_source_uri: string | null;
+      text_content_hash: string | null;
     }>(`
       SELECT d.draft_id, v.draft_version_id, d.title, v.source_uri, v.mime_type, v.content_hash,
-             d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position
+             d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position,
+             v.text_source_uri, v.text_content_hash
         FROM draft_document d
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
         JOIN organization_membership om ON om.membership_id = w.membership_id
@@ -1656,6 +1668,7 @@ export class ArdenRepository implements ArdenDataRepository {
       collectionId: row.collection_id,
       favoritedAt: row.favorited_at,
       position: row.sort_position,
+      text: storedText(row.text_source_uri, row.text_content_hash),
     } : null;
     });
   }
@@ -1688,7 +1701,8 @@ export class ArdenRepository implements ArdenDataRepository {
         now: new Date(),
       })) return { kind: "unavailable" };
       if (source.sourceUri !== input.expectedSource.sourceUri || source.contentHash !== input.expectedSource.contentHash
-        || source.mimeType !== "text/plain" || input.copiedContent.mimeType !== source.mimeType
+        || !(source.mimeType === "text/plain" || source.mimeType === "application/pdf")
+        || input.copiedContent.mimeType !== source.mimeType
         || input.copiedContent.sourceUri === source.sourceUri) return { kind: "unavailable" };
 
       const existing = await this.findSharedDraftByCreateRequest(client, source.ownerMembershipId, organizationId, input.idempotencyKey);
@@ -2893,9 +2907,11 @@ export class ArdenRepository implements ArdenDataRepository {
       const created = draft.rows[0];
       if (!created) throw new Error("Draft insert returned no row");
       const versionResult = await client.query<{ draft_version_id: string }>(`
-        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id)
-        VALUES ($1, 1, $2, $3, $4, $5)
-        RETURNING draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash, membershipId]);
+        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id,
+                                   text_source_uri, text_content_hash)
+        VALUES ($1, 1, $2, $3, $4, $5, $6, $7)
+        RETURNING draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash, membershipId,
+        content.text?.sourceUri ?? null, content.text?.contentHash ?? null]);
       const versionId = versionResult.rows[0]?.draft_version_id;
       if (!versionId) throw new Error("Draft version insert returned no row");
       return {
@@ -2912,6 +2928,7 @@ export class ArdenRepository implements ArdenDataRepository {
         collectionId,
         favoritedAt: null,
         position: null,
+        text: content.text ?? null,
       };
     });
   }
@@ -2955,10 +2972,13 @@ export class ArdenRepository implements ArdenDataRepository {
         collection_id: string | null;
         favorited_at: Date | null;
         sort_position: number | null;
+        text_source_uri: string | null;
+        text_content_hash: string | null;
         sealed: boolean;
       }>(`
         SELECT om.membership_id, d.title, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash,
                d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position,
+               v.text_source_uri, v.text_content_hash,
                (v.sealed_at IS NOT NULL
                 OR EXISTS (SELECT 1 FROM shared_draft s WHERE s.source_private_version_id = v.draft_version_id)
                 OR EXISTS (SELECT 1 FROM shared_submission s WHERE s.draft_version_id = v.draft_version_id)) AS sealed
@@ -2972,36 +2992,45 @@ export class ArdenRepository implements ArdenDataRepository {
       const current = currentResult.rows[0];
       if (!current) return { kind: "not-found" };
       if (current.current_version_no !== expectedVersion) return { kind: "conflict", currentVersion: current.current_version_no };
+      // Decision 0034: a text note takes text and a PDF item takes a PDF; only the title changes across kinds.
+      if (content && content.mimeType !== current.mime_type) return { kind: "wrong-kind" };
 
       const version = expectedVersion + 1;
       const title = patch.title ?? current.title;
-      const source = content ?? {
+      const source: StoredContentFields = content ? { ...content, text: content.text ?? null } : {
         sourceUri: current.source_uri,
-        mimeType: current.mime_type,
+        mimeType: current.mime_type as StoredContentFields["mimeType"],
         contentHash: current.content_hash,
+        text: storedText(current.text_source_uri, current.text_content_hash),
       };
       await client.query(`
         UPDATE draft_document
            SET title = $2, current_version_no = $3, updated_at = now()
          WHERE draft_id = $1`, [draftId, title, version]);
       let versionId: string;
-      let replacedSourceUri: string | null = null;
+      const replacedSourceUris: string[] = [];
       if (!current.sealed) {
         // Decision 0031: the open current version is overwritten instead of adding history.
         await client.query(`
-          UPDATE draft_version SET version_no = $2, source_uri = $3, mime_type = $4, content_hash = $5
-           WHERE draft_version_id = $1`, [current.draft_version_id, version, source.sourceUri, source.mimeType, source.contentHash]);
+          UPDATE draft_version SET version_no = $2, source_uri = $3, mime_type = $4, content_hash = $5,
+                 text_source_uri = $6, text_content_hash = $7
+           WHERE draft_version_id = $1`, [current.draft_version_id, version, source.sourceUri, source.mimeType, source.contentHash,
+          source.text?.sourceUri ?? null, source.text?.contentHash ?? null]);
         versionId = current.draft_version_id;
-        if (source.sourceUri !== current.source_uri) {
-          const shared = await client.query(`SELECT 1 FROM draft_version WHERE source_uri = $1 LIMIT 1`, [current.source_uri]);
-          if (!shared.rowCount) replacedSourceUri = current.source_uri;
+        // Objects the overwrite made unreachable are erased by the caller after commit.
+        for (const replaced of [current.source_uri, current.text_source_uri]) {
+          if (!replaced || replaced === source.sourceUri || replaced === source.text?.sourceUri) continue;
+          const shared = await client.query(`SELECT 1 FROM draft_version WHERE source_uri = $1 OR text_source_uri = $1 LIMIT 1`, [replaced]);
+          if (!shared.rowCount) replacedSourceUris.push(replaced);
         }
       } else {
         // A contributed (sealed) version stays as it is; the note continues in a new open version.
         const versionResult = await client.query<{ draft_version_id: string }>(`
-          INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id)
-          VALUES ($1, $2, $3, $4, $5, $6)
-          RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash, current.membership_id]);
+          INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id,
+                                     text_source_uri, text_content_hash)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash, current.membership_id,
+          source.text?.sourceUri ?? null, source.text?.contentHash ?? null]);
         const inserted = versionResult.rows[0]?.draft_version_id;
         if (!inserted) throw new Error("Draft version insert returned no row");
         versionId = inserted;
@@ -3026,8 +3055,9 @@ export class ArdenRepository implements ArdenDataRepository {
           collectionId: current.collection_id,
           favoritedAt: current.favorited_at,
           position: current.sort_position,
+          text: source.text ?? null,
         },
-        replacedSourceUri,
+        replacedSourceUris,
       };
     });
   }
@@ -3197,7 +3227,13 @@ export class ArdenRepository implements ArdenDataRepository {
 }
 
 export type DraftCursor = { updatedAt: string; draftId: string };
-export type StoredContentFields = { sourceUri: string; mimeType: "text/plain" | "application/pdf"; contentHash: string };
+export type StoredTextFields = { sourceUri: string; contentHash: string };
+function storedText(sourceUri: string | null, contentHash: string | null): StoredTextFields | null {
+  return sourceUri && contentHash ? { sourceUri, contentHash } : null;
+}
+/** Decision 0034: `text` is the extracted text of a PDF item (absent or null for text notes and PDFs without text). */
+export type StoredContentFields = { sourceUri: string; mimeType: "text/plain" | "application/pdf"; contentHash: string;
+  text?: StoredTextFields | null };
 
 function organizationSlug(name: string): string {
   const base = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()

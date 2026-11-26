@@ -408,6 +408,18 @@
       "filename": "0068_expired_document_renewal.sql",
       "sha256": "4c6d46ca3f9d5d55d3be392ebd4620437aa10c9272a4a53b0b3a12bb45239542",
       "rollout": "operator"
+    },
+    {
+      "id": "0069",
+      "filename": "0069_private_pdf_items.sql",
+      "sha256": "8fb13f7c0b19b9ff0a21795295f59aed8235ea0b345db641e7fe4cb5d7595baa",
+      "rollout": "operator"
+    },
+    {
+      "id": "0070",
+      "filename": "0070_private_direct_shares.sql",
+      "sha256": "014ea0e7dd7a9cae61524b618a839e4b69d057b6c66e5c8f92dc549bb01d60c5",
+      "rollout": "operator"
     }
   ]
 }

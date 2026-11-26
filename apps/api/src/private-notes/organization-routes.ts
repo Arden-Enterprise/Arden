@@ -23,6 +23,7 @@ export function representNoteSummary(item: DraftListItem) {
     createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString(),
     collectionId: item.collectionId, favoritedAt: item.favoritedAt?.toISOString() ?? null,
     position: item.position, archivedAt: item.archivedAt?.toISOString() ?? null,
+    kind: item.currentVersion.mimeType === "application/pdf" ? "pdf" : "note",
   };
 }
 
@@ -34,6 +35,9 @@ export function representPrivateNote(draft: PrivateDraft, body: string) {
     createdAt: draft.createdAt.toISOString(), updatedAt: draft.updatedAt.toISOString(),
     collectionId: draft.collectionId, favoritedAt: draft.favoritedAt?.toISOString() ?? null,
     position: draft.position,
+    // Decision 0034: a PDF item has no editable body; `textAvailable` says whether private AI can read it.
+    kind: draft.mimeType === "application/pdf" ? "pdf" : "note",
+    textAvailable: draft.mimeType === "application/pdf" ? Boolean(draft.text) : true,
   };
 }
 
@@ -231,7 +235,7 @@ export function registerPrivateOrganizationRoutes(app: FastifyInstance, input: {
       const draft = await store.duplicateNote(actor.userId, organizationId, source,
         copyTitle(source.title, maxNoteTitleCodePoints), copy, request.id);
       if (!draft) {
-        await storage.remove(copy.sourceUri);
+        await removeCopy(storage, copy);
         return notFound(reply, request);
       }
       reply.header("Location", `/api/v1/organizations/${organizationId}/private-workspace/drafts/${draft.id}`);
@@ -257,7 +261,7 @@ export function registerPrivateOrganizationRoutes(app: FastifyInstance, input: {
       const result = await store.duplicateCollection(actor.userId, organizationId, subtree,
         copyTitle(subtree.root.title, maxCollectionTitleCodePoints), copies, request.id);
       if (result === null || result === "changed") {
-        await Promise.all([...copies.values()].map((copy) => storage.remove(copy.sourceUri)));
+        await Promise.all([...copies.values()].map((copy) => removeCopy(storage, copy)));
         if (result === null) return notFound(reply, request);
         return reply.code(409).send(safeError("PRIVATE_TREE_CHANGED", "This collection changed. Refresh and try again.", request.id));
       }
@@ -345,10 +349,24 @@ async function copyContent(storage: PrivateContentStorage, source: PrivateNoteSo
   if (source.mimeType === "application/pdf") {
     const bytes = await storage.readPdf(source.sourceUri, source.contentHash);
     const copy = await storage.writePdf(bytes);
-    return { body: "", copy };
+    // Decision 0034: a PDF item's extracted text is copied with it.
+    if (!source.text) return { body: "", copy };
+    try {
+      const text = await storage.write(await storage.read(source.text.sourceUri, source.text.contentHash));
+      return { body: "", copy: { ...copy, text: { sourceUri: text.sourceUri, contentHash: text.contentHash } } };
+    } catch (error) {
+      await storage.remove(copy.sourceUri);
+      throw error;
+    }
   }
   const body = await storage.read(source.sourceUri, source.contentHash);
   return { body, copy: await storage.write(body) };
+}
+
+/** Erases a copy that was never committed: the content object and, for a PDF item, its extracted text. */
+async function removeCopy(storage: PrivateContentStorage, copy: StoredContentFields): Promise<void> {
+  await storage.remove(copy.sourceUri);
+  if (copy.text) await storage.remove(copy.text.sourceUri);
 }
 
 function safeError(code: string, message: string, requestId: string) {

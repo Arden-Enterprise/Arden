@@ -4,7 +4,7 @@ import { ApiError } from "../shared/api-client";
 import type { PrivateArchivedNote, PrivateTrashEntry } from "../shared/private-workspace-api";
 import { createNotePreview, getNoteDraft, isNoteDirty, notePreviewReducer, type NotePreviewState } from "./noteDraftModel";
 import { createDemoBackend, createServerBackend, type LoadedNote, type PrivateNotesBackend } from "./privateNotesBackend";
-import { choosePdfFile, mergePdfIntoNote, PdfImportError, readPdfText } from "./pdfImport";
+import { choosePdfFile, mergePdfIntoNote, PdfImportError, readPdfText, readPdfUpload } from "./pdfImport";
 import { ancestorsOf, itemSubtree, notesIn, placeNote, placementOf, ROOT_LABEL, serverIndex, UNTITLED_COLLECTION, UNTITLED_NOTE,
   type TreeItemRef } from "./privateNotesModel";
 
@@ -363,6 +363,47 @@ export function usePrivateNotes(initialNotes: PrivateNote[], initialCollections:
     return file && generation === loadGeneration.current ? importPdf(noteId, file) : false;
   };
 
+  /** Counts file replacements so an open PDF item reloads its file (its version id stays the same). */
+  const [pdfRevision, setPdfRevision] = useState(0);
+
+  /**
+   * Decision 0034 (spec F03-FILE): keeps an original PDF in Private, inside `collectionId` or the root, and opens it.
+   * Opens the file picker, so it must run inside the click.
+   */
+  const uploadPdf = async (collectionId: string | null = null) => {
+    const generation = loadGeneration.current;
+    const file = await choosePdfFile();
+    if (!file || generation !== loadGeneration.current) return false;
+    return run("upload-pdf", async (service) => service.createPdf({ ...(await readPdfUpload(file)), collectionId }), (note) => {
+      rememberVersions([note]);
+      dispatch({ type: "upsert", notes: [withoutVersion(note)] });
+      dispatch({ type: "select", id: note.id });
+      setFocus({ kind: "note" });
+      setTreeOpen(true);
+      if (collectionId) expandPath(collectionId, collectionId);
+      announce(note.textAvailable ? `Added “${note.title}”` : `Added “${note.title}”. It has no text, so AI is unavailable for it`);
+    }, "The PDF couldn’t be added.");
+  };
+
+  /** Replaces a PDF item's file with another PDF; the title, place and favorites stay. */
+  const replacePdf = async (noteId: string) => {
+    const generation = loadGeneration.current;
+    const file = await choosePdfFile();
+    if (!file || generation !== loadGeneration.current) return false;
+    return run("replace-pdf", async (service) => {
+      const upload = await readPdfUpload(file);
+      return service.replacePdf(noteId, versions.current.get(noteId) ?? 0, { pdfBase64: upload.pdfBase64, text: upload.text });
+    }, (note) => {
+      rememberVersions([note]);
+      dispatch({ type: "upsert", notes: [withoutVersion(note)] });
+      setPdfRevision((revision) => revision + 1);
+      announce("Replaced the file");
+    }, "The file couldn’t be replaced.");
+  };
+
+  // Stable across renders so a viewer can depend on it; it always reads the current backend.
+  const loadPdf = useRef((noteId: string) => backend.current.loadPdf(noteId)).current;
+
   const createCollection = (parentId: string | null = null, where: RenameTarget["where"] = "tree") => run("create-collection",
     (service) => service.createCollection(UNTITLED_COLLECTION, parentId), (collection) => {
       setCollections((current) => [...current, collection]);
@@ -392,7 +433,9 @@ export function usePrivateNotes(initialNotes: PrivateNote[], initialCollections:
     }
     if ((title || UNTITLED_NOTE) === note.title) return;
     // A rename is a new version of the saved content; unsaved body edits stay in the draft.
-    await run("rename", (service) => service.updateNote(note.id, versions.current.get(note.id) ?? 0, { title: title || UNTITLED_NOTE, body: note.body }),
+    // A PDF item takes a title only (decision 0034).
+    const renamed = note.kind === "pdf" ? { title: title || UNTITLED_NOTE } : { title: title || UNTITLED_NOTE, body: note.body };
+    await run("rename", (service) => service.updateNote(note.id, versions.current.get(note.id) ?? 0, renamed),
       (result) => {
         versions.current.set(result.id, result.version);
         const hadDraft = Boolean(latest.current.state.drafts[note.id]);
@@ -634,6 +677,10 @@ export function usePrivateNotes(initialNotes: PrivateNote[], initialCollections:
     shiftNote,
     importPdf,
     pickPdf,
+    uploadPdf,
+    replacePdf,
+    loadPdf,
+    pdfRevision,
     archiveNote,
     unarchiveNote,
     trashArchived,

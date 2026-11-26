@@ -331,5 +331,5 @@ function collectionView(collection: MemoryCollection): PrivateCollection {
 function source(note: MemoryNote): PrivateNoteSource {
   const content = note.content();
   return { id: note.id, title: note.title, collectionId: note.collectionId, versionId: content.versionId,
-    sourceUri: content.sourceUri, mimeType: content.mimeType, contentHash: content.contentHash };
+    sourceUri: content.sourceUri, mimeType: content.mimeType, contentHash: content.contentHash, text: null };
 }

@@ -199,6 +199,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
           await client.query("DELETE FROM shared_draft WHERE author_membership_id = ANY($1::uuid[])", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM selected_reader WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM reader_selection WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM private_item_share WHERE organization_id = $1", [ids.organization]);
+          await client.query("DELETE FROM organization_direct_share_setting WHERE organization_id = $1", [ids.organization]);
           await client.query("DELETE FROM draft_version WHERE draft_id IN (SELECT d.draft_id FROM draft_document d JOIN private_workspace w ON w.workspace_id = d.workspace_id WHERE w.membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM draft_document WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
           await client.query("DELETE FROM private_collection WHERE workspace_id IN (SELECT workspace_id FROM private_workspace WHERE membership_id = ANY($1::uuid[]))", [[ids.ownerMembership, ids.managerMembership]]);
@@ -1389,9 +1391,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const second = object("2");
     const saved = await repository.updateDraft(ids.owner, ids.organization, note!.id, 1, { body: "two" }, second, "live-save-1");
     expect(saved).toMatchObject({ kind: "updated", draft: { currentVersion: 2, versionId: note!.versionId, sourceUri: second.sourceUri },
-      replacedSourceUri: first.sourceUri });
+      replacedSourceUris: [first.sourceUri] });
     const renamed = await repository.updateDraft(ids.owner, ids.organization, note!.id, 2, { title: "Live note renamed" }, null, "live-rename");
-    expect(renamed).toMatchObject({ kind: "updated", draft: { currentVersion: 3, versionId: note!.versionId }, replacedSourceUri: null });
+    expect(renamed).toMatchObject({ kind: "updated", draft: { currentVersion: 3, versionId: note!.versionId }, replacedSourceUris: [] });
     expect(await versions()).toEqual([{ draft_version_id: note!.versionId, version_no: 3, source_uri: second.sourceUri, sealed: false }]);
     await expect(repository.updateDraft(ids.owner, ids.organization, note!.id, 2, { body: "stale" }, object("9"), "live-stale"))
       .resolves.toEqual({ kind: "conflict", currentVersion: 3 });
@@ -1406,7 +1408,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect((await versions())[0]).toMatchObject({ sealed: true });
     const third = object("3");
     const afterContribution = await repository.updateDraft(ids.owner, ids.organization, note!.id, 3, { body: "three" }, third, "live-save-2");
-    expect(afterContribution).toMatchObject({ kind: "updated", draft: { currentVersion: 4 }, replacedSourceUri: null });
+    expect(afterContribution).toMatchObject({ kind: "updated", draft: { currentVersion: 4 }, replacedSourceUris: [] });
     if (afterContribution.kind !== "updated") return;
     expect(afterContribution.draft.versionId).not.toBe(note!.versionId);
     expect(await versions()).toEqual([
@@ -1442,6 +1444,181 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await expect(repository.updateDraft(ids.manager, ids.organization, note!.id, 4, { body: "x" }, object("8"), "live-steal"))
       .resolves.toEqual({ kind: "not-found" });
   }, 30_000);
+
+  it("keeps a private PDF item with its extracted text, replaces both and seals them on contribution (decision 0034)", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+    const hash = (digit: string) => digit.repeat(64);
+    const pdfObject = (digit: string, withText: boolean) => ({
+      sourceUri: `arden-private-object://${randomUUID()}.pdf`, mimeType: "application/pdf" as const, contentHash: hash(digit),
+      text: withText ? { sourceUri: `arden-private-object://${randomUUID()}`, contentHash: hash(digit) } : null,
+    });
+    const first = pdfObject("a", true);
+    const item = await repository.createDraft(ids.owner, ids.organization, { title: "Board minutes", body: "" }, first, "pdf-create");
+    await expect(repository.getDraft(ids.owner, ids.organization, item!.id)).resolves.toMatchObject({
+      mimeType: "application/pdf", text: first.text });
+    // Only the owner reads it; another member, including a manager, sees nothing.
+    await expect(repository.getDraft(ids.manager, ids.organization, item!.id)).resolves.toBeNull();
+
+    // A text note and a PDF item never take each other's content; the title still changes.
+    const textObject = { sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain" as const, contentHash: hash("b") };
+    await expect(repository.updateDraft(ids.owner, ids.organization, item!.id, 1, { body: "typed" }, textObject, "pdf-as-text"))
+      .resolves.toEqual({ kind: "wrong-kind" });
+    await expect(repository.updateDraft(ids.owner, ids.organization, item!.id, 1, { title: "Board minutes 2026" }, null, "pdf-rename"))
+      .resolves.toMatchObject({ kind: "updated", draft: { currentVersion: 2, text: first.text }, replacedSourceUris: [] });
+
+    // Replacing the file overwrites the open version and reports both old objects for erasure.
+    const second = pdfObject("c", true);
+    await expect(repository.updateDraft(ids.owner, ids.organization, item!.id, 2, {}, second, "pdf-replace"))
+      .resolves.toMatchObject({ kind: "updated", draft: { currentVersion: 3, sourceUri: second.sourceUri, text: second.text },
+        replacedSourceUris: [first.sourceUri, first.text!.sourceUri] });
+
+    // Contribution copies the file into a shared PDF draft and seals the version with its text.
+    const source = await repository.getPrivateContributionSource(ids.owner, ids.organization, item!.versionId);
+    const contributed = await repository.createKnowledgeDraft(ids.owner, ids.organization, {
+      actorMembershipId: ids.ownerMembership, sourceVersionId: item!.versionId, classification: "INTERNAL", idempotencyKey: randomUUID(),
+      expectedSource: source!, copiedContent: { ...pdfObject("c", false), text: undefined }, requestId: "pdf-contribute",
+    });
+    expect(contributed).toMatchObject({ kind: "created", draft: { mimeType: "application/pdf" } });
+    const runtime = async (sql: string, values: unknown[]) => {
+      const client = await pool!.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE arden_runtime");
+        await client.query("SET LOCAL search_path TO arden, public");
+        await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [ids.owner, ids.organization]);
+        return await client.query(sql, values);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    await expect(runtime("UPDATE draft_version SET text_source_uri = NULL, text_content_hash = NULL WHERE draft_version_id = $1",
+      [item!.versionId])).rejects.toMatchObject({ code: "55000" });
+    // Extracted text belongs only to PDF versions.
+    const textNote = await repository.createDraft(ids.owner, ids.organization, { title: "Text-only", body: "words" },
+      { sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain", contentHash: hash("e") }, "pdf-text-note");
+    await expect(pool.query(`UPDATE arden.draft_version SET text_source_uri = 'arden-private-object://x', text_content_hash = $2
+      WHERE draft_version_id = $1`, [textNote!.versionId, hash("d")])).rejects.toMatchObject({ code: "23514" });
+
+    // Trash and purge report the file and its text object for erasure.
+    const store = repository.privateOrganization;
+    const batch = await store.trashNote(ids.owner, ids.organization, item!.id, "pdf-trash");
+    const purged = await store.purgeTrash(ids.owner, ids.organization, batch!.batchId, "pdf-purge");
+    expect(purged).toEqual([{ draftId: item!.id, sourceUris: [second.sourceUri, second.text!.sourceUri].sort() }]);
+  }, 30_000);
+
+  it("shares a private item with named members only, without review, and ends access on revoke, trash and leaving (decision 0034)", async () => {
+    if (!repository || !pool) throw new Error("Test database is unavailable");
+    const shares = repository.directShares;
+    const object = (digit: string) => ({ sourceUri: `arden-private-object://${randomUUID()}`, mimeType: "text/plain" as const, contentHash: digit.repeat(64) });
+    const note = await repository.createDraft(ids.owner, ids.organization, { title: "Onboarding plan", body: "secret" }, object("1"), "share-note");
+    const runtime = async (actor: string, sql: string, values: unknown[]) => {
+      const client = await pool!.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL ROLE arden_runtime");
+        await client.query("SET LOCAL search_path TO arden, public");
+        await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)", [actor, ids.organization]);
+        return await client.query(sql, values);
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    const notices = async () => (await pool!.query<{ publication_title: string; shared_by_name: string }>(`SELECT publication_title, shared_by_name
+      FROM arden.arden_notification WHERE recipient_membership_id = $1 AND event_type = 'DOCUMENT_SHARED_DIRECT' AND resource_id = $2`,
+    [ids.managerMembership, note!.id])).rows;
+    try {
+      // Only active members of the organization other than the owner can be chosen.
+      await expect(shares.share(ids.owner, ids.organization, note!.id, [ids.ownerMembership], "share-self"))
+        .resolves.toEqual({ kind: "invalid-recipients" });
+      await expect(shares.share(ids.owner, ids.organization, note!.id, [randomUUID()], "share-stranger"))
+        .resolves.toEqual({ kind: "invalid-recipients" });
+      await expect(shares.share(ids.manager, ids.organization, note!.id, [ids.organizationReviewerMembership], "share-not-owner"))
+        .resolves.toEqual({ kind: "not-found" });
+
+      const shared = await shares.share(ids.owner, ids.organization, note!.id, [ids.managerMembership], "share-manager");
+      expect(shared).toMatchObject({ kind: "shared", added: 1, shares: { settings: { enabled: true, recipientLimit: 10 },
+        recipients: [{ membershipId: ids.managerMembership, name: "Synthetic Manager", active: true }] } });
+      expect(await notices()).toEqual([{ publication_title: "Onboarding plan", shared_by_name: "Synthetic Owner" }]);
+      // Sharing with the same person again adds no grant and no second notice.
+      await expect(shares.share(ids.owner, ids.organization, note!.id, [ids.managerMembership], "share-again"))
+        .resolves.toMatchObject({ kind: "shared", added: 0 });
+      expect(await notices()).toHaveLength(1);
+
+      // The recipient reads the current saved version, read-only; others see nothing.
+      await expect(shares.listSharedWithMe(ids.manager, ids.organization)).resolves.toMatchObject([
+        { id: note!.id, title: "Onboarding plan", kind: "note", ownerName: "Synthetic Owner" }]);
+      await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.toMatchObject({ sourceUri: note!.sourceUri, version: 1 });
+      await expect(shares.listSharedWithMe(ids.organizationReviewer, ids.organization)).resolves.toEqual([]);
+      await expect(shares.getSharedItem(ids.organizationReviewer, ids.organization, note!.id)).resolves.toBeNull();
+      await expect(repository.updateDraft(ids.manager, ids.organization, note!.id, 1, { body: "x" }, object("2"), "share-edit"))
+        .resolves.toEqual({ kind: "not-found" });
+      expect((await runtime(ids.manager, "UPDATE draft_document SET title = 'taken' WHERE draft_id = $1", [note!.id])).rowCount).toBe(0);
+      expect((await runtime(ids.manager, `UPDATE private_item_share SET revoked_at = now(), revoked_by_membership_id = $2
+        WHERE draft_id = $1`, [note!.id, ids.managerMembership])).rowCount).toBe(0);
+      // Recipients read only the current version, never the owner's other items or collections.
+      expect((await runtime(ids.manager, "SELECT draft_id FROM draft_document WHERE workspace_id = (SELECT workspace_id FROM draft_document WHERE draft_id = $1)", [note!.id])).rows)
+        .toEqual([{ draft_id: note!.id }]);
+
+      // A later save is what the recipient sees next.
+      await repository.updateDraft(ids.owner, ids.organization, note!.id, 1, { body: "updated" }, object("3"), "share-save");
+      await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.toMatchObject({ version: 2, contentHash: "3".repeat(64) });
+
+      // Organization Admin settings: the limit counts active recipients, and turning sharing off hides shared items.
+      await expect(shares.updateSettings(ids.manager, ids.organization, { enabled: true, recipientLimit: 1 }, "settings-member"))
+        .resolves.toBeNull();
+      await expect(shares.updateSettings(ids.owner, ids.organization, { enabled: true, recipientLimit: 1 }, "settings-limit"))
+        .resolves.toEqual({ enabled: true, recipientLimit: 1 });
+      await expect(shares.share(ids.owner, ids.organization, note!.id, [ids.organizationReviewerMembership], "share-over"))
+        .resolves.toEqual({ kind: "limit", limit: 1 });
+      await shares.updateSettings(ids.owner, ids.organization, { enabled: false, recipientLimit: 1 }, "settings-off");
+      await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.toBeNull();
+      await expect(shares.share(ids.owner, ids.organization, note!.id, [ids.managerMembership], "share-off"))
+        .resolves.toEqual({ kind: "disabled" });
+      await shares.updateSettings(ids.owner, ids.organization, { enabled: true, recipientLimit: 10 }, "settings-on");
+
+      // An owner who stops being an active member no longer shares anything.
+      await pool.query("UPDATE arden.organization_membership SET status = 'SUSPENDED' WHERE membership_id = $1", [ids.ownerMembership]);
+      try {
+        await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.toBeNull();
+      } finally {
+        await pool.query("UPDATE arden.organization_membership SET status = 'ACTIVE' WHERE membership_id = $1", [ids.ownerMembership]);
+      }
+      await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.not.toBeNull();
+
+      // Revoking ends access at once; sharing again is a new grant with its own notice.
+      const managerShare = (await shares.listShares(ids.owner, ids.organization, note!.id))!.recipients[0]!;
+      await expect(shares.revoke(ids.owner, ids.organization, note!.id, managerShare.shareId, "revoke-one"))
+        .resolves.toMatchObject({ recipients: [] });
+      await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.toBeNull();
+      await shares.share(ids.owner, ids.organization, note!.id, [ids.managerMembership, ids.organizationReviewerMembership], "share-two");
+      expect(await notices()).toHaveLength(2);
+      await expect(shares.revoke(ids.owner, ids.organization, note!.id, null, "revoke-all")).resolves.toMatchObject({ recipients: [] });
+      await expect(shares.getSharedItem(ids.organizationReviewer, ids.organization, note!.id)).resolves.toBeNull();
+
+      // Moving the item to trash revokes its shares; restoring it does not share it again.
+      await shares.share(ids.owner, ids.organization, note!.id, [ids.managerMembership], "share-before-trash");
+      const batch = await repository.privateOrganization.trashNote(ids.owner, ids.organization, note!.id, "share-trash");
+      await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.toBeNull();
+      await repository.privateOrganization.restoreTrash(ids.owner, ids.organization, batch!.batchId, "share-restore");
+      await expect(shares.listShares(ids.owner, ids.organization, note!.id)).resolves.toMatchObject({ recipients: [] });
+      await expect(shares.getSharedItem(ids.manager, ids.organization, note!.id)).resolves.toBeNull();
+
+      // A share row can only be revoked, once; audit never carries the title.
+      await expect(pool.query("UPDATE arden.private_item_share SET recipient_membership_id = $2 WHERE draft_id = $1",
+        [note!.id, ids.organizationReviewerMembership])).rejects.toMatchObject({ code: "55000" });
+      const audit = await pool.query<{ details_json: unknown }>(`SELECT details_json FROM arden.audit_event
+        WHERE organization_id = $1 AND event_type IN ('PRIVATE_ITEM_SHARED', 'PRIVATE_ITEM_SHARE_REVOKED', 'DIRECT_SHARE_SETTINGS_UPDATED')`, [ids.organization]);
+      expect(audit.rows.length).toBeGreaterThanOrEqual(8);
+      expect(audit.rows).toContainEqual({ details_json: expect.objectContaining({
+        draftId: note!.id, revokedCount: 1, reason: "TRASH", requestId: "share-trash",
+      }) });
+      expect(JSON.stringify(audit.rows)).not.toContain("Onboarding plan");
+    } finally {
+      await pool.query("DELETE FROM arden.organization_direct_share_setting WHERE organization_id = $1", [ids.organization]);
+    }
+  }, 60_000);
 });
 
 registerKnowledgeCatalogVerification();

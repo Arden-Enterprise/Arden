@@ -6,12 +6,14 @@ export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_ME
   departmentId: string | null; memberIds: string[] };
 export type NotificationTarget = { view: "review-queue"; id: string } | { view: "knowledge"; publicationId?: string }
   /** Decision 0032: My Contributions with this document selected (e.g. to decide an on-behalf renewal). */
-  | { view: "contribution"; documentId: string };
+  | { view: "contribution"; documentId: string }
+  /** Decision 0034: a private item shared directly with this member. */
+  | { view: "shared-item"; itemId: string };
 export type NotificationItem = {
   id: string;
   type: "REVIEW_REQUESTED" | "REVIEW_APPROVED" | "REVIEW_REJECTED" | "PUBLICATION_ACTIVE"
     | "PUBLICATION_FAILED" | "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP"
-    | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED";
+    | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED" | "DOCUMENT_SHARED_DIRECT";
   message: string;
   createdAt: string;
   readAt: string | null;

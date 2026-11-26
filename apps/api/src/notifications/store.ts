@@ -70,7 +70,8 @@ export class PgNotificationStore implements NotificationStore {
       const items: NotificationRecord[] = pageRows.map(row => ({
         id: row.notification_id, type: row.event_type, resourceType: row.resource_type,
         resourceId: row.resource_id, createdAt: row.created_at.toISOString(), readAt: row.read_at?.toISOString() ?? null,
-        ...(row.event_type === "DOCUMENT_SHARED_PERSONAL" || row.event_type === "DOCUMENT_SHARED_GROUP" ? {
+        ...(row.event_type === "DOCUMENT_SHARED_PERSONAL" || row.event_type === "DOCUMENT_SHARED_GROUP"
+          || row.event_type === "DOCUMENT_SHARED_DIRECT" ? {
           publicationTitle: row.publication_title ?? undefined, sharedByName: row.shared_by_name ?? undefined,
         } : {}),
         ...(row.event_type === "PUBLICATION_EXPIRING" ? {

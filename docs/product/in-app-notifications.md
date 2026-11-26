@@ -110,3 +110,7 @@ The release inventory has 61 operator-reviewed/history entries. The ownership
 rehearsal expects 48 trusted routines and the recovery inventory explicitly matches
 Flow 4 overload signatures. Database verification uses disposable CI PostgreSQL;
 shared staging migration, release and signed-in/Realtime acceptance are separate.
+
+### F21 direct-share notice (decision 0034)
+
+`DOCUMENT_SHARED_DIRECT` tells a member that a colleague shared a private note or PDF with them without review. It names the owner and the item, never content, and opens the read-only reader (`/shared/:id`). Core returns the details and target only while the item is still shared with the reader; otherwise the generic unavailable message is shown. Revocation sends no notice. Evidence and remaining checks are in [F03-SHR](identity-and-access.md#f03-shr-share-button-and-direct-sharing).

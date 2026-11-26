@@ -6,11 +6,15 @@ import { PrivateNoteEditor } from "./PrivateNoteEditor";
 import { WorkspaceTopbar, type ContextControlProps, type TopbarCrumb } from "../shared/WorkspaceTopbar";
 import { WorkspacePageContent, WorkspacePageHeader } from "../shared/WorkspacePageContent";
 import { ContributePrivateNoteDialog, type ContributionAttempt } from "./ContributePrivateNoteDialog";
+import { SharePrivateItemPanel } from "./SharePrivateItemPanel";
+import { SharePeoplePanel } from "./SharePeoplePanel";
+import { loadDirectSharing, type DirectShareSettings } from "../shared/direct-share-api";
 import type { CreatedKnowledgeDraft } from "../shared/api-client";
 import type { PrivateNotesController } from "./usePrivateNotes";
 import type { Platform } from "../shared/types";
 import { ItemActionsMenu } from "./ItemActionsMenu";
-import { focusNoteTitle, itemActions } from "./PrivateNotesTree";
+import { focusNoteTitle, itemActions, itemIcon } from "./PrivateNotesTree";
+import { PrivatePdfView } from "./PrivatePdfView";
 import { PrivateNotesTrash } from "./PrivateNotesTrash";
 import { PrivateNotesArchive } from "./PrivateNotesArchive";
 import { ancestorsOf, childrenOf, collectionItem, noteItem, ROOT_LABEL, type TreeItem } from "./privateNotesModel";
@@ -26,7 +30,9 @@ function FavoriteToggle({ item, controller, disabled }: { item: TreeItem; contro
  * In-place title editing on a collection page (spec F03-ARR): Enter or leaving the field saves, Escape cancels.
  * An empty title is not saved: Enter keeps the field open with an error, leaving it restores the old title.
  */
-export function CollectionTitleInput({ title, onDone }: { title: string; onDone: (value: string | null) => void }) {
+export function CollectionTitleInput({ title, onDone, emptyMessage = "A collection needs a title." }: {
+  title: string; onDone: (value: string | null) => void; emptyMessage?: string;
+}) {
   const input = useRef<HTMLInputElement>(null);
   const settled = useRef(false);
   const [empty, setEmpty] = useState(false);
@@ -44,7 +50,7 @@ export function CollectionTitleInput({ title, onDone }: { title: string; onDone:
         } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finish(null); }
       }}
       onBlur={(event) => finish(event.currentTarget.value.trim() ? event.currentTarget.value : null)} />
-    {empty && <span id="pn-title-error" className="pn-title-error" role="alert">A collection needs a title.</span>}
+    {empty && <span id="pn-title-error" className="pn-title-error" role="alert">{emptyMessage}</span>}
   </span>;
 }
 
@@ -53,8 +59,9 @@ function ItemListing({ items, onOpen }: { items: TreeItem[]; onOpen: (item: Tree
   return <ul className="pn-card-list">
     {items.map((item) => <li key={`${item.kind}:${item.id}`}>
       <button type="button" className="pn-card" onClick={() => onOpen(item)}>
-        <Icon name={item.kind === "collection" ? "folder" : "document"} size={17} />
-        <span className="pn-card-copy"><strong>{item.title}</strong><span>{item.kind === "collection" ? "Collection" : "Note"}</span></span>
+        <Icon name={itemIcon(item)} size={17} />
+        <span className="pn-card-copy"><strong>{item.title}</strong><span>{item.kind === "collection" ? "Collection"
+          : item.note.kind === "pdf" ? "PDF" : "Note"}</span></span>
       </button>
     </li>)}
   </ul>;
@@ -68,7 +75,19 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
   onContributionAttemptChange: (attempt: ContributionAttempt | null) => void;
   onKnowledgeDraftCreated: (draft: CreatedKnowledgeDraft) => void;
 } & ContextControlProps) {
-  const [contributionOpen, setContributionOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
+  const selectedId = controller.selectedNote?.id;
+  // The Share panel belongs to one item; opening another item closes it.
+  useEffect(() => { setShareOpen(false); }, [selectedId]);
+  // Decision 0034: Share with people is offered only while the organization allows direct sharing.
+  const [directSharing, setDirectSharing] = useState<DirectShareSettings | null>(null);
+  useEffect(() => {
+    if (!shareOpen || !controller.serverBacked || !organizationId) return;
+    let present = true;
+    void loadDirectSharing(platform, organizationId).then((settings) => { if (present) setDirectSharing(settings); })
+      .catch(() => { if (present) setDirectSharing({ enabled: false, recipientLimit: 0 }); });
+    return () => { present = false; };
+  }, [shareOpen, controller.serverBacked, platform, organizationId]);
   const [discarding, setDiscarding] = useState(false);
   const [dismissedNotice, setDismissedNotice] = useState(0);
   const { state, selectedNote, draft, isDirty, serverBacked, loading, saving, error, saveMessage, focus, collections, actionError, busyAction } = controller;
@@ -94,27 +113,48 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
 
   const open = (item: TreeItem) => { if (item.kind === "note") controller.openNote(item.id); else controller.openCollection(item.id); };
 
-  // Contributing a copy opens inside this page's status island rather than a modal dialog.
-  const contributionPanel = contributionOpen && serverBacked && selectedNote && sourceVersionId && !isDirty ? <ContributePrivateNoteDialog
-    key={sourceVersionId}
-    platform={platform}
-    organizationId={organizationId}
-    source={{ title: selectedNote.title, body: selectedNote.body, versionId: sourceVersionId }}
-    attempt={matchingAttempt}
-    onAttemptChange={onContributionAttemptChange}
-    onClose={() => setContributionOpen(false)}
-    onCreated={(created) => { onContributionAttemptChange(null); setContributionOpen(false); onKnowledgeDraftCreated(created); }}
+  // Decision 0034: one Share button. Its panel opens inside this page's status island rather than a modal dialog;
+  // contributing a copy is one of its choices.
+  const sharePanel = shareOpen && serverBacked && selectedNote ? <SharePrivateItemPanel
+    key={selectedNote.id}
+    title={selectedNote.title}
+    onClose={() => setShareOpen(false)}
+    people={directSharing?.enabled && sourceVersionId ? {
+      render: (back, show) => <SharePeoplePanel platform={platform} organizationId={organizationId}
+        item={{ id: selectedNote.id, title: selectedNote.title }} onBack={back} onContribute={() => show("contribute")} />,
+    } : undefined}
+    contribute={{
+      unavailableReason: !sourceVersionId || isDirty ? "Save your changes before contributing a copy." : undefined,
+      render: (back) => <ContributePrivateNoteDialog
+        key={sourceVersionId}
+        platform={platform}
+        organizationId={organizationId}
+        source={{ title: selectedNote.title, body: selectedNote.body, versionId: sourceVersionId ?? "", isPdf: selectedNote.kind === "pdf",
+          hasText: selectedNote.kind === "pdf" ? Boolean(selectedNote.textAvailable) : undefined }}
+        attempt={matchingAttempt}
+        onAttemptChange={onContributionAttemptChange}
+        onClose={back}
+        onCreated={(created) => { onContributionAttemptChange(null); setShareOpen(false); onKnowledgeDraftCreated(created); }}
+      />,
+    }}
   /> : undefined;
 
   const headerMenu = (item: TreeItem) => <ItemActionsMenu placement="below" triggerClassName="pn-icon-button pn-header-button"
     label={`More actions for ${item.title}`}
-    actions={itemActions(controller, item, item.kind === "note"
+    actions={itemActions(controller, item, item.kind === "note" && item.note.kind !== "pdf"
       ? () => focusNoteTitle()
       : () => controller.startRename(item, "page"))} />;
+  const shareButton = serverBacked && <button type="button" className="secondary-button" disabled={pending || saving} aria-haspopup="dialog"
+    aria-expanded={shareOpen} onClick={() => setShareOpen(true)}><Icon name="people" size={14} />Share</button>;
+  const renamingPage = (id: string) => controller.renaming?.where === "page" && controller.renaming.id === id;
+  const uploadPdfButton = (collectionId: string | null) => <button type="button" className="secondary-button"
+    disabled={loading || busyAction === "upload-pdf"} onClick={() => void controller.uploadPdf(collectionId)}>
+    <Icon name="pdf" size={14} />{busyAction === "upload-pdf" ? "Adding PDF…" : "Upload PDF"}
+  </button>;
 
   return (
     <main id="arden-main" className="workspace-page" aria-labelledby="personal-workspace-title" tabIndex={-1}>
-      <WorkspaceTopbar breadcrumb={breadcrumb} crumbs={crumbs} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={contributionPanel} />
+      <WorkspaceTopbar breadcrumb={breadcrumb} crumbs={crumbs} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={sharePanel} />
       <WorkspacePageContent className="personal-content is-single is-editing-note" header={<WorkspacePageHeader className="personal-title-row"
         eyebrow="WORK"
         title="Private"
@@ -127,7 +167,31 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
           {" "}<button type="button" className="pn-link-button" onClick={controller.dismissActionError}>Dismiss</button></p>}
         {notice && <ActionToast key={notice.id} message={notice.message} onDismiss={() => setDismissedNotice(notice.id)} />}
         <div className="personal-grid">
-          {view === "note" && current && <PrivateNoteEditor key={current.id} selectedNote={selectedNote} draftTitle={draft.title} draftBody={draft.body} isDirty={isDirty}
+          {view === "note" && current && selectedNote?.kind === "pdf" && <PrivatePdfView key={current.id} itemId={current.id}
+            title={current.title} revision={controller.pdfRevision} loadPdf={controller.loadPdf}
+            heading={<>
+              <span className="pn-page-icon" aria-hidden="true"><Icon name="pdf" size={22} /></span>
+              {renamingPage(current.id)
+                ? <CollectionTitleInput title={current.title} emptyMessage="A PDF needs a title." onDone={(value) => {
+                  if (value === null) controller.cancelRename();
+                  else void controller.commitRename({ kind: "note", id: current.id }, value);
+                }} />
+                : <h2><button type="button" className="pn-title-button" title="Click to rename"
+                  onClick={() => controller.startRename({ kind: "note", id: current.id }, "page")}>{current.title}</button></h2>}
+            </>}
+            notice={selectedNote.textAvailable ? undefined
+              : <p className="pn-page-meta">No text found in this PDF, so AI is unavailable for it.</p>}
+            toolbar={<>
+              <FavoriteToggle item={current} controller={controller} disabled={busyAction === "favorite"} />
+              <span className="island-chip"><Icon name="lock" size={12} />Only you</span>
+              <span className="note-toolbar-spacer" />
+              <button type="button" className="secondary-button" disabled={busyAction === "replace-pdf"}
+                onClick={() => void controller.replacePdf(current.id)}>{busyAction === "replace-pdf" ? "Replacing…" : "Replace file"}</button>
+              {shareButton}
+              {headerMenu(current)}
+            </>} />}
+
+          {view === "note" && current && selectedNote?.kind !== "pdf" && <PrivateNoteEditor key={current.id} selectedNote={selectedNote} draftTitle={draft.title} draftBody={draft.body} isDirty={isDirty}
             savedMessage={saveMessage || state.savedMessage}
             toolbar={<>
               <FavoriteToggle item={current} controller={controller} disabled={pending || busyAction === "favorite"} />
@@ -135,7 +199,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
               <span className="private-state" aria-live="polite">{controller.autosaving ? "Saving…" : isDirty ? "Unsaved changes" : "Saved"}</span>
               <span className="note-toolbar-spacer" />
               {isDirty && <button type="button" className="secondary-button" disabled={saving} onClick={() => setDiscarding(true)}>Discard changes</button>}
-              {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}><Icon name="layers" size={14} />Create review draft</button>}
+              {shareButton}
               {headerMenu(current)}
               <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : "Save"}</button>
             </>}
@@ -177,6 +241,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
                 <button type="button" className="secondary-button" disabled={busyAction === "create-note"} onClick={() => void controller.addNote(collection.id, "page").then(focusNoteTitle)}>
                   <Icon name="plus" size={14} />New note in this collection
                 </button>
+                {serverBacked && uploadPdfButton(collection.id)}
               </div>
             </div>
           </section>}
@@ -203,6 +268,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
                   onClick={() => void controller.createCollection(null, "page")}>
                   <Icon name="folder-add" size={14} />New collection
                 </button>
+                {serverBacked && uploadPdfButton(null)}
               </div>
             </div>
           </section>}

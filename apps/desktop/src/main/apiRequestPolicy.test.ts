@@ -229,6 +229,49 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ ...request, path: "https://other.invalid/api/v1/me" }), false);
   });
 
+  it("allows exactly the decision 0034 direct-share routes", () => {
+    const organization = `/api/v1/organizations/${organizationId}`;
+    const id = sourcePrivateVersionId;
+    const shares = `${organization}/private-workspace/drafts/${id}/shares`;
+    const allowed = [
+      { path: shares, method: "GET" },
+      { path: shares, method: "POST", body: JSON.stringify({ recipientMembershipIds: [id] }) },
+      { path: `${shares}/${id}/revoke`, method: "POST" },
+      { path: `${shares}/revoke-all`, method: "POST" },
+      { path: `${organization}/shared-with-me`, method: "GET" },
+      { path: `${organization}/shared-with-me/${id}`, method: "GET" },
+      { path: `${organization}/shared-with-me/${id}/pdf`, method: "GET" },
+      { path: `${organization}/direct-sharing`, method: "GET" },
+      { path: `${organization}/direct-sharing`, method: "PUT", body: JSON.stringify({ enabled: true, recipientLimit: 10 }) },
+    ];
+    for (const request of allowed) assert.equal(validateDesktopApiRequest(request), true, `${request.method} ${request.path}`);
+    assert.equal(desktopApiResponseLimit({ path: `${organization}/shared-with-me/${id}/pdf`, method: "GET" }), 7_100_000);
+    const refused = [
+      { path: `${shares}/revoke-all`, method: "POST", body: "{}" },
+      { path: `${organization}/shared-with-me/${id}`, method: "PATCH", body: "{}", ifMatch: '"1"' },
+      { path: `${organization}/shared-with-me?all=1`, method: "GET" },
+      { path: `${organization}/direct-sharing`, method: "POST", body: "{}" },
+      { path: shares, method: "PUT", body: "{}" },
+    ];
+    for (const request of refused) assert.equal(validateDesktopApiRequest(request), false, `${request.method} ${request.path}`);
+  });
+
+  it("allows exactly the decision 0034 private PDF routes and their size limits", () => {
+    const base = `/api/v1/organizations/${organizationId}/private-workspace/drafts`;
+    const id = sourcePrivateVersionId;
+    const upload = JSON.stringify({ title: "Minutes", pdfBase64: "a".repeat(6_900_000), text: "" });
+    assert.equal(validateDesktopApiRequest({ path: `${base}/pdf`, method: "POST", body: upload }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "PUT", body: upload, ifMatch: '"2"' }), true);
+    assert.equal(desktopApiResponseLimit({ path: `${base}/${id}/pdf`, method: "GET" }), 7_100_000);
+    // Replacing needs the version it was based on; no other method, query or oversized body is accepted.
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "PUT", body: upload }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "PATCH", body: upload, ifMatch: '"2"' }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/pdf?x=1`, method: "POST", body: upload }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/pdf`, method: "POST", body: "a".repeat(7_200_000) }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}`, method: "PATCH", body: upload, ifMatch: '"2"' }), false);
+  });
+
   it("allows exactly the decision 0029 and F03-ARR private-notes organization routes and methods", () => {
     const base = `/api/v1/organizations/${organizationId}/private-workspace`;
     const id = sourcePrivateVersionId;

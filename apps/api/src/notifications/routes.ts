@@ -6,7 +6,7 @@ import { signNotificationReaderToken, type NotificationRealtimeConfiguration } f
 
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
 const messages: Record<Exclude<NotificationType, "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP"
-  | "PUBLICATION_EXPIRING" | "PUBLICATION_RENEWAL_ON_BEHALF">, string> = {
+  | "PUBLICATION_EXPIRING" | "PUBLICATION_RENEWAL_ON_BEHALF" | "DOCUMENT_SHARED_DIRECT">, string> = {
   REVIEW_REQUESTED: "A knowledge item is waiting for your review.",
   REVIEW_APPROVED: "Your knowledge request was approved.",
   REVIEW_REJECTED: "Your knowledge request was rejected.",
@@ -66,6 +66,10 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
         : [];
       if (readablePublicationIds === null) return reply.code(404).send({ error: { code: "NOT_FOUND", message: "The organization is unavailable." } });
       const readablePublications = new Set(readablePublicationIds);
+      // Decision 0034: a direct-share notice keeps its title and target only while the item is still shared with the reader.
+      const hasDirectShares = page.items.some(item => item.type === "DOCUMENT_SHARED_DIRECT");
+      const readableSharedItems = new Set(hasDirectShares && repository.directShares
+        ? (await repository.directShares.listSharedWithMe(actor.userId, request.params.organizationId) ?? []).map(item => item.id) : []);
       // Decision 0032: renewal notices keep their details only while the member is still responsible for the document.
       const renewalDocumentIds = new Set(page.items
         .filter(item => item.type === "PUBLICATION_EXPIRING" || item.type === "PUBLICATION_RENEWAL_ON_BEHALF")
@@ -93,6 +97,14 @@ export function registerNotificationRoutes(app: FastifyInstance, input: {
             return { id: item.id, type: item.type, message,
               createdAt: item.createdAt, readAt: item.readAt,
               ...(visible ? { target: { view: "knowledge", publicationId: item.resourceId } } : {}) };
+          }
+          if (item.type === "DOCUMENT_SHARED_DIRECT") {
+            const visible = readableSharedItems.has(item.resourceId);
+            const message = visible
+              ? `${item.sharedByName ?? "A colleague"} shared “${item.publicationTitle ?? "a private item"}” with you. It has not been reviewed.`
+              : "This notification's item is no longer available.";
+            return { id: item.id, type: item.type, message, createdAt: item.createdAt, readAt: item.readAt,
+              ...(visible ? { target: { view: "shared-item", itemId: item.resourceId } } : {}) };
           }
           if (item.type === "PUBLICATION_EXPIRING" || item.type === "PUBLICATION_RENEWAL_ON_BEHALF") {
             const state = responsibleStates.get(item.resourceId);

@@ -222,3 +222,7 @@
 @media (prefers-reduced-motion: reduce) {
   .arden-app-shell .pn-chevron .arden-icon { transition: none; }
 }
+
+/* Decision 0034: an original PDF kept in Private opens in the PDF viewer under its title. */
+.pn-pdf-body { display: grid; gap: 16px; min-width: 0; }
+.pn-pdf-body .knowledge-pdf-document object { height: min(74vh, 900px); }

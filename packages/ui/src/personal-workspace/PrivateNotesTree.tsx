@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
-import { Icon } from "../shared/Icon";
+import { Icon, type IconName } from "../shared/Icon";
 import type { PrivateNotesController } from "./usePrivateNotes";
 import { ItemActionsMenu, type ItemActions } from "./ItemActionsMenu";
 import { childrenOf, favoriteItems, moveDestinations, notesIn, ROOT_LABEL, type TreeItem } from "./privateNotesModel";
@@ -16,6 +16,11 @@ function dropHalf(event: DragEvent<HTMLElement>): "before" | "after" {
 }
 
 /** Builds the shared `···` actions for a tree item; `onRename` lets the caller choose where renaming happens. */
+/** Decision 0034: a PDF item shows the PDF icon. */
+export function itemIcon(item: TreeItem): IconName {
+  return item.kind === "collection" ? "folder" : item.note.kind === "pdf" ? "pdf" : "document";
+}
+
 export function itemActions(controller: PrivateNotesController, item: TreeItem, onRename: () => void,
   onPdfImported?: () => void): ItemActions {
   const ref = { kind: item.kind, id: item.id };
@@ -33,9 +38,10 @@ export function itemActions(controller: PrivateNotesController, item: TreeItem, 
     onMove: (collectionId) => void controller.moveTo(ref, collectionId),
     onTrash: () => void controller.requestTrash(ref),
     ...(item.kind === "note" ? {
-      onImportPdf: () => void controller.pickPdf(item.id).then(imported => {
+      // A PDF item keeps its file; Import PDF adds text to a text note only.
+      ...(item.note.kind === "pdf" ? {} : { onImportPdf: () => void controller.pickPdf(item.id).then(imported => {
         if (imported) onPdfImported?.();
-      }),
+      }) }),
       order: {
         canMoveUp: index > 0, canMoveDown: index >= 0 && index < siblings.length - 1,
         onMoveUp: () => void controller.shiftNote(item.id, -1), onMoveDown: () => void controller.shiftNote(item.id, 1),
@@ -164,7 +170,7 @@ export function PrivateNotesNavSection({ controller, navItem, pageVisible, colla
           onClick={() => controller.toggleExpanded(item.id)}><Icon name="chevron" size={13} /></button>
           : <span className="pn-chevron-space" aria-hidden="true" />}
         {isRenaming ? <>
-          <span className="pn-row-icon" aria-hidden="true"><Icon name={isCollection ? "folder" : "document"} size={15} /></span>
+          <span className="pn-row-icon" aria-hidden="true"><Icon name={itemIcon(item)} size={15} /></span>
           <RenameInput title={item.title} onCommit={(value) => void controller.commitRename(item, value)}
             onCancel={() => {
               controller.cancelRename();
@@ -173,7 +179,7 @@ export function PrivateNotesNavSection({ controller, navItem, pageVisible, colla
         </> : <>
           <button type="button" className="pn-row-main" data-pn-row={section === "tree" ? `${item.kind}:${item.id}` : undefined}
             aria-current={selectedKey === `${item.kind}:${item.id}` ? "page" : undefined} onClick={() => open(item)}>
-            <Icon name={isCollection ? "folder" : "document"} size={15} />
+            <Icon name={itemIcon(item)} size={15} />
             <span className="pn-ellipsis">{item.title}</span>
             {unsaved && <span className="pn-unsaved" title="Unsaved changes"><span className="sr-only">, unsaved changes</span></span>}
           </button>

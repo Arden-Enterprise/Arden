@@ -29,6 +29,7 @@ import { emptyLibraryFilters, type LibraryFilters } from "./KnowledgeLibraryBrow
 import { KnowledgeHomeBrowse } from "./KnowledgeHomeBrowse";
 import { useHomePublications, type HomeSource } from "./useHomePublications";
 import { KnowledgeHomeNavigation, type HomeTab } from "./KnowledgeHomeNavigation";
+import { DirectSharesSection, SharedItemReader } from "./DirectShares";
 import { KnowledgeMetadataFields, editableKnowledgeMetadata, targetReadersLabel } from "./KnowledgeMetadataFields";
 import { targetReadersComplete } from "./TargetReadersField";
 import { ActionToast } from "../shared/ActionToast";
@@ -168,7 +169,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const [newTitleError, setNewTitleError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [createMode, setCreateMode] = useState<"text" | "pdf">("text");
-  const [screen, setScreen] = useState<"library" | "create" | "editor" | "document">("library");
+  const [screen, setScreen] = useState<"library" | "create" | "editor" | "document" | "shared">("library");
+  /** Decision 0034: the directly shared private item open in the read-only reader. */
+  const [sharedItemId, setSharedItemId] = useState<string | null>(null);
+  const [directShareRefresh, setDirectShareRefresh] = useState(0);
   const [libraryTab, setLibraryTab] = useState<HomeTab>("organization");
   const [organizationView, setOrganizationView] = useState<"overview" | "all">("overview");
   const [reportOpen, setReportOpen] = useState(false);
@@ -924,7 +928,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
   });
   // Full-page screens have their own address; tabs, filters and dialogs stay in memory.
-  const homeLocation: KnowledgeHomeLocation = screen === "document" && document ? { kind: "document", id: document.id }
+  const homeLocation: KnowledgeHomeLocation = screen === "shared" && sharedItemId ? { kind: "shared", id: sharedItemId }
+    : screen === "document" && document ? { kind: "document", id: document.id }
     : screen === "editor" && draft ? { kind: "draft", id: draft.id }
       : screen === "create" ? { kind: "create" }
         : libraryTab === "reports" && caseSurface === "reports" && maintenanceCase ? { kind: "report", caseId: maintenanceCase.caseId }
@@ -964,6 +969,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       case "home": return show(homeDirty, closeHomeScreen);
       case "document": return show(homeDirty, () => openPublished(location.id));
       case "draft": return show(homeDirty, () => openDraft(location.id));
+      case "shared": return show(homeDirty, () => { closeHomeScreen(); setLibraryTab("shared"); setSharedItemId(location.id); setScreen("shared"); });
       case "create": return show(homeDirty, () => { if (screen !== "create") openCreate("text"); });
       case "report": return show(homeDirty, async () => {
         closeHomeScreen(); setLibraryTab("reports");
@@ -1008,6 +1014,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const breadcrumb = view === "review-queue" ? `${organizationName} / Knowledge / Reviews${reviewSection === "maintenance" ? " / Maintenance" : ""}`
     : screen === "library" ? `${organizationName} / Home${libraryTab === "drafts" ? " / My Contributions" : libraryTab === "reports" ? " / My reports" : ""}`
       : screen === "create" ? `${organizationName} / Home / New draft`
+        : screen === "shared" ? `${organizationName} / Home / Shared with me`
         : `${organizationName} / Home / ${screen === "document" ? document?.title ?? "Publication" : draft?.title ?? "Draft"}`;
 
   return <main id={active ? "arden-main" : undefined} className="workspace-page" tabIndex={-1}>
@@ -1402,12 +1409,21 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
             key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
             instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>}
-      /> : <>
+      /> : screen === "shared" && sharedItemId ? <SharedItemReader key={sharedItemId} platform={platform} organizationId={organizationId}
+        itemId={sharedItemId}
+        onBack={() => { setSharedItemId(null); setScreen("library"); setLibraryTab("shared"); }}
+        onLost={() => setDirectShareRefresh((value) => value + 1)}
+        // Private notes are plain text unless they hold an Arden document; show them as the owner wrote them.
+        renderText={(item) => item.body.startsWith("arden-document:")
+          ? <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+            key={`shared:${item.id}:${item.version}`} body={item.body} instanceKey={`shared:${item.id}:${item.version}`} /></Suspense>
+          : <div className="shared-item-text">{item.body.trim() ? item.body : "Nothing is written in this note yet."}</div>} />
+      : <>
         {awaitingAssignment && <p className="island-note knowledge-awaiting-assignment" role="status">
           Waiting for an admin to assign your department. You can read documents shared with the whole organization.</p>}
         <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : libraryTab === "reports" ? "My reports" : "Home"}
           description=""
-          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="island-icon-button" aria-label="Refresh" title="Refresh" disabled={busy} onClick={() => void refresh()}><Icon name="refresh" size={16} /></button>
+          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="island-icon-button" aria-label="Refresh" title="Refresh" disabled={busy} onClick={() => { void refresh(); setDirectShareRefresh((value) => value + 1); }}><Icon name="refresh" size={16} /></button>
             {catalog?.canManage && libraryTab === "organization" && (organizationView === "all" || query.trim() || home.views.organization.status !== "ready")
               && <button type="button" className="secondary-button" onClick={() => setManagingCatalog(true)}>Manage collections</button>}
             <button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button>
@@ -1422,6 +1438,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             catalog={catalog} catalogError={catalogError} query={query} filters={libraryFilters} onFilters={setLibraryFilters}
             organizationView={organizationView} onOrganizationView={value => { setOrganizationView(value); if (value === "overview") setQuery(""); }} onOpen={openPublished}
             onManage={() => setManagingCatalog(true)} onRetry={() => void home.refresh()} />}
+        {!managingCatalog && libraryTab === "shared" && <DirectSharesSection platform={platform} organizationId={organizationId}
+          refreshKey={directShareRefresh} onOpen={(itemId) => { setSharedItemId(itemId); setScreen("shared"); }} />}
         {!managingCatalog && libraryTab === "reports" && <section role="tabpanel" aria-labelledby="home-tab-reports">{(maintenanceCase || maintenanceLoading || maintenanceError) && caseSurface === "reports"
           ? <MaintenanceCaseScreen key={maintenanceCase?.caseId ?? "report-case"} item={maintenanceCase} history={maintenanceHistory} loading={maintenanceLoading} error={maintenanceError} actionError={maintenanceActionError} busy={busy}
             onBack={leaveMaintenanceCase}
