@@ -13,6 +13,14 @@ context assembly, answer generation and Langfuse telemetry. The Arden core API r
 source of truth for identity, organization membership, AccessPolicy, review state, chat history
 and atomic publication activation. ChromaDB is a retrieval index, never an authorization source.
 
+## Submission review
+
+`POST /v1/submission-reviews` is a service-authenticated, additive v1 endpoint for BM04 F-06.
+Core authorizes the reviewer and sends the exact frozen submission. Arden-AI checks the hash
+and extracts readable text. The model receives only that text and selects passage IDs, which
+Arden-AI resolves into excerpts. The reviewer receives a summary and optional checks and still
+decides whether to approve or reject. See the [request and response schema](schemas/submission-review-v1.schema.json).
+
 ## Local development
 
 The project targets Python 3.11 and uses `uv` for dependency and environment management.
