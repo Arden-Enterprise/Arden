@@ -26,6 +26,12 @@ type NotificationContextValue = {
 const NotificationContext = createContext<NotificationContextValue | null>(null);
 const notificationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+function realtimeWebSocketEndpoint(endpoint: string): string {
+  const url = new URL(endpoint);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString().replace(/\/$/, "");
+}
+
 export function NotificationProvider(props: {
   platform: Platform;
   organizationId: string | null;
@@ -221,10 +227,16 @@ function ScopedNotificationProvider({ platform, organizationId, onOpenTarget, ch
         throw cause;
       }
       if (stopped) return;
-      client = new RealtimeClientClass(initialCredential.endpoint, {
+      client = new RealtimeClientClass(realtimeWebSocketEndpoint(initialCredential.endpoint), {
         params: { apikey: initialCredential.apiKey },
         accessToken: readToken,
       });
+      await client.setAuth();
+      if (stopped) {
+        client.disconnect();
+        client = null;
+        return undefined;
+      }
       channel = client.channel(initialCredential.topic, { config: { private: true } });
       channel.on("broadcast", { event: "notification" }, message => {
         const payload = message.payload as { notificationId?: unknown } | null;

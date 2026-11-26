@@ -115,6 +115,7 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `SUPABASE_URL` | Unset locally | Supabase project Auth/API URL reachable from the API container |
 | `SUPABASE_PUBLISHABLE_KEY` | Unset locally | Project publishable/anon key used by the server-side Supabase Auth adapter; never substitute a service-role key |
 | `SUPABASE_REALTIME_PUBLIC_URL` | Unset | Public HTTPS Realtime endpoint ending in `/realtime/v1`; loopback HTTP is local-only |
+| `SUPABASE_REALTIME_API_KEY` | Unset | Optional gateway key when an API gateway in front of Realtime inspects `apikey` separately from `ARDEN_NOTIFICATION_JWT_SECRET`; when unset, Core mints a narrow transport-only HS256 socket token |
 | `ARDEN_NOTIFICATION_JWT_SECRET` | Unset | API-only 64-character HS256 signing value; must exactly match the target Realtime verifier's accepted key. Never place it in client configuration |
 | `ARDEN_NOTIFICATION_CHANNEL_NAMESPACE` | Unset | Required with the Realtime endpoint/key; unique for each environment and development slot |
 | `ARDEN_NOTIFICATION_DATABASE_URL` | Unset | Dedicated API-side login that may `SET ROLE arden_notification_worker`; required with complete Realtime configuration and never given application-content grants |
@@ -137,7 +138,7 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 - Keep secret values out of tracked env/config files. Track sanitized examples with descriptions, defaults, required status, consumer, and restart/build implications. Treat `.env.production` as sensitive even if the current ignore patterns do not cover it.
 - Vite client env values are build-time public values. Future runtime public config must remain distinct from server secrets and support the same immutable artifact in staging/production.
 - Production startup must fail closed on missing/invalid critical configuration. No dev password, default administrator, disabled auth/TLS, or cloud fallback may become an implicit production setting.
-- Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice. Realtime notification configuration is all-or-none: if any of its endpoint, signing key or namespace is set, all must be valid. The API also uses the existing publishable key. Keep actual values in private API runtime configuration, not `VITE_*`, Electron renderer env, build arguments, URLs or logs.
+- Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice. Realtime notification configuration is all-or-none: if any of its endpoint, signing key, namespace or optional gateway API key is set, the required Realtime settings must be valid together. When no separate gateway API key is configured, Core mints a narrow transport-only HS256 socket token with `ARDEN_NOTIFICATION_JWT_SECRET`. Keep actual values in private API runtime configuration, not `VITE_*`, Electron renderer env, build arguments, URLs or logs.
 
 ### In-app notifications and Supabase Realtime
 

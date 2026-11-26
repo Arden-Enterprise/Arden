@@ -7,6 +7,9 @@ import { NotificationBell } from "../src/notifications/NotificationBell";
 import { NotificationProvider, useNotifications } from "../src/notifications/NotificationProvider";
 
 const realtimeHarness = vi.hoisted(() => ({
+  endpoint: null as string | null,
+  setAuthCount: 0,
+  setAuthBeforeSubscribe: false,
   broadcast: null as null | ((message: unknown) => void),
   status: null as null | ((status: string) => void),
   topic: null as string | null,
@@ -17,8 +20,13 @@ const realtimeHarness = vi.hoisted(() => ({
 
 vi.mock("@supabase/realtime-js", () => ({
   RealtimeClient: class {
-    constructor(_endpoint: string, options: unknown) {
+    constructor(endpoint: string, options: unknown) {
+      realtimeHarness.endpoint = endpoint;
       realtimeHarness.accessToken = (options as { accessToken?: () => Promise<string | null> }).accessToken ?? null;
+    }
+    async setAuth() {
+      realtimeHarness.setAuthCount++;
+      await realtimeHarness.accessToken?.();
     }
     channel(topic: string, _options: unknown) {
       realtimeHarness.topic = topic;
@@ -28,6 +36,7 @@ vi.mock("@supabase/realtime-js", () => ({
           return channel;
         },
         subscribe: (listener: (status: string) => void) => {
+          realtimeHarness.setAuthBeforeSubscribe = realtimeHarness.setAuthCount > 0;
           realtimeHarness.status = listener;
           return channel;
         },
@@ -53,6 +62,7 @@ const fixture: api.NotificationItem = {
 
 afterEach(() => {
   cleanup(); vi.restoreAllMocks();
+  realtimeHarness.endpoint = null; realtimeHarness.setAuthCount = 0; realtimeHarness.setAuthBeforeSubscribe = false;
   realtimeHarness.broadcast = null; realtimeHarness.status = null; realtimeHarness.topic = null; realtimeHarness.accessToken = null;
   realtimeHarness.removeCount = 0; realtimeHarness.disconnectCount = 0;
 });
@@ -106,6 +116,8 @@ describe("F21 in-app notification inbox", () => {
     });
     const view = renderInbox();
     await waitFor(() => expect(realtimeHarness.broadcast).toEqual(expect.any(Function)));
+    expect(realtimeHarness.endpoint).toBe("wss://realtime.example.test/realtime/v1");
+    expect(realtimeHarness.setAuthBeforeSubscribe).toBe(true);
     expect(realtimeHarness.topic).toBe(`arden-notifications:staging:${organizationOne}:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`);
     await act(async () => { realtimeHarness.status?.("SUBSCRIBED"); });
     await act(async () => { realtimeHarness.status?.("CHANNEL_ERROR"); });
@@ -127,12 +139,13 @@ describe("F21 in-app notification inbox", () => {
     const getCredential = vi.spyOn(api, "getNotificationRealtimeCredential")
       .mockResolvedValueOnce({ endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
         accessToken: "notification-reader-token", topic: `arden-notifications:staging:${organizationOne}:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb`,
-        expiresAt: new Date(Date.now() + 30_000).toISOString() })
+        expiresAt: new Date(Date.now() + 120_000).toISOString() })
       .mockRejectedValueOnce(new api.ApiError(401, "expired"));
     renderInbox();
-    await waitFor(() => expect(realtimeHarness.accessToken).toEqual(expect.any(Function)));
+    await waitFor(() => expect(realtimeHarness.status).toEqual(expect.any(Function)));
     fireEvent.click(await screen.findByRole("button", { name: "Notifications, 1 unread" }));
     expect(await screen.findByRole("dialog", { name: "Notifications" })).toBeTruthy();
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 90_000);
     await act(async () => {
       await expect(realtimeHarness.accessToken?.()).rejects.toMatchObject({ status: 401 });
     });
