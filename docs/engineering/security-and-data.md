@@ -172,7 +172,7 @@ contributor and agent, not to one named tool.
 - Secrets include DB/auth/model/connector credentials, signing keys, backup encryption keys, session cookies, authorization headers, and credentialed URLs. Keep them out of Git, bundles, screenshots, fixtures, PR text, ordinary logs, and model inputs.
 - Store server secrets in environment/approved secret management; validate required production config and fail closed. Development defaults must never silently become production credentials.
 - Redact application/request logging and crash diagnostics before adding sensitive routes. Default Fastify logging is not proof that a future payload/header configuration is safe.
-- Audit metadata should record actor, organization, action, target/version, decision, timestamp, and correlation/idempotency reference, not full document/prompt content by default.
+- Audit only consequential actions ([decision 0035](../decisions/0035-audit-only-consequential-actions.md)): access, official knowledge, organization structure, exceptional privileges and actions that cannot be undone; not routine owner-only private-note edits. Audit metadata should record actor, organization, action, target/version, decision, timestamp, and correlation/idempotency reference, not full document/prompt content by default.
 - Restrict audit access, define retention and integrity controls, and avoid editable ordinary-user audit records. Document stronger tamper-evidence requirements if adopted; do not claim them before implementation.
 - Use synthetic test fixtures and sanitized, approved diagnostics. Suspected leaks require containment and a regression rule/test; do not copy exposed secrets into an issue or rotate customer credentials without authorized coordination.
 
