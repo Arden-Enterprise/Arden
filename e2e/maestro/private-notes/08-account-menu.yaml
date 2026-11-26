@@ -1,19 +1,18 @@
 # F03-ORG scope: the account button at the bottom-left opens a menu with
 # Settings, Trash and Log out; Trash states the 30-day retention.
-url: http://127.0.0.1:5180/?preview=1
+url: http://127.0.0.1:5180/
 name: Private Notes - account menu offers Settings, Trash and Log out
 tags:
   - private-notes
   - f03-org
 ---
-- runFlow: subflows/login-demo.yaml
+- runFlow: subflows/login.yaml
 
-- tapOn: "Lan Nguyen"
+- tapOn:
+    id: "Account menu"
 - assertVisible: "Settings"
 - assertVisible: "Trash"
-# Demo sessions currently label the sign-out item "Exit preview"; a signed-in
-# session shows "Log out". Accept both so the flow runs in demo mode.
-- assertVisible: "Log out|Exit preview"
+- assertVisible: "Log out"
 - takeScreenshot: 08-account-menu
 
 - tapOn: "Trash"
