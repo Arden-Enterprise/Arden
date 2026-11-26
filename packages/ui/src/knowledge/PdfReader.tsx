@@ -211,7 +211,7 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
     if (!layer || rendered === 0) return;
     clearMarks(layer, markClass);
     if (!highlight) return;
-    const { marks } = markQuote(layer, highlight.excerpt, markClass);
+    const { marks } = markQuote(layer, highlight.excerpt, markClass, highlight.request.samePage);
     onHighlight(marks[0] ?? null, highlight);
     // Re-run only for a finished render or a new citation request, not for a new callback identity.
   }, [rendered, highlight]);
