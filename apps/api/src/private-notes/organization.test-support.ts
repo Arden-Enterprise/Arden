@@ -75,7 +75,7 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     return [...this.collections.values()].filter((collection) => this.isActiveCollection(collection.id)).map(collectionView);
   }
 
-  async createCollection(userId: string, organizationId: string, input: { title: string; parentId: string | null }, requestId: string): Promise<PrivateCollection | null> {
+  async createCollection(userId: string, organizationId: string, input: { title: string; parentId: string | null }, _requestId: string): Promise<PrivateCollection | null> {
     if (!this.owner(userId, organizationId)) return null;
     if (input.parentId && !this.isActiveCollection(input.parentId)) return null;
     if ([...this.collections.keys()].filter((id) => this.isActiveCollection(id)).length + 1 > this.collectionLimit) {
@@ -85,12 +85,11 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     const collection: MemoryCollection = { id: randomUUID(), title: input.title, parentId: input.parentId, favoritedAt: null,
       trashedAt: null, batchId: null, status: "ACTIVE", createdAt: at, updatedAt: at };
     this.collections.set(collection.id, collection);
-    this.audit.push({ eventType: "PRIVATE_COLLECTION_CREATED", details: { collectionId: collection.id, requestId } });
     return collectionView(collection);
   }
 
   async updateCollection(userId: string, organizationId: string, collectionId: string,
-    input: { title?: string; parentId?: string | null }, requestId: string): Promise<UpdateCollectionResult> {
+    input: { title?: string; parentId?: string | null }, _requestId: string): Promise<UpdateCollectionResult> {
     if (!this.owner(userId, organizationId) || !this.isActiveCollection(collectionId)) return { kind: "not-found" };
     const collection = this.collections.get(collectionId) as MemoryCollection;
     if (input.parentId) {
@@ -102,7 +101,6 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     if (input.title !== undefined) collection.title = input.title;
     if (input.parentId !== undefined) collection.parentId = input.parentId;
     collection.updatedAt = this.now();
-    this.audit.push({ eventType: "PRIVATE_COLLECTION_UPDATED", details: { collectionId, requestId } });
     return { kind: "updated", collection: collectionView(collection) };
   }
 
@@ -130,7 +128,7 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     return this.summary(note);
   }
 
-  async setNoteArchived(userId: string, organizationId: string, draftId: string, archived: boolean, requestId: string): Promise<DraftListItem | null> {
+  async setNoteArchived(userId: string, organizationId: string, draftId: string, archived: boolean, _requestId: string): Promise<DraftListItem | null> {
     const note = this.ownedActiveNote(userId, organizationId, draftId);
     if (!note) return null;
     if (Boolean(note.archivedAt) !== archived) {
@@ -140,7 +138,6 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
         note.position = null;
         if (note.collectionId && !this.isActiveCollection(note.collectionId)) note.collectionId = null;
       }
-      this.audit.push({ eventType: archived ? "PRIVATE_DRAFT_ARCHIVED" : "PRIVATE_DRAFT_UNARCHIVED", details: { draftId, requestId } });
     }
     return this.summary(note);
   }
@@ -164,11 +161,10 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
   }
 
   async duplicateNote(userId: string, organizationId: string, from: PrivateNoteSource, title: string,
-    copy: StoredContentFields, requestId: string): Promise<PrivateDraft | null> {
+    copy: StoredContentFields, _requestId: string): Promise<PrivateDraft | null> {
     const note = this.ownedTreeNote(userId, organizationId, from.id);
     if (!note || note.content().versionId !== from.versionId) return null;
     const created = this.copyNote(title, note.collectionId, copy);
-    this.audit.push({ eventType: "PRIVATE_DRAFT_DUPLICATED", details: { draftId: created.id, sourceDraftId: from.id, requestId } });
     const content = created.content();
     return {
       id: created.id, organizationId, title, versionId: content.versionId, sourceUri: copy.sourceUri, mimeType: copy.mimeType,
@@ -183,7 +179,7 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
   }
 
   async duplicateCollection(userId: string, organizationId: string, snapshot: PrivateCollectionSubtree, rootTitle: string,
-    copies: ReadonlyMap<string, StoredContentFields>, requestId: string): Promise<PrivateDuplicatedCollection | "changed" | null> {
+    copies: ReadonlyMap<string, StoredContentFields>, _requestId: string): Promise<PrivateDuplicatedCollection | "changed" | null> {
     if (!this.owner(userId, organizationId) || !this.isActiveCollection(snapshot.root.id)) return null;
     const current = this.subtree(snapshot.root.id);
     if (JSON.stringify(current.notes.map((note) => note.versionId)) !== JSON.stringify(snapshot.notes.map((note) => note.versionId))) return "changed";
@@ -199,29 +195,26 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     });
     const notes = current.notes.map((note) => this.summary(this.copyNote(note.title,
       newIds.get(note.collectionId ?? "") ?? null, copies.get(note.id) as StoredContentFields)));
-    this.audit.push({ eventType: "PRIVATE_COLLECTION_CREATED", details: { collectionId: collections[0]?.id, requestId } });
     return { collection: collections[0] as PrivateCollection, collections, notes };
   }
 
-  async trashNote(userId: string, organizationId: string, draftId: string, requestId: string): Promise<PrivateTrashEntry | null> {
+  async trashNote(userId: string, organizationId: string, draftId: string, _requestId: string): Promise<PrivateTrashEntry | null> {
     const note = this.ownedActiveNote(userId, organizationId, draftId);
     if (!note) return null;
     const batchId = randomUUID();
     note.trashedAt = this.now();
     note.batchId = batchId;
     note.archivedAt = null;
-    this.audit.push({ eventType: "PRIVATE_ITEM_TRASHED", details: { batchId, kind: "note", itemCount: 1, requestId } });
     return this.entries().find((entry) => entry.batchId === batchId) ?? null;
   }
 
-  async trashCollection(userId: string, organizationId: string, collectionId: string, requestId: string): Promise<PrivateTrashEntry | null> {
+  async trashCollection(userId: string, organizationId: string, collectionId: string, _requestId: string): Promise<PrivateTrashEntry | null> {
     if (!this.owner(userId, organizationId) || !this.isActiveCollection(collectionId)) return null;
     const subtree = this.subtree(collectionId);
     const batchId = randomUUID();
     const at = this.now();
     for (const collection of subtree.collections) Object.assign(this.collections.get(collection.id) as MemoryCollection, { trashedAt: at, batchId });
     for (const note of subtree.notes) Object.assign(this.notes.get(note.id) as MemoryNote, { trashedAt: at, batchId });
-    this.audit.push({ eventType: "PRIVATE_ITEM_TRASHED", details: { batchId, kind: "collection", requestId } });
     return this.entries().find((entry) => entry.batchId === batchId) ?? null;
   }
 
@@ -230,7 +223,7 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
     return this.owner(userId, organizationId) ? this.entries() : [];
   }
 
-  async restoreTrash(userId: string, organizationId: string, batchId: string, requestId: string): Promise<{ collections: PrivateCollection[]; notes: DraftListItem[] } | null> {
+  async restoreTrash(userId: string, organizationId: string, batchId: string, _requestId: string): Promise<{ collections: PrivateCollection[]; notes: DraftListItem[] } | null> {
     if (!this.owner(userId, organizationId)) return null;
     const { notes, collections } = this.batch(batchId);
     const root = this.entries().find((entry) => entry.batchId === batchId);
@@ -243,7 +236,6 @@ export class MemoryPrivateOrganizationStore implements PrivateOrganizationStore 
       if (collection.parentId && !this.isActiveCollection(collection.parentId)) collection.parentId = null;
     }
     for (const item of [...notes, ...collections]) Object.assign(item, { trashedAt: null, batchId: null });
-    this.audit.push({ eventType: "PRIVATE_ITEM_RESTORED", details: { batchId, requestId } });
     return { collections: collections.map(collectionView), notes: notes.map((note) => this.summary(note)) };
   }
 

@@ -1285,8 +1285,8 @@ describe("API auth and private draft routes", () => {
       expect(list.statusCode).toBe(200);
       expect(list.headers["cache-control"]).toBe("no-store");
       expect(list.json().items.map((item: { title: string }) => item.title).sort()).toEqual(["Child", "Projects"]);
-      expect(repository.privateOrganization.audit.map((event) => event.eventType)).toContain("PRIVATE_COLLECTION_UPDATED");
-      expect(JSON.stringify(repository.privateOrganization.audit)).not.toContain("Projects");
+      // Decision 0035: collection changes are routine owner-only actions and are not audited.
+      expect(repository.privateOrganization.audit).toEqual([]);
 
       repository.privateOrganization.collectionLimit = 2;
       const overLimit = await app.inject({ method: "POST", url: `${base}/collections`, headers, payload: { title: "Third" } });
@@ -1441,9 +1441,8 @@ describe("API auth and private draft routes", () => {
       expect(restored.json().favoritedAt).not.toBeNull();
       expect((await app.inject({ method: "GET", url: `${base}/archive`, headers })).json().items).toEqual([]);
       expect((await app.inject({ method: "GET", url: `${base}/drafts`, headers })).json().items).toHaveLength(1);
-      expect(repository.privateOrganization.audit.map((event) => event.eventType))
-        .toEqual(expect.arrayContaining(["PRIVATE_DRAFT_ARCHIVED", "PRIVATE_DRAFT_UNARCHIVED"]));
-      expect(JSON.stringify(repository.privateOrganization.audit)).not.toContain("Review notes");
+      // Decision 0035: archiving is a routine owner-only action and is not audited.
+      expect(repository.privateOrganization.audit).toEqual([]);
 
       // Delete from the Archived view is Move to trash, which clears the archive flag.
       await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: true } });

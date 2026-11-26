@@ -269,7 +269,7 @@ describe("ArdenShell entry addresses", () => {
     window.history.replaceState(null, "", "/ask");
     render(createElement(ArdenShell, { platform: "web" }));
     expect(await screen.findByRole("heading", { name: "Choose your workspace" })).toBeTruthy();
-    expect(window.location.pathname).toBe("/workspaces");
+    await waitFor(() => expect(window.location.pathname).toBe("/workspaces"));
     fireEvent.click(screen.getAllByRole("button", { name: /Other Org/i })[0]);
     await waitFor(() => expect(window.location.pathname).toBe("/ask"));
     cleanup();
@@ -288,6 +288,6 @@ describe("ArdenShell entry addresses", () => {
     await enterWorkspace();
     fireEvent.click(screen.getByRole("button", { name: /Workspace: Test Org/i }));
     expect(await screen.findByRole("heading", { name: "Choose your workspace" })).toBeTruthy();
-    expect(window.location.pathname).toBe("/workspaces");
+    await waitFor(() => expect(window.location.pathname).toBe("/workspaces"));
   });
 });

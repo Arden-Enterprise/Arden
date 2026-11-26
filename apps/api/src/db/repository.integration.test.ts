@@ -329,8 +329,9 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(concurrentUpdates.filter((result) => result.kind === "updated")).toHaveLength(1);
     expect(concurrentUpdates.filter((result) => result.kind === "conflict")).toEqual([{ kind: "conflict", currentVersion: 3 }]);
     await expect(repository.getDraft(ids.owner, ids.organization, created.id)).resolves.toMatchObject({ currentVersion: 3 });
+    // Decision 0035: creating and saving a private note are routine owner-only actions and are not audited.
     const audit = await pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM arden.audit_event WHERE organization_id = $1 AND event_type LIKE 'PRIVATE_DRAFT_%'`, [ids.organization]);
-    expect(audit.rows[0]?.count).toBe("3");
+    expect(audit.rows[0]?.count).toBe("0");
     const connectionContext = await pool.query<{ role_name: string; actor_id: string | null }>(`SELECT current_user AS role_name, current_setting('arden.actor_id', true) AS actor_id`);
     expect(connectionContext.rows[0]?.role_name).not.toBe("arden_runtime");
     expect([null, ""]).toContain(connectionContext.rows[0]?.actor_id);
@@ -1280,17 +1281,21 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(versions.rows[0]?.count).toBe("1");
     await expect(store.listTrash(ids.owner, ids.organization)).resolves.toEqual([expect.objectContaining({ kind: "collection", id: parent!.id })]);
     await expect(store.restoreTrash(ids.owner, ids.organization, expired!.batchId, "org-restore-purged")).resolves.toBeNull();
-    const audit = await pool.query<{ details_json: unknown }>(`SELECT details_json FROM arden.audit_event
-      WHERE organization_id = $1 AND event_type LIKE 'PRIVATE_%' AND event_type NOT LIKE 'PRIVATE_DRAFT_CREATED'
-        AND event_type NOT LIKE 'PRIVATE_DRAFT_UPDATED'`, [ids.organization]);
-    expect(audit.rows.length).toBeGreaterThan(0);
-    expect(JSON.stringify(audit.rows)).not.toMatch(/Owner parent|Owner child|Organized/);
+    // Decision 0035: collections, trash and restore are routine owner-only actions and are not audited.
+    const routine = await pool.query<{ count: string }>(`SELECT count(*)::text AS count FROM arden.audit_event
+      WHERE organization_id = $1 AND event_type IN ('PRIVATE_COLLECTION_CREATED', 'PRIVATE_COLLECTION_UPDATED',
+        'PRIVATE_ITEM_TRASHED', 'PRIVATE_ITEM_RESTORED', 'PRIVATE_DRAFT_DUPLICATED')`, [ids.organization]);
+    expect(routine.rows[0]?.count).toBe("0");
 
-    // Owner purge of the remaining parent batch.
+    // Owner purge of the remaining parent batch: permanent deletion stays audited, without titles.
     const parentBatch = (await store.listTrash(ids.owner, ids.organization))![0]!.batchId;
     await expect(store.purgeTrash(ids.manager, ids.organization, parentBatch, "org-purge-steal")).resolves.toBeNull();
     await expect(store.purgeTrash(ids.owner, ids.organization, parentBatch, "org-purge")).resolves.toEqual([]);
     await expect(store.listCollections(ids.owner, ids.organization)).resolves.toEqual([]);
+    const purgeAudit = await pool.query<{ details_json: unknown }>(`SELECT details_json FROM arden.audit_event
+      WHERE organization_id = $1 AND event_type = 'PRIVATE_ITEM_PURGED'`, [ids.organization]);
+    expect(purgeAudit.rows.length).toBeGreaterThan(0);
+    expect(JSON.stringify(purgeAudit.rows)).not.toMatch(/Owner parent|Owner child|Organized/);
   }, 30_000);
 
   it("orders and archives notes owner-only without moving their saved time (spec F03-ARR)", async () => {
@@ -1367,8 +1372,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     expect(row.rows[0]).toMatchObject({ archived_at: null, trashed_at: expect.any(Date) });
     const audit = await pool.query<{ details_json: unknown }>(`SELECT details_json FROM arden.audit_event
       WHERE organization_id = $1 AND event_type IN ('PRIVATE_DRAFT_ARCHIVED', 'PRIVATE_DRAFT_UNARCHIVED')`, [ids.organization]);
-    expect(audit.rows).toHaveLength(3);
-    expect(JSON.stringify(audit.rows)).not.toMatch(/Third|Arrange shelf/);
+    // Decision 0035: archiving is a routine owner-only action and is not audited.
+    expect(audit.rows).toHaveLength(0);
   }, 30_000);
 
   it("overwrites a note's open version, seals it on contribution and keeps sealed versions immutable (decision 0031)", async () => {

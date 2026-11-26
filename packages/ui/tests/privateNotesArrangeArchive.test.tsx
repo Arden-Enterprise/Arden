@@ -41,8 +41,7 @@ function Workspace({ seedNotes = notes, seedCollections = collections, connect }
   controllerRef = controller;
   return createElement("div", { className: "arden-app-shell" },
     createElement(AppSidebar, {
-      activeView: "personal-workspace", platform: "web", previewRole: "member", organization: null,
-      memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
+      activeView: "personal-workspace", platform: "web", memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
       privateNotes: { controller, pageVisible: true, onOpen: vi.fn() },
       trashCount: controller.trash.length, onOpenTrash: () => controller.openTrash(), onOpenArchive: () => controller.openArchive(),
     }),
@@ -210,7 +209,7 @@ describe("archived notes", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Account menu" }));
     expect(within(screen.getByRole("menu", { name: "Account" })).getAllByRole("menuitem").map(textOf))
-      .toEqual(["Settings", "Archived", "Trash", "Exit preview"]);
+      .toEqual(["Settings", "Archived", "Trash", "Log out"]);
     await act(async () => fireEvent.click(menuItem("Archived")));
     const page = screen.getByRole("region", { name: "Archived notes" });
     expect(within(page).getByRole("region", { name: "From Private" })).toBeTruthy();

@@ -100,8 +100,7 @@ function Workspace({ connect, onOpen }: { connect?: boolean; onOpen?: () => void
   controllerRef = controller;
   return createElement("div", { className: "arden-app-shell" },
     createElement(AppSidebar, {
-      activeView: onOpen ? "knowledge" : "personal-workspace", platform: "web", previewRole: "member", organization: null,
-      memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
+      activeView: onOpen ? "knowledge" : "personal-workspace", platform: "web", memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
       privateNotes: { controller, pageVisible: !onOpen, onOpen: onOpen ?? vi.fn() },
     }),
     createElement(PersonalWorkspacePage, {
