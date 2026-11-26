@@ -543,7 +543,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const deliveredIds: string[] = [];
     let deliveryAttempts = 0;
     const worker = new NotificationOutboxWorker(randomUUID(), notificationPool, {
-      endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
+      endpoint: "https://realtime.example.test/realtime/v1",
       signingKey: new TextEncoder().encode("ab".repeat(32)), namespace: "test-slot",
     }, { info: () => undefined, warn: () => undefined, error: () => undefined }, async (_configuration, event) => {
       if (event.notificationId !== targetNotificationId) return;
@@ -577,7 +577,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
       WHERE notification_id = $1`, [targetNotificationId]);
     const exhausted = new NotificationOutboxWorker(randomUUID(), notificationPool, {
-      endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
+      endpoint: "https://realtime.example.test/realtime/v1",
       signingKey: new TextEncoder().encode("ab".repeat(32)), namespace: "test-slot",
     }, { info: () => undefined, warn: () => undefined, error: () => undefined }, async () => {
       throw new Error("REALTIME_HTTP_503");

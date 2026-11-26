@@ -216,7 +216,7 @@ function startNotificationStream(parent: BrowserWindow, organizationId: string):
       refreshPromise ??= requestNotificationCredential(organizationId).finally(() => { refreshPromise = null; });
       try {
         const next = await refreshPromise;
-        if (next.endpoint !== credential.endpoint || next.apiKey !== credential.apiKey || next.topic !== credential.topic) {
+        if (next.endpoint !== credential.endpoint || next.topic !== credential.topic) {
           throw new Error("Notification channel scope changed");
         }
         credential = next;
@@ -229,10 +229,17 @@ function startNotificationStream(parent: BrowserWindow, organizationId: string):
         throw error;
       }
     };
-    const client = new RealtimeClient(credential.endpoint, {
+    const wsEndpoint = new URL(credential.endpoint);
+    wsEndpoint.protocol = wsEndpoint.protocol === "https:" ? "wss:" : "ws:";
+    const client = new RealtimeClient(wsEndpoint.toString().replace(/\/$/, ""), {
       params: { apikey: credential.apiKey },
       accessToken: async () => (await refresh()).accessToken,
     });
+    await client.setAuth();
+    if (parent.isDestroyed()) {
+      await client.disconnect();
+      return;
+    }
     const channel = client.channel(credential.topic, { config: { private: true } });
     let subscribed = false;
     channel.on("broadcast", { event: "notification" }, (message) => {
