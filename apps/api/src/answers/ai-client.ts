@@ -9,6 +9,7 @@ export interface AskArdenClient {
   retrieve(request: RetrievalRequest): Promise<RetrievalResponse>;
   generate(request: GenerationRequest): Promise<GenerationResponse>;
   writing?(request: unknown): Promise<unknown>;
+  reviewSubmission?(request: unknown): Promise<unknown>;
 }
 
 export class ArdenAiAnswerError extends Error {
@@ -48,6 +49,10 @@ export class HttpAskArdenClient implements AskArdenClient {
 
   async writing(request: unknown): Promise<unknown> {
     return this.post("/v1/writing-actions", request, 64 * 1024, 65_000);
+  }
+
+  async reviewSubmission(request: unknown): Promise<unknown> {
+    return this.post("/v1/submission-reviews", request, 32 * 1024, 65_000);
   }
 
   private async post(path: string, payload: unknown, responseLimit = maxResponseBytes, timeoutMs = this.timeoutMs): Promise<unknown> {

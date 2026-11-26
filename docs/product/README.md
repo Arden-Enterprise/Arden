@@ -22,7 +22,7 @@ Each group document distinguishes current main, branch-only alternatives, observ
 | F06 | Installation System Admin | [Identity and access](identity-and-access.md#f06-installation-administration) | API foundation; System Admin UI/rehearsal pending in main inventory |
 | F07 | Create a shared draft or contribute a separate copy | [Knowledge lifecycle](knowledge-lifecycle.md#f07-creation-and-contribution) | Main slices; preserve private original |
 | F08 | Canonical document versions and import | [Knowledge lifecycle](knowledge-lifecycle.md#f08-content-versions-and-import) | Semantic Document contract is branch-only; import breadth not certified |
-| F09 | Immutable submission and review decisions | [Knowledge lifecycle](knowledge-lifecycle.md#f09-submission-and-review) | Material main/branch contract conflict G1/G3 |
+| F09 | Immutable submission, reviewer assistance and review decisions | [Knowledge lifecycle](knowledge-lifecycle.md#f09-submission-and-review) | Reviewer AI is implemented locally with a paired Arden-AI endpoint and organization opt-in. Historical review reconciliation is tracked under G1/G3. |
 | F10 | Publication, activation and withdrawal | [Knowledge lifecycle](knowledge-lifecycle.md#f10-publication-and-activation) | Main/branch activation contract conflict G1 |
 | F11 | Published library and search | [Graph, AI and work](graph-ai-and-work.md#f11-library-and-search) | KM2 supersedes Topic/mixed-reader Collections for the new flow; local P1 scope/P2 Topic-free contribution tested, Home/Collection/data rollout remains separate in owning spec |
 | F12 | Graph navigation, selected-item details and context | [Graph, AI and work](graph-ai-and-work.md#f12-graph-and-context) | Planned; ARD-50 records requested UI and acceptance |

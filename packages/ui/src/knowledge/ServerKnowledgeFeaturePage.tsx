@@ -21,6 +21,7 @@ import type { Platform } from "../shared/types";
 import { PdfDocument, PdfViewer, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
 import { PdfReader } from "./PdfReader";
 import { ReviewList, initialsOf } from "./ReviewList";
+import { SubmissionReviewAi } from "./SubmissionReviewAi";
 import { reviewRequestPresentation } from "./reviewRequest";
 import { libraryDateLabel } from "./libraryDisplay";
 import { ownerDepartment } from "./readerSelection";
@@ -1247,6 +1248,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                   </>}
                 </dl>
               </section>
+              {review.reviewAiAvailable && <SubmissionReviewAi key={`${organizationId}:${review.id}:${review.snapshotVersionId}`}
+                review={review} platform={platform} organizationId={organizationId} disabled={busy} />}
               <ApprovedReadersField review={review} value={approvedReaders} departments={options?.departments ?? []}
                 departmentName={departmentName} busy={busy} platform={platform} organizationId={organizationId}
                 onChange={value => { setApprovedReaders(value); setDecisionToConfirm(null); }} />

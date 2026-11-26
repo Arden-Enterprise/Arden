@@ -1,6 +1,6 @@
 import type { Platform } from "./types";
 import { rememberReturnPath } from "../app/workspaceRoute";
-import type { KnowledgeMetadata, PublicationScope, KnowledgeType } from "@arden/domain";
+import type { KnowledgeMetadata, PublicationScope, KnowledgeType, SubmissionReviewResult } from "@arden/domain";
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
   departmentId: string | null; memberIds: string[] };
@@ -194,6 +194,7 @@ export type ProposedReadersDetail = {
   members: Array<{ membershipId: string; displayName: string | null }>;
 };
 export type KnowledgeReviewDetail = KnowledgeSubmission & {
+  reviewAiAvailable?: boolean;
   /** Absent from older servers and null for a legacy audience submission. */
   proposedReaders?: ProposedReadersDetail | null;
   body: string;
@@ -420,6 +421,14 @@ export async function listKnowledgeReviewBoard(platform: Platform, organizationI
 
 export function loadKnowledgeReview(platform: Platform, organizationId: string, submissionId: string): Promise<KnowledgeReviewDetail> {
   return request(platform, `${knowledgePath(organizationId)}/reviews/${submissionId}`);
+}
+
+export function runSubmissionReview(platform: Platform, organizationId: string, review: KnowledgeReviewDetail,
+  signal: AbortSignal): Promise<SubmissionReviewResult> {
+  return request(platform, `${knowledgePath(organizationId)}/reviews/${review.id}/ai-review`, {
+    method: "POST", signal,
+    body: JSON.stringify({ snapshotVersionId: review.snapshotVersionId, snapshotContentHash: review.contentHash }),
+  }, platform === "web" ? 85_000 : undefined);
 }
 
 /**

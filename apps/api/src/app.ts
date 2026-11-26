@@ -18,6 +18,7 @@ import { registerReaderQuestionRoutes } from "./reader-ai/question-routes.js";
 import { registerPrivateNoteQuestion } from "./private-notes/question.js";
 import { privateFeedbackTickets, registerPrivateFeedbackRoute } from "./private-notes/feedback.js";
 import { registerWritingRoutes } from "./writing/routes.js";
+import { registerReviewerAiRoutes } from "./knowledge/review-ai-routes.js";
 import type { ReaderAiClient } from "./reader-ai/summary.js";
 import { canRead, readerModes, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
 import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
@@ -60,6 +61,7 @@ type AppDependencies = {
   invitationDeliveryMode?: "email" | "local-test-no-email";
   askArden?: AskArdenClient | null;
   privateNoteAiOrganizations?: ReadonlySet<string>;
+  reviewerAiOrganizations?: ReadonlySet<string>;
   readerAi?: ReaderAiClient | null;
   notificationRealtime?: NotificationRealtimeConfiguration | null;
   testActor?: SessionContext;
@@ -123,6 +125,9 @@ export function buildApp(dependencies: AppDependencies) {
     requestActor, uuidPattern, privateAiOrganizations, feedbackTickets);
   registerWritingRoutes(app, dependencies.repository, dependencies.askArden ?? null,
     requestActor, uuidPattern, privateAiOrganizations);
+  const reviewerAiOrganizations = dependencies.reviewerAiOrganizations ?? new Set<string>();
+  registerReviewerAiRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null,
+    requestActor, uuidPattern, reviewerAiOrganizations);
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
   registerNotificationRoutes(app, { repository: dependencies.repository,
     store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
@@ -1916,6 +1921,8 @@ export function buildApp(dependencies: AppDependencies) {
         }
         reply.header("Cache-Control", "no-store");
         return { ...representSubmission(detail.submission), ...content, mimeType: detail.mimeType,
+          reviewAiAvailable: detail.submission.requestType === "CONTENT" && Boolean(dependencies.askArden?.reviewSubmission)
+            && reviewerAiOrganizations.has(organizationId),
           submittedByMembershipId: detail.submittedByMembershipId,
           teamTag: detail.teamTag, projectTag: detail.projectTag, proposedReaders: detail.proposedReaders };
       } catch (error) {

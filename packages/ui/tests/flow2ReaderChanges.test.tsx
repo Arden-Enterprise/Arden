@@ -62,6 +62,25 @@ describe("T2.2 reviewer approves fewer readers", () => {
     return dialog;
   }
 
+  it("shows AI evidence on demand and keeps the decision manual", async () => {
+    const detail = { ...reviewDetail(null, "CONTENT"), reviewAiAvailable: true };
+    const ai = vi.spyOn(api, "runSubmissionReview").mockResolvedValue({
+      contractVersion: 1, requestId: "request", snapshotVersionId: detail.snapshotVersionId,
+      snapshotContentHash: detail.contentHash,
+      summary: [{ text: "Describes the reimbursement process.", citation: { excerpt: "Managers approve claims.", page: 2 } }],
+      checks: [{ category: "CLARITY", text: "Verify which manager approves.", citation: { excerpt: "Managers approve claims.", page: 2 } }],
+    });
+    const decide = await openReview(detail);
+    expect(ai).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Review with AI" }));
+    const result = await screen.findByRole("region", { name: "AI review results" });
+    expect(within(result).getByText("Describes the reimbursement process.")).toBeTruthy();
+    expect(within(result).getAllByText("Source excerpt · page 2")).toHaveLength(2);
+    expect(decide).not.toHaveBeenCalled();
+    await confirmApproval();
+    await waitFor(() => expect(decide).toHaveBeenCalledOnce());
+  });
+
   it("approves the proposed readers without sending approved readers", async () => {
     const decide = await openReview(reviewDetail({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: ["m1", "m2", "m3"] }));
     expect(screen.getByRole("radio", { name: /Proposed readers/ })).toHaveProperty("checked", true);

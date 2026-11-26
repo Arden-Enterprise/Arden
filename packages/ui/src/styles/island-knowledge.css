@@ -99,6 +99,16 @@
 .review-frozen dt { color: var(--arden-text-muted); }
 .review-frozen dd { min-width: 0; margin: 0; overflow: hidden; color: var(--arden-text-primary); text-overflow: ellipsis; white-space: nowrap; }
 .island-note.review-blocked-note { margin: 0; padding: 10px 12px; font-size: 12px; }
+.review-ai { padding-top: 14px; border-top: 1px solid var(--arden-border); font-size: 13px; }
+.review-ai > button { display: inline-flex; align-items: center; gap: 7px; }
+.review-ai p { margin: 0; }
+.review-ai > p { margin-top: 8px; }
+.review-ai h4 { margin: 12px 0 6px; font-size: 13px; }
+.review-ai ul { display: grid; gap: 8px; margin: 0; padding-inline-start: 18px; }
+.review-ai .review-ai-hint, .review-ai summary { color: var(--arden-text-muted); }
+.review-ai summary { margin-top: 4px; cursor: pointer; }
+.review-ai blockquote { margin: 4px 0 0; padding-inline-start: 8px; border-inline-start: 2px solid var(--arden-border-strong); white-space: pre-wrap; }
+.review-ai li { overflow-wrap: anywhere; }
 .review-note { display: grid; gap: 8px; }
 .review-note-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--arden-text-secondary); font-size: 13px; font-weight: 500; }
 .review-note-label small { color: var(--arden-text-muted); font-size: 12px; font-weight: 400; }
