@@ -8,8 +8,7 @@ import type { SettingsSectionProps } from "../types";
 export function AccountSettingsSection({
   platform,
   session,
-  organization,
-  organizationName = organization?.name,
+  organizationName,
   memberName = "Member",
   memberRole = "Member",
   memberDepartment,
@@ -119,8 +118,8 @@ export function AccountSettingsSection({
           <div className="settings-banner settings-banner-info">
             <Icon name="warning" size={16} />
             <div>
-              <strong>Sample Preview Session</strong>
-              <p>Password updates and credential management are available when connected to an authenticated organization workspace.</p>
+              <strong>Not signed in</strong>
+              <p>Sign in to change your password.</p>
             </div>
           </div>
         ) : (
@@ -222,7 +221,7 @@ export function AccountSettingsSection({
           </div>
           <div>
             <dt>Session State</dt>
-            <dd>{session ? "Authenticated" : "Sample Preview"}</dd>
+            <dd>{session ? "Authenticated" : "Signed out"}</dd>
           </div>
           {session?.testMode && (
             <div>
@@ -246,7 +245,7 @@ export function AccountSettingsSection({
               onClick={onSignOut}
             >
               <Icon name="logout" size={16} />
-              <span>{session ? "Log out" : "Exit preview"}</span>
+              <span>Log out</span>
             </button>
           </div>
         )}

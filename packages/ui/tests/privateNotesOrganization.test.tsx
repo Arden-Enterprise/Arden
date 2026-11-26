@@ -43,8 +43,7 @@ function Workspace({ seedNotes = notes, seedCollections = collections, connect }
   controllerRef = controller;
   return createElement("div", { className: "arden-app-shell" },
     createElement(AppSidebar, {
-      activeView: "personal-workspace", platform: "web", previewRole: "member", organization: null,
-      memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
+      activeView: "personal-workspace", platform: "web", memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
       privateNotes: { controller, pageVisible: true, onOpen: vi.fn() },
       trashCount: controller.trash.length, onOpenTrash: () => controller.openTrash(),
     }),
@@ -279,8 +278,8 @@ describe("account menu", () => {
     expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
     fireEvent.click(trigger);
     const menu = screen.getByRole("menu", { name: "Account" });
-    expect(within(menu).getByText("Member · FPT Digital")).toBeTruthy();
-    expect(within(menu).getAllByRole("menuitem").map(textOf)).toEqual(["Settings", "Trash", "Exit preview"]);
+    expect(within(menu).getByText("Member · Organization")).toBeTruthy();
+    expect(within(menu).getAllByRole("menuitem").map(textOf)).toEqual(["Settings", "Trash", "Log out"]);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu", { name: "Account" })).toBeNull();
     expect(document.activeElement).toBe(trigger);

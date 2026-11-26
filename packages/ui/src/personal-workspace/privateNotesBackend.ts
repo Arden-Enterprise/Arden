@@ -117,7 +117,7 @@ type DemoArchived = { note: LoadedNote; archivedAt: string };
 const TRASH_RETENTION_MS = 30 * 86_400_000;
 
 /**
- * In-memory stand-in used by the sign-in Demo and `?preview=1`. Nothing leaves this
+ * In-memory stand-in used before the controller connects to the server, and by tests. Nothing leaves this
  * browser tab or is written to storage; refreshing or exiting clears it (DESIGN.md private-note contract).
  */
 export function createDemoBackend(seed: { notes: PrivateNote[]; collections: PrivateCollection[] }, now: () => Date = () => new Date()): PrivateNotesBackend {

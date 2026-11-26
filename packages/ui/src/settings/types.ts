@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import type { Platform } from "../shared/types";
 import type { CurrentSession } from "../shared/api-client";
-import type { OrganizationPreview } from "../organization/previewModel";
 import type { IconName } from "../shared/Icon";
 
 /**
@@ -12,7 +11,6 @@ import type { IconName } from "../shared/Icon";
 export type SettingsSectionProps = {
   platform: Platform;
   session: CurrentSession | null;
-  organization: OrganizationPreview | null;
   organizationName?: string;
   memberName?: string;
   memberRole?: string;

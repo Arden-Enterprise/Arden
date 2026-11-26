@@ -181,9 +181,6 @@
 .auth-google-button { border: 1px solid rgb(242 241 247 / .14); color: var(--arden-warm); background: rgb(242 241 247 / .045); }
 .auth-google-button:hover:not(:disabled) { border-color: rgb(139 130 246 / .46); background: rgb(139 130 246 / .08); }
 .auth-google-mark { display: block; flex: none; width: 18px; height: 18px; }
-.auth-preview-tools { margin-top: 14px; color: var(--arden-text-muted); font-size: 11px; text-align: center; }
-.auth-preview-tools summary { cursor: pointer; }
-.auth-preview-tools button { margin: 8px 4px 0; padding: 5px 8px; border: 1px solid var(--arden-line); border-radius: 5px; color: var(--arden-text-secondary); background: transparent; font-size: 10px; }
 .auth-eyebrow { display: block; margin-bottom: 10px; color: var(--arden-accent); font-family: "Sora", sans-serif; font-size: 9px; font-weight: 650; letter-spacing: .1em; text-align: center; }
 .auth-account-email { display: block; margin: 9px 0 24px; color: var(--arden-text-muted); font-size: 12px; text-align: center; }
 .auth-password-card .auth-card-main { margin-bottom: 7px; }

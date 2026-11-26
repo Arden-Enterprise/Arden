@@ -114,7 +114,7 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
 
   return (
     <main id="arden-main" className="workspace-page" aria-labelledby="personal-workspace-title" tabIndex={-1}>
-      <WorkspaceTopbar breadcrumb={breadcrumb} crumbs={crumbs} previewLabel={serverBacked ? undefined : "Demo"} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={contributionPanel} />
+      <WorkspaceTopbar breadcrumb={breadcrumb} crumbs={crumbs} contextOpen={contextOpen} onToggleContext={onToggleContext} panel={contributionPanel} />
       <WorkspacePageContent className="personal-content is-single is-editing-note" header={<WorkspacePageHeader className="personal-title-row"
         eyebrow="WORK"
         title="Private"
@@ -128,11 +128,11 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
         {notice && <ActionToast key={notice.id} message={notice.message} onDismiss={() => setDismissedNotice(notice.id)} />}
         <div className="personal-grid">
           {view === "note" && current && <PrivateNoteEditor key={current.id} selectedNote={selectedNote} draftTitle={draft.title} draftBody={draft.body} isDirty={isDirty}
-            savedMessage={saveMessage || state.savedMessage || (serverBacked ? "" : "Demo · Cleared on refresh")}
+            savedMessage={saveMessage || state.savedMessage}
             toolbar={<>
               <FavoriteToggle item={current} controller={controller} disabled={pending || busyAction === "favorite"} />
               <span className="island-chip"><Icon name="lock" size={12} />Only you</span>
-              <span className="private-state" aria-live="polite">{controller.autosaving ? "Saving…" : isDirty ? "Unsaved changes" : serverBacked ? "Saved" : "Saved · Demo"}</span>
+              <span className="private-state" aria-live="polite">{controller.autosaving ? "Saving…" : isDirty ? "Unsaved changes" : "Saved"}</span>
               <span className="note-toolbar-spacer" />
               {isDirty && <button type="button" className="secondary-button" disabled={saving} onClick={() => setDiscarding(true)}>Discard changes</button>}
               {serverBacked && <button type="button" className="secondary-button" disabled={!sourceVersionId || isDirty || saving} onClick={() => setContributionOpen(true)}><Icon name="layers" size={14} />Create review draft</button>}
@@ -184,7 +184,6 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
           {view === "root" && <section className="pn-page" aria-labelledby="private-root-title">
             <div className="pn-page-toolbar">
               <span className="island-chip"><Icon name="lock" size={12} />Only you</span>
-              <span className="private-state">{serverBacked ? "" : "Demo · Cleared on refresh"}</span>
             </div>
             <div className="pn-page-body">
               <div className="pn-page-heading">

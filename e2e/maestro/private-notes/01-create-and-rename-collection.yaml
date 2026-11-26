@@ -1,11 +1,11 @@
 # F03-ORG-AC2: create a collection and rename it.
-url: http://127.0.0.1:5180/?preview=1
+url: http://127.0.0.1:5180/
 name: Private Notes - create and rename a collection
 tags:
   - private-notes
   - f03-org
 ---
-- runFlow: subflows/login-demo.yaml
+- runFlow: subflows/login.yaml
 
 - runFlow:
     file: subflows/create-collection.yaml

@@ -1,6 +1,6 @@
 # Private Notes organization: Maestro web flows
 
-End-to-end flows for [F03-ORG collections, favorites and trash](../../../docs/product/identity-and-access.md) (ADR 0029), driven by [Maestro](https://maestro.dev) against the web app in demo mode. No API, database or account is needed: the demo session keeps private notes in memory and resets on each launch.
+End-to-end flows for [F03-ORG collections, favorites and trash](../../../docs/product/identity-and-access.md) (ADR 0029), driven by [Maestro](https://maestro.dev) against the web app signed in with a synthetic account. Arden has no demo mode, so the flows need the local API in local Mainflow 1 test mode (`ARDEN_LOCAL_FLOW1_TEST_MODE=true`, an `@example.test` account in `ARDEN_LOCAL_TEST_USERS`) on a disposable `arden_test_*` database, and an organization that account belongs to. Notes and collections the flows create stay in that database: use a fresh one for each full run (flow 08 expects an empty Trash).
 
 These flows exercise the UI only. They are not evidence for the server or RLS acceptance paths (owner-only access, purge job, If-Match conflicts).
 
@@ -12,13 +12,13 @@ These flows exercise the UI only. They are not evidence for the server or RLS ac
 
 ## Run
 
-1. Start the web app (Vite, `127.0.0.1:5180`, strict port):
+1. Start the API in local test mode on a disposable database, then the web app (Vite, `127.0.0.1:5180`, strict port):
 
    ```sh
    pnpm dev:web
    ```
 
-2. In another terminal, run the flows:
+2. In another terminal, set `ARDEN_E2E_EMAIL`, `ARDEN_E2E_PASSWORD` and `ARDEN_E2E_ORGANIZATION` for the synthetic account, then run the flows:
 
    ```sh
    pnpm e2e:private-notes
@@ -34,8 +34,8 @@ These flows exercise the UI only. They are not evidence for the server or RLS ac
 
 | Path | Purpose |
 | --- | --- |
-| `01`–`08-*.yaml` | Feature flows. Each is independent and starts a fresh demo session. |
-| `subflows/` | Shared steps: demo login, create collection/note, inline title entry, row menu, Trash. Not run on their own. |
+| `01`–`08-*.yaml` | Feature flows. Each signs in again with a cleared browser state. |
+| `subflows/` | Shared steps: sign-in, create collection/note, inline title entry, row menu, Trash. Not run on their own. |
 | `smoke/` | Harness check against the pre-feature Private Notes page (login + page opens). |
 | `config.yaml` | Runs only the top-level flows when the folder is the target. |
 
@@ -43,7 +43,7 @@ These flows exercise the UI only. They are not evidence for the server or RLS ac
 | --- | --- |
 | `01-create-and-rename-collection` | F03-ORG-AC2 |
 | `02-create-note-in-collection` | F03-ORG-AC2 |
-| `03-favorite-and-unfavorite` | F03-ORG-AC3 (reload persistence not covered: demo resets on reload) |
+| `03-favorite-and-unfavorite` | F03-ORG-AC3 (reload persistence not covered by the flow) |
 | `04-duplicate-note` | F03-ORG-AC4 (note only) |
 | `05-move-note` | F03-ORG-AC2 |
 | `06-trash-and-restore` | F03-ORG-AC5 |
@@ -59,9 +59,9 @@ Maestro web matches `text:` against rendered text (`innerText`, so CSS `text-tra
 - `Add a note to <title>` (collection `+`)
 - `Add to favorites` / `Remove from favorites` (note-header star, and the same visible text in the menu)
 
-Visible text: `Duplicate`, `Rename`, `Move to`, `Move to…` (submenu heading), `Current` (current destination), `Move to trash`, `Trash`, `Restore`, `Delete permanently`, `Cancel` (confirmation dialog), `Settings`, `Log out` (demo: `Exit preview`), `Favorites` (case-insensitive), `Deletes in 30 days`, `Items in trash are permanently deleted after 30 days.`, `Trash is empty.`
+Visible text: `Duplicate`, `Rename`, `Move to`, `Move to…` (submenu heading), `Current` (current destination), `Move to trash`, `Trash`, `Restore`, `Delete permanently`, `Cancel` (confirmation dialog), `Settings`, `Log out`, `Favorites` (case-insensitive), `Deletes in 30 days`, `Items in trash are permanently deleted after 30 days.`, `Trash is empty.`
 
-Behaviour assumed from the approved prototype: creating a collection or note, and Rename, open an autofocused inline title input that commits on Enter. The account button is found by the demo member name `Lan Nguyen`.
+Behaviour assumed from the approved prototype: creating a collection or note, and Rename, open an autofocused inline title input that commits on Enter. The account button is found by its accessible name `Account menu`.
 
 ## Maestro web limits found while writing these flows
 
