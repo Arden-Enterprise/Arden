@@ -69,7 +69,8 @@ function visibleSlot() {
 
 async function enterWorkspace(platform: "web" | "desktop" = "web") {
   render(createElement(ArdenShell, { platform }));
-  fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+  // A restored session with one organization opens it directly.
+  await screen.findByRole("button", { name: /Workspace: Test Org/i });
 }
 
 function privateNote(id: string, title: string) {
@@ -81,6 +82,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   window.history.replaceState(null, "", "/");
   window.sessionStorage.clear();
+  window.localStorage.clear();
   vi.mocked(apiClient.restoreSession).mockResolvedValue({
     actor: { id: "user-1", email: "admin@example.com", fullName: "Admin" },
     account: { passwordSetupRequired: false },
@@ -234,5 +236,54 @@ describe("ArdenShell browser history", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Ask Arden" })[0]);
     await waitFor(() => expect(visibleSlot()).toBe("ask"));
     expect(window.location.pathname).toBe("/");
+  });
+});
+
+describe("ArdenShell entry addresses", () => {
+  function twoOrganizations() {
+    vi.mocked(apiClient.restoreSession).mockResolvedValue({
+      actor: { id: "user-1", email: "admin@example.com", fullName: "Admin" },
+      account: { passwordSetupRequired: false },
+      memberships: [membership(["ORG_ADMIN"]), { ...membership(["MEMBER"]), organization: { id: "org-2", name: "Other Org" } }],
+    } as unknown as apiClient.CurrentSession);
+  }
+
+  it("shows no sign-in form while the saved session is checked, then gives sign-in its address", async () => {
+    let finish!: (value: apiClient.CurrentSession | null) => void;
+    vi.mocked(apiClient.restoreSession).mockReturnValue(new Promise((resolve) => { finish = resolve; }));
+    window.history.replaceState(null, "", "/private/notes/note-b");
+    render(createElement(ArdenShell, { platform: "web" }));
+    expect(screen.getByRole("status").textContent).toBe("Loading Arden…");
+    expect(screen.queryByRole("button", { name: /sign in/i })).toBeNull();
+    finish(null);
+    await waitFor(() => expect(window.location.pathname).toBe("/sign-in"));
+    expect(takeReturnPath()).toBe("/private/notes/note-b");
+  });
+
+  it("returns a reload to the organization opened last, and keeps the chooser at its own address", async () => {
+    twoOrganizations();
+    window.history.replaceState(null, "", "/ask");
+    render(createElement(ArdenShell, { platform: "web" }));
+    expect(await screen.findByRole("heading", { name: "Choose your workspace" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/workspaces");
+    fireEvent.click(screen.getAllByRole("button", { name: /Other Org/i })[0]);
+    await waitFor(() => expect(window.location.pathname).toBe("/ask"));
+    cleanup();
+
+    render(createElement(ArdenShell, { platform: "web" }));
+    expect(await screen.findByRole("button", { name: /Workspace: Other Org/i })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Choose your workspace" })).toBeNull();
+    cleanup();
+
+    window.history.replaceState(null, "", "/workspaces");
+    render(createElement(ArdenShell, { platform: "web" }));
+    expect(await screen.findByRole("heading", { name: "Choose your workspace" })).toBeTruthy();
+  });
+
+  it("moves to the chooser address when switching workspace", async () => {
+    await enterWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: /Workspace: Test Org/i }));
+    expect(await screen.findByRole("heading", { name: "Choose your workspace" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/workspaces");
   });
 });

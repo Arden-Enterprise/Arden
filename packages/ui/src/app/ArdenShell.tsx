@@ -35,7 +35,8 @@ import { IslandConfirm } from "../shared/IslandConfirm";
 import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership, type NotificationTarget } from "../shared/api-client";
 import { needsDepartmentAssignment } from "../shared/membershipAssignment";
 import { emptyKnowledgeRoute, sameKnowledgeLocation, type KnowledgeRoute, type KnowledgeRouteRequest } from "../knowledge/knowledgeRoute";
-import { allowedRoute, homeRoute, parseWorkspacePath, routeForView, takeReturnPath, workspacePath, type PrivateLocation, type WorkspaceRoute } from "./workspaceRoute";
+import { allowedRoute, forgetLastOrganization, homeRoute, parseWorkspacePath, readLastOrganization, rememberLastOrganization, rememberReturnPath, routeForView, signInPath, takeReturnPath, workspacePath, workspacesPath, type PrivateLocation, type WorkspaceRoute } from "./workspaceRoute";
+import { AuthLayout } from "../sign-in/AuthLayout";
 
 type ArdenShellProps = { platform: Platform };
 
@@ -69,7 +70,7 @@ const initialCollections: PrivateCollection[] = [
   { id: "sample-discovery", title: "Discovery", parentId: null, favoritedAt: null },
 ];
 
-type EntryView = "sign-in" | "password-setup" | "workspace-select" | "system-feedback" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
+type EntryView = "restoring" | "sign-in" | "password-setup" | "workspace-select" | "system-feedback" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
 
 /**
  * Extracts a 43-character invitation token from the URL path `/invite/:token`.
@@ -166,7 +167,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   });
   const [entryView, setEntryView] = useState<EntryView>(() => {
     if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return "sign-in";
-    return invitationToken ? "invite-link" : "sign-in";
+    // Until the saved session is checked, show the entry background rather than a sign-in form that may vanish.
+    return invitationToken ? "invite-link" : "restoring";
   });
   const [previewMemberId, setPreviewMemberId] = useState("sample-employee");
   const [invitationId, setInvitationId] = useState("");
@@ -201,6 +203,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [requestedReviewId, setRequestedReviewId] = useState<string | null>(null);
   const [requestedContributionId, setRequestedContributionId] = useState<string | null>(null);
   const restoreStarted = useRef(false);
+  const serverActorId = useRef<string | null>(null);
   // The web address mirrors the open workspace screen so browser Back/Forward and reload work. The desktop app has
   // no address bar and loads from a file URL, so it keeps navigation in memory only.
   const routing = platform === "web" && typeof window !== "undefined";
@@ -330,6 +333,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       try { window.history.replaceState(null, "", "/"); } catch {}
     }
     setServerOrganizationId(membership.organization.id);
+    if (serverActorId.current) rememberLastOrganization(serverActorId.current, membership.organization.id);
     setRequestedReviewId(null);
     setCreatedKnowledgeDraft(null);
     setAssignedReviewCount(undefined);
@@ -345,7 +349,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     // Open the screen the address names (a reload, a shared link, or the page kept across Google sign-in),
     // falling back to Home when this member cannot open it.
     const returnPath = routing ? takeReturnPath() : null;
-    const currentPath = routing ? window.location.pathname === "/" && returnPath ? returnPath : window.location.pathname : "/";
+    const here = routing ? window.location.pathname : "/";
+    const currentPath = here !== "/" && parseWorkspacePath(here) ? here : returnPath ?? "/";
     const requested = parseWorkspacePath(currentPath) ?? homeRoute;
     const route = allowedRoute(requested, {
       admin: membership.roleCodes.includes("ORG_ADMIN"),
@@ -370,11 +375,12 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
    *
    * @param current The authenticated server session
    */
-  const acceptServerSession = async (current: CurrentSession) => {
+  const acceptServerSession = async (current: CurrentSession, options: { resume?: boolean } = {}) => {
     if (new URLSearchParams(window.location.search).has("auth") || (typeof window !== "undefined" && window.location.pathname === "/reset-password")) {
       try { window.history.replaceState(null, "", "/"); } catch {}
     }
     setServerSession(current);
+    serverActorId.current = current.actor.id;
     if (current.account?.passwordSetupRequired === true) {
       setEntryView("password-setup");
       return;
@@ -389,7 +395,23 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (recoveryTokens) {
       setRecoveryTokens(null);
     }
+    const resume = options.resume ? resumableMembership(current) : null;
+    if (resume) {
+      enterServerOrganization(resume);
+      return;
+    }
     setEntryView("workspace-select");
+  };
+
+  /**
+   * Picks the organization a reload returns to: the one this account last opened, or its only active one.
+   * An explicit visit to the chooser's address keeps the chooser.
+   */
+  const resumableMembership = (current: CurrentSession) => {
+    if (routing && window.location.pathname === workspacesPath) return null;
+    const active = current.memberships.filter((membership) => membership.status === "active");
+    const last = readLastOrganization(current.actor.id);
+    return active.find((membership) => membership.organization.id === last) ?? (active.length === 1 ? active[0] : null);
   };
 
   useEffect(() => {
@@ -404,7 +426,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         const activeMemberships = current.memberships.filter((membership) => membership.status === "active");
         if (!pathToken && activeMemberships.length > 0) {
           setInvitationToken(null);
-          return acceptServerSession(current);
+          return acceptServerSession(current, { resume: true });
         }
         if (pathToken) {
           setServerSession(current);
@@ -422,7 +444,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         return acceptServerSession(current);
       }
       return undefined;
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(() => {
+      setEntryView((view) => view === "restoring" ? "sign-in" : view);
+    });
   }, [platform]);
 
   useEffect(() => {
@@ -512,6 +536,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setSettingsOpen(false);
     setNavOpen(false);
     if (serverSession) void apiSignOut(platform).catch(() => undefined);
+    forgetLastOrganization();
+    serverActorId.current = null;
+    // Leave the workspace address now so the next person to sign in here does not reopen it.
+    if (routing && window.location.pathname !== signInPath) { try { window.history.replaceState(null, "", signInPath); } catch {} }
     setServerSession(null);
     setServerOrganizationId(null);
     setRequestedReviewId(null);
@@ -547,6 +575,23 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       document.removeEventListener("visibilitychange", expire);
     };
   }, [serverSession?.sessionExpiresAt]);
+
+  // Sign-in and the workspace chooser have their own addresses. The workspace address the person came for is kept
+  // so choosing an organization returns to it.
+  const entryPath = entryView === "sign-in" ? signInPath
+    : entryView === "workspace-select" && serverSession ? workspacesPath : null;
+  useEffect(() => {
+    if (!routing || !entryPath || recoveryTokens) return;
+    const here = window.location.pathname;
+    if (here === entryPath || here === "/reset-password" || tokenFromInvitationPath(here)
+      || isPasswordRecoveryTarget(window.location)) return;
+    rememberReturnPath(here);
+    try { window.history.replaceState(null, "", entryPath); } catch {}
+  }, [routing, entryPath, recoveryTokens]);
+
+  if (entryView === "restoring") {
+    return <AuthLayout><p className="sr-only" role="status">Loading Arden…</p></AuthLayout>;
+  }
 
   if (entryView === "setup") {
     return (
@@ -775,7 +820,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
   const showWorkspaceSelector = () => {
     historyTarget.current = null;
-    if (routing && window.location.pathname !== "/") { try { window.history.replaceState(null, "", "/"); } catch {} }
+    if (routing && window.location.pathname !== workspacesPath) { try { window.history.replaceState(null, "", workspacesPath); } catch {} }
     setKnowledgeDirty(false);
     setServerOrganizationId(null);
     setContributionAttempt(null);
