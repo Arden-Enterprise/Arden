@@ -24,6 +24,11 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
 });
 
 const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const systemSession = {
+  administrator: { id: "44444444-4444-4444-8444-444444444444", email: "sysadmin@arden.local", fullName: "System Operator",
+    canManageSystemAdmins: true },
+  sessionExpiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+};
 
 describe("System Console", () => {
   afterEach(() => {
@@ -85,6 +90,7 @@ describe("System Console", () => {
       ["Kho tri thức", "knowledge"], ["Sử dụng AI", "ai-usage"],
       ["Đóng góp tri thức", "contributions"], ["Phản hồi AI & lỗi", "feedback"],
       ["Chất lượng tri thức", "quality"], ["Sức khỏe hệ thống", "health"],
+      ["Phản hồi Private Notes", "private-feedback"],
     ] as const;
     for (const [label, endpoint] of sections) {
       fireEvent.click(screen.getByRole("button", { name: new RegExp(label) }));
@@ -94,14 +100,9 @@ describe("System Console", () => {
     }
   });
 
-  it("opens the Console only for a no-membership session the API marked eligible", async () => {
-    const session: CurrentSession = {
-      actor: { id: "11111111-1111-4111-8111-111111111111", email: "system@example.test", emailVerified: true },
-      account: { passwordSetupRequired: false },
-      canAccessSystemConsole: true,
-      memberships: [],
-    };
-    api.restoreSession.mockResolvedValue(session);
+  it("opens the Console only from a restored isolated System Admin session", async () => {
+    api.restoreSession.mockResolvedValue(null);
+    api.restoreSystemSession.mockResolvedValue(systemSession);
     api.getSystemConsoleReport.mockResolvedValue({ organizations: { total: 0 } });
 
     render(createElement(ArdenShell, { platform: "web" }));
@@ -109,12 +110,52 @@ describe("System Console", () => {
     await waitFor(() => expect(api.getSystemConsoleReport).toHaveBeenCalled());
   });
 
-  it("keeps the organization route when membership exists even if a stale session claims Console access", async () => {
+  it("keeps a member session out of the Console even when a System Admin cookie also exists", async () => {
+    window.history.replaceState(null, "", "/workspaces");
+    api.restoreSession.mockResolvedValue({
+      actor: { id: "11111111-1111-4111-8111-111111111111", email: "member@example.test", emailVerified: true },
+      account: { passwordSetupRequired: false },
+      memberships: [{ organization: { id: organizationId, name: "Northwind" }, status: "active",
+        roleCodes: ["MEMBER"], canUsePrivateWorkspace: true }],
+    } satisfies CurrentSession);
+    api.restoreSystemSession.mockResolvedValue(systemSession);
+
+    render(createElement(ArdenShell, { platform: "web" }));
+    expect(await screen.findByRole("heading", { name: /choose your workspace/i })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Tổng quan" })).toBeNull();
+  });
+
+  it("keeps a password-recovery link on its page instead of restoring the System Console", async () => {
+    window.history.replaceState(null, "", "/reset-password");
+    api.restoreSession.mockResolvedValue(null);
+    api.restoreSystemSession.mockResolvedValue(systemSession);
+
+    render(createElement(ArdenShell, { platform: "web" }));
+    await waitFor(() => expect(api.restoreSystemSession).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByText(/Loading Arden/)).toBeNull());
+    expect(screen.queryByRole("heading", { name: "Tổng quan" })).toBeNull();
+    expect(api.getSystemConsoleReport).not.toHaveBeenCalled();
+  });
+
+  it("pages contribution and quality rows like the organization list", async () => {
+    api.getSystemConsoleReport.mockImplementation(async (_platform: string, report: string) => report === "contributions"
+      ? { page: 1, pageSize: 25, total: 30, items: [{ organizationId, departmentId: null, submitted: 3, approved: 2, rejected: 0, pending: 1 }] }
+      : {});
+    render(createElement(SystemConsolePage, { platform: "web", onSignOut: vi.fn() }));
+    await screen.findByRole("heading", { name: "Tổng quan" });
+    fireEvent.click(screen.getByRole("button", { name: /Đóng góp tri thức/ }));
+    expect(await screen.findByText("30 dòng")).toBeTruthy();
+    expect(api.getSystemConsoleReport).toHaveBeenLastCalledWith("web", "contributions", expect.objectContaining({ page: 1, pageSize: 25 }));
+    fireEvent.click(screen.getByRole("button", { name: "Sau" }));
+    await waitFor(() => expect(api.getSystemConsoleReport).toHaveBeenLastCalledWith("web", "contributions",
+      expect.objectContaining({ page: 2 })));
+  });
+
+  it("keeps the organization route for a member session", async () => {
     window.history.replaceState(null, "", "/workspaces");
     api.restoreSession.mockResolvedValue({
       actor: { id: "33333333-3333-4333-8333-333333333333", email: "member@example.test", emailVerified: true },
       account: { passwordSetupRequired: false },
-      canAccessSystemConsole: true,
       memberships: [{ organization: { id: organizationId, name: "Northwind" }, status: "active",
         roleCodes: ["MEMBER"], canUsePrivateWorkspace: true }],
     } satisfies CurrentSession);
@@ -129,7 +170,6 @@ describe("System Console", () => {
     api.restoreSession.mockResolvedValue({
       actor: { id: "22222222-2222-4222-8222-222222222222", email: "dedicated@example.test", emailVerified: true },
       account: { passwordSetupRequired: false },
-      canAccessSystemConsole: false,
       memberships: [],
     } satisfies CurrentSession);
 
@@ -184,6 +224,17 @@ describe("System Console", () => {
     fireEvent.click(await screen.findByRole("button", { name: /initialize system admin/i }));
     expect(await screen.findByRole("heading", { name: /create the first system admin/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /back to member sign in/i })).toBeTruthy();
+  });
+
+  it("accepts a setup token up to the API's 512-character limit", async () => {
+    window.history.replaceState(null, "", "/system/setup");
+    api.restoreSession.mockResolvedValue(null);
+    api.getSystemSetupStatus.mockResolvedValue({ needsInitialSetup: true, hasOrganizations: true });
+    api.restoreSystemSession.mockResolvedValue(null);
+    render(createElement(ArdenShell, { platform: "web" }));
+    const token = await screen.findByLabelText("One-time setup token");
+    expect(token.getAttribute("maxlength")).toBe("512");
+    expect(screen.getByLabelText("Password").getAttribute("maxlength")).toBe("100");
   });
 
   it("redirects /system/setup to System Admin sign-in when initial setup is already completed", async () => {

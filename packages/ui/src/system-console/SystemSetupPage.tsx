@@ -11,6 +11,8 @@ import { NewPasswordField, accountPasswordRequirementMessage } from "../sign-in/
 import { VisiblePasswordField } from "../sign-in/VisiblePasswordField";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/** Matches the API schema for the one-time setup token. */
+export const systemSetupTokenMaximumLength = 512;
 
 export function SystemSetupPage({
   platform,
@@ -42,7 +44,7 @@ export function SystemSetupPage({
     setEmail(normalizedEmail);
 
     if (!trimmedToken) {
-      setError("Enter the one-time setup token from ARDEN_SYSTEM_SETUP_TOKEN or the API startup logs.");
+      setError("Enter the one-time setup token provided by your Arden operator.");
       return;
     }
     if (!trimmedName) {
@@ -129,7 +131,8 @@ export function SystemSetupPage({
                 value={setupToken}
                 onChange={setSetupToken}
                 autoComplete="off"
-                placeholder="From ARDEN_SYSTEM_SETUP_TOKEN or API startup logs"
+                placeholder="Provided by your Arden operator"
+                maxLength={systemSetupTokenMaximumLength}
               />
               <label>
                 <span>Full name</span>

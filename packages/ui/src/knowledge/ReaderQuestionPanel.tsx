@@ -10,28 +10,32 @@ import { ReaderAiGenerated } from "./ReaderAiPanel";
 export function ReaderQuestionPanel({ id, labelledBy, options, access }: { id: string; labelledBy: string;
   options: ReaderOperationOptions; access: ReaderAccessSession }) {
   const fieldId = useId(), [query, setQuery] = useState(""), [submitted, setSubmitted] = useState("");
-  const [feedback, setFeedback] = useState<"POSITIVE" | "NEGATIVE" | "SAVING" | null>(null);
-  const [feedbackError, setFeedbackError] = useState(false);
+  // Feedback belongs to one rated answer in one access scope; a late result for another answer is ignored.
+  const [rating, setRating] = useState<{ key: string; value: "POSITIVE" | "NEGATIVE" | "SAVING" | null; error: boolean } | null>(null);
   const operation = useReaderOperation<ReaderAnswer, string>(options, access, {
     label: "Document Q&A", busyRetrySeconds: 10,
     run: (config, input, signal) => askReaderQuestion(config.platform, config.context, input, signal),
   });
   const { state } = operation, waiting = state.status === "loading" || state.status === "checking";
-  const rateAnswer = async (rating: "POSITIVE" | "NEGATIVE") => {
-    if (!state.result || feedback) return;
-    setFeedback("SAVING"); setFeedbackError(false);
+  const answerKey = state.result ? `${options.context.organizationId}:${state.result.requestId}` : null;
+  const current = rating && rating.key === answerKey ? rating : null;
+  const feedback = current?.value ?? null, feedbackError = current?.error ?? false;
+  const rateAnswer = async (value: "POSITIVE" | "NEGATIVE") => {
+    if (!state.result || !answerKey || feedback) return;
+    const key = answerKey;
+    setRating({ key, value: "SAVING", error: false });
     try {
-      await submitAiAnswerFeedback(options.platform, options.context.organizationId, state.result.requestId, rating);
-      setFeedback(rating);
+      await submitAiAnswerFeedback(options.platform, options.context.organizationId, state.result.requestId, value);
+      setRating((previous) => previous?.key === key ? { key, value, error: false } : previous);
     } catch (error) {
-      setFeedback(null);
-      setFeedbackError(!(error instanceof ApiError && error.status === 404));
+      setRating((previous) => previous?.key === key
+        ? { key, value: null, error: !(error instanceof ApiError && error.status === 404) } : previous);
     }
   };
   if (options.visible === false) return null;
   const submit = () => {
     if (!query.trim() || waiting) return;
-    options.onCitation(null); setSubmitted(query); setFeedback(null); setFeedbackError(false); void operation.open(query);
+    options.onCitation(null); setSubmitted(query); setRating(null); void operation.open(query);
   };
   const showQuestion = Boolean(submitted) && state.status !== "closed";
   return <section id={id} role="tabpanel" className="reader-ai-body reader-ai-ask" aria-labelledby={labelledBy}>

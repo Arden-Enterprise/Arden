@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, getSystemConsoleOrganization, getSystemConsoleReport, type SystemConsoleQuery,
-  type SystemConsoleReport } from "../shared/api-client";
+  type SystemConsoleReport, type SystemConsoleReportName } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 
-type Section = "overview" | "organizations" | "knowledge" | "ai-usage" | "contributions" | "feedback" | "quality" | "health";
+type Section = SystemConsoleReportName;
+/** Sections whose report returns a bounded page of rows (at most 50). */
+const pagedSections = new Set<Section>(["organizations", "contributions", "quality"]);
 type Props = { platform: Platform; onSignOut: () => void };
 type Row = Record<string, unknown>;
 const nav: Array<{ id: Section; label: string; description: string }> = [
@@ -13,13 +15,10 @@ const nav: Array<{ id: Section; label: string; description: string }> = [
   { id: "ai-usage", label: "Sử dụng AI", description: "Lượt gọi, độ trễ và chi phí" },
   { id: "contributions", label: "Đóng góp tri thức", description: "Tổng hợp theo tổ chức và phòng ban" },
   { id: "feedback", label: "Phản hồi AI & lỗi", description: "Đánh giá và case đang mở" },
+  { id: "private-feedback", label: "Phản hồi Private Notes", description: "Đánh giá theo tuần (UTC)" },
   { id: "quality", label: "Chất lượng tri thức", description: "Các tín hiệu cần rà soát" },
   { id: "health", label: "Sức khỏe hệ thống", description: "Trạng thái dịch vụ và hàng đợi" },
 ];
-const reportName: Partial<Record<Section, "overview" | "organizations" | "knowledge" | "ai-usage" | "contributions" | "feedback" | "quality" | "health">> = {
-  overview: "overview", organizations: "organizations", knowledge: "knowledge", "ai-usage": "ai-usage",
-  contributions: "contributions", feedback: "feedback", quality: "quality", health: "health",
-};
 const labelNames: Record<string, string> = {
   organizations: "Tổ chức", total: "Tổng số", active: "Đang hoạt động", suspended: "Tạm dừng", archived: "Đã lưu trữ",
   knowledge: "Kho tri thức", drafts: "Bản nháp", activeDrafts: "Đang hoạt động", archivedDrafts: "Đã lưu trữ",
@@ -35,6 +34,7 @@ const labelNames: Record<string, string> = {
   count: "Số lượng", database: "Core / Database", indexing: "Hàng đợi indexing", notifications: "Hàng đợi thông báo",
   oldestPendingSeconds: "Tuổi dòng chờ lâu nhất (giây)",
   auth: "Auth", ardenAi: "Arden-AI", latencyMs: "Độ trễ (ms)", failed: "Lỗi", running: "Đang chạy",
+  weekStart: "Tuần bắt đầu", good: "Tốt", bad: "Chưa tốt",
 };
 
 function record(value: unknown): Row | null {
@@ -48,10 +48,14 @@ function display(key: string, value: unknown): string {
   if (typeof value === "boolean") return value ? "Có" : "Không";
   if (typeof value === "number") {
     if (key === "estimatedCostMicroUsd") return `$${(value / 1_000_000).toFixed(4)}`;
-    if (key === "createdAt") return new Date(value).toLocaleDateString("vi-VN");
     return value.toLocaleString("vi-VN");
   }
   if (typeof value === "string") {
+    // PostgreSQL returns timestamps as ISO strings.
+    if (key === "createdAt") {
+      const date = new Date(value);
+      return Number.isNaN(date.valueOf()) ? value : date.toLocaleDateString("vi-VN");
+    }
     const statuses: Record<string, string> = { ok: "Bình thường", unavailable: "Không khả dụng",
       not_configured: "Chưa cấu hình", degraded: "Cần kiểm tra", ACTIVE: "Đang hoạt động", SUSPENDED: "Tạm dừng", ARCHIVED: "Đã lưu trữ",
       OPEN: "Đang mở", REVIEW: "Cần rà soát", EXPIRED: "Hết hiệu lực" };
@@ -101,7 +105,8 @@ export function SystemConsolePage({ platform, onSignOut }: Props) {
     const range = formatDateRange(fromDay, toDay);
     if (!range) return null;
     return { ...range,
-    ...(section === "organizations" ? { search, status, page, pageSize } : {}),
+    ...(section === "organizations" ? { search, status } : {}),
+    ...(pagedSections.has(section) && !selectedOrganization ? { page, pageSize } : {}),
     ...(selectedOrganization ? { organizationId: selectedOrganization } : {}),
     } satisfies SystemConsoleQuery;
   }, [fromDay, toDay, section, search, status, page, pageSize, selectedOrganization]);
@@ -122,7 +127,7 @@ export function SystemConsolePage({ platform, onSignOut }: Props) {
     setLoading(true); setError(null);
     const request = selectedOrganization
       ? getSystemConsoleOrganization(platform, selectedOrganization, query)
-      : getSystemConsoleReport(platform, reportName[section]!, query);
+      : getSystemConsoleReport(platform, section, query);
     void request.then(data => { if (current) setReport(data); })
       .catch(cause => { if (current) { setReport(null); setError(safeError(cause)); } })
       .finally(() => { if (current) setLoading(false); });
@@ -184,10 +189,7 @@ export function SystemConsolePage({ platform, onSignOut }: Props) {
               <td><button type="button" className="system-console-link" onClick={() => setSelectedOrganization(String(item.id))}>Chi tiết</button></td>
             </tr>)}</tbody>
           </table>{orgItems.length === 0 && <p className="system-console-empty">Không tìm thấy tổ chức.</p>}</div>
-          <div className="system-console-pagination"><span>{total.toLocaleString("vi-VN")} tổ chức</span>
-            <button type="button" disabled={page <= 1} onClick={() => setPage(value => Math.max(1, value - 1))}>Trước</button>
-            <span>Trang {page}</span><button type="button" disabled={page * pageSize >= total} onClick={() => setPage(value => value + 1)}>Sau</button>
-          </div>
+          <Pagination total={total} page={page} pageSize={pageSize} unit="tổ chức" onPage={setPage} />
         </> : <>
           <div className="system-console-metrics">{flatMetrics.map((item, index) => <article className="system-console-metric" key={`${item.label}:${index}`}>
             <span>{item.label}</span><strong>{display(item.key, item.value)}</strong>
@@ -199,12 +201,23 @@ export function SystemConsolePage({ platform, onSignOut }: Props) {
           {section === "overview" && <p className="system-console-footnote">Usage phản ánh các sự kiện đã ghi nhận; yêu cầu lỗi hoặc lần thử lại nội bộ của nhà cung cấp có thể chưa được tính.</p>}
           {section === "contributions" && <RowsTable title="Theo tổ chức và phòng ban" data={rows(report.items)} columns={["organizationId", "departmentId", "submitted", "approved", "rejected", "pending"]} />}
           {section === "quality" && <RowsTable title="Tín hiệu chất lượng" data={rows(report.items)} columns={["documentRef", "signal", "count", "status"]} />}
+          {(section === "contributions" || section === "quality") && <Pagination total={total} page={page} pageSize={pageSize}
+            unit="dòng" onPage={setPage} />}
+          {section === "private-feedback" && <RowsTable title="12 tuần gần nhất" data={rows(report.weeks)} columns={["weekStart", "good", "bad"]} />}
           {selectedOrganization && <p className="system-console-footnote">Dung lượng tính theo byte dữ liệu được tham chiếu. Thiếu dữ liệu lịch sử sẽ hiển thị “Chưa đủ dữ liệu”.</p>}
           {section === "health" && <p className="system-console-footnote">Thông tin lỗi và trạng thái đã được làm sạch; Console không cung cấp thao tác điều khiển dịch vụ.</p>}
         </>}
       </>}
     </div>
   </main>;
+}
+
+function Pagination({ total, page, pageSize, unit, onPage }: { total: number; page: number; pageSize: number; unit: string;
+  onPage: (update: (value: number) => number) => void }) {
+  return <div className="system-console-pagination"><span>{total.toLocaleString("vi-VN")} {unit}</span>
+    <button type="button" disabled={page <= 1} onClick={() => onPage(value => Math.max(1, value - 1))}>Trước</button>
+    <span>Trang {page}</span><button type="button" disabled={page * pageSize >= total} onClick={() => onPage(value => value + 1)}>Sau</button>
+  </div>;
 }
 
 function RowsTable({ title, data, columns }: { title: string; data: Row[]; columns: string[] }) {

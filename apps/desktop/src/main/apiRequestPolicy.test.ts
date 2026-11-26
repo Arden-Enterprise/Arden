@@ -134,7 +134,10 @@ describe("desktop API request allowlist", () => {
     }
     const analytics = { path: "/api/v1/system/analytics/private-feedback", method: "GET" };
     assert.equal(validateDesktopApiRequest(analytics), true);
+    // The Console sends its date range; only the shared report query keys are accepted.
+    assert.equal(validateDesktopApiRequest({ ...analytics, path: `${analytics.path}?from=2026-11-01T00%3A00%3A00Z&to=2026-11-27T00%3A00%3A00Z` }), true);
     assert.equal(validateDesktopApiRequest({ ...analytics, path: `${analytics.path}?all=1` }), false);
+    assert.equal(validateDesktopApiRequest({ ...analytics, method: "POST", body: "{}" }), false);
   });
   it("permits only the scoped bodyless submission withdrawal action", () => {
     const path = `/api/v1/organizations/${organizationId}/knowledge/submissions/${sourcePrivateVersionId}/withdraw`;
@@ -370,7 +373,7 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/departments/${sourcePrivateVersionId}/delete`, method: "POST", body: "{}" }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/departments/${sourcePrivateVersionId}/delete`, method: "GET" }), false);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/administrators", method: "GET" }), true);
-    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/administrators", method: "POST", body: JSON.stringify({ userId: sourcePrivateVersionId }) }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/administrators", method: "POST", body: JSON.stringify({ email: "monitor@example.test", fullName: "Monitor", password: "StrongPassword!1" }) }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}/revoke`, method: "POST", body: "{}" }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}/revoke`, method: "GET" }), false);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}`, method: "PATCH", body: JSON.stringify({ canManageSystemAdmins: true }) }), true);

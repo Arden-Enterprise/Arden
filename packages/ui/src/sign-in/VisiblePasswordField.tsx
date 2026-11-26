@@ -8,10 +8,13 @@ type VisiblePasswordFieldProps = {
   autoComplete: string;
   placeholder: string;
   minLength?: number;
+  /** Defaults to the account password limit; a one-time setup token may be longer. */
+  maxLength?: number;
 };
 
 /** Password entry with an explicit visibility control and no account-creation rules. */
-export function VisiblePasswordField({ label, value, onChange, autoComplete, placeholder, minLength }: VisiblePasswordFieldProps) {
+export function VisiblePasswordField({ label, value, onChange, autoComplete, placeholder, minLength,
+  maxLength = accountPasswordMaximumLength }: VisiblePasswordFieldProps) {
   const id = useId();
   const [visible, setVisible] = useState(false);
   return (
@@ -25,7 +28,7 @@ export function VisiblePasswordField({ label, value, onChange, autoComplete, pla
         autoComplete={autoComplete}
         placeholder={placeholder}
         minLength={minLength}
-        maxLength={accountPasswordMaximumLength}
+        maxLength={maxLength}
         required
       />
       <button

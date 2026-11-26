@@ -79,10 +79,9 @@ const audienceGroupMemberPath = new RegExp(`^/api/v1/organizations/${uuid}/audie
 const audienceGroupRemovePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/members/${uuid}/remove$`);
 const audienceGroupDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/deactivate$`);
 const systemAdministratorCollection = /^\/api\/v1\/system\/administrators$/;
-const systemPrivateFeedbackAnalytics = "/api/v1/system/analytics/private-feedback";
 const systemAdministratorRevoke = new RegExp(`^/api/v1/system/administrators/${uuid}/revoke$`);
 const systemAdministratorCapability = new RegExp(`^/api/v1/system/administrators/${uuid}$`);
-const systemConsoleRead = new RegExp(`^/api/v1/system/(overview|organizations|organizations/${uuid}|reports/(knowledge|ai-usage|contributions|feedback|quality)|health)$`);
+const systemConsoleRead = new RegExp(`^/api/v1/system/(overview|organizations|organizations/${uuid}|reports/(knowledge|ai-usage|contributions|feedback|quality)|analytics/private-feedback|health)$`);
 const systemSetupStatusPath = /^\/api\/v1\/system\/setup\/status$/;
 const systemSetupPostPath = /^\/api\/v1\/system\/setup$/;
 const systemAuthMePath = /^\/api\/v1\/system\/auth\/me$/;
@@ -287,7 +286,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && request.body === "{}" && !request.ifMatch && !request.idempotencyKey;
   const audienceGroupDeactivate = audienceGroupDeactivatePath.test(url.pathname) && request.method === "POST"
     && request.body === "{}" && typeof request.ifMatch === "string" && /^"audience-group-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
-  const systemAdministrationGet = (systemAdministratorCollection.test(url.pathname) || url.pathname === systemPrivateFeedbackAnalytics) && request.method === "GET"
+  const systemAdministrationGet = systemAdministratorCollection.test(url.pathname) && request.method === "GET"
     && !url.search && !request.body && !request.ifMatch && !request.idempotencyKey;
   const systemAdministrationGrant = systemAdministratorCollection.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;

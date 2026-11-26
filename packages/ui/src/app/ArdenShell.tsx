@@ -9,7 +9,6 @@ import { SignInPage } from "../sign-in/SignInPage";
 import { clearRecoveryTokens, readRecoveryTokens, storeRecoveryTokens } from "../sign-in/recovery-session";
 import { SetPasswordPage } from "../sign-in/SetPasswordPage";
 import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
-import { SystemFeedbackPage } from "../sign-in/SystemFeedbackPage";
 import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
 import { AskArdenPage } from "../ask-arden/AskArdenPage";
 import type { KnowledgeCitationReference, KnowledgeReaderTarget } from "../knowledge/knowledgeCitation";
@@ -37,7 +36,7 @@ import { AuthLayout } from "../sign-in/AuthLayout";
 
 type ArdenShellProps = { platform: Platform };
 
-type EntryView = "restoring" | "sign-in" | "password-setup" | "workspace-select" | "system-feedback" | "workspace" | "invite-link" | "system-console" | "system-setup" | "system-sign-in";
+type EntryView = "restoring" | "sign-in" | "password-setup" | "workspace-select" | "workspace" | "invite-link" | "system-console" | "system-setup" | "system-sign-in";
 
 /**
  * Extracts a 43-character invitation token from the URL path `/invite/:token`.
@@ -348,13 +347,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       setEntryView("password-setup");
       return;
     }
-    if (current.canAccessSystemConsole && current.memberships.length === 0) {
-      setInvitationToken(null);
-      clearRecoveryTokens();
-      setRecoveryTokens(null);
-      setEntryView("system-console");
-      return;
-    }
     if (invitationToken) {
       if (typeof window !== "undefined") {
         try { window.history.replaceState(null, "", "/"); } catch {}
@@ -421,16 +413,22 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       return;
     }
 
-    let memberRestored = false;
-    void restoreSession(platform).then((current) => {
+    // One decision picks the view: a member session (and any recovery or invitation flow) is decided
+    // first, and only without one does a restored System Admin session open the Console. A late System
+    // Admin result can therefore never replace a member, recovery or invitation page.
+    const systemRestore = Promise.all([
+      getSystemSetupStatus(platform).catch(() => null),
+      restoreSystemSession(platform).catch(() => null),
+    ]);
+    void systemRestore.then(([setupStatus]) => { if (setupStatus) setSystemSetupStatus(setupStatus); });
+    void restoreSession(platform).catch(() => null).then(async (current) => {
+      const pathToken = typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
+      const recoveryFlow = Boolean(recoveryTokens)
+        || (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location));
       if (current) {
-        memberRestored = true;
-        if (recoveryTokens) return undefined;
-        if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return undefined;
+        if (recoveryFlow) return undefined;
         if (current.account?.passwordSetupRequired === true) return acceptServerSession(current);
-        const pathToken = typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
         const activeMemberships = current.memberships.filter((membership) => membership.status === "active");
-        if (current.canAccessSystemConsole && current.memberships.length === 0) return acceptServerSession(current);
         if (!pathToken && activeMemberships.length > 0) {
           setInvitationToken(null);
           return acceptServerSession(current, { resume: true });
@@ -450,28 +448,19 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         }
         return acceptServerSession(current);
       }
+      // Password recovery and invitation links always keep their own pages.
+      if (pathToken || recoveryFlow) return undefined;
+      const [setupStatus, restoredSystem] = await systemRestore;
+      if (restoredSystem) {
+        setSystemSession(restoredSystem);
+        setEntryView("system-console");
+        return undefined;
+      }
+      if (setupStatus?.needsInitialSetup && !setupStatus.hasOrganizations) setEntryView("system-setup");
       return undefined;
     }).catch(() => undefined).finally(() => {
       setEntryView((view) => view === "restoring" ? "sign-in" : view);
     });
-
-    void Promise.all([
-      getSystemSetupStatus(platform).catch(() => null),
-      restoreSystemSession(platform).catch(() => null),
-    ]).then(([setupStatus, restoredSystem]) => {
-      if (setupStatus) setSystemSetupStatus(setupStatus);
-      if (memberRestored) return;
-      if (restoredSystem) {
-        setSystemSession(restoredSystem);
-        setEntryView("system-console");
-        return;
-      }
-      const pathToken = typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
-      if (!pathToken && !recoveryTokens && !(typeof window !== "undefined" && isPasswordRecoveryTarget(window.location))
-        && setupStatus?.needsInitialSetup && !setupStatus.hasOrganizations) {
-        setEntryView("system-setup");
-      }
-    }).catch(() => undefined);
   }, [platform]);
 
   useEffect(() => {
@@ -579,6 +568,34 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     };
   }, [serverSession?.sessionExpiresAt]);
 
+  const finishSystemSignOut = (notice: string | null = null) => {
+    void apiSystemSignOut(platform).catch(() => undefined);
+    setSystemSession(null);
+    setSystemSignInNotice(notice);
+    if (typeof window !== "undefined") {
+      try { window.history.replaceState(null, "", "/system/sign-in"); } catch {}
+    }
+    setEntryView("system-sign-in");
+  };
+
+  // The System Admin session has its own 24-hour expiry; leave the Console when it ends.
+  useEffect(() => {
+    if (!systemSession?.sessionExpiresAt) return;
+    const expiresAt = Date.parse(systemSession.sessionExpiresAt);
+    const expire = () => {
+      if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) finishSystemSignOut("Your System Admin session ended. Sign in again.");
+    };
+    const delay = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - Date.now()) : 0;
+    const timer = window.setTimeout(expire, delay);
+    window.addEventListener("focus", expire);
+    document.addEventListener("visibilitychange", expire);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", expire);
+      document.removeEventListener("visibilitychange", expire);
+    };
+  }, [systemSession?.sessionExpiresAt]);
+
   // Sign-in and the workspace chooser have their own addresses. The workspace address the person came for is kept
   // so choosing an organization returns to it.
   const entryPath = entryView === "sign-in" ? signInPath
@@ -600,18 +617,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     return <SetPasswordPage platform={platform} email={serverSession.actor.email} onComplete={acceptServerSession} />;
   }
 
-  const finishSystemSignOut = () => {
-    void apiSystemSignOut(platform).catch(() => undefined);
-    setSystemSession(null);
-    setSystemSignInNotice(null);
-    if (typeof window !== "undefined") {
-      try { window.history.replaceState(null, "", "/system/sign-in"); } catch {}
-    }
-    setEntryView("system-sign-in");
-  };
-
-  if (entryView === "system-console" && (systemSession || (serverSession?.canAccessSystemConsole && serverSession.memberships.length === 0))) {
-    return <SystemConsolePage platform={platform} onSignOut={systemSession ? finishSystemSignOut : finishSignOut} />;
+  // Only the isolated System Admin session opens the Console; member sessions never do.
+  if (entryView === "system-console" && systemSession) {
+    return <SystemConsolePage platform={platform} onSignOut={() => finishSystemSignOut()} />;
   }
 
   if (entryView === "system-setup") {
@@ -712,16 +720,12 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     );
   }
 
-  if (entryView === "system-feedback" && serverSession?.systemAdmin) {
-    return <SystemFeedbackPage platform={platform} onBack={() => setEntryView("workspace-select")} />;
-  }
   if (entryView === "workspace-select") {
     if (serverSession) {
       return <WorkspaceSelectPage
         organizationName="organization"
         memberships={serverSession.memberships}
         testMode={serverSession.testMode}
-        onOpenSystemFeedback={serverSession.systemAdmin ? () => setEntryView("system-feedback") : undefined}
         onCreateOrganization={async (name, departmentName) => {
           await apiCreateOrganization(platform, name, departmentName);
           await acceptServerSession(await currentSession(platform));
