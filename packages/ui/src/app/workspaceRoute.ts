@@ -20,7 +20,7 @@ export type WorkspaceRoute =
 /** What every routed feature currently shows, as reported to the shell. */
 export type FeatureLocations = { knowledge: KnowledgeRoute; conversationId: string | null; private: PrivateLocation };
 
-export type RouteCapabilities = { admin: boolean; privateNotes: boolean };
+export type RouteCapabilities = { admin: boolean; privateNotes: boolean; reviews: boolean };
 
 export const homeRoute: WorkspaceRoute = { view: "knowledge", at: { kind: "home" } };
 
@@ -140,6 +140,8 @@ export function routeForView(view: WorkspaceView, features: FeatureLocations): W
 export function allowedRoute(route: WorkspaceRoute, capabilities: RouteCapabilities): WorkspaceRoute {
   if (route.view === "organization-access" && !capabilities.admin) return homeRoute;
   if (route.view === "personal-workspace" && !capabilities.privateNotes) return homeRoute;
+  // Reviews belongs to Organization Admins and members with an active reviewer grant.
+  if (route.view === "review-queue" && !capabilities.reviews) return homeRoute;
   return route;
 }
 
@@ -158,4 +160,31 @@ export function takeReturnPath(): string | null {
     window.sessionStorage.removeItem(returnPathKey);
     return path && parseWorkspacePath(path) ? path : null;
   } catch { return null; }
+}
+
+/** Address of the sign-in screen. */
+export const signInPath = "/sign-in";
+/** Address of the workspace chooser. */
+export const workspacesPath = "/workspaces";
+
+const lastOrganizationKey = "arden.lastOrganization";
+
+/** Remembers which organization this account last opened, so a reload can return to it. */
+export function rememberLastOrganization(actorId: string, organizationId: string): void {
+  try { window.localStorage.setItem(lastOrganizationKey, JSON.stringify({ actorId, organizationId })); } catch {}
+}
+
+/** Reads the organization this account last opened in this browser. */
+export function readLastOrganization(actorId: string): string | null {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(lastOrganizationKey) ?? "null") as unknown;
+    if (!stored || typeof stored !== "object") return null;
+    const { actorId: owner, organizationId } = stored as Record<string, unknown>;
+    return owner === actorId && typeof organizationId === "string" ? organizationId : null;
+  } catch { return null; }
+}
+
+/** Forgets the last organization, for example on sign-out. */
+export function forgetLastOrganization(): void {
+  try { window.localStorage.removeItem(lastOrganizationKey); } catch {}
 }

@@ -84,8 +84,15 @@ class WebProxyBodyLimitTests(unittest.TestCase):
         path = f"/api/v1/organizations/{ORG}/knowledge/drafts/{DRAFT}"
         self.assertGreaterEqual(effective_limit(path), self.max_pdf_base64 + self.max_body_bytes)
 
+    def test_private_pdf_upload_and_replace_fit_the_api_limit(self):
+        drafts = f"/api/v1/organizations/{ORG}/private-workspace/drafts"
+        for path in (f"{drafts}/pdf", f"{drafts}/{DRAFT}/pdf"):
+            with self.subTest(path=path):
+                self.assertGreaterEqual(effective_limit(path), self.max_pdf_base64 + self.max_body_bytes * 6 + 4096)
+
     def test_other_api_routes_keep_the_small_default(self):
         for path in ["/api/v1/me", f"/api/v1/organizations/{ORG}/knowledge/drafts/new",
+                     f"/api/v1/organizations/{ORG}/private-workspace/drafts/{DRAFT}",
                      f"/api/v1/organizations/{ORG}/knowledge/drafts/{DRAFT}/submit",
                      f"/api/v1/organizations/{ORG}/knowledge/drafts/{DRAFT}/versions"]:
             with self.subTest(path=path):

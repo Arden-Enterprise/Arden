@@ -1,12 +1,12 @@
 # F03-ORG-AC3: favorite a note from the row menu, see it in Favorites and the
 # header star, then remove it with the header star.
-url: http://127.0.0.1:5180/?preview=1
+url: http://127.0.0.1:5180/
 name: Private Notes - favorite then unfavorite a note
 tags:
   - private-notes
   - f03-org
 ---
-- runFlow: subflows/login-demo.yaml
+- runFlow: subflows/login.yaml
 
 - runFlow:
     file: subflows/create-root-note.yaml

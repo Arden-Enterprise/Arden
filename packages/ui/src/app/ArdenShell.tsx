@@ -14,12 +14,8 @@ import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
 import { AskArdenPage } from "../ask-arden/AskArdenPage";
 import type { KnowledgeCitationReference, KnowledgeReaderTarget } from "../knowledge/knowledgeCitation";
 import { WaitingRoomPage } from "./WaitingRoomPage";
-import { InvitationAcceptPage } from "../organization/InvitationAcceptPage";
 import { InvitationLinkPage } from "../organization/InvitationLinkPage";
 import { OrganizationAdminPage } from "../organization/OrganizationAdminPage";
-import { MembershipAccessPage } from "../organization/MembershipAccessPage";
-import { OrganizationSetupPage } from "../organization/OrganizationSetupPage";
-import { OrganizationAccessPage } from "../organization/OrganizationAccessPage";
 import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
 import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { SettingsDialog } from "../settings";
@@ -28,48 +24,17 @@ import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
 import { StatusIslandContext, type StatusIslandConfirm, type StatusIslandToast } from "../shared/StatusIslandContext";
-import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
-import { membershipReadiness } from "../organization/organizationWorkflow";
-import type { Platform, PrivateCollection, PrivateNote, WorkspaceView } from "../shared/types";
+import type { Platform, WorkspaceView } from "../shared/types";
 import { IslandConfirm } from "../shared/IslandConfirm";
 import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership, type NotificationTarget } from "../shared/api-client";
 import { needsDepartmentAssignment } from "../shared/membershipAssignment";
 import { emptyKnowledgeRoute, sameKnowledgeLocation, type KnowledgeRoute, type KnowledgeRouteRequest } from "../knowledge/knowledgeRoute";
-import { allowedRoute, homeRoute, parseWorkspacePath, routeForView, takeReturnPath, workspacePath, type PrivateLocation, type WorkspaceRoute } from "./workspaceRoute";
+import { allowedRoute, forgetLastOrganization, homeRoute, parseWorkspacePath, readLastOrganization, rememberLastOrganization, rememberReturnPath, routeForView, signInPath, takeReturnPath, workspacePath, workspacesPath, type PrivateLocation, type WorkspaceRoute } from "./workspaceRoute";
+import { AuthLayout } from "../sign-in/AuthLayout";
 
 type ArdenShellProps = { platform: Platform };
 
-const initialNotes: PrivateNote[] = [
-  {
-    id: "architecture-review",
-    title: "Discovery notes — private workflow",
-    body:
-      "Observations\nMembers need a place to capture incomplete thoughts before they are ready for a governed shared item.\n\nAssumptions to validate\n• Privacy must be explicit at every entry point.\n• Save acknowledgement must reflect the server response.\n• Publication creates a separate immutable snapshot.",
-    updatedLabel: "Updated 2m ago · Sample",
-    collectionId: "sample-discovery",
-  },
-  {
-    id: "handover-observations",
-    title: "Weekly reflection",
-    body:
-      "A private summary of what worked, what changed, and what to revisit.",
-    updatedLabel: "Updated yesterday · Sample",
-  },
-  {
-    id: "incident-follow-up",
-    title: "API questions",
-    body:
-      "Open questions about note save acknowledgement and version conflicts.",
-    updatedLabel: "Updated 3d ago · Sample",
-  },
-];
-
-/** Demo-only collection; demo notes and collections live in memory and are cleared on refresh or exit. */
-const initialCollections: PrivateCollection[] = [
-  { id: "sample-discovery", title: "Discovery", parentId: null, favoritedAt: null },
-];
-
-type EntryView = "sign-in" | "password-setup" | "workspace-select" | "system-feedback" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
+type EntryView = "restoring" | "sign-in" | "password-setup" | "workspace-select" | "system-feedback" | "workspace" | "invite-link";
 
 /**
  * Extracts a 43-character invitation token from the URL path `/invite/:token`.
@@ -138,14 +103,13 @@ export function ArdenShell({ platform }: ArdenShellProps) {
 /**
  * ArdenShell internal state container and workspace routing dispatcher.
  *
- * Manages view transitions between sign-in, invitation preview, workspace selection,
+ * Manages view transitions between sign-in, invitation links, workspace selection,
  * and authenticated workspace surfaces while enforcing password recovery precedence.
  *
  * @param props Platform configuration props
  * @returns Arden shell workspace content
  */
 function ArdenShellContent({ platform }: ArdenShellProps) {
-  const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
   const [invitationToken, setInvitationToken] = useState<string | null>(() => {
     if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return null;
     return typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
@@ -166,18 +130,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   });
   const [entryView, setEntryView] = useState<EntryView>(() => {
     if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return "sign-in";
-    return invitationToken ? "invite-link" : "sign-in";
+    // Until the saved session is checked, show the entry background rather than a sign-in form that may vanish.
+    return invitationToken ? "invite-link" : "restoring";
   });
-  const [previewMemberId, setPreviewMemberId] = useState("sample-employee");
-  const [invitationId, setInvitationId] = useState("");
-  const [accessMemberId, setAccessMemberId] = useState("");
-  const [pendingMemberEntry, setPendingMemberEntry] = useState<string | null>(null);
-  const [organization, setOrganization] = useState<OrganizationPreview | null>(null);
   const [organizationDirty, setOrganizationDirty] = useState(false);
   const [knowledgeDirty, setKnowledgeDirty] = useState(false);
   const [invitationBatchSending, setInvitationBatchSending] = useState(false);
   const [activeView, setActiveView] = useState<WorkspaceView>("knowledge");
-  const privateNotes = usePrivateNotes(initialNotes, initialCollections);
+  const privateNotes = usePrivateNotes([], []);
   const [contextOpen, setContextOpen] = useState(false);
   const contextOpener = useRef<HTMLElement | null>(null);
   const returnContextFocus = useRef(false);
@@ -192,7 +152,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
   const shellRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | "workspace-select" | null>(null);
+  const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "workspace-select" | null>(null);
   const [serverSession, setServerSession] = useState<CurrentSession | null>(null);
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
   const [createdKnowledgeDraft, setCreatedKnowledgeDraft] = useState<CreatedKnowledgeDraft | null>(null);
@@ -201,6 +161,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const [requestedReviewId, setRequestedReviewId] = useState<string | null>(null);
   const [requestedContributionId, setRequestedContributionId] = useState<string | null>(null);
   const restoreStarted = useRef(false);
+  const serverActorId = useRef<string | null>(null);
   // The web address mirrors the open workspace screen so browser Back/Forward and reload work. The desktop app has
   // no address bar and loads from a file URL, so it keeps navigation in memory only.
   const routing = platform === "web" && typeof window !== "undefined";
@@ -330,6 +291,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       try { window.history.replaceState(null, "", "/"); } catch {}
     }
     setServerOrganizationId(membership.organization.id);
+    if (serverActorId.current) rememberLastOrganization(serverActorId.current, membership.organization.id);
     setRequestedReviewId(null);
     setCreatedKnowledgeDraft(null);
     setAssignedReviewCount(undefined);
@@ -340,16 +302,16 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setConversationId(null);
     setAskRouteRequest(null);
     waitingPrivateRoute.current = null;
-    setOrganization(null);
-    setPreviewRole(null);
     // Open the screen the address names (a reload, a shared link, or the page kept across Google sign-in),
     // falling back to Home when this member cannot open it.
     const returnPath = routing ? takeReturnPath() : null;
-    const currentPath = routing ? window.location.pathname === "/" && returnPath ? returnPath : window.location.pathname : "/";
+    const here = routing ? window.location.pathname : "/";
+    const currentPath = here !== "/" && parseWorkspacePath(here) ? here : returnPath ?? "/";
     const requested = parseWorkspacePath(currentPath) ?? homeRoute;
     const route = allowedRoute(requested, {
       admin: membership.roleCodes.includes("ORG_ADMIN"),
       privateNotes: membership.canUsePrivateWorkspace && !needsDepartmentAssignment(membership),
+      reviews: (membership.canReview ?? true) && !needsDepartmentAssignment(membership),
     });
     if (routing) {
       const path = workspacePath(route);
@@ -370,11 +332,12 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
    *
    * @param current The authenticated server session
    */
-  const acceptServerSession = async (current: CurrentSession) => {
+  const acceptServerSession = async (current: CurrentSession, options: { resume?: boolean } = {}) => {
     if (new URLSearchParams(window.location.search).has("auth") || (typeof window !== "undefined" && window.location.pathname === "/reset-password")) {
       try { window.history.replaceState(null, "", "/"); } catch {}
     }
     setServerSession(current);
+    serverActorId.current = current.actor.id;
     if (current.account?.passwordSetupRequired === true) {
       setEntryView("password-setup");
       return;
@@ -389,7 +352,23 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (recoveryTokens) {
       setRecoveryTokens(null);
     }
+    const resume = options.resume ? resumableMembership(current) : null;
+    if (resume) {
+      enterServerOrganization(resume);
+      return;
+    }
     setEntryView("workspace-select");
+  };
+
+  /**
+   * Picks the organization a reload returns to: the one this account last opened, or its only active one.
+   * An explicit visit to the chooser's address keeps the chooser.
+   */
+  const resumableMembership = (current: CurrentSession) => {
+    if (routing && window.location.pathname === workspacesPath) return null;
+    const active = current.memberships.filter((membership) => membership.status === "active");
+    const last = readLastOrganization(current.actor.id);
+    return active.find((membership) => membership.organization.id === last) ?? (active.length === 1 ? active[0] : null);
   };
 
   useEffect(() => {
@@ -404,7 +383,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         const activeMemberships = current.memberships.filter((membership) => membership.status === "active");
         if (!pathToken && activeMemberships.length > 0) {
           setInvitationToken(null);
-          return acceptServerSession(current);
+          return acceptServerSession(current, { resume: true });
         }
         if (pathToken) {
           setServerSession(current);
@@ -422,7 +401,9 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         return acceptServerSession(current);
       }
       return undefined;
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(() => {
+      setEntryView((view) => view === "restoring" ? "sign-in" : view);
+    });
   }, [platform]);
 
   useEffect(() => {
@@ -479,7 +460,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     setNavOpen(false);
-  }, [activeView, previewRole, entryView]);
+  }, [activeView, entryView]);
 
   useLayoutEffect(() => {
     if (entryView !== "workspace") return;
@@ -490,28 +471,15 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     page.classList.add("is-page-enter");
   }, [activeView, entryView]);
 
-  /**
-   * Transitions preview mode into a specific member workspace if readiness checks pass.
-   *
-   * @param memberId Target member identifier
-   */
-  const enterMemberWorkspace = (memberId: string) => {
-    if (!organization || membershipReadiness(organization, memberId).state !== "ready") return;
-    const member = organization.members.find(item => item.id === memberId);
-    setPreviewRole(member?.role === "Organization Admin" ? "admin" : "member");
-    setPreviewMemberId(memberId);
-    if (memberId !== previewMemberId) privateNotes.reset([]);
-    setActiveView("knowledge");
-    setKnowledgeCitationTarget(null);
-    setEntryView("workspace");
-    setPendingMemberEntry(null);
-  };
-
   /** Clears protected workspace state when the user signs out or the session expires. */
   const finishSignOut = () => {
     setSettingsOpen(false);
     setNavOpen(false);
     if (serverSession) void apiSignOut(platform).catch(() => undefined);
+    forgetLastOrganization();
+    serverActorId.current = null;
+    // Leave the workspace address now so the next person to sign in here does not reopen it.
+    if (routing && window.location.pathname !== signInPath) { try { window.history.replaceState(null, "", signInPath); } catch {} }
     setServerSession(null);
     setServerOrganizationId(null);
     setRequestedReviewId(null);
@@ -519,16 +487,11 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     setAssignedReviewCount(undefined);
     setContributionAttempt(null);
     setKnowledgeCitationTarget(null);
-    setPreviewRole(null);
     setEntryView("sign-in");
-    setOrganization(null);
     setOrganizationDirty(false);
     setActiveView("knowledge");
     setKnowledgeDirty(false);
     privateNotes.reset();
-    setInvitationId("");
-    setAccessMemberId("");
-    setPendingMemberEntry(null);
   };
 
   useEffect(() => {
@@ -548,29 +511,28 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     };
   }, [serverSession?.sessionExpiresAt]);
 
-  if (entryView === "setup") {
-    return (
-      <OrganizationSetupPage
-        initialOrganization={organization ?? undefined}
-        onSaveDraft={setOrganization}
-        onCancel={() => setEntryView(previewRole ? "workspace" : "sign-in")}
-        onComplete={(configuredOrganization) => {
-          setOrganization(configuredOrganization);
-          if (previewMemberId !== "sample-admin") privateNotes.reset([]);
-          setEntryView("workspace");
-          setPreviewRole("admin");
-          setPreviewMemberId("sample-admin");
-          setActiveView("organization-access");
-        }}
-      />
-    );
+  // Sign-in and the workspace chooser have their own addresses. The workspace address the person came for is kept
+  // so choosing an organization returns to it.
+  const entryPath = entryView === "sign-in" ? signInPath
+    : entryView === "workspace-select" && serverSession ? workspacesPath : null;
+  useEffect(() => {
+    if (!routing || !entryPath || recoveryTokens) return;
+    const here = window.location.pathname;
+    if (here === entryPath || here === "/reset-password" || tokenFromInvitationPath(here)
+      || isPasswordRecoveryTarget(window.location)) return;
+    rememberReturnPath(here);
+    try { window.history.replaceState(null, "", entryPath); } catch {}
+  }, [routing, entryPath, recoveryTokens]);
+
+  if (entryView === "restoring") {
+    return <AuthLayout><p className="sr-only" role="status">Loading Arden…</p></AuthLayout>;
   }
 
   if (entryView === "password-setup" && serverSession) {
     return <SetPasswordPage platform={platform} email={serverSession.actor.email} onComplete={acceptServerSession} />;
   }
 
-  if (entryView === "sign-in") {
+  if (entryView === "sign-in" || (!serverSession && entryView !== "invite-link")) {
     return (
       <SignInPage
         platform={platform}
@@ -581,30 +543,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           setRecoveryTokens(null);
         }}
         onAuthenticated={acceptServerSession}
-        onEnterPreview={() => {
-          setServerSession(null);
-          setServerOrganizationId(null);
-          setCreatedKnowledgeDraft(null);
-          setContributionAttempt(null);
-          setOrganization(createPreviewOrganization());
-          setPreviewRole("member");
-          setPreviewMemberId("sample-employee");
-          privateNotes.reset();
-          setEntryView("workspace-select");
-        }}
-        onEnterAdminPreview={() => {
-          setServerSession(null);
-          setServerOrganizationId(null);
-          setCreatedKnowledgeDraft(null);
-          setContributionAttempt(null);
-          setOrganization(createPreviewOrganization());
-          setPreviewRole("admin");
-          setPreviewMemberId("sample-admin");
-          privateNotes.reset([]);
-          setActiveView("organization-access");
-          setEntryView("workspace");
-        }}
-        onOpenSetup={() => setEntryView("setup")}
       />
     );
   }
@@ -643,30 +581,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         }}
       />;
     }
-    return <WorkspaceSelectPage organizationName={organization?.name ?? "FPT Digital"} onBack={() => { setPreviewRole(null); setOrganization(null); privateNotes.reset(); setEntryView("sign-in"); }} onContinue={() => { setActiveView("knowledge"); setEntryView("workspace"); }} />;
   }
 
-  /**
-   * Navigates the workspace preview back to the administrative access view.
-   */
-  const returnToAdmin = () => {
-    setPreviewRole("admin");
-    setPreviewMemberId("sample-admin");
-    setActiveView("organization-access");
-    setEntryView("workspace");
-  };
-
-  if (entryView === "invitation" && organization) {
-    return <InvitationAcceptPage organization={organization} invitationId={invitationId} onChange={setOrganization} onBack={returnToAdmin} onContinue={(memberId) => { setAccessMemberId(memberId); setEntryView("access"); }} />;
-  }
-
-  if (entryView === "access" && organization) {
-    return <><MembershipAccessPage organization={organization} memberId={accessMemberId} onBack={returnToAdmin} onContinue={(memberId) => {
-      if (membershipReadiness(organization, memberId).state !== "ready") return;
-      if (memberId !== previewMemberId && privateNotes.hasUnsavedDrafts) setPendingMemberEntry(memberId);
-      else enterMemberWorkspace(memberId);
-    }} />{pendingMemberEntry && <DiscardChangesDialog exiting={false} switchingMember onCancel={() => setPendingMemberEntry(null)} onDiscard={() => enterMemberWorkspace(pendingMemberEntry)} />}</>;
-  }
 
   /**
    * Navigates to a specific workspace view, handling unsaved draft confirmation.
@@ -676,6 +592,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const navigate = (view: WorkspaceView) => {
     historyTarget.current = null;
     setNavOpen(false);
+    // Links to Reviews (for example from Home) do nothing for members without review authority.
+    if (view === "review-queue" && !canUseReviews) return;
     if (invitationBatchSending && activeView === "organization-access" && view !== activeView) {
       setIslandToast({ message: "Wait for invitations to finish before leaving Administration.", onDismiss: () => setIslandToast(null) });
       return;
@@ -711,7 +629,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   handleHistoryNavigation.current = () => {
     if (!currentRoutePath || window.location.pathname === currentRoutePath) return;
     const requested = parseWorkspacePath(window.location.pathname) ?? homeRoute;
-    const route = allowedRoute(requested, { admin: liveAdmin || (!serverSession && previewRole === "admin"), privateNotes: canUsePrivateNotes });
+    const route = allowedRoute(requested, { admin: liveAdmin, privateNotes: canUsePrivateNotes, reviews: canUseReviews });
     const path = workspacePath(route);
     if (path !== window.location.pathname) { try { window.history.replaceState(null, "", path); } catch {} }
     if (path === currentRoutePath) return;
@@ -780,7 +698,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
 
   const showWorkspaceSelector = () => {
     historyTarget.current = null;
-    if (routing && window.location.pathname !== "/") { try { window.history.replaceState(null, "", "/"); } catch {} }
+    if (routing && window.location.pathname !== workspacesPath) { try { window.history.replaceState(null, "", workspacesPath); } catch {} }
     setKnowledgeDirty(false);
     setServerOrganizationId(null);
     setContributionAttempt(null);
@@ -817,15 +735,18 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     contextOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setContextOpen(true);
   } };
-  const previewMember = organization?.members.find(member => member.id === previewMemberId);
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
-  const memberName = serverSession ? serverSession.actor.fullName?.trim() || "Signed-in member" : previewMember?.name;
+  const memberName = serverSession?.actor.fullName?.trim() || "Signed-in member";
   const liveAdmin = activeMembership?.roleCodes.includes("ORG_ADMIN") ?? false;
   const isUnassignedMember = Boolean(serverSession && activeMembership && needsDepartmentAssignment(activeMembership));
   const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue";
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
-  // Demo sessions always have the in-memory notes; signed-in members need a private workspace in this organization.
-  const canUsePrivateNotes = !isUnassignedMember && (!serverSession || Boolean(activeMembership?.canUsePrivateWorkspace));
+  // Members need a private workspace in this organization.
+  const canUsePrivateNotes = !isUnassignedMember && Boolean(activeMembership?.canUsePrivateWorkspace);
+  // Older servers omit the field and still enforce reviewer access at the API.
+  const canUseReviews = !isUnassignedMember && Boolean(activeMembership && (activeMembership.canReview ?? true));
+  const memberRole = liveAdmin ? "Organization Admin" : "Member";
+  const memberDepartment = activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : liveAdmin ? "All organization" : "Member");
   const privateNote = privateNotes.focus.kind === "note" ? privateNotes.selectedNote : null;
   const privateVersion = privateNotes.selectedVersion;
   const chatSource: ChatSource = activeView !== "personal-workspace" ? { kind: "company" }
@@ -850,15 +771,13 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       <AppSidebar
         activeView={activeView}
         platform={platform}
-        previewRole={previewRole ?? "member"}
-        organization={organization}
         organizationLabel={serverOrganizationId ? serverSession?.memberships.find((item) => item.organization.id === serverOrganizationId)?.organization.name : undefined}
         authenticated={Boolean(serverSession)}
         showAdmin={liveAdmin}
+        showReviews={canUseReviews}
         isUnassigned={isUnassignedMember}
         memberName={memberName}
-        memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
-        memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+        memberRole={memberRole}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined}
         canSwitchWorkspace={Boolean(serverSession)}
@@ -875,7 +794,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         onOpenArchive={canUsePrivateNotes ? () => { privateNotes.openArchive(); navigate("personal-workspace"); } : undefined}
       />
       {navOpen && <button type="button" className="shell-nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
-      <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={(previewRole === "admin" && !serverSession) || liveAdmin}
+      <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={liveAdmin}
+        showReviews={canUseReviews}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined} onNavigate={navigate} />
 
       <ErrorBoundary>
@@ -901,17 +821,15 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           />
         ) : activeView === "organization-access" && serverOrganizationId && activeMembership && liveAdmin ? (
           <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} onSendingInvitationsChange={(sending) => { setInvitationBatchSending(sending); if (!sending) setIslandToast(null); }} {...contextControl} />
-        ) : activeView === "organization-access" && organization && previewRole === "admin" ? (
-          <OrganizationAccessPage organization={organization} onChange={setOrganization} onDirtyChange={setOrganizationDirty} onOpenSetup={() => { if (organizationDirty) setPendingAction("setup"); else setEntryView("setup"); }} onPreviewInvitation={(id) => { setInvitationId(id); setEntryView("invitation"); }} onPreviewAccess={(id) => { setAccessMemberId(id); setEntryView("access"); }} {...contextControl} />
         ) : activeView === "personal-workspace" ? (
-          <PersonalWorkspacePage key={serverOrganizationId ?? previewMemberId} controller={privateNotes} platform={platform} organizationId={serverOrganizationId ?? ""} contributionAttempt={contributionAttempt} onContributionAttemptChange={setContributionAttempt} onKnowledgeDraftCreated={(draft) => { setCreatedKnowledgeDraft(draft); navigate("knowledge"); }} {...contextControl} />
+          <PersonalWorkspacePage key={serverOrganizationId ?? "none"} controller={privateNotes} platform={platform} organizationId={serverOrganizationId ?? ""} contributionAttempt={contributionAttempt} onContributionAttemptChange={setContributionAttempt} onKnowledgeDraftCreated={(draft) => { setCreatedKnowledgeDraft(draft); navigate("knowledge"); }} {...contextControl} />
         ) : null}
 
       <div className="knowledge-feature-slot" hidden={!isKnowledgeView}>
-        <KnowledgeFeaturePage key={`${serverSession?.actor.id ?? "sample"}:${serverOrganizationId ?? "sample"}`} view={knowledgeView} active={isKnowledgeView}
+        <KnowledgeFeaturePage key={`${serverSession?.actor.id ?? "none"}:${serverOrganizationId ?? "none"}`} view={knowledgeView} active={isKnowledgeView}
           platform={platform} organizationId={serverOrganizationId}
-          organizationName={activeMembership?.organization.name ?? organization?.name}
-          departmentName={activeMembership ? "Personal contribution" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+          organizationName={activeMembership?.organization.name}
+          departmentName="Personal contribution"
           createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
           citationTarget={knowledgeCitationTarget}
           requestedReviewId={requestedReviewId} onReviewTargetHandled={() => setRequestedReviewId(null)}
@@ -949,11 +867,10 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         <SettingsDialog
           platform={platform}
           session={serverSession}
-          organization={organization}
           organizationName={activeMembership?.organization.name}
           memberName={memberName}
-          memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
-          memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+          memberRole={memberRole}
+          memberDepartment={memberDepartment}
           onClose={() => setSettingsOpen(false)}
           onRefreshSession={async () => {
             const refreshed = await restoreSession(platform);
@@ -971,7 +888,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
           }}
           onDiscard={() => {
             if (pendingAction === "exit") finishSignOut();
-            else if (pendingAction === "setup") { setOrganizationDirty(false); setEntryView("setup"); }
             else if (pendingAction === "workspace-select") {
               setOrganizationDirty(false);
               showWorkspaceSelector();

@@ -91,7 +91,7 @@ The ERD/SQL names below are the baseline. This section limits implementation to 
 | `private_workspace` | `workspace_id`, `membership_id`, name/status; unique `membership_id` | One private workspace per membership, matching the ERD. Manager/admin role does not grant another membership's workspace. |
 | `draft_document` | `draft_id`, `workspace_id`, title/description/status, `current_version_no` | Private note's stable identity and mutable metadata. Every lookup is scoped through its workspace and owner membership. |
 | `draft_version` | `draft_version_id`, `draft_id`, `version_no`, `source_uri`, `mime_type`, `content_hash`, creator membership; unique `(draft_id, version_no)` | Immutable saved content snapshot. An update creates a new version and advances `current_version_no`; it does not overwrite an earlier snapshot. `source_uri` is an opaque API-generated object reference; note text is stored on a protected persistent Coolify volume as `text/plain`, with SHA-256 integrity verification. |
-| `audit_event` | Organization, actor membership, event type/time, target and details fields | Successful create/update records actor, organization, action, target/version, decision, timestamp, and request correlation metadata. Do not record note content in audit details or ordinary logs. |
+| `audit_event` | Organization, actor membership, event type/time, target and details fields | Records consequential actions only ([decision 0035](../decisions/0035-audit-only-consequential-actions.md)); private-note create/update is not audited. Do not record note content in audit details or ordinary logs. |
 
 Use the existing composite constraints/triggers in the SQL as integrity rules, and verify their behavior on PostgreSQL 17. They are not substitutes for request authorization. The current SQL targets PostgreSQL 15+; repository local Compose uses PostgreSQL 17 with pgvector.
 
@@ -106,7 +106,7 @@ Current API implementation bounds: title at most 200 Unicode code points, body a
 - A private workspace is organization-scoped. Whether users may keep standalone workspaces outside an organization remains open in the blueprint.
 - `membership_id`, `organization_id`, IDs, versions, and audit actor are server-controlled. Update requests cannot change them. Resolve the owner by joining `private_workspace.membership_id` to `organization_membership.user_id` and require that `user_id` to match the verified actor.
 - Apply explicit SQL column lists and parameterized queries. Runtime application roles must not be superusers or `BYPASSRLS`; row-level security is defense in depth and must be tested with the real non-bypass role and pooled-connection context. Application authorization remains mandatory.
-- Note create/update and its audit metadata commit in one transaction. Failed writes produce no successful audit event. Denial/security diagnostics use safe metadata and do not expose private content.
+- Note create/update commits in one transaction. Under decision 0035 it writes no audit event; consequential actions write theirs in the same transaction as the change. Denial/security diagnostics use safe metadata and do not expose private content.
 - There is no delete endpoint in this slice. Do not implement hard delete, soft delete, retention, or recovery by implication.
 
 ## API contract
@@ -204,7 +204,7 @@ For each request, construct the context in this order:
 3. Load the membership for `(organization_id, actor_id)` using a tenant-bound query. Require an allowed status and recognized context; otherwise deny.
 4. For draft operations, join `draft_document` through `private_workspace` and `organization_membership`; require the membership's `user_id` to match the verified actor and the requested organization.
 5. Perform the operation transactionally. Recheck the membership/ownership predicates in the data operation so a delayed or concurrent request cannot rely only on a stale UI decision.
-6. On create/update, write an audit row containing actor, organization, action, target, outcome, timestamp, and request correlation ID. Do not log note payloads, authorization headers, cookies, or credentialed URLs.
+6. For a consequential action ([decision 0035](../decisions/0035-audit-only-consequential-actions.md)), write an audit row containing actor, organization, action, target, outcome, timestamp, and request correlation ID. Routine private-note saves are not audited. Do not log note payloads, authorization headers, cookies, or credentialed URLs.
 
 The same policy must later be called by every new route, job, event, search, graph, export, citation, and AI context path that can expose notes. Those surfaces are explicitly outside this slice and must not become alternate access paths.
 

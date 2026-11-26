@@ -29,7 +29,8 @@ describe("ArdenShell Private sidebar", () => {
       status: "ANSWERED", answer: "Friday.", citations: [],
     });
     render(createElement(ArdenShell, { platform: "web" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+    // A restored session with one organization opens it directly.
+    await screen.findByRole("button", { name: /Workspace: Test Org/i });
     fireEvent.click(screen.getAllByRole("button", { name: "Private" })[0]);
     const privateRoot = await within(screen.getByRole("main", { name: "Private" }))
       .findByRole("button", { name: "Private", exact: true });
@@ -68,6 +69,7 @@ describe("System Admin feedback analytics", () => {
 
   it("offers no analytics entry to organization admins without System Admin access", async () => {
     const analytics = vi.spyOn(apiClient, "loadPrivateFeedbackAnalytics");
+    window.history.replaceState(null, "", "/workspaces");
     render(createElement(ArdenShell, { platform: "web" }));
     await screen.findByRole("heading", { name: "Choose your workspace" });
     expect(screen.queryByRole("button", { name: "Private AI feedback" })).toBeNull();
@@ -92,6 +94,8 @@ vi.mock("../src/organization/OrganizationAdminPage", async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, "", "/");
+  window.localStorage.clear();
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
     configurable: true,
     value: function (this: HTMLDialogElement) { this.open = true; },
@@ -129,7 +133,8 @@ afterEach(() => {
 describe("ArdenShell invitation batch navigation", () => {
   it("preserves an unsaved shared draft until workspace switching is confirmed", async () => {
     render(createElement(ArdenShell, { platform: "web" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+    // A restored session with one organization opens it directly.
+    await screen.findByRole("button", { name: /Workspace: Test Org/i });
     fireEvent.click(screen.getAllByRole("button", { name: "Home", exact: true })[0]);
     fireEvent.click(await screen.findByRole("button", { name: "Create from PDF" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved shared draft" } });
@@ -147,6 +152,7 @@ describe("ArdenShell invitation batch navigation", () => {
   });
 
   it("lets a member with one workspace open the selector and create another", async () => {
+    window.history.replaceState(null, "", "/workspaces");
     render(createElement(ArdenShell, { platform: "web" }));
     expect(await screen.findByRole("heading", { name: "Choose your workspace" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Create another organization/i })).toBeTruthy();
@@ -160,7 +166,8 @@ describe("ArdenShell invitation batch navigation", () => {
 
   it("keeps the administrator on the result page until sending finishes", async () => {
     render(createElement(ArdenShell, { platform: "web" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+    // A restored session with one organization opens it directly.
+    await screen.findByRole("button", { name: /Workspace: Test Org/i });
     fireEvent.click(await screen.findByRole("button", { name: "Administration" }));
     expect(screen.getByText("Batch in progress")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Start batch" }));
@@ -182,7 +189,8 @@ describe("ArdenShell invitation batch navigation", () => {
 
   it("asks before leaving unsaved organization edits for the workspace chooser", async () => {
     render(createElement(ArdenShell, { platform: "web" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+    // A restored session with one organization opens it directly.
+    await screen.findByRole("button", { name: /Workspace: Test Org/i });
     fireEvent.click(screen.getByRole("button", { name: "Administration" }));
     fireEvent.click(screen.getByRole("button", { name: "Mark unsaved" }));
     const workspaceButton = screen.getByRole("button", { name: /Workspace: Test Org.*Switch or create workspace/i });

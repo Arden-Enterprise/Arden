@@ -75,7 +75,7 @@ Rename of a note keeps using `PATCH /drafts/:id` with `If-Match` (creates a new 
 - Trashing an item that is already in trash returns 404.
 - Restore: the batch root returns to its original parent if that collection is active, otherwise to the root. Descendants keep their relations.
 - Purge (manual or the 30-day job): delete every private-storage content object of the affected note versions, set note and collection titles to `''`, status `PURGED`, keep rows. The job runs in-process every hour and purges batches with `trashed_at < now() - interval '30 days'`.
-- Audit events: `PRIVATE_COLLECTION_CREATED/UPDATED`, `PRIVATE_ITEM_TRASHED/RESTORED/PURGED`, `PRIVATE_DRAFT_DUPLICATED`. Audit payloads must not contain titles or content.
+- Audit events: only `PRIVATE_ITEM_PURGED` (permanent deletion), under [decision 0035](../../decisions/0035-audit-only-consequential-actions.md). Collection changes, duplicate, trash and restore are routine owner-only actions and are not audited. Audit payloads must not contain titles or content.
 - Desktop `apiRequestPolicy` allows exactly these paths and methods (GET/POST/PATCH/PUT); no DELETE method is introduced.
 
 ## Spec F03-ARR: order and archive
@@ -103,7 +103,7 @@ Rules:
 
 - Archived notes are excluded from `GET /drafts`, favorites, placement, duplicate and collection subtrees (collection duplicate/trash). Trashing a collection leaves its archived notes archived. `POST /drafts/:id/trash` also accepts an archived note and clears the archive flag. A database check forbids a note being archived and in trash at once.
 - Placement (`collection_id`, `sort_position`) and `archived_at` changes do not update `updated_at`; content edits, favorites and trash keep their previous behaviour.
-- Audit events `PRIVATE_DRAFT_ARCHIVED` and `PRIVATE_DRAFT_UNARCHIVED` carry the draft id and request id only.
+- Archive and unarchive are not audited ([decision 0035](../../decisions/0035-audit-only-consequential-actions.md)).
 - Other members, Org Admins and System Admins get the existing non-enumerating 404 for every route above and an empty archive list. The desktop allow-list adds exactly `PUT /drafts/:id/archive` and `GET /archive`.
 
 ## Decision 0031: saving a note

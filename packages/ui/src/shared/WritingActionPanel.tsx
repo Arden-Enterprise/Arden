@@ -4,13 +4,35 @@ import { ApiError } from "./api-client";
 import type { EditorActionAnchor } from "./editor-action-anchor";
 import type { EditorClipboardAction } from "./editor-clipboard";
 import type { Platform } from "./types";
+import type { InlineFormat } from "./markdownInlineFormat";
 
 const clipboardActions = [{ action: "cut", label: "Cut" }, { action: "copy", label: "Copy" },
   { action: "paste", label: "Paste" }] as const;
 
+const formatButtons: { format: InlineFormat; label: string; shortcut: string; glyph: string }[] = [
+  { format: "bold", label: "Bold", shortcut: "Ctrl+B", glyph: "B" },
+  { format: "italic", label: "Italic", shortcut: "Ctrl+I", glyph: "I" },
+  { format: "strike", label: "Strikethrough", shortcut: "Ctrl+Shift+S", glyph: "S" },
+  { format: "code", label: "Inline code", shortcut: "Ctrl+E", glyph: "</>" },
+];
+
+const aiIcons: Record<"IMPROVE" | "REFORMAT" | "EXPLAIN", string> = {
+  IMPROVE: "M8 1.5l1.4 3.6 3.6 1.4-3.6 1.4L8 11.5 6.6 7.9 3 6.5l3.6-1.4L8 1.5zM12.5 10l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7.7-1.8z",
+  REFORMAT: "M2.5 4h11M2.5 8h7M2.5 12h9",
+  EXPLAIN: "M8 14.5A6.5 6.5 0 1 0 8 1.5a6.5 6.5 0 0 0 0 13zM6.2 6.2a1.9 1.9 0 1 1 2.6 1.8c-.5.2-.8.6-.8 1.1v.4M8 11.6v.1",
+};
+
+function AiIcon({ action }: { action: keyof typeof aiIcons }) {
+  const filled = action === "IMPROVE";
+  return <svg className="writing-action-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"
+    fill={filled ? "currentColor" : "none"} stroke={filled ? "none" : "currentColor"} strokeWidth="1.4" strokeLinecap="round">
+    <path d={aiIcons[action]} />
+  </svg>;
+}
+
 export function WritingActionPanel({
   platform, organizationId, text, scope, onApply, onClose, canApply = true,
-  anchor, source, focusOnOpen, clipboard,
+  anchor, source, focusOnOpen, clipboard, formatting, aiEnabled = true,
 }: {
   platform: Platform; organizationId: string; text: string; scope: "SELECTION" | "PAGE";
   onApply: (replacement: string, action: WritingAction) => void; onClose: (restoreFocus: boolean) => void;
@@ -19,6 +41,9 @@ export function WritingActionPanel({
   source: HTMLElement;
   focusOnOpen?: boolean;
   clipboard?: { hasSelection: boolean; run: (action: EditorClipboardAction, signal: AbortSignal) => Promise<void> };
+  /** Markdown formatting for the selected text, shown above the AI actions. */
+  formatting?: { active: Record<InlineFormat, boolean>; onToggle: (format: InlineFormat) => void };
+  aiEnabled?: boolean;
 }) {
   const [pending, setPending] = useState<WritingAction | null>(null);
   const [result, setResult] = useState<(WritingResult & { action: WritingAction }) | null>(null);
@@ -28,7 +53,7 @@ export function WritingActionPanel({
   const controller = useRef<AbortController | null>(null);
   const panel = useRef<HTMLElement>(null);
   const expanded = Boolean(pending || result || error);
-  const canWrite = Boolean(text.trim()) && text.length <= 12_000;
+  const canWrite = aiEnabled && Boolean(text.trim()) && text.length <= 12_000;
   const close = (restoreFocus: boolean) => {
     controller.current?.abort();
     onClose(restoreFocus);
@@ -129,12 +154,19 @@ export function WritingActionPanel({
         disabled={Boolean(pending) || clipboardPending || (action !== "paste" && !clipboard.hasSelection)}
         onClick={() => void runClipboard(action)}>{label}</button>)}
     </div>}
-    {canWrite && <div className="writing-action-options" role="group" aria-label="Writing actions">
-      <button type="button" disabled={Boolean(pending) || clipboardPending || !editable("IMPROVE")} onClick={() => void run("IMPROVE")}>Improve Writing</button>
-      <button type="button" disabled={Boolean(pending) || clipboardPending || !editable("REFORMAT")} onClick={() => void run("REFORMAT")}>Reformat</button>
-      <button type="button" disabled={Boolean(pending) || clipboardPending} onClick={() => void run("EXPLAIN")}>Explain</button>
+    {formatting && !expanded && <div className="writing-action-format" role="toolbar" aria-label="Text formatting">
+      {formatButtons.map(({ format, label, shortcut, glyph }) => <button key={format} type="button"
+        className={`writing-format-${format}${formatting.active[format] ? " is-active" : ""}`}
+        aria-label={label} aria-pressed={formatting.active[format]} title={`${label} (${shortcut})`}
+        disabled={Boolean(pending) || clipboardPending} onClick={() => formatting.onToggle(format)}>{glyph}</button>)}
     </div>}
-    {text.length > 12_000 && <p role="status">Select up to 12,000 characters to use AI writing.</p>}
+    {canWrite && <div className="writing-action-options writing-action-ai" role="group" aria-label="Writing actions">
+      {!expanded && <span className="writing-action-label" aria-hidden="true">Arden AI</span>}
+      <button type="button" disabled={Boolean(pending) || clipboardPending || !editable("IMPROVE")} onClick={() => void run("IMPROVE")}><AiIcon action="IMPROVE" />Improve Writing</button>
+      <button type="button" disabled={Boolean(pending) || clipboardPending || !editable("REFORMAT")} onClick={() => void run("REFORMAT")}><AiIcon action="REFORMAT" />Reformat</button>
+      <button type="button" disabled={Boolean(pending) || clipboardPending} onClick={() => void run("EXPLAIN")}><AiIcon action="EXPLAIN" />Explain</button>
+    </div>}
+    {aiEnabled && text.length > 12_000 && <p role="status">Select up to 12,000 characters to use AI writing.</p>}
     {pending && <p role="status">{pending === "EXPLAIN" ? "Explaining…" : "Preparing suggestion…"}</p>}
     {error && <p role="alert">{error}</p>}
     {result?.status === "UNCHANGED" && <p role="status">{result.text}</p>}

@@ -168,7 +168,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
     });
   }
 
-  async createCollection(userId: string, organizationId: string, input: { title: string; parentId: string | null }, requestId: string): Promise<PrivateCollection | null> {
+  async createCollection(userId: string, organizationId: string, input: { title: string; parentId: string | null }, _requestId: string): Promise<PrivateCollection | null> {
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await findOwner(client, userId, organizationId);
       if (!owner) return null;
@@ -181,14 +181,12 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
         VALUES ($1, $2, $3) RETURNING ${collectionColumns}`, [workspaceId, input.parentId, input.title]);
       const row = inserted.rows[0];
       if (!row) throw new Error("Private collection insert returned no row");
-      await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_COLLECTION_CREATED",
-        { collectionId: row.collection_id, requestId });
       return mapCollection(row);
     });
   }
 
   async updateCollection(userId: string, organizationId: string, collectionId: string,
-    input: { title?: string; parentId?: string | null }, requestId: string): Promise<UpdateCollectionResult> {
+    input: { title?: string; parentId?: string | null }, _requestId: string): Promise<UpdateCollectionResult> {
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await findOwner(client, userId, organizationId);
       if (!owner?.workspaceId) return { kind: "not-found" };
@@ -208,8 +206,6 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
         RETURNING ${collectionColumns}`, [collectionId, workspaceId, input.title ?? null, moving, input.parentId ?? null]);
       const row = updated.rows[0];
       if (!row) return { kind: "not-found" };
-      await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_COLLECTION_UPDATED",
-        { collectionId, renamed: input.title !== undefined, moved: moving, requestId });
       return { kind: "updated", collection: mapCollection(row) };
     });
   }
@@ -267,7 +263,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
     });
   }
 
-  async setNoteArchived(userId: string, organizationId: string, draftId: string, archived: boolean, requestId: string): Promise<DraftListItem | null> {
+  async setNoteArchived(userId: string, organizationId: string, draftId: string, archived: boolean, _requestId: string): Promise<DraftListItem | null> {
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await findOwner(client, userId, organizationId);
       if (!owner?.workspaceId) return null;
@@ -287,8 +283,6 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
           await client.query(`UPDATE draft_document SET archived_at = NULL, collection_id = $3, sort_position = NULL
             WHERE draft_id = $1 AND workspace_id = $2`, [draftId, workspaceId, collectionId]);
         }
-        await appendPrivateAudit(client, organizationId, owner.membershipId,
-          archived ? "PRIVATE_DRAFT_ARCHIVED" : "PRIVATE_DRAFT_UNARCHIVED", { draftId, requestId });
       }
       return (await noteSummaries(client, workspaceId, organizationId, [draftId]))[0] ?? null;
     });
@@ -329,7 +323,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
   }
 
   async duplicateNote(userId: string, organizationId: string, source: PrivateNoteSource, title: string,
-    copy: StoredContentFields, requestId: string): Promise<PrivateDraft | null> {
+    copy: StoredContentFields, _requestId: string): Promise<PrivateDraft | null> {
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await findOwner(client, userId, organizationId);
       if (!owner?.workspaceId) return null;
@@ -338,8 +332,6 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       // Decision 0031: an open version can change in place, so compare its content too.
       if (!current || current.versionId !== source.versionId || current.contentHash !== source.contentHash) return null;
       const created = await insertNoteCopy(client, owner, current.collectionId, title, copy);
-      await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_DRAFT_DUPLICATED",
-        { draftId: created.draftId, sourceDraftId: source.id, requestId });
       return {
         id: created.draftId, organizationId, title, versionId: created.versionId,
         sourceUri: copy.sourceUri, mimeType: copy.mimeType, contentHash: copy.contentHash, currentVersion: 1,
@@ -358,7 +350,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
   }
 
   async duplicateCollection(userId: string, organizationId: string, snapshot: PrivateCollectionSubtree, rootTitle: string,
-    copies: ReadonlyMap<string, StoredContentFields>, requestId: string): Promise<PrivateDuplicatedCollection | "changed" | null> {
+    copies: ReadonlyMap<string, StoredContentFields>, _requestId: string): Promise<PrivateDuplicatedCollection | "changed" | null> {
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await findOwner(client, userId, organizationId);
       if (!owner?.workspaceId) return null;
@@ -391,10 +383,6 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       }
       const root = collections[0];
       if (!root) throw new Error("Private collection copy has no root");
-      await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_COLLECTION_CREATED", {
-        collectionId: root.id, sourceCollectionId: snapshot.root.id, duplicated: true,
-        collectionCount: collections.length, noteCount: noteIds.length, requestId,
-      });
       return { collection: root, collections, notes: await noteSummaries(client, workspaceId, organizationId, noteIds) };
     });
   }
@@ -410,9 +398,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
         WHERE d.draft_id = $1 AND d.workspace_id = $2 AND d.status = 'ACTIVE' AND d.trashed_at IS NULL`,
       [draftId, owner.workspaceId, batchId]);
       if (!trashed.rowCount) return null;
-      await revokeBatchShares(client, owner.membershipId, batchId);
-      await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_ITEM_TRASHED",
-        { batchId, kind: "note", itemCount: 1, requestId });
+      await revokeBatchShares(client, organizationId, owner.membershipId, batchId, requestId);
       return requireEntry(await trashEntries(client, owner.workspaceId, batchId));
     });
   }
@@ -427,15 +413,13 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
       if (subtree.length === 0) return null;
       const batchId = randomUUID();
       // Notes before collections: every tree writer uses this order under the workspace lock.
-      const notes = await client.query(`UPDATE draft_document d SET trashed_at = now(), trash_batch_id = $3
+      await client.query(`UPDATE draft_document d SET trashed_at = now(), trash_batch_id = $3
         WHERE d.workspace_id = $1 AND d.collection_id = ANY($2::uuid[]) AND ${treeNote}`,
       [workspaceId, subtree, batchId]);
       await client.query(`UPDATE private_collection c SET trashed_at = now(), trash_batch_id = $3
         WHERE c.workspace_id = $1 AND c.collection_id = ANY($2::uuid[]) AND ${activeCollection}`,
       [workspaceId, subtree, batchId]);
-      await revokeBatchShares(client, owner.membershipId, batchId);
-      await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_ITEM_TRASHED",
-        { batchId, kind: "collection", itemCount: subtree.length + (notes.rowCount ?? 0), requestId });
+      await revokeBatchShares(client, organizationId, owner.membershipId, batchId, requestId);
       return requireEntry(await trashEntries(client, workspaceId, batchId));
     });
   }
@@ -448,7 +432,7 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
     });
   }
 
-  async restoreTrash(userId: string, organizationId: string, batchId: string, requestId: string): Promise<{ collections: PrivateCollection[]; notes: DraftListItem[] } | null> {
+  async restoreTrash(userId: string, organizationId: string, batchId: string, _requestId: string): Promise<{ collections: PrivateCollection[]; notes: DraftListItem[] } | null> {
     return this.withActor(userId, organizationId, async (client) => {
       const owner = await findOwner(client, userId, organizationId);
       if (!owner?.workspaceId) return null;
@@ -470,8 +454,6 @@ export class PgPrivateOrganizationStore implements PrivateOrganizationStore, Pri
         WHERE d.workspace_id = $1 AND d.trash_batch_id = $2 AND d.status = 'ACTIVE'`, [workspaceId, batchId]);
       await client.query(`UPDATE private_collection c SET trashed_at = NULL, trash_batch_id = NULL
         WHERE c.workspace_id = $1 AND c.trash_batch_id = $2 AND c.status = 'ACTIVE'`, [workspaceId, batchId]);
-      await appendPrivateAudit(client, organizationId, owner.membershipId, "PRIVATE_ITEM_RESTORED",
-        { batchId, kind: root.kind, itemCount: items.length, requestId });
       const collectionIds = items.filter((item) => item.kind === "collection").map((item) => item.id);
       const collections = collectionIds.length ? (await client.query<CollectionRow>(`SELECT ${collectionColumns}
         FROM private_collection c WHERE c.workspace_id = $1 AND c.collection_id = ANY($2::uuid[])
@@ -751,13 +733,21 @@ async function contentObjects(client: PoolClient, draftIds: string[]): Promise<P
 
 /**
  * Decision 0034: moving an item to trash ends its direct shares for good; restoring it does not share it again.
- * Returns how many shares were revoked.
+ * Decision 0035: audit the loss of access, without recording owner-only trash operations.
  */
-async function revokeBatchShares(client: PoolClient, ownerMembershipId: string, batchId: string): Promise<number> {
-  const revoked = await client.query(`UPDATE private_item_share s SET revoked_at = now(), revoked_by_membership_id = $1
-    WHERE s.owner_membership_id = $1 AND s.revoked_at IS NULL
-      AND s.draft_id IN (SELECT d.draft_id FROM draft_document d WHERE d.trash_batch_id = $2)`, [ownerMembershipId, batchId]);
-  return revoked.rowCount ?? 0;
+async function revokeBatchShares(client: PoolClient, organizationId: string, ownerMembershipId: string, batchId: string, requestId: string): Promise<void> {
+  const revoked = await client.query<{ draft_id: string; count: number }>(`
+    WITH revoked AS (
+      UPDATE private_item_share s SET revoked_at = now(), revoked_by_membership_id = $1
+      WHERE s.owner_membership_id = $1 AND s.revoked_at IS NULL
+        AND s.draft_id IN (SELECT d.draft_id FROM draft_document d WHERE d.trash_batch_id = $2)
+      RETURNING s.draft_id
+    )
+    SELECT draft_id, count(*)::integer AS count FROM revoked GROUP BY draft_id`, [ownerMembershipId, batchId]);
+  for (const row of revoked.rows) {
+    await appendPrivateAudit(client, organizationId, ownerMembershipId, "PRIVATE_ITEM_SHARE_REVOKED",
+      { draftId: row.draft_id, revokedCount: row.count, reason: "TRASH", requestId });
+  }
 }
 
 async function markErased(client: PoolClient, draftIds: string[], workspaceId: string | null): Promise<void> {
@@ -766,7 +756,10 @@ async function markErased(client: PoolClient, draftIds: string[], workspaceId: s
       AND ($2::uuid IS NULL OR workspace_id = $2)`, [draftIds, workspaceId]);
 }
 
-/** Audit details carry identifiers and counts only, never titles or content. */
+/**
+ * Decision 0035: audit permanent deletion and any share revocation caused by trashing.
+ * Audit details carry identifiers and counts only, never titles or content.
+ */
 async function appendPrivateAudit(client: PoolClient, organizationId: string, membershipId: string,
   eventType: string, details: Record<string, string | number | boolean>): Promise<void> {
   await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id, event_type, outcome, details_json)

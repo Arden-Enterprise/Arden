@@ -30,7 +30,7 @@ function Workspace() {
   controllerRef = controller;
   return createElement("div", { className: "arden-app-shell" },
     createElement(AppSidebar, {
-      activeView: "personal-workspace", platform: "web", previewRole: "member", organization: null,
+      activeView: "personal-workspace", platform: "web", authenticated: true,
       memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
       privateNotes: { controller, pageVisible: true, onOpen: vi.fn() },
     }),

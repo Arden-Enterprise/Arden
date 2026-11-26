@@ -5,6 +5,9 @@ import type { Platform, PrivateNote } from "../shared/types";
 import { WritingActionPanel } from "../shared/WritingActionPanel";
 import { pointAnchor, textareaSelectionAnchor, type EditorActionAnchor } from "../shared/editor-action-anchor";
 import { runEditorClipboard } from "../shared/editor-clipboard";
+import { activeInlineFormats, toggleInlineFormat, type InlineFormat } from "../shared/markdownInlineFormat";
+
+const formatShortcuts: Record<string, InlineFormat> = { b: "bold", i: "italic", e: "code", "shift+s": "strike" };
 
 type PrivateNoteEditorProps = {
   selectedNote: PrivateNote | null;
@@ -52,7 +55,7 @@ export function PrivateNoteEditor({
     if (restoreFocus) (popup?.source ?? bodyRef.current)?.focus({ preventScroll: true });
   };
   const updateSelection = (fallback?: EditorActionAnchor) => {
-    if (!assistantEnabled || suppressSelection.current) return;
+    if (suppressSelection.current) return;
     const target = bodyRef.current;
     if (!target) return;
     const { selectionStart: start, selectionEnd: end, value } = target;
@@ -73,6 +76,30 @@ export function PrivateNoteEditor({
     setSelection(start !== end ? { start, end, body: value } : null);
     setPopup({ kind: "context", source: target, keyboard, clipboard: { start, end, value, draft: draftBody },
       anchor: start !== end || keyboard ? textareaSelectionAnchor(target, start, end, point) : point });
+  };
+  const applyFormat = (format: InlineFormat) => {
+    const target = bodyRef.current;
+    if (!target || target.value !== draftBody) return;
+    const { selectionStart: start, selectionEnd: end } = target;
+    const edit = toggleInlineFormat(draftBody, start, end, format);
+    if (!edit) return;
+    suppressSelection.current = true;
+    target.focus({ preventScroll: true });
+    target.setSelectionRange(edit.from, edit.to);
+    // insertText keeps the browser's undo history; the fallback still produces the same body.
+    if (!target.ownerDocument.execCommand?.("insertText", false, edit.insert) || target.value !== edit.value) {
+      onBodyChange(edit.value);
+    } else {
+      target.setSelectionRange(edit.start, edit.end);
+    }
+    requestAnimationFrame(() => {
+      if (bodyRef.current !== target || target.value !== edit.value) return;
+      target.setSelectionRange(edit.start, edit.end);
+      setSelection({ start: edit.start, end: edit.end, body: edit.value });
+      setPopup({ kind: "selection", source: target,
+        anchor: textareaSelectionAnchor(target, edit.start, edit.end, target.getBoundingClientRect()) });
+      suppressSelection.current = false;
+    });
   };
   const selectedText = selection && selection.body === draftBody ? draftBody.slice(selection.start, selection.end) : "";
   const targetText = selectedText || draftBody;
@@ -118,6 +145,13 @@ export function PrivateNoteEditor({
                 onMouseDown={() => { suppressSelection.current = false; }}
                 onKeyDown={(event) => {
                   if (event.key === "Escape") return;
+                  const shortcut = (event.ctrlKey || event.metaKey) && !event.altKey
+                    && formatShortcuts[`${event.shiftKey ? "shift+" : ""}${event.key.toLowerCase()}`];
+                  if (shortcut && event.currentTarget.selectionStart !== event.currentTarget.selectionEnd) {
+                    event.preventDefault();
+                    applyFormat(shortcut);
+                    return;
+                  }
                   suppressSelection.current = false;
                   if (assistantEnabled && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
                     event.preventDefault();
@@ -136,10 +170,13 @@ export function PrivateNoteEditor({
                 placeholder="Write a private note…"
               />
             </label>
-            {assistantEnabled && popup && (popup.clipboard ? popup.clipboard.draft === draftBody : targetText.trim()) && <WritingActionPanel
+            {popup && (popup.clipboard ? popup.clipboard.draft === draftBody : targetText.trim()) && <WritingActionPanel
               key={`${selectedNote?.id}:${popup.kind}:${selection?.start}:${selection?.end}:${draftBody}`}
               platform={platform} organizationId={organizationId} text={targetText} scope={scope}
-              anchor={popup.anchor} source={popup.source} focusOnOpen={popup.keyboard}
+              anchor={popup.anchor} source={popup.source} focusOnOpen={popup.keyboard} aiEnabled={assistantEnabled}
+              formatting={selectedText.trim() && selection ? {
+                active: activeInlineFormats(draftBody, selection.start, selection.end), onToggle: applyFormat,
+              } : undefined}
               canApply={!selection || selection.body === draftBody}
               clipboard={popup.clipboard && {
                 hasSelection: popup.clipboard.start !== popup.clipboard.end,

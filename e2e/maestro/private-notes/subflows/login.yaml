@@ -1,0 +1,24 @@
+# Signs in with a synthetic account on a local test stack and enters its organization.
+# There is no demo mode: start the API in local Mainflow 1 test mode against a disposable
+# arden_test_* database and pass ARDEN_E2E_EMAIL, ARDEN_E2E_PASSWORD and
+# ARDEN_E2E_ORGANIZATION (run.ps1 forwards them with `maestro test -e`).
+url: http://127.0.0.1:5180/
+name: Subflow - sign in and enter the test organization
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Sign in to your account"
+    timeout: 30000
+- tapOn: "Email address"
+- inputText: ${ARDEN_E2E_EMAIL}
+- tapOn: "Password"
+- inputText: ${ARDEN_E2E_PASSWORD}
+- tapOn: "Sign in"
+- extendedWaitUntil:
+    visible: "Choose your workspace"
+    timeout: 15000
+- tapOn: ${ARDEN_E2E_ORGANIZATION}
+- extendedWaitUntil:
+    visible: "Private"
+    timeout: 15000

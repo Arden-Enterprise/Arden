@@ -29,6 +29,8 @@ export type MembershipSummary = {
   departmentName?: string | null;
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
+  /** Organization Admin or an active reviewer grant: the member can use Reviews. Absent means false. */
+  canReview?: boolean;
 };
 export type ActiveMembership = { membershipId: string; organizationId: string; userId: string };
 
@@ -907,6 +909,22 @@ export class ArdenRepository implements ArdenDataRepository {
        GROUP BY o.organization_id, o.name, om.membership_id, om.status
        ORDER BY o.name, o.organization_id`, [userId, "PRIVATE_WORKSPACE_READ"]);
 
+    // Reviews is for Organization Admins and members with an active reviewer grant. Grants are readable only
+    // inside their organization's context, so each active membership is checked in its own context.
+    const reviewers = new Set<string>();
+    for (const row of result.rows) {
+      if (row.status !== "ACTIVE") continue;
+      if ((row.role_codes ?? []).includes("ORG_ADMIN")) { reviewers.add(row.organization_id); continue; }
+      await client.query("SELECT set_config('arden.organization_id', $1, true)", [row.organization_id]);
+      const grant = await client.query(`SELECT 1 FROM reviewer_grant g
+        JOIN organization_membership om ON om.membership_id = g.reviewer_membership_id
+       WHERE g.organization_id = $1 AND om.user_id = $2 AND om.status = 'ACTIVE' AND g.status = 'ACTIVE'
+         AND g.valid_from <= now() AND (g.valid_until IS NULL OR g.valid_until > now())
+       LIMIT 1`, [row.organization_id, userId]);
+      if (grant.rowCount) reviewers.add(row.organization_id);
+    }
+    await client.query("SELECT set_config('arden.organization_id', '', true)");
+
     return result.rows.map((row) => ({
       organizationId: row.organization_id,
       organizationName: row.organization_name,
@@ -915,6 +933,7 @@ export class ArdenRepository implements ArdenDataRepository {
       departmentName: row.department_name,
       roleCodes: row.role_codes ?? [],
       canUsePrivateWorkspace: row.can_use_private_workspace,
+      canReview: reviewers.has(row.organization_id),
     }));
     });
   }
@@ -2860,7 +2879,7 @@ export class ArdenRepository implements ArdenDataRepository {
       Boolean(await this.findMembership(userId, organizationId, "PRIVATE_WORKSPACE_WRITE", client)));
   }
 
-  async createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, requestId: string): Promise<PrivateDraft | null> {
+  async createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, _requestId: string): Promise<PrivateDraft | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const membershipId = await this.findMembership(userId, organizationId, "PRIVATE_WORKSPACE_WRITE", client);
       if (!membershipId) return null;
@@ -2895,7 +2914,6 @@ export class ArdenRepository implements ArdenDataRepository {
         content.text?.sourceUri ?? null, content.text?.contentHash ?? null]);
       const versionId = versionResult.rows[0]?.draft_version_id;
       if (!versionId) throw new Error("Draft version insert returned no row");
-      await this.appendAudit(client, organizationId, membershipId, "PRIVATE_DRAFT_CREATED", created.draft_id, 1, requestId);
       return {
         id: created.draft_id,
         organizationId,
@@ -2928,7 +2946,7 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<DraftUpdateResult> {
+  async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, _requestId: string): Promise<DraftUpdateResult> {
     return this.withActorContext(userId, organizationId, async (client) => {
       // Lock the mutable document before reading its version join. Under READ
       // COMMITTED, a waiter otherwise rechecks the new document against an old
@@ -3017,7 +3035,6 @@ export class ArdenRepository implements ArdenDataRepository {
         if (!inserted) throw new Error("Draft version insert returned no row");
         versionId = inserted;
       }
-      await this.appendAudit(client, organizationId, current.membership_id, "PRIVATE_DRAFT_UPDATED", draftId, version, requestId);
       const updated = await client.query<{ created_at: Date; updated_at: Date }>(`
         SELECT created_at, updated_at FROM draft_document WHERE draft_id = $1`, [draftId]);
       const timestamps = updated.rows[0];

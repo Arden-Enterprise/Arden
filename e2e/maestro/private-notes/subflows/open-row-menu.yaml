@@ -2,7 +2,7 @@
 # When the item is selected the note header "···" has the same accessible
 # name; index 0 is the sidebar row because the sidebar precedes the main
 # content in DOM order.
-url: http://127.0.0.1:5180/?preview=1
+url: http://127.0.0.1:5180/
 name: Subflow - open the row action menu
 ---
 - tapOn:

@@ -113,4 +113,6 @@ Expired documents and Home columns: [0032 — Expired documents, reviewed renewa
 
 Reviewer self-approval: [0033 — Reviewers with a matching grant may decide their own submissions](0033-reviewer-self-approval.md) (accepted 24 November 2026) supersedes the reviewer self-review ban in 0011/0015 and amends the 0032 renewal decision order. Branch `feat/expired-document-visibility` only.
 
-Share button and direct sharing: [0034 — One Share button, unreviewed direct sharing with individuals and private PDF items](0034-share-button-direct-share-and-private-pdf.md) (accepted 26 November 2026) relaxes product contract item 4 for named individuals and lets Private store PDF files. Not implemented.
+Share button and direct sharing: [0034 — One Share button, unreviewed direct sharing with individuals and private PDF items](0034-share-button-direct-share-and-private-pdf.md) (accepted 26 November 2026) allows explicitly selected members to read a private item and lets Private store PDF files.
+
+Audit policy: [0035 — Audit only consequential actions](0035-audit-only-consequential-actions.md) (accepted 26 November 2026) supersedes the audit line of 0002. Permanent deletion and changes to share access are audited.
