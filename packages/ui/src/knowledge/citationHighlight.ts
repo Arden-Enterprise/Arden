@@ -1,4 +1,4 @@
-import { findQuoteInSegments, type TextMatch } from "./citationTextMatch";
+import { findPageQuoteMatches, findQuoteInSegments, type TextMatch } from "./citationTextMatch";
 
 export function textNodesIn(root: Node): Text[] {
   const walker = root.ownerDocument!.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -22,12 +22,12 @@ function rangesFor(nodes: readonly Text[], match: TextMatch): Array<{ node: Text
  * Wraps the quote in `<mark>` elements. Only for DOM this code owns (the PDF text layer);
  * an editor-managed DOM would discard the change, so use {@link highlightQuoteRanges} there.
  */
-export function markQuote(root: HTMLElement, quote: string, className: string): { marks: HTMLElement[]; complete: boolean } {
+export function markQuote(root: HTMLElement, quote: string, className: string, onCitedPage = false): { marks: HTMLElement[]; complete: boolean } {
   const nodes = textNodesIn(root);
-  const match = findQuoteInSegments(nodes.map((node) => node.data), quote);
-  if (!match) return { marks: [], complete: false };
+  const segments = nodes.map(node => node.data);
+  const matches = onCitedPage ? findPageQuoteMatches(segments, quote) : [findQuoteInSegments(segments, quote)];
   const marks: HTMLElement[] = [];
-  for (const { node, from, to } of rangesFor(nodes, match).reverse()) {
+  for (const { node, from, to } of matches.flatMap(match => match ? rangesFor(nodes, match) : []).reverse()) {
     const middle = from > 0 ? node.splitText(from) : node;
     if (to - from < middle.data.length) middle.splitText(to - from);
     const mark = root.ownerDocument.createElement("mark");
@@ -36,7 +36,7 @@ export function markQuote(root: HTMLElement, quote: string, className: string): 
     mark.appendChild(middle);
     marks.unshift(mark);
   }
-  return { marks, complete: match.complete };
+  return { marks, complete: matches[0]?.complete === true };
 }
 
 export function clearMarks(root: HTMLElement, className: string): void {
