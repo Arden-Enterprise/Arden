@@ -39,6 +39,8 @@ export type OrganizationMembership = {
   departmentName?: string | null;
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
+  /** Organization Admin or an active reviewer grant. Older servers omit it; the UI then keeps Reviews visible. */
+  canReview?: boolean;
 };
 export type CurrentSession = {
   actor: { id: string; email?: string; fullName?: string | null };

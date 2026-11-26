@@ -42,10 +42,14 @@ describe("workspace routes", () => {
   });
 
   it("falls back to Home for a screen the member cannot open", () => {
-    const member = { admin: false, privateNotes: false };
+    const member = { admin: false, privateNotes: false, reviews: false };
     expect(allowedRoute({ view: "organization-access" }, member)).toEqual({ view: "knowledge", at: { kind: "home" } });
     expect(allowedRoute({ view: "personal-workspace", at: { kind: "root" } }, member)).toEqual({ view: "knowledge", at: { kind: "home" } });
     expect(allowedRoute({ view: "ask-arden", conversationId: null }, member)).toEqual({ view: "ask-arden", conversationId: null });
+    // Reviews only for Organization Admins and members with an active reviewer grant.
+    expect(allowedRoute({ view: "review-queue", at: { kind: "reviews" } }, member)).toEqual({ view: "knowledge", at: { kind: "home" } });
+    expect(allowedRoute({ view: "review-queue", at: { kind: "maintenance" } }, { ...member, reviews: true }))
+      .toEqual({ view: "review-queue", at: { kind: "maintenance" } });
   });
 
   it("keeps only a workspace address across a sign-in redirect, once", () => {

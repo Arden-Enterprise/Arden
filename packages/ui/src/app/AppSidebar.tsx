@@ -10,6 +10,8 @@ type AppSidebarProps = {
   organizationLabel?: string;
   authenticated?: boolean;
   showAdmin?: boolean;
+  /** False for members without review authority: the REVIEW section is not shown. */
+  showReviews?: boolean;
   isUnassigned?: boolean;
   memberName?: string;
   memberRole?: string;
@@ -151,6 +153,7 @@ export function AppSidebar({
   organizationLabel,
   authenticated = false,
   showAdmin = false,
+  showReviews = true,
   isUnassigned = false,
   memberName = "Lan Nguyen",
   memberRole = "Member",
@@ -225,8 +228,10 @@ export function AppSidebar({
           ? <PrivateNotesNavSection key={item.label} controller={privateNotes.controller} navItem={navButton(item)}
             pageVisible={privateNotes.pageVisible} collapsed={collapsed} onOpen={privateNotes.onOpen} />
           : navButton(item))}
-        <span className="meta-label navigation-label">REVIEW</span>
-        {knowledgeNavigation.map(navButton)}
+        {showReviews && <>
+          <span className="meta-label navigation-label">REVIEW</span>
+          {knowledgeNavigation.map(navButton)}
+        </>}
         {showAdmin && <>
           <span className="meta-label navigation-label">MANAGE ORGANIZATION</span>
           {navButton(adminNavigation)}

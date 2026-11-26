@@ -483,6 +483,11 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
 
     await expect(repository.getKnowledgeOptions(ids.owner, ids.organization))
       .resolves.toMatchObject({ organizationReviewerAvailable: false });
+    // Reviews is offered to Organization Admins and to members with an active reviewer grant only.
+    const canReview = async (userId: string) => (await repository.listMemberships(userId))
+      .find((membership) => membership.organizationId === ids.organization)?.canReview;
+    await expect(canReview(ids.owner)).resolves.toBe(true);
+    await expect(canReview(ids.organizationReviewer)).resolves.toBe(false);
 
     const grant = await repository.createReviewerGrant(ids.owner, ids.organization, {
       reviewerMembershipId: ids.organizationReviewerMembership,
@@ -500,6 +505,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       status: "ACTIVE",
     });
     if (!grant) throw new Error("Reviewer grant was not created");
+    await expect(canReview(ids.organizationReviewer)).resolves.toBe(true);
     if (!pool || !notificationPool || !repository.notifications) throw new Error("Notification store or worker is unavailable");
     const grantNotification = await pool.query<{ notification_id: string; event_type: string }>(`
       SELECT notification_id, event_type FROM arden.arden_notification

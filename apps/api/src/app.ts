@@ -628,6 +628,7 @@ export function buildApp(dependencies: AppDependencies) {
           departmentName: membership.departmentName ?? null,
           roleCodes: membership.roleCodes,
           canUsePrivateWorkspace: membership.canUsePrivateWorkspace,
+          canReview: membership.canReview ?? false,
         })),
       };
     } catch (error) {

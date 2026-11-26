@@ -311,6 +311,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     const route = allowedRoute(requested, {
       admin: membership.roleCodes.includes("ORG_ADMIN"),
       privateNotes: membership.canUsePrivateWorkspace && !needsDepartmentAssignment(membership),
+      reviews: (membership.canReview ?? true) && !needsDepartmentAssignment(membership),
     });
     if (routing) {
       const path = workspacePath(route);
@@ -591,6 +592,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const navigate = (view: WorkspaceView) => {
     historyTarget.current = null;
     setNavOpen(false);
+    // Links to Reviews (for example from Home) do nothing for members without review authority.
+    if (view === "review-queue" && !canUseReviews) return;
     if (invitationBatchSending && activeView === "organization-access" && view !== activeView) {
       setIslandToast({ message: "Wait for invitations to finish before leaving Administration.", onDismiss: () => setIslandToast(null) });
       return;
@@ -626,7 +629,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   handleHistoryNavigation.current = () => {
     if (!currentRoutePath || window.location.pathname === currentRoutePath) return;
     const requested = parseWorkspacePath(window.location.pathname) ?? homeRoute;
-    const route = allowedRoute(requested, { admin: liveAdmin, privateNotes: canUsePrivateNotes });
+    const route = allowedRoute(requested, { admin: liveAdmin, privateNotes: canUsePrivateNotes, reviews: canUseReviews });
     const path = workspacePath(route);
     if (path !== window.location.pathname) { try { window.history.replaceState(null, "", path); } catch {} }
     if (path === currentRoutePath) return;
@@ -735,6 +738,8 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
   // Members need a private workspace in this organization.
   const canUsePrivateNotes = !isUnassignedMember && Boolean(activeMembership?.canUsePrivateWorkspace);
+  // Older servers omit the field and still enforce reviewer access at the API.
+  const canUseReviews = !isUnassignedMember && Boolean(activeMembership && (activeMembership.canReview ?? true));
   const memberRole = liveAdmin ? "Organization Admin" : "Member";
   const memberDepartment = activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : liveAdmin ? "All organization" : "Member");
   const privateNote = privateNotes.focus.kind === "note" ? privateNotes.selectedNote : null;
@@ -761,6 +766,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         organizationLabel={serverOrganizationId ? serverSession?.memberships.find((item) => item.organization.id === serverOrganizationId)?.organization.name : undefined}
         authenticated={Boolean(serverSession)}
         showAdmin={liveAdmin}
+        showReviews={canUseReviews}
         isUnassigned={isUnassignedMember}
         memberName={memberName}
         memberRole={memberRole}
@@ -781,6 +787,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       />
       {navOpen && <button type="button" className="shell-nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
       <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={liveAdmin}
+        showReviews={canUseReviews}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined} onNavigate={navigate} />
 
       <ErrorBoundary>

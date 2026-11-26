@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { adminNavigation, AppSidebar, knowledgeNavigation, navigationDisabled, workNavigation } from "../src/app/AppSidebar";
+import { MobileTabIsland } from "../src/app/MobileTabIsland";
 
 describe("workspace navigation with Ask Arden", () => {
   it.each([false, true])("shows Ask Arden and governance destinations (admin: %s)", (showAdmin) => {
@@ -23,6 +24,19 @@ describe("workspace navigation with Ask Arden", () => {
     const base = { activeView: "knowledge" as const, platform: "web" as const, authenticated: true, onNavigate: () => undefined, onSignOut: () => undefined };
     expect(JSON.stringify(AppSidebar(base))).not.toContain("Administration");
     expect(JSON.stringify(AppSidebar({ ...base, showAdmin: true }))).toContain("Administration");
+  });
+});
+
+describe("Reviews visibility", () => {
+  it("hides the REVIEW section and the phone tab for members without review authority", () => {
+    const base = { activeView: "knowledge" as const, platform: "web" as const, previewRole: "member" as const, organization: null,
+      authenticated: true, onNavigate: () => undefined, onSignOut: () => undefined };
+    expect(JSON.stringify(AppSidebar({ ...base, showReviews: false }))).not.toContain("Reviews");
+    expect(JSON.stringify(AppSidebar({ ...base, showReviews: true }))).toContain("Reviews");
+    const tabs = (showReviews: boolean) => JSON.stringify(MobileTabIsland({ activeView: "knowledge", authenticated: true, showAdmin: false,
+      showReviews, onNavigate: () => undefined }));
+    expect(tabs(false)).not.toContain("Reviews");
+    expect(tabs(true)).toContain("Reviews");
   });
 });
 
