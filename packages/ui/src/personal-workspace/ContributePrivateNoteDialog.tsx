@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { noteText } from "./noteDocument";
 import { ApiError, createKnowledgeDraft, type CreatedKnowledgeDraft } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 
@@ -15,7 +16,8 @@ export type ContributionAttempt = {
 export function ContributePrivateNoteDialog({ platform, organizationId, source, attempt, onAttemptChange, onClose, onCreated }: {
   platform: Platform;
   organizationId: string;
-  source: { title: string; body: string; versionId: string };
+  /** `isPdf`: a private PDF item, whose file is copied into the review draft (decision 0034). */
+  source: { title: string; body: string; versionId: string; isPdf?: boolean; hasText?: boolean };
   attempt: ContributionAttempt | null;
   onAttemptChange: (attempt: ContributionAttempt | null) => void;
   onClose: () => void;
@@ -28,7 +30,7 @@ export function ContributePrivateNoteDialog({ platform, organizationId, source, 
   const inFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const titleId = useId();
-  const excerpt = source.body.replace(/\s+/g, " ").trim();
+  const excerpt = noteText(source.body).replace(/\s+/g, " ").trim();
 
   useEffect(() => {
     mounted.current = true;
@@ -72,8 +74,12 @@ export function ContributePrivateNoteDialog({ platform, organizationId, source, 
     </div>
     <div className="knowledge-source-preview">
       <strong>{source.title}</strong>
-      <p className={excerpt ? undefined : "is-empty"}>{excerpt || "Nothing written in this note yet."}</p>
+      {source.isPdf ? <p>PDF file · the review draft gets a copy of this file.</p>
+        : <p className={excerpt ? undefined : "is-empty"}>{excerpt || "Nothing written in this note yet."}</p>}
     </div>
+    {source.isPdf && source.hasText === false && <p className="share-choice-reason" role="note">
+      No text was found in this PDF. Publishing needs text that Arden can index, so a reviewed copy of a scan can’t become current.
+    </p>}
     <form className="knowledge-contribute-form" onSubmit={(event) => void submit(event)}>
       {retryPending && !error && <p role="status">Couldn’t confirm draft creation.</p>}
       {error && <p role="alert" className="knowledge-form-error">{error}</p>}

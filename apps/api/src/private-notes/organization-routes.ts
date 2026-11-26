@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { DraftListItem, PrivateDraft, StoredContentFields } from "../db/repository.js";
 import type { PrivateContentStorage } from "./content-storage.js";
 import { maxListedCollections, PrivateCollectionLimitError } from "./organization-store.js";
-import type { PrivateCollection, PrivateNoteSource, PrivateOrganizationStore, PrivateTrashEntry } from "./organization-store.js";
+import type { PrivateArchivedNote, PrivateCollection, PrivateNoteSource, PrivateOrganizationStore, PrivateTrashEntry } from "./organization-store.js";
 import { erasePurgedContent, privateTrashPurgeAfter } from "./trash-retention.js";
 
 type RequestActor = (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>;
@@ -13,6 +13,8 @@ const copySuffix = " (copy)";
 /** Bounds the synchronous content copy of one collection duplicate request. */
 export const maxDuplicatedNotes = 500;
 export const maxDuplicatedCollections = 1_000;
+/** Larger indexes are accepted by clamping to the end; this only bounds the request. */
+const maxPlacementIndex = 1_000_000;
 
 export function representNoteSummary(item: DraftListItem) {
   return {
@@ -20,6 +22,8 @@ export function representNoteSummary(item: DraftListItem) {
     currentVersion: item.currentVersion,
     createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString(),
     collectionId: item.collectionId, favoritedAt: item.favoritedAt?.toISOString() ?? null,
+    position: item.position, archivedAt: item.archivedAt?.toISOString() ?? null,
+    kind: item.currentVersion.mimeType === "application/pdf" ? "pdf" : "note",
   };
 }
 
@@ -30,6 +34,10 @@ export function representPrivateNote(draft: PrivateDraft, body: string) {
     version: draft.currentVersion,
     createdAt: draft.createdAt.toISOString(), updatedAt: draft.updatedAt.toISOString(),
     collectionId: draft.collectionId, favoritedAt: draft.favoritedAt?.toISOString() ?? null,
+    position: draft.position,
+    // Decision 0034: a PDF item has no editable body; `textAvailable` says whether private AI can read it.
+    kind: draft.mimeType === "application/pdf" ? "pdf" : "note",
+    textAvailable: draft.mimeType === "application/pdf" ? Boolean(draft.text) : true,
   };
 }
 
@@ -38,6 +46,13 @@ function representCollection(collection: PrivateCollection) {
     id: collection.id, title: collection.title, parentId: collection.parentId,
     favoritedAt: collection.favoritedAt?.toISOString() ?? null,
     createdAt: collection.createdAt.toISOString(), updatedAt: collection.updatedAt.toISOString(),
+  };
+}
+
+function representArchivedNote(note: PrivateArchivedNote) {
+  return {
+    id: note.id, title: note.title, collectionId: note.collectionId, collectionTitle: note.collectionTitle,
+    archivedAt: note.archivedAt.toISOString(), createdAt: note.createdAt.toISOString(), updatedAt: note.updatedAt.toISOString(),
   };
 }
 
@@ -136,16 +151,19 @@ export function registerPrivateOrganizationRoutes(app: FastifyInstance, input: {
     } catch (error) { return failed(reply, request, error, "collection update"); }
   });
 
-  app.put<{ Params: { organizationId: string; draftId: string }; Body: { collectionId: string | null } }>(`${base}/drafts/:draftId/collection`, {
+  // `index` (spec F03-ARR) places the note at that 0-based position of the destination; without it the note goes last.
+  app.put<{ Params: { organizationId: string; draftId: string }; Body: { collectionId: string | null; index?: number } }>(`${base}/drafts/:draftId/collection`, {
     schema: {
       params: params("draftId"),
-      body: { type: "object", additionalProperties: false, required: ["collectionId"], properties: { collectionId: nullableUuid } },
+      body: { type: "object", additionalProperties: false, required: ["collectionId"],
+        properties: { collectionId: nullableUuid, index: { type: "integer", minimum: 0, maximum: maxPlacementIndex } } },
     },
   }, async (request, reply) => {
     const actor = await requestActor(request, reply);
     if (!actor) return;
     try {
-      const note = await store.moveNote(actor.userId, request.params.organizationId, request.params.draftId, request.body.collectionId);
+      const note = await store.moveNote(actor.userId, request.params.organizationId, request.params.draftId,
+        request.body.collectionId, request.body.index ?? null);
       if (!note) return notFound(reply, request);
       return noStore(reply).send(representNoteSummary(note));
     } catch (error) { return failed(reply, request, error, "note move"); }
@@ -161,6 +179,32 @@ export function registerPrivateOrganizationRoutes(app: FastifyInstance, input: {
       if (!note) return notFound(reply, request);
       return noStore(reply).send(representNoteSummary(note));
     } catch (error) { return failed(reply, request, error, "note favorite"); }
+  });
+
+  app.put<{ Params: { organizationId: string; draftId: string }; Body: { archived: boolean } }>(`${base}/drafts/:draftId/archive`, {
+    schema: {
+      params: params("draftId"),
+      body: { type: "object", additionalProperties: false, required: ["archived"], properties: { archived: { type: "boolean" } } },
+    },
+  }, async (request, reply) => {
+    const actor = await requestActor(request, reply);
+    if (!actor) return;
+    try {
+      const note = await store.setNoteArchived(actor.userId, request.params.organizationId, request.params.draftId,
+        request.body.archived, request.id);
+      if (!note) return notFound(reply, request);
+      return noStore(reply).send(representNoteSummary(note));
+    } catch (error) { return failed(reply, request, error, "note archive"); }
+  });
+
+  app.get<{ Params: { organizationId: string } }>(`${base}/archive`, { schema: { params: params() } }, async (request, reply) => {
+    const actor = await requestActor(request, reply);
+    if (!actor) return;
+    try {
+      const archived = await store.listArchived(actor.userId, request.params.organizationId);
+      if (!archived) return notFound(reply, request);
+      return noStore(reply).send({ items: archived.items.map(representArchivedNote), hasMore: archived.hasMore });
+    } catch (error) { return failed(reply, request, error, "archive list"); }
   });
 
   app.put<{ Params: { organizationId: string; collectionId: string }; Body: { favorite: boolean } }>(`${base}/collections/:collectionId/favorite`, {
@@ -191,7 +235,7 @@ export function registerPrivateOrganizationRoutes(app: FastifyInstance, input: {
       const draft = await store.duplicateNote(actor.userId, organizationId, source,
         copyTitle(source.title, maxNoteTitleCodePoints), copy, request.id);
       if (!draft) {
-        await storage.remove(copy.sourceUri);
+        await removeCopy(storage, copy);
         return notFound(reply, request);
       }
       reply.header("Location", `/api/v1/organizations/${organizationId}/private-workspace/drafts/${draft.id}`);
@@ -217,7 +261,7 @@ export function registerPrivateOrganizationRoutes(app: FastifyInstance, input: {
       const result = await store.duplicateCollection(actor.userId, organizationId, subtree,
         copyTitle(subtree.root.title, maxCollectionTitleCodePoints), copies, request.id);
       if (result === null || result === "changed") {
-        await Promise.all([...copies.values()].map((copy) => storage.remove(copy.sourceUri)));
+        await Promise.all([...copies.values()].map((copy) => removeCopy(storage, copy)));
         if (result === null) return notFound(reply, request);
         return reply.code(409).send(safeError("PRIVATE_TREE_CHANGED", "This collection changed. Refresh and try again.", request.id));
       }
@@ -305,10 +349,24 @@ async function copyContent(storage: PrivateContentStorage, source: PrivateNoteSo
   if (source.mimeType === "application/pdf") {
     const bytes = await storage.readPdf(source.sourceUri, source.contentHash);
     const copy = await storage.writePdf(bytes);
-    return { body: "", copy };
+    // Decision 0034: a PDF item's extracted text is copied with it.
+    if (!source.text) return { body: "", copy };
+    try {
+      const text = await storage.write(await storage.read(source.text.sourceUri, source.text.contentHash));
+      return { body: "", copy: { ...copy, text: { sourceUri: text.sourceUri, contentHash: text.contentHash } } };
+    } catch (error) {
+      await storage.remove(copy.sourceUri);
+      throw error;
+    }
   }
   const body = await storage.read(source.sourceUri, source.contentHash);
   return { body, copy: await storage.write(body) };
+}
+
+/** Erases a copy that was never committed: the content object and, for a PDF item, its extracted text. */
+async function removeCopy(storage: PrivateContentStorage, copy: StoredContentFields): Promise<void> {
+  await storage.remove(copy.sourceUri);
+  if (copy.text) await storage.remove(copy.text.sourceUri);
 }
 
 function safeError(code: string, message: string, requestId: string) {

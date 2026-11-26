@@ -115,6 +115,7 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `SUPABASE_URL` | Unset locally | Supabase project Auth/API URL reachable from the API container |
 | `SUPABASE_PUBLISHABLE_KEY` | Unset locally | Project publishable/anon key used by the server-side Supabase Auth adapter; never substitute a service-role key |
 | `SUPABASE_REALTIME_PUBLIC_URL` | Unset | Public HTTPS Realtime endpoint ending in `/realtime/v1`; loopback HTTP is local-only |
+| `SUPABASE_REALTIME_API_KEY` | Unset | Optional gateway key when an API gateway in front of Realtime inspects `apikey` separately from `ARDEN_NOTIFICATION_JWT_SECRET`; when unset, Core mints a narrow transport-only HS256 socket token |
 | `ARDEN_NOTIFICATION_JWT_SECRET` | Unset | API-only 64-character HS256 signing value; must exactly match the target Realtime verifier's accepted key. Never place it in client configuration |
 | `ARDEN_NOTIFICATION_CHANNEL_NAMESPACE` | Unset | Required with the Realtime endpoint/key; unique for each environment and development slot |
 | `ARDEN_NOTIFICATION_DATABASE_URL` | Unset | Dedicated API-side login that may `SET ROLE arden_notification_worker`; required with complete Realtime configuration and never given application-content grants |
@@ -127,6 +128,8 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `ARDEN_CORE_URL` | `http://127.0.0.1:3001` for local desktop | Public HTTPS Core origin for the Windows desktop process; loopback HTTP is allowed only for local development |
 | `ARDEN_AI_URL` | Unset | Private HTTP(S) origin of Arden-AI, with no path or credentials; configure together with the service token |
 | `ARDEN_AI_SERVICE_TOKEN` | Unset | Server-only shared credential for Core/worker to call Arden-AI; never expose it to web/desktop clients |
+| `ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS` | Unset | Comma-separated organization UUIDs that have opted in to the configured provider handling Private questions, note excerpts and client-supplied AI writing text; writing actions for shared drafts are also gated because Core cannot verify text provenance |
+| `ARDEN_REVIEWER_AI_ORGANIZATIONS` | Unset | Comma-separated organization UUIDs authorized to send extracted text from pending content submissions to the configured provider via the paired [Reviewer AI endpoint](reviewer-ai.md) |
 | `ARDEN_TEST_DATABASE_URL` | Unset | Optional real-PostgreSQL integration target; must be a disposable, pre-migrated database named `arden_test_*` |
 | `ARDEN_LOCAL_FLOW1_TEST_MODE` | Unset | Manual local browser-test auth; only `true` with loopback API/PostgreSQL, database `arden_test_*`, no Supabase config, and non-production mode |
 | `ARDEN_LOCAL_TEST_USERS` | Unset | JSON list of synthetic `@example.test` accounts, required only in fenced local Mainflow 1 test mode; keep the passwords in the launching shell, not files/Git |
@@ -136,7 +139,7 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 - Keep secret values out of tracked env/config files. Track sanitized examples with descriptions, defaults, required status, consumer, and restart/build implications. Treat `.env.production` as sensitive even if the current ignore patterns do not cover it.
 - Vite client env values are build-time public values. Future runtime public config must remain distinct from server secrets and support the same immutable artifact in staging/production.
 - Production startup must fail closed on missing/invalid critical configuration. No dev password, default administrator, disabled auth/TLS, or cloud fallback may become an implicit production setting.
-- Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice. Realtime notification configuration is all-or-none: if any of its endpoint, signing key or namespace is set, all must be valid. The API also uses the existing publishable key. Keep actual values in private API runtime configuration, not `VITE_*`, Electron renderer env, build arguments, URLs or logs.
+- Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice. Realtime notification configuration is all-or-none: if any of its endpoint, signing key, namespace or optional gateway API key is set, the required Realtime settings must be valid together. When no separate gateway API key is configured, Core mints a narrow transport-only HS256 socket token with `ARDEN_NOTIFICATION_JWT_SECRET`. Keep actual values in private API runtime configuration, not `VITE_*`, Electron renderer env, build arguments, URLs or logs.
 
 ### In-app notifications and Supabase Realtime
 
@@ -145,6 +148,12 @@ Migrations `0039_in_app_notifications.sql`, `0061_document_share_notifications.s
 Before scheduling 0063 on any shared environment, inspect the exact current administrator accounts and all their organization memberships using the approved private operator procedure. An administrator who belongs to an organization must retain that membership and its data; do not migrate that identity into a no-membership System Admin. Provision a separate verified Auth account, validate sign-in, and select at least one dedicated account for first-manager bootstrap. Existing dedicated admins become monitors by default; record and audit the explicit first-manager handoff. Migration 0063 is forward-only. Do not run it on a shared target as part of this implementation task; database rehearsal and rollout require their own authorization and target-specific backup/recovery plan.
 
 Migration `0062_private_notes_organization_and_trash.sql` (decision 0029) is operator-class: it replaces the `draft_document` status check, adds owner-only `private_collection` rows and retention-only RLS policies, and introduces no new `SECURITY DEFINER` routine or DELETE grant. The API then runs an hourly in-process purge (`arden.private_trash_retention` transaction context) that tombstones private trash older than 30 days and erases its content objects; an erasure failure is logged and retried on the next run. Rehearse 0001–0062 on a disposable database before any shared target.
+
+Migration `0064_private_notes_order_and_archive.sql` (spec F03-ARR) is operator-class: it adds nullable `draft_document.sort_position` and `archived_at` with check constraints and an index, and recreates `trg_draft_document_updated_at` with a `WHEN` clause so placement and archive changes keep `updated_at`. It adds no grant, policy or `SECURITY DEFINER` routine and needs no backfill (existing notes keep a null position and sort newest first). Rehearse 0001–0064 on a disposable database before any shared target.
+
+Migration `0068_expired_document_renewal.sql` (decision 0032) is operator-class: it adds the `RENEWAL` change-request type with `renewal_expiration_date`/`on_behalf_of_author`, a one-pending-renewal unique index, the `publication_validity_renewal` record (RLS: runtime reads a row only with a publication it can already read), the `PUBLICATION_EXPIRING` and `PUBLICATION_RENEWAL_ON_BEHALF` notice types, replaces `validate_shared_submission`, `validate_review_decision`, `apply_publication_change`, `eligible_ai_publications`, `review_submission_authors` and `submission_proposed_reader_directory` in place (owners kept) and adds six reviewed `SECURITY DEFINER` routines (`request_publication_renewal`, `list_publication_renewal_state`, `enqueue_publication_expiry_reminders`, `list_publication_author_names`, `decide_on_behalf_renewal`, `publication_change_target_state`; 53 in the owner inventory). `publication_change_target_state` answers only whether a change request still names the current publication, so a reviewer whose grant covers the request can decide it without being a reader. For decision 0033 it replaces the review-decision insert policy without the submitter exclusion (a matching grant or Organization Admin is still required) and adds `renewal_author_read` so an active author reads renewal requests made on their behalf. It rewrites no frozen snapshot and withdraws nothing. After deployment Core runs the reminder routine hourly as `arden_runtime`; it is idempotent. Old Core keeps working on the expanded schema but cannot request renewals. Back up and rehearse 0001–0068 on a disposable database before any shared target.
+
+Migration `0065_private_note_live_version.sql` (decision 0031) is operator-class: it adds `draft_version.sealed_at`, seals all existing private-note history except each live note's uncontributed current version, replaces the `draft_version` immutability trigger with a `SECURITY INVOKER` guard that only lets an unsealed, unreferenced version be overwritten, and grants `arden_runtime` column-level `UPDATE` on the version number, content reference and `sealed_at`. It deletes nothing and adds no `SECURITY DEFINER` routine. After deployment the API erases a replaced content object after each save; an erasure failure is logged and leaves an unreferenced object. Rehearse 0001–0064 on a disposable database before any shared target.
 
 Migration 0039 creates the `arden_notification_worker` role as `NOLOGIN`, with only notification-envelope reads and the outbox state columns needed for leasing/retry/delivery. Provision a separate `LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS` database role for the API dispatcher, grant it membership in `arden_notification_worker`, and put that login's secret only in `ARDEN_NOTIFICATION_DATABASE_URL` through the environment's secret manager. The dispatcher uses `SET LOCAL ROLE` inside each transaction; the login itself must fail direct reads, and after role switch it must still fail reads from submissions, drafts, and other Arden content. Never reuse `DATABASE_URL`, the migration login, or the indexing-worker login. If Realtime is absent, leave both the dispatcher URL and Realtime settings unset.
 
@@ -307,3 +316,18 @@ unordered function is no longer executable by the worker. Existing publications 
 republished or repaired; review any pre-existing stale pointer separately. Core and web must be
 released together for the expanded state contract. A live schema upgrade still requires a separate
 reviewed backup, compatibility/recovery plan and explicit authorization; this guide is not consent.
+
+## Published-date AI contraction (0063)
+
+Migration0063 is operator-only under [ADR0030](../decisions/0030-published-date-ai-sources.md).
+It removes the chat scope column and obsolete temporal lineage, replaces the
+eligibility policies/helper and maintenance publication proof, and clears retired
+Effective Date keys from mutable drafts. Frozen metadata, publications, chat turns,
+evidence, files and generation IDs remain. The trusted routine inventory becomes47.
+Rehearse a full backup restore, rollback and upgrade with old chat/publication data,
+then test real runtime workflows after the ownership handoff. Do not edit applied
+SQL or transfer trusted executors. Core/web/desktop must roll out together: older
+clients send a retired field, and older Core expects the removed column/helper.
+No reindex or AI service contract change is needed. Recovery uses matching reviewed
+code/schema or the protected pre-upgrade backup. This local implementation is not
+approval or evidence of applying0063 on a shared environment.

@@ -5,7 +5,23 @@ Decision owner: requesting maintainer. Origin: maintainer-approved combined
 authorization/Ask Arden implementation and hybrid-search request; record: Codex.
 Baselines: Core staging `a07f575`, AI main `cc0b4d2`. F13/F14, ARD-52/57/58/59.
 
-## Contract and acceptance
+## Current publication refinement — 23 November 2026
+
+[ADR0030](../decisions/0030-published-date-ai-sources.md) supersedes GA5/GA6 and
+the temporal rollout instructions below. Local migration0063 removes the scope
+column, parameterized helper, policies/settings and release-lineage table/trigger.
+Core selects only the current indexed publication, available from Published date,
+with Target Readers, withdrawal and optional inclusive Expiration Date checks.
+No fallback to an older readable/expired/withdrawn version. Old turns remain,
+but superseded source evidence makes them unavailable for display/reuse.
+The API no longer accepts/returns versionScope. UI has no version dropdown.
+Frozen historical metadata remains immutable but is omitted from current API
+projections; new metadata/drafts have no Effective Date input.
+AI v2 retrieve/generate contracts stay unchanged: they already use Core's explicit
+generation allow-list. No paired AI source change or reindex is required.
+This is local implementation, not a staging migration/release claim.
+
+## Original contract and acceptance (temporal clauses superseded)
 
 - GA1: lexical BM25 and dense Chroma retrieval rank only Core-allowed generations
   in the current organization. Deterministic reciprocal-rank fusion deduplicates
@@ -57,7 +73,7 @@ rewritten. This scope does not authorize a shared migration, provider call, Git
 publication or deployment. Public and private handoffs record actual checks and
 remaining acceptance separately.
 
-## Implementation and verification map — 13 November
+## Historical implementation and verification map — 13 November
 
 This checkout implements the contract; it is not published/deployed.
 

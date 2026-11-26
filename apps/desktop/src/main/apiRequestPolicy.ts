@@ -10,12 +10,22 @@ export type DesktopApiRequest = {
 const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 const uuidPattern = new RegExp(`^${uuid}$`);
 const privateDraftPath = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts(?:/${uuid})?$`);
-// Decision 0029 private notes organization: collections, favorites and trash. No DELETE method.
+const privateNoteQuestionPath = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/questions$`);
+/** Decision 0034: original PDFs kept in Private (upload, read and replace the file). */
+const privatePdfCreate = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/pdf$`);
+const privatePdfFile = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/pdf$`);
+/** Decision 0034: direct shares (owner list/share/revoke, recipient reads, organization setting). */
+const directShareCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/shares$`);
+const directShareRevoke = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/drafts/${uuid}/shares/(${uuid}/revoke|revoke-all)$`);
+const sharedWithMe = new RegExp(`^/api/v1/organizations/${uuid}/shared-with-me(?:/${uuid})?$`);
+const sharedWithMePdf = new RegExp(`^/api/v1/organizations/${uuid}/shared-with-me/${uuid}/pdf$`);
+const directSharingSetting = new RegExp(`^/api/v1/organizations/${uuid}/direct-sharing$`);
+// Decision 0029 private notes organization: collections, favorites and trash; spec F03-ARR order and archive. No DELETE method.
 const privateCollectionCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections$`);
 const privateCollectionItem = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/collections/${uuid}$`);
-const privateFavoritePlacement = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/(drafts/${uuid}/(collection|favorite)|collections/${uuid}/favorite)$`);
+const privateFavoritePlacement = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/(drafts/${uuid}/(collection|favorite|archive)|collections/${uuid}/favorite)$`);
 const privateItemAction = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/((drafts|collections)/${uuid}/(duplicate|trash)|trash/${uuid}/(restore|purge))$`);
-const privateTrashCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/trash$`);
+const privateTrashCollection = new RegExp(`^/api/v1/organizations/${uuid}/private-workspace/(trash|archive)$`);
 const sharedDraftPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts$`);
 const knowledgeCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/(options|drafts|submissions|reviews|published|reviewer-grants)$`);
 const reviewerGrantCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants$`);
@@ -33,6 +43,7 @@ const governanceWithBody = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/
 const governanceDismiss = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reports/${uuid}/dismiss$`);
 const knowledgeReviewItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}$`);
 const knowledgeReviewDecision = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}/decisions$`);
+const knowledgeReviewAi = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviews/${uuid}/ai-review$`);
 const publishedKnowledgeItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}$`);
 const readerSummaryPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}/summary$`);
 const readerSummaryAccess = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/published/${uuid}/summary/access$`);
@@ -52,7 +63,10 @@ const maintenanceCommand = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/
 const maintenanceImport = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/imports$`);
 const closedReportQuery = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reports$`);
 const aiAnswerPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/answers$`);
+const writingActionPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/writing-actions$`);
 const aiConversationPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations(?:/${uuid})?$`);
+const aiFeedbackPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations/${uuid}/turns/${uuid}/feedback$`);
+const privateFeedbackPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/private-feedback$`);
 const reviewerGrantDeactivate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants/${uuid}/deactivate$`);
 const administrationPath = new RegExp(`^/api/v1/organizations/${uuid}/administration$`);
 const adminCreatePath = new RegExp(`^/api/v1/organizations/${uuid}/(departments|invitations)$`);
@@ -65,6 +79,7 @@ const audienceGroupMemberPath = new RegExp(`^/api/v1/organizations/${uuid}/audie
 const audienceGroupRemovePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/members/${uuid}/remove$`);
 const audienceGroupDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/deactivate$`);
 const systemAdministratorCollection = /^\/api\/v1\/system\/administrators$/;
+const systemPrivateFeedbackAnalytics = "/api/v1/system/analytics/private-feedback";
 const systemAdministratorRevoke = new RegExp(`^/api/v1/system/administrators/${uuid}/revoke$`);
 const systemAdministratorCapability = new RegExp(`^/api/v1/system/administrators/${uuid}$`);
 const systemConsoleRead = new RegExp(`^/api/v1/system/(overview|organizations|organizations/${uuid}|reports/(knowledge|ai-usage|contributions|feedback|quality)|health)$`);
@@ -86,7 +101,9 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
   if (typeof request.path !== "string" || request.path.length > 2048 || !request.path.startsWith("/") || request.path.startsWith("//")) return false;
   if (request.method !== "GET" && request.method !== "POST" && request.method !== "PATCH" && request.method !== "PUT") return false;
   const pdfUpload = typeof request.path === "string" && (pdfKnowledgeDraft.test(request.path)
-    || (request.method === "PATCH" && knowledgeDraftItem.test(request.path)));
+    || (request.method === "PATCH" && knowledgeDraftItem.test(request.path))
+    || (request.method === "POST" && privatePdfCreate.test(request.path))
+    || (request.method === "PUT" && privatePdfFile.test(request.path)));
   if (request.body !== undefined && (typeof request.body !== "string" || Buffer.byteLength(request.body, "utf8") >
     (pdfUpload ? 7_100_000 : 128 * 1024))) return false;
   if (request.ifMatch !== undefined && (typeof request.ifMatch !== "string" || request.ifMatch.length > 80)) return false;
@@ -98,19 +115,34 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
 
 export function desktopApiResponseLimit(request: DesktopApiRequest): number {
   const pdfCreate = request.method === "POST" && pdfKnowledgeDraft.test(request.path);
+  const privatePdfRead = request.method === "GET" && (privatePdfFile.test(request.path) || sharedWithMePdf.test(request.path));
   const knowledgeDetail = ((request.method === "GET" || request.method === "PATCH")
     && (knowledgeDraftItem.test(request.path) || knowledgeDraftVersionItem.test(request.path)))
     || (request.method === "GET" && (knowledgeReviewItem.test(request.path)
       || publishedKnowledgeItem.test(request.path)));
-  return pdfCreate || knowledgeDetail ? 7_100_000 : 1024 * 1024;
+  return pdfCreate || knowledgeDetail || privatePdfRead ? 7_100_000 : 1024 * 1024;
 }
 
 /** Reader deadlines are main-owned; other routes retain the validated renderer bound. */
 export function desktopApiTimeout(request: DesktopApiRequest): number | undefined {
-  if (request.method === "POST" && readerQuestionPath.test(request.path)) return 240_000;
+  if (request.method === "POST" && knowledgeReviewAi.test(request.path)) return 85_000;
+  if (request.method === "POST" && writingActionPath.test(request.path)) return 90_000;
+  if (request.method === "POST" && (readerQuestionPath.test(request.path) || privateNoteQuestionPath.test(request.path))) return 240_000;
   if (request.method === "POST" && readerSummaryPath.test(request.path)) return 300_000;
   if (request.method === "GET" && readerSummaryAccess.test(request.path)) return 30_000;
   return request.timeoutMs;
+}
+
+function reviewAiBody(body: string | undefined): boolean {
+  if (!body || body.length > 200) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      && Object.keys(value).sort().join() === "snapshotContentHash,snapshotVersionId"
+      && "snapshotVersionId" in value && typeof value.snapshotVersionId === "string" && uuidPattern.test(value.snapshotVersionId)
+      && "snapshotContentHash" in value && typeof value.snapshotContentHash === "string"
+      && /^[0-9a-f]{64}$/.test(value.snapshotContentHash);
+  } catch { return false; }
 }
 
 function summaryBody(body: string | undefined): boolean {
@@ -123,14 +155,43 @@ function summaryBody(body: string | undefined): boolean {
   } catch { return false; }
 }
 
-function questionBody(body: string | undefined): boolean {
+function questionBody(body: string | undefined, versioned = false): boolean {
   if (!body || body.length > 25_000) return false;
   try {
     const value: unknown = JSON.parse(body);
     return typeof value === "object" && value !== null && !Array.isArray(value)
-      && Object.keys(value).sort().join() === "query,requestId" && "requestId" in value && "query" in value
+      && Object.keys(value).sort().join() === (versioned ? "expectedVersion,query,requestId" : "query,requestId")
+      && (!versioned || ("expectedVersion" in value && typeof value.expectedVersion === "number"
+        && Number.isInteger(value.expectedVersion) && value.expectedVersion >= 1 && value.expectedVersion <= 2_147_483_647))
+      && "requestId" in value && "query" in value
       && typeof value.requestId === "string" && uuidPattern.test(value.requestId)
       && typeof value.query === "string" && Boolean(value.query.trim()) && Array.from(value.query).length <= 4_000;
+  } catch { return false; }
+}
+
+function feedbackBody(body: string | undefined, privateAnswer: boolean): boolean {
+  if (!body || body.length > (privateAnswer ? 200 : 60)) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      && Object.keys(value).length === (privateAnswer ? 2 : 1) && "feedback" in value
+      && (!privateAnswer || ("token" in value && typeof value.token === "string"
+        && /^[0-9a-f-]{36}\.[0-9]{13}\.[A-Za-z0-9_-]{43}$/.test(value.token)))
+      && (value.feedback === "GOOD" || value.feedback === "BAD" || value.feedback === null);
+  } catch { return false; }
+}
+
+function writingBody(body: string | undefined): boolean {
+  if (!body || body.length > 25_000) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const data = value as Record<string, unknown>;
+    return Object.keys(data).sort().join() === "action,requestId,scope,text"
+      && typeof data.requestId === "string" && uuidPattern.test(data.requestId)
+      && ["IMPROVE", "REFORMAT", "EXPLAIN"].includes(String(data.action))
+      && ["SELECTION", "PAGE"].includes(String(data.scope))
+      && typeof data.text === "string" && Boolean(data.text.trim()) && data.text.length <= 12_000;
   } catch { return false; }
 }
 
@@ -153,6 +214,16 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     || (privateCollectionItem.test(url.pathname) && request.method === "PATCH" && Boolean(request.body))
     || (privateFavoritePlacement.test(url.pathname) && request.method === "PUT" && Boolean(request.body))
     || (privateItemAction.test(url.pathname) && request.method === "POST" && (request.body === undefined || request.body === "{}")));
+  const privatePdfRequest = !request.idempotencyKey && !url.search && (
+    (privatePdfCreate.test(url.pathname) && request.method === "POST" && Boolean(request.body) && !request.ifMatch)
+    || (privatePdfFile.test(url.pathname) && request.method === "GET" && request.body === undefined && !request.ifMatch)
+    || (privatePdfFile.test(url.pathname) && request.method === "PUT" && Boolean(request.body) && Boolean(request.ifMatch)));
+  const directShareRequest = !request.ifMatch && !request.idempotencyKey && !url.search && (
+    ((directShareCollection.test(url.pathname) || sharedWithMe.test(url.pathname) || sharedWithMePdf.test(url.pathname)
+      || directSharingSetting.test(url.pathname)) && request.method === "GET" && request.body === undefined)
+    || (directShareCollection.test(url.pathname) && request.method === "POST" && Boolean(request.body))
+    || (directShareRevoke.test(url.pathname) && request.method === "POST" && request.body === undefined)
+    || (directSharingSetting.test(url.pathname) && request.method === "PUT" && Boolean(request.body)));
   const sharedDraftCreate = sharedDraftPath.test(url.pathname) && request.method === "POST" &&
     Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   const knowledgeGet = (knowledgeCollection.test(url.pathname) || knowledgeDraftItem.test(url.pathname)
@@ -190,10 +261,18 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && !request.body && !request.ifMatch && !request.idempotencyKey;
   const aiAnswer = aiAnswerPath.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
+  const writingAction = writingActionPath.test(url.pathname) && request.method === "POST" && !url.search
+    && writingBody(request.body) && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
+  const reviewAi = knowledgeReviewAi.test(url.pathname) && request.method === "POST" && !url.search
+    && reviewAiBody(request.body) && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
   const aiConversationGet = aiConversationPath.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const privateAnswerFeedback = privateFeedbackPath.test(url.pathname);
+  const aiFeedback = (aiFeedbackPath.test(url.pathname) || privateAnswerFeedback) && request.method === "PUT" && !url.search
+    && !request.ifMatch && !request.idempotencyKey && feedbackBody(request.body, privateAnswerFeedback);
   const readerSummary = ((readerSummaryPath.test(url.pathname) && request.method === "POST" && summaryBody(request.body))
     || (readerQuestionPath.test(url.pathname) && request.method === "POST" && questionBody(request.body))
+    || (privateNoteQuestionPath.test(url.pathname) && request.method === "POST" && !url.search && questionBody(request.body, true))
     || (readerSummaryAccess.test(url.pathname) && request.method === "GET" && request.body === undefined))
     && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
   const adminGet = administrationPath.test(url.pathname) && request.method === "GET"
@@ -208,8 +287,8 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && request.body === "{}" && !request.ifMatch && !request.idempotencyKey;
   const audienceGroupDeactivate = audienceGroupDeactivatePath.test(url.pathname) && request.method === "POST"
     && request.body === "{}" && typeof request.ifMatch === "string" && /^"audience-group-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
-  const systemAdministrationGet = systemAdministratorCollection.test(url.pathname) && request.method === "GET"
-    && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const systemAdministrationGet = (systemAdministratorCollection.test(url.pathname) || url.pathname === systemPrivateFeedbackAnalytics) && request.method === "GET"
+    && !url.search && !request.body && !request.ifMatch && !request.idempotencyKey;
   const systemAdministrationGrant = systemAdministratorCollection.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const systemAdministrationRevoke = systemAdministratorRevoke.test(url.pathname) && request.method === "POST"
@@ -225,7 +304,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     || ((systemSetupPostPath.test(url.pathname) || systemAuthSignInPath.test(url.pathname)) && request.method === "POST" && Boolean(request.body))
     || (systemAuthSignOutPath.test(url.pathname) && request.method === "POST" && !request.body)
   );
-  const aiFeedback = aiAnswerFeedback.test(url.pathname) && request.method === "POST"
+  const systemAiFeedback = aiAnswerFeedback.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const adminPost = (adminCreatePath.test(url.pathname) || adminMemberDepartmentPath.test(url.pathname))
     && request.method === "POST" && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
@@ -248,7 +327,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     (url.pathname === "/api/v1/auth/sign-in" && request.method === "POST") ||
     (url.pathname === "/api/v1/auth/sign-out" && request.method === "POST") ||
     (url.pathname === "/api/v1/me" && request.method === "GET") ||
-    privateDraftRequest
+    privateDraftRequest || privatePdfRequest || directShareRequest
   ) && !request.idempotencyKey;
   const queryAllowed = collection && [...url.searchParams.keys()].every((key) => key === "limit" || key === "cursor");
   const catalogGet = knowledgeCatalogRead.test(url.pathname) && request.method === "GET"
@@ -282,12 +361,12 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const maintenanceWrite = maintenanceCommand.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   return (privateOrganizationRequest || placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
-    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || aiConversationGet || readerSummary || adminGet
+    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || writingAction || reviewAi || aiConversationGet || aiFeedback || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || maintenanceImportPost || maintenanceList || maintenanceCreate || maintenanceRead || maintenanceWrite
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke || systemAdministrationCapability
-    || systemConsoleGet || systemAuthRequest || aiFeedback
+    || systemConsoleGet || systemAuthRequest || systemAiFeedback
     || notificationsGet || notificationReadRequest || notificationReadAllRequest)
     && (!url.search || queryAllowed || catalogQuery || notificationsGet || publicationScopeQuery || maintenanceList || maintenanceRead || closedReports || systemConsoleGet);
 }

@@ -375,13 +375,61 @@
     },
     {
       "id": "0063",
-      "filename": "0063_system_console_least_privilege.sql",
-      "sha256": "7e96b251087cee68f338cadb2e8d1217a3d5c7eeb7504c6a05232d50afec3899",
+      "filename": "0063_published_date_ai_sources.sql",
+      "sha256": "d5486e8a3cd7bfb362d22af6c6a68d6d8e38d8144be4c177fff9fbdfb708c942",
       "rollout": "operator"
     },
     {
       "id": "0064",
-      "filename": "0064_system_admin_isolated_identity.sql",
+      "filename": "0064_private_notes_order_and_archive.sql",
+      "sha256": "9f22d17e977b874951b0bc9549ba5d868a8310e5cf21c34c0536580c8326d729",
+      "rollout": "operator"
+    },
+    {
+      "id": "0065",
+      "filename": "0065_private_note_live_version.sql",
+      "sha256": "497031f3604039a8fe37cc9c6cea3ee2bd914f8ebbc385c9e6959a79291540cd",
+      "rollout": "operator"
+    },
+    {
+      "id": "0066",
+      "filename": "0066_ai_turn_feedback.sql",
+      "sha256": "8998207456d95043ca162d42b403d9a27342ceddd12c13f26cab7d24413cd95f",
+      "rollout": "operator"
+    },
+    {
+      "id": "0067",
+      "filename": "0067_private_ai_feedback.sql",
+      "sha256": "d16f4464601be1488459aee48f418bfefcbefef3456ea352030763535ffb1c41",
+      "rollout": "operator"
+    },
+    {
+      "id": "0068",
+      "filename": "0068_expired_document_renewal.sql",
+      "sha256": "4c6d46ca3f9d5d55d3be392ebd4620437aa10c9272a4a53b0b3a12bb45239542",
+      "rollout": "operator"
+    },
+    {
+      "id": "0069",
+      "filename": "0069_private_pdf_items.sql",
+      "sha256": "8fb13f7c0b19b9ff0a21795295f59aed8235ea0b345db641e7fe4cb5d7595baa",
+      "rollout": "operator"
+    },
+    {
+      "id": "0070",
+      "filename": "0070_private_direct_shares.sql",
+      "sha256": "014ea0e7dd7a9cae61524b618a839e4b69d057b6c66e5c8f92dc549bb01d60c5",
+      "rollout": "operator"
+    },
+    {
+      "id": "0071",
+      "filename": "0071_system_console_least_privilege.sql",
+      "sha256": "7e96b251087cee68f338cadb2e8d1217a3d5c7eeb7504c6a05232d50afec3899",
+      "rollout": "operator"
+    },
+    {
+      "id": "0072",
+      "filename": "0072_system_admin_isolated_identity.sql",
       "sha256": "c5f9e37c11b60f9de15141ac24306cd868d22f592affa534e231fb6ed63a3848",
       "rollout": "operator"
     }

@@ -1,0 +1,9 @@
+# Reviewer AI
+
+BM04 F-06 and DS-02a cover assistance before publication. The reviewer opens the pending submission under Reviews → Publications and chooses **Review with AI**. The panel gives one to three summary points and up to three checks about clarity, consistency, missing context or potentially sensitive content. Each point has a source excerpt. PDF excerpts include the original page number. The reviewer can continue with the regular decision controls during AI processing or after a failure.
+
+Core accepts only the snapshot version ID and content hash from the renderer. The authenticated route `POST /api/v1/organizations/:organizationId/knowledge/reviews/:submissionId/ai-review` reuses the current assigned-review check. It resolves and integrity-checks the stored content, revalidates access before delegating and withholds results if the grant or pending submission changes during inference. Only content submissions are eligible.
+
+The internal Arden-AI route `POST /v1/submission-reviews` checks the snapshot hash and extracts text locally. The provider receives bounded text passages with identifiers. Arden-AI resolves returned identifiers to source excerpts and rejects unknown identifiers. Core validates the response against the same snapshot and request. Each response is scoped to the open review, with no persistence, indexing or changes to the reviewer decision.
+
+The feature requires the paired Arden-AI endpoint and per-organization approval for sending text from pending submissions to the configured model provider. Set `ARDEN_REVIEWER_AI_ORGANIZATIONS` in Core to the opted-in organization UUIDs. Leave it empty by default. Enable it after the paired service is deployed. Review supports text documents and text-extractable PDFs up to 32,000 extracted characters. The assistant reports unsupported content instead of silently reviewing a partial snapshot. The feature has no database migration.

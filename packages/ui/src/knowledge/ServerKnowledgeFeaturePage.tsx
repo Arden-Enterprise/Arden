@@ -10,7 +10,7 @@ import {
   ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listKnowledgeReviewBoard,
   listKnowledgeDrafts, listKnowledgeSubmissions, loadKnowledgeDraft,
   withdrawKnowledgeSubmission, retryKnowledgePublication,
-  loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, saveKnowledgeDraft, loadKnowledgeCatalog, replaceKnowledgePdf,
+  loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, listPublicationRenewals, type PublicationRenewalState, saveKnowledgeDraft, loadKnowledgeCatalog, replaceKnowledgePdf,
   submitKnowledgeDraft, type AssignedKnowledgeReview, type DecidedKnowledgeReview, type KnowledgeDraftRecord,
   type KnowledgeDraftSummary, type KnowledgeOptions, type KnowledgeReviewDetail,
   type KnowledgeSubmission, type PublishedKnowledge, type KnowledgeCatalog, type TargetReaders,
@@ -21,6 +21,7 @@ import type { Platform } from "../shared/types";
 import { PdfDocument, PdfViewer, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
 import { PdfReader } from "./PdfReader";
 import { ReviewList, initialsOf } from "./ReviewList";
+import { SubmissionReviewAi } from "./SubmissionReviewAi";
 import { reviewRequestPresentation } from "./reviewRequest";
 import { libraryDateLabel } from "./libraryDisplay";
 import { ownerDepartment } from "./readerSelection";
@@ -29,6 +30,7 @@ import { emptyLibraryFilters, type LibraryFilters } from "./KnowledgeLibraryBrow
 import { KnowledgeHomeBrowse } from "./KnowledgeHomeBrowse";
 import { useHomePublications, type HomeSource } from "./useHomePublications";
 import { KnowledgeHomeNavigation, type HomeTab } from "./KnowledgeHomeNavigation";
+import { DirectSharesSection, SharedItemReader } from "./DirectShares";
 import { KnowledgeMetadataFields, editableKnowledgeMetadata, targetReadersLabel } from "./KnowledgeMetadataFields";
 import { targetReadersComplete } from "./TargetReadersField";
 import { ActionToast } from "../shared/ActionToast";
@@ -49,7 +51,9 @@ import {
 } from "../maintenance/maintenance-client";
 import { ApprovedReadersField, approvedReadersReady } from "./ApprovedReadersField";
 import { PublicationChangeDialog, publicationChangeSentMessage, type PublicationChangeType } from "./PublicationChangeDialog";
+import { OnBehalfRenewalDecision, RenewPublicationDialog, renewalStatus } from "./RenewPublicationDialog";
 import type { KnowledgeReaderTarget, KnowledgeCitationReference } from "./knowledgeCitation";
+import type { KnowledgeHomeLocation, KnowledgeLocation, KnowledgeReviewLocation, KnowledgeRoute, KnowledgeRouteRequest } from "./knowledgeRoute";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
   .then((module) => ({ default: module.ArdenRichTextEditor })));
@@ -60,10 +64,10 @@ const ArdenDocumentView = lazy(() => import("./ArdenRichTextEditor")
 /** Minimum time between window-focus refreshes of Home (deliberate Refresh and actions are not limited). */
 export const focusReloadIntervalMs = 30_000;
 
-function readerValidity(item: PublishedKnowledge): { status: "EFFECTIVE" | "EXPIRING" | "UPCOMING" | "EXPIRED"; expiresInDays?: number } {
+function readerValidity(item: PublishedKnowledge): { status: "EFFECTIVE" | "EXPIRING" | "EXPIRED"; expiresInDays?: number } {
   const { status, daysLeft } = validityStatus(item.management, new Date().toLocaleDateString("en-CA"));
   if (status === "Expiring soon") return { status: "EXPIRING", expiresInDays: daysLeft ?? 0 };
-  return { status: status === "Current" ? "EFFECTIVE" : status === "Upcoming" ? "UPCOMING" : "EXPIRED" };
+  return { status: status === "Current" ? "EFFECTIVE" : "EXPIRED" };
 }
 
 function DocumentSurfaceLoading() {
@@ -82,6 +86,15 @@ type Props = ContextControlProps & {
   citationTarget?: KnowledgeReaderTarget | null;
   requestedReviewId?: string | null;
   onReviewTargetHandled?: () => void;
+  /** Decision 0032: open My Contributions with this document selected. */
+  requestedContributionId?: string | null;
+  onContributionTargetHandled?: () => void;
+  /** Shows a location from the address bar (browser Back/Forward or an opened link). */
+  routeRequest?: KnowledgeRouteRequest | null;
+  /** Reports what Home and Reviews show so the shell can keep the address bar in step. */
+  onRouteChange?: (route: KnowledgeRoute, options: { replace: boolean }) => void;
+  /** Called once a route request has been shown, refused or has failed. */
+  onRouteSettled?: () => void;
   onAssignedReviewCount?: (count: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
   awaitingAssignment?: boolean;
@@ -128,6 +141,7 @@ export function ServerKnowledgeFeaturePage(props: Props) {
 }
 function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   view, active, createdDraftId, citationTarget, requestedReviewId, onReviewTargetHandled,
+  requestedContributionId, onContributionTargetHandled, routeRequest, onRouteChange, onRouteSettled,
   onAssignedReviewCount, onDirtyChange, awaitingAssignment = false,
   onOpenPrivateNotes, canUsePrivateWorkspace = false, contextOpen, onToggleContext, onOpenReviews }: Props) {
   const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
@@ -156,7 +170,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const [newTitleError, setNewTitleError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [createMode, setCreateMode] = useState<"text" | "pdf">("text");
-  const [screen, setScreen] = useState<"library" | "create" | "editor" | "document">("library");
+  const [screen, setScreen] = useState<"library" | "create" | "editor" | "document" | "shared">("library");
+  /** Decision 0034: the directly shared private item open in the read-only reader. */
+  const [sharedItemId, setSharedItemId] = useState<string | null>(null);
+  const [directShareRefresh, setDirectShareRefresh] = useState(0);
   const [libraryTab, setLibraryTab] = useState<HomeTab>("organization");
   const [organizationView, setOrganizationView] = useState<"overview" | "all">("overview");
   const [reportOpen, setReportOpen] = useState(false);
@@ -238,6 +255,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const reviewBodyRef = useRef<HTMLDivElement>(null);
   const pendingNextReview = useRef<string | null>(null);
   const readerReturnId = useRef<string | null>(null);
+  const replaceRoute = useRef(false);
   useEffect(() => {
     if (screen !== "library" || !readerReturnId.current) return;
     const id = readerReturnId.current;
@@ -247,6 +265,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     (opener ?? window.document.getElementById("arden-main"))?.focus();
   }, [screen]);
 
+  const [renewals, setRenewals] = useState<Map<string, PublicationRenewalState>>(() => new Map());
+  const [renewing, setRenewing] = useState<PublicationRenewalState | null>(null);
   const lastReloadAt = useRef(0);
   const reload = useCallback(async () => {
     lastReloadAt.current = Date.now();
@@ -260,6 +280,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
         .catch(() => { setCatalogError("Catalog is unavailable. You can still browse documents."); return null; }),
     ]);
     const nextReviews = nextBoard.items;
+    // Decision 0032: validity of my current publications; a failure only hides the Renew action.
+    void listPublicationRenewals(platform, organizationId)
+      .then((items) => setRenewals(new Map(items.filter((item) => item.isAuthor).map((item) => [item.documentId, item]))))
+      .catch(() => setRenewals(new Map()));
     setDrafts(nextDrafts); setSubmissions(nextSubmissions);
     setReviews(nextReviews); setDecidedReviews(nextBoard.decided); setOptions(nextOptions);
     setCatalog(nextCatalog);
@@ -620,7 +644,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     finally { setBusy(false); }
   };
 
-  const openDraft = (id: string) => void run(async () => {
+  const openDraft = (id: string) => run(async () => {
     setReplacementPdf(null);
     const loaded = await loadKnowledgeDraft(platform, organizationId, id);
     submitRequestKey.current = null;
@@ -658,6 +682,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       : await createNewKnowledgeDraft(platform, organizationId,
         { title: newTitle.trim(), body: newBody }, key);
     createRequestKey.current = null;
+    replaceRoute.current = true;
     setDraft(created); setEditor(valuesFromDraft(created)); setScreen("editor");
     setNewTitle(""); setNewBody(serializeSemanticDocument(
       plainTextToSemanticDocument("", () => crypto.randomUUID()),
@@ -718,6 +743,12 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     openReview(requestedReviewId);
   }, [active, view, requestedReviewId, onReviewTargetHandled]);
 
+  useEffect(() => {
+    if (!requestedContributionId || !active || view !== "knowledge") return;
+    onContributionTargetHandled?.();
+    setScreen("library"); setLibraryTab("drafts"); setSelectedContributionId(requestedContributionId);
+  }, [active, view, requestedContributionId, onContributionTargetHandled]);
+
   const requireDecisionReason = () => {
     setCommentSubmitted(true);
     if (comment.trim()) return true;
@@ -734,6 +765,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     decisionRequest.current = { action, readers: signature, key };
     const result = await decideKnowledgeReview(platform, organizationId, review, action, comment.trim() || null, key,
       readers ?? undefined);
+    replaceRoute.current = true;
     decisionRequest.current = null; setReview(null); setDecisionToConfirm(null);
     await refresh();
     setMessage(result.status === "APPROVED"
@@ -755,17 +787,19 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     let present = true;
     void loadKnowledgeReview(platform, organizationId, next).then((loaded) => {
       if (!present) return;
+      replaceRoute.current = true;
       setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
     }).catch((cause: unknown) => { if (present) setError(errorMessage(cause)); });
     return () => { present = false; };
   }, [busy, review, reviews, platform, organizationId]);
 
-  const openPublished = (id: string) => void run(async () => {
+  const openPublished = (id: string) => run(async () => {
     try {
       const loaded = await loadPublishedKnowledge(platform, organizationId, id);
       setOpenedCitation(null); setDocument(loaded); setScreen("document");
     } catch (cause) {
-      if (cause instanceof ApiError && [401, 403, 404].includes(cause.status)) { home.forget(id); void home.refresh(); }
+      // 410: the document expired (decision 0032); the server message names the date and owner department.
+      if (cause instanceof ApiError && [401, 403, 404, 410].includes(cause.status)) { home.forget(id); void home.refresh(); }
       throw cause;
     }
   });
@@ -789,10 +823,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           setOpenedCitation("documentId" in citationTarget ? citationTarget : null);
           setDocument(loaded); setScreen("document");
         })
-        .catch(() => {
+        .catch((cause: unknown) => {
           if (!present) return;
           setOpenedCitation(null);
-          setError("Source unavailable.");
+          setError(cause instanceof ApiError && cause.status === 410 ? cause.message : "Source unavailable.");
         })
         .finally(() => { loading = false; if (present) setBusy(false); });
     };
@@ -894,6 +928,73 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const backToAllReviews = () => guardDiscard(Boolean(comment.trim()), () => {
     setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
   });
+  // Full-page screens have their own address; tabs, filters and dialogs stay in memory.
+  const homeLocation: KnowledgeHomeLocation = screen === "shared" && sharedItemId ? { kind: "shared", id: sharedItemId }
+    : screen === "document" && document ? { kind: "document", id: document.id }
+    : screen === "editor" && draft ? { kind: "draft", id: draft.id }
+      : screen === "create" ? { kind: "create" }
+        : libraryTab === "reports" && caseSurface === "reports" && maintenanceCase ? { kind: "report", caseId: maintenanceCase.caseId }
+          : { kind: "home" };
+  const reviewLocation: KnowledgeReviewLocation = reviewSection === "maintenance"
+    ? caseSurface === "reviews" && maintenanceCase ? { kind: "maintenance-case", caseId: maintenanceCase.caseId } : { kind: "maintenance" }
+    : review ? { kind: "review", id: review.id } : { kind: "reviews" };
+  const routeKey = JSON.stringify([homeLocation, reviewLocation]);
+  useEffect(() => {
+    // A screen that replaces the one before it (a created draft, the next review after a decision) takes its history entry.
+    onRouteChange?.({ home: homeLocation, reviews: reviewLocation }, { replace: replaceRoute.current });
+    replaceRoute.current = false;
+  }, [routeKey, onRouteChange]);
+
+  const closeHomeScreen = () => {
+    if (screen === "document" && document) readerReturnId.current = document.id;
+    if (screen === "editor") {
+      if (draft) setEditor(valuesFromDraft(draft));
+      setReplacementPdf(null); setLibraryTab("drafts"); void refresh();
+    }
+    if (screen === "create") resetCreation();
+    if (caseSurface === "reports" && maintenanceCase) leaveMaintenanceCase();
+    setOpenedCitation(null); setError(""); setScreen("library");
+  };
+  const closeReview = () => { setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null; };
+  const showLocation = (location: KnowledgeLocation) => {
+    const settle = () => onRouteSettled?.();
+    const homeDirty = (screen === "create" && creationDirty) || (screen === "editor" && dirty);
+    const reviewDirty = Boolean(review && comment.trim());
+    // Unsaved work keeps its screen behind the discard dialog; the shell restores the address meanwhile.
+    const show = (changed: boolean, action: () => void | Promise<void>) => {
+      if (busy) { settle(); return; }
+      if (changed) { setDiscardAction(() => () => { void action(); }); settle(); return; }
+      void Promise.resolve(action()).finally(settle);
+    };
+    switch (location.kind) {
+      case "home": return show(homeDirty, closeHomeScreen);
+      case "document": return show(homeDirty, () => openPublished(location.id));
+      case "draft": return show(homeDirty, () => openDraft(location.id));
+      case "shared": return show(homeDirty, () => { closeHomeScreen(); setLibraryTab("shared"); setSharedItemId(location.id); setScreen("shared"); });
+      case "create": return show(homeDirty, () => { if (screen !== "create") openCreate("text"); });
+      case "report": return show(homeDirty, async () => {
+        closeHomeScreen(); setLibraryTab("reports");
+        await openMaintenanceCase(location.caseId, "reports");
+      });
+      case "reviews": return show(reviewDirty, () => { closeReview(); setReviewSection("publication"); leaveMaintenanceCase(); });
+      case "review": return show(reviewDirty, () => run(async () => {
+        const loaded = await loadKnowledgeReview(platform, organizationId, location.id);
+        setReviewSection("publication"); leaveMaintenanceCase();
+        setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
+      }));
+      case "maintenance": return show(false, () => { setReviewSection("maintenance"); if (caseSurface === "reviews") leaveMaintenanceCase(); });
+      case "maintenance-case": return show(false, async () => {
+        setReviewSection("maintenance");
+        await openMaintenanceCase(location.caseId, "reviews");
+      });
+    }
+  };
+  const handledRoute = useRef<string | null>(null);
+  useEffect(() => {
+    if (!routeRequest || handledRoute.current === routeRequest.navigationId) return;
+    handledRoute.current = routeRequest.navigationId;
+    showLocation(routeRequest.location);
+  }, [routeRequest]);
   const loadMoreHistory = () => {
     if (!maintenanceCase || !maintenanceHistory?.nextCursor) return;
     const request = caseLoad.current.request;
@@ -914,6 +1015,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const breadcrumb = view === "review-queue" ? `${organizationName} / Knowledge / Reviews${reviewSection === "maintenance" ? " / Maintenance" : ""}`
     : screen === "library" ? `${organizationName} / Home${libraryTab === "drafts" ? " / My Contributions" : libraryTab === "reports" ? " / My reports" : ""}`
       : screen === "create" ? `${organizationName} / Home / New draft`
+        : screen === "shared" ? `${organizationName} / Home / Shared with me`
         : `${organizationName} / Home / ${screen === "document" ? document?.title ?? "Publication" : draft?.title ?? "Draft"}`;
 
   return <main id={active ? "arden-main" : undefined} className="workspace-page" tabIndex={-1}>
@@ -1138,7 +1240,6 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                   {review.management ? <>
                     <div><dt>Type</dt><dd>{review.management.type ?? "—"}</dd></div>
                     <div><dt>Version</dt><dd>{review.management.version}</dd></div>
-                    {review.management.effectiveDate && <div><dt>Effective Date</dt><dd>{review.management.effectiveDate}</dd></div>}
                     {review.management.expirationDate && <div><dt>Expiration Date</dt><dd>{review.management.expirationDate}</dd></div>}
                     {review.management.changeNote && <div><dt>Change Note</dt><dd>{review.management.changeNote}</dd></div>}
                   </> : <>
@@ -1147,6 +1248,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                   </>}
                 </dl>
               </section>
+              {review.reviewAiAvailable && <SubmissionReviewAi key={`${organizationId}:${review.id}:${review.snapshotVersionId}`}
+                review={review} platform={platform} organizationId={organizationId} disabled={busy} />}
               <ApprovedReadersField review={review} value={approvedReaders} departments={options?.departments ?? []}
                 departmentName={departmentName} busy={busy} platform={platform} organizationId={organizationId}
                 onChange={value => { setApprovedReaders(value); setDecisionToConfirm(null); }} />
@@ -1203,7 +1306,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             {newFile && !newFileError && <div className="knowledge-selected-pdf"><strong>{newFile.name}</strong><span>{(newFile.size / 1024 / 1024).toFixed(1)} MB · ready to upload</span><button type="button" disabled={busy} onClick={() => { chooseFile(null); if (fileInput.current) fileInput.current.value = ""; }}>Remove</button></div>}
           </div> : <div className="arden-document-field"><span>Document text</span>
             <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor key="new-shared-knowledge"
-              body={newBody} instanceKey="new-shared-knowledge" disabled={busy} onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
+              body={newBody} instanceKey="new-shared-knowledge" disabled={busy} platform={platform} organizationId={organizationId}
+              onChange={(body) => { setNewBody(body); createRequestKey.current = null; }} /></Suspense>
           </div>}
           <div className="knowledge-live-actions"><button type="submit" className="primary-button" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button>
             <button type="button" className="secondary-button" disabled={busy} onClick={cancelCreation}>Cancel</button>
@@ -1234,7 +1338,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                 <Suspense fallback={<DocumentSurfaceLoading />}><ArdenRichTextEditor
                   key={`${draft.id}:${draft.currentVersion.version}`} body={editor.body}
                   instanceKey={`${draft.id}:${draft.currentVersion.version}`}
-                  disabled={busy} onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
+                  disabled={busy} platform={platform} organizationId={organizationId}
+                  onChange={(body) => setEditor({ ...editor, body })} /></Suspense>
               </div>}
             </div>
           </article>
@@ -1307,12 +1412,21 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           : <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
             key={`published:${document.id}:${document.contentHash}`} body={document.body ?? ""}
             instanceKey={`published:${document.id}:${document.contentHash}`} /></Suspense>}
-      /> : <>
+      /> : screen === "shared" && sharedItemId ? <SharedItemReader key={sharedItemId} platform={platform} organizationId={organizationId}
+        itemId={sharedItemId}
+        onBack={() => { setSharedItemId(null); setScreen("library"); setLibraryTab("shared"); }}
+        onLost={() => setDirectShareRefresh((value) => value + 1)}
+        // Private notes are plain text unless they hold an Arden document; show them as the owner wrote them.
+        renderText={(item) => item.body.startsWith("arden-document:")
+          ? <Suspense fallback={<DocumentSurfaceLoading />}><ArdenDocumentView
+            key={`shared:${item.id}:${item.version}`} body={item.body} instanceKey={`shared:${item.id}:${item.version}`} /></Suspense>
+          : <div className="shared-item-text">{item.body.trim() ? item.body : "Nothing is written in this note yet."}</div>} />
+      : <>
         {awaitingAssignment && <p className="island-note knowledge-awaiting-assignment" role="status">
           Waiting for an admin to assign your department. You can read documents shared with the whole organization.</p>}
         <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : libraryTab === "reports" ? "My reports" : "Home"}
           description=""
-          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="island-icon-button" aria-label="Refresh" title="Refresh" disabled={busy} onClick={() => void refresh()}><Icon name="refresh" size={16} /></button>
+          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="island-icon-button" aria-label="Refresh" title="Refresh" disabled={busy} onClick={() => { void refresh(); setDirectShareRefresh((value) => value + 1); }}><Icon name="refresh" size={16} /></button>
             {catalog?.canManage && libraryTab === "organization" && (organizationView === "all" || query.trim() || home.views.organization.status !== "ready")
               && <button type="button" className="secondary-button" onClick={() => setManagingCatalog(true)}>Manage collections</button>}
             <button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button>
@@ -1327,6 +1441,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             catalog={catalog} catalogError={catalogError} query={query} filters={libraryFilters} onFilters={setLibraryFilters}
             organizationView={organizationView} onOrganizationView={value => { setOrganizationView(value); if (value === "overview") setQuery(""); }} onOpen={openPublished}
             onManage={() => setManagingCatalog(true)} onRetry={() => void home.refresh()} />}
+        {!managingCatalog && libraryTab === "shared" && <DirectSharesSection platform={platform} organizationId={organizationId}
+          refreshKey={directShareRefresh} onOpen={(itemId) => { setSharedItemId(itemId); setScreen("shared"); }} />}
         {!managingCatalog && libraryTab === "reports" && <section role="tabpanel" aria-labelledby="home-tab-reports">{(maintenanceCase || maintenanceLoading || maintenanceError) && caseSurface === "reports"
           ? <MaintenanceCaseScreen key={maintenanceCase?.caseId ?? "report-case"} item={maintenanceCase} history={maintenanceHistory} loading={maintenanceLoading} error={maintenanceError} actionError={maintenanceActionError} busy={busy}
             onBack={leaveMaintenanceCase}
@@ -1340,7 +1456,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           <div className="island-main"><IslandTable label="My contributions" minWidth={620} columns="minmax(240px, 1.8fr) minmax(110px, 1fr) 110px minmax(150px, auto)"
             headers={["DOCUMENT", "DEPARTMENT", "UPDATED", "STATUS"]}>
             {filteredDrafts.map((item) => {
-              const status = draftStatus(item, latestByDraft.get(item.id));
+              const status = contributionStatus(item, latestByDraft.get(item.id), renewals.get(item.id));
               return <IslandRow key={item.id} selected={selectedContributionId === item.id} className="library-row">
                 <IslandCell className="island-row-cell is-name"><button type="button" className="island-row-name library-row-name" onClick={() => setSelectedContributionId(item.id)}
                   aria-label={`Open details for ${item.title}`} title={item.title}>
@@ -1357,7 +1473,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           </IslandTable></div>
           {selectedContribution && <aside className="island island-panel island-side contribution-side" aria-labelledby="contribution-title">
             <div className="island-side-header"><div>
-              <span className="island-chip-row"><span className={`island-chip has-dot ${chipTone(draftStatus(selectedContribution, selectedContributionLatest).tone)}`}>{draftStatus(selectedContribution, selectedContributionLatest).label}</span><span className="island-meta">{selectedContribution.management?.version}</span></span>
+              <span className="island-chip-row"><span className={`island-chip has-dot ${chipTone(contributionStatus(selectedContribution, selectedContributionLatest, renewals.get(selectedContribution.id)).tone)}`}>{contributionStatus(selectedContribution, selectedContributionLatest, renewals.get(selectedContribution.id)).label}</span><span className="island-meta">{selectedContribution.management?.version}</span></span>
               <h2 id="contribution-title">{selectedContribution.title}</h2></div>
               <button type="button" className="island-icon-button" onClick={() => setSelectedContributionId(null)} aria-label="Close contribution details"><Icon name="close" size={14} /></button></div>
             {selectedContributionLatest?.decisionComment && <blockquote className="island-box contribution-reason"><strong>Reviewer note</strong><p>{selectedContributionLatest.decisionComment}</p></blockquote>}
@@ -1367,6 +1483,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
               <dt>Readers</dt><dd>{targetReadersLabel(selectedContribution.targetReaders, departmentName)}</dd>
               {pendingChangeRequest && <><dt>Request</dt><dd>{reviewRequestPresentation(pendingChangeRequest).label} · awaiting review</dd></>}
             </dl>
+            {renewals.get(selectedContribution.id)?.pending?.canDecide
+              && <OnBehalfRenewalDecision key={renewals.get(selectedContribution.id)!.pending!.submissionId}
+                pending={renewals.get(selectedContribution.id)!.pending!} platform={platform} organizationId={organizationId}
+                onDecided={(action) => { setMessage(action === "APPROVE" ? "Renewal approved" : "Renewal rejected"); void refresh(); }} />}
             {selectedContributionLatest?.withdrawal && <blockquote className="island-box contribution-reason">
               <strong>{selectedContributionLatest.withdrawal.by === "REVIEWER" ? "Withdrawn by a reviewer" : "Withdrawn by an administrator"}</strong>
               <p>{selectedContributionLatest.withdrawal.reason}</p></blockquote>}
@@ -1393,6 +1513,9 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             <div className="island-side-footer contribution-actions"><button type="button" className="primary-button" disabled={busy} onClick={() => openDraft(selectedContribution.id)}>Open draft</button>
               {selectedContributionLatest?.status === "PENDING_REVIEW" && withdrawConfirmId !== selectedContributionLatest.id
                 && <button type="button" className="secondary-button" disabled={busy} onClick={() => setWithdrawConfirmId(selectedContributionLatest.id)}>Withdraw request</button>}
+              {canRequestPublicationChange && renewals.get(selectedContribution.id)?.canRenew
+                && <button type="button" className="secondary-button" disabled={busy}
+                  onClick={() => setRenewing(renewals.get(selectedContribution.id) ?? null)}>Renew</button>}
               {canRequestPublicationChange && <>
                 <button type="button" className="secondary-button" disabled={busy} onClick={() => setChangeRequest("READER_CHANGE")}>Change readers</button>
                 <button type="button" className="secondary-button contribution-withdraw-confirm" disabled={busy} onClick={() => setChangeRequest("WITHDRAWAL")}>Withdraw document</button>
@@ -1445,6 +1568,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       documentId={selectedContribution.id} platform={platform} organizationId={organizationId}
       departments={options?.departments ?? []} onClose={() => setChangeRequest(null)}
       onSent={() => { const sent = changeRequest; setChangeRequest(null); setMessage(publicationChangeSentMessage(sent)); void refresh(); }} />}
+    {renewing && <RenewPublicationDialog target={renewing} platform={platform} organizationId={organizationId}
+      departmentName={departmentName}
+      onClose={() => setRenewing(null)}
+      onSent={() => { setRenewing(null); setMessage("Renewal sent for review"); void refresh(); }} />}
     {discardAction && <DiscardChangesDialog exiting={false} onCancel={() => setDiscardAction(null)} onDiscard={() => {
       discardAction(); setDiscardAction(null);
     }} />}
@@ -1499,6 +1626,16 @@ function approvedReadersLabel(readers: TargetReaders, departmentName: (id: strin
   const names = new Map((review.proposedReaders?.members ?? []).map(member => [member.membershipId, member.displayName]));
   const known = readers.memberIds.map(id => names.get(id)).filter((name): name is string => Boolean(name));
   return known.length === readers.memberIds.length && known.length <= 3 ? known.join(", ") : targetReadersLabel(readers, departmentName);
+}
+
+/** Decision 0032: My Contributions shows validity (Expires in N days, Expired, renewal pending) for a current publication. */
+export function contributionStatus(item: Parameters<typeof draftStatus>[0], latest: KnowledgeSubmission | undefined,
+  renewal: PublicationRenewalState | undefined): { label: string; tone: string } {
+  const base = draftStatus(item, latest);
+  if (!renewal || item.hasPendingSubmission) return base;
+  if (latest?.status === "PENDING_REVIEW" && latest.requestType && latest.requestType !== "RENEWAL") return base;
+  const validity = renewalStatus(renewal);
+  return validity.label === "Current" ? base : validity;
 }
 
 const statusChipTone: Record<string, string> = { "is-info": "tone-info", "is-success": "tone-success", "is-danger": "tone-danger", "is-attention": "tone-warning" };

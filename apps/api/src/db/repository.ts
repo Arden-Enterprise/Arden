@@ -1,9 +1,8 @@
 import type { Pool, PoolClient, QueryResult } from "pg";
 import { metadataSubmissionErrors, validKnowledgeMetadata, type KnowledgeMetadata } from "@arden/domain";
 import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledge/catalog-store.js";
-import { PgConversationStore, type ConversationStore } from "../answers/conversation-store.js";
+import { PgConversationStore, type AnswerFeedback, type ConversationStore } from "../answers/conversation-store.js";
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
-import type { VersionScope } from "../answers/governed-contracts.js";
 import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
@@ -12,6 +11,7 @@ import { PgSystemConsoleStore, type SystemConsoleStore } from "../system-console
 import { PgSystemAuthStore, type SystemAuthStore } from "../system-auth/store.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
+import { PgDirectShareStore, type DirectShareStore } from "../private-notes/direct-share-store.js";
 import { PgPrivateOrganizationStore, isActiveCollection, lockTree, type PrivateOrganizationStore,
   type PrivateTrashRetentionStore } from "../private-notes/organization-store.js";
 import type { MaintenancePort } from "../maintenance/case-service.js";
@@ -32,6 +32,8 @@ export type MembershipSummary = {
   departmentName?: string | null;
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
+  /** Organization Admin or an active reviewer grant: the member can use Reviews. Absent means false. */
+  canReview?: boolean;
 };
 export type ActiveMembership = { membershipId: string; organizationId: string; userId: string };
 
@@ -48,9 +50,13 @@ export type PrivateDraft = {
   updatedAt: Date;
   collectionId: string | null;
   favoritedAt: Date | null;
+  /** Owner-chosen order inside the collection or root (spec F03-ARR); null sorts first. */
+  position: number | null;
+  /** Decision 0034: text extracted from a PDF item, when it has any; always null for text notes. */
+  text?: StoredTextFields | null;
 };
 
-/** Decision 0029 note summary; trashed and purged notes are never listed. */
+/** Decision 0029 note summary; trashed, archived and purged notes are never listed. */
 export type DraftListItem = {
   id: string;
   organizationId: string;
@@ -60,8 +66,18 @@ export type DraftListItem = {
   updatedAt: Date;
   collectionId: string | null;
   favoritedAt: Date | null;
+  position: number | null;
+  /** Set while archived (spec F03-ARR); only archive responses carry a non-null value. */
+  archivedAt: Date | null;
 };
 export type DraftWrite = { title: string; body: string; collectionId?: string | null };
+/**
+ * Decision 0031: `replacedSourceUris` are the content objects the save made unreachable (the open version was
+ * overwritten and no other version uses it); the caller erases it after commit.
+ */
+export type DraftUpdateResult = { kind: "not-found" } | { kind: "conflict"; currentVersion: number }
+  | { kind: "wrong-kind" }
+  | { kind: "updated"; draft: PrivateDraft; replacedSourceUris: string[] };
 export type DraftPatch = { title?: string; body?: string };
 export type PrivateContributionSource = {
   versionId: string;
@@ -150,9 +166,29 @@ export type SharedKnowledgeSubmission = {
   publicationFailure: PublicationFailureKind | null;
   /** New direct withdrawals are Admin-only (0024); historical reviewer provenance remains readable. */
   withdrawal: { by: "REVIEWER" | "ORGANIZATION_ADMIN"; reason: string; at: Date } | null;
+  /** RENEWAL only (0032): the requested Valid until (null = no expiry) and whether it was asked on the author's behalf. */
+  renewal?: { expirationDate: string | null; onBehalfOfAuthor: boolean } | null;
 };
 export type PublicationFailureKind = "TEMPORARY" | "CONTENT" | "SYSTEM";
-export type PublicationRequestType = "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+/** Decision 0032: a reviewed RENEWAL changes only the Valid until of the current publication. */
+export type PublicationRenewalInput = { expirationDate: string | null; reason: string; idempotencyKey: string };
+export type RequestPublicationRenewalResult =
+  | { kind: "requested"; submission: SharedKnowledgeSubmission }
+  | { kind: "replayed"; submission: SharedKnowledgeSubmission }
+  | { kind: "not-found" } | { kind: "not-renewable" } | { kind: "not-yet" } | { kind: "pending" }
+  | { kind: "invalid-date" } | { kind: "invalid-reason" };
+export type PublicationRenewalState = {
+  documentId: string; publishedVersionId: string; title: string; responsibleDepartmentId: string | null;
+  /** Effective Valid until (YYYY-MM-DD) or null for no expiry. */
+  expirationDate: string | null; renewalPending: boolean; authorActive: boolean; isAuthor: boolean; canRenew: boolean;
+  /** The active author's display name (null when inactive); shown to people renewing on their behalf. */
+  authorName: string | null;
+  /** The renewal waiting for review, if any. `canDecide`: the caller is the author of an on-behalf request (0032). */
+  pending: { submissionId: string; snapshotVersionId: string; contentHash: string; onBehalfOfAuthor: boolean;
+    requestedByName: string | null; reason: string; expirationDate: string | null; requestedAt: Date;
+    authorWindowUntil: Date | null; canDecide: boolean } | null;
+};
+export type PublicationRequestType = "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
 export type PublicationChangeInput = {
   type: "READER_CHANGE" | "WITHDRAWAL";
   reason: string;
@@ -286,6 +322,11 @@ export type PublishedKnowledge = {
   publishedAt: Date;
   validFrom: Date;
   validUntil: Date | null;
+  /** Decision 0032: past its effective Valid until (inclusive through that UTC day). Hidden from readers.
+   * The database projection always sets it; only hand-built fixtures omit it. */
+  expired?: boolean;
+  /** Home AUTHOR column: the active author's display name, when listed; never an email or reviewer. */
+  authorName?: string | null;
 };
 export type AuthorizedAiSource = {
   management?: KnowledgeMetadata | null;
@@ -388,7 +429,7 @@ const sharedDraftSelect = `
 
 function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnowledgeDraft {
   return {
-    management: withoutTopic(row.management), hasPublishedVersion: row.has_published_version,
+    management: currentManagement(row.management), hasPublishedVersion: row.has_published_version,
     id: row.shared_draft_id,
     organizationId,
     title: row.title,
@@ -444,6 +485,8 @@ type SharedSubmissionRow = ReaderSelectionColumns & ApprovedReaderColumns & {
   withdrawn_by: "REVIEWER" | "ORGANIZATION_ADMIN" | null;
   withdrawn_reason: string | null;
   withdrawn_at: Date | null;
+  renewal_expiration_date?: string | null;
+  on_behalf_of_author?: boolean;
 };
 // organization_wide: the frozen audience includes the organization audience. That kind is valid only at
 // Organization scope (audience_snapshot_enforceable) and audience_member_read shows it to every active member,
@@ -464,7 +507,8 @@ const submissionSelect = `
          cp.published_version_id,
          rd.comment AS decision_comment, s.request_type, s.request_reason, s.target_published_version_id,
          knowledge_publication_failure_kind(s.publication_failure_code) AS publication_failure,
-         s.withdrawn_by, s.withdrawn_reason, s.withdrawn_at
+         s.withdrawn_by, s.withdrawn_reason, s.withdrawn_at,
+         to_char(s.renewal_expiration_date, 'YYYY-MM-DD') AS renewal_expiration_date, s.on_behalf_of_author
     FROM shared_submission s
     LEFT JOIN published_knowledge_version pv ON pv.submission_id = s.submission_id
     LEFT JOIN knowledge_current_publication cp ON cp.published_version_id = pv.published_version_id
@@ -474,10 +518,15 @@ type GovernanceViewRow = {
   mime_type: string; responsible_department_id: string | null; reader_mode: GovernanceReaderMode;
   reader_department_id: string | null;
 };
-/** Decision0027: versions frozen before migration0042 keep historical Topic keys; Arden never returns them. */
-function withoutTopic<T extends object>(management: T | null | undefined): T | null {
+/** Frozen snapshots retain retired keys for provenance; current API metadata never returns them. */
+function isIsoDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+function currentManagement<T extends object>(management: T | null | undefined): T | null {
   if (!management) return null;
-  const { topicId: _topicId, topicName: _topicName, ...rest } = management as T & { topicId?: unknown; topicName?: unknown };
+  const { topicId: _topicId, topicName: _topicName, effectiveDate: _effectiveDate, ...rest } = management as T & { topicId?: unknown; topicName?: unknown; effectiveDate?: unknown };
   return rest as T;
 }
 function mapGovernanceView(row: GovernanceViewRow): GovernanceDocumentView {
@@ -491,7 +540,7 @@ function sqlStateOf(error: unknown): string | null {
 }
 function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmission {
   return {
-    management: withoutTopic(row.management),
+    management: currentManagement(row.management),
     id: row.submission_id,
     draftId: row.shared_draft_id,
     snapshotVersionId: row.shared_draft_version_id,
@@ -515,6 +564,8 @@ function mapSharedSubmission(row: SharedSubmissionRow): SharedKnowledgeSubmissio
     publicationFailure: row.publication_state === "FAILED" ? row.publication_failure ?? "SYSTEM" : null,
     withdrawal: row.withdrawn_by && row.withdrawn_reason && row.withdrawn_at
       ? { by: row.withdrawn_by, reason: row.withdrawn_reason, at: row.withdrawn_at } : null,
+    renewal: row.request_type === "RENEWAL"
+      ? { expirationDate: row.renewal_expiration_date ?? null, onBehalfOfAuthor: row.on_behalf_of_author === true } : null,
   };
 }
 type ReviewerGrantRow = {
@@ -574,6 +625,8 @@ type PublishedKnowledgeRow = ReaderSelectionColumns & {
   published_at: Date;
   valid_from: Date;
   valid_until: Date | null;
+  expiration_date: string | null;
+  expired: boolean;
 };
 type AuthorizedAiSourceRow = ReaderSelectionColumns & {
   management: KnowledgeMetadata | null;
@@ -595,14 +648,19 @@ const publishedKnowledgeSelect = `
          owner_department.name AS responsible_department_name,
          pv.audience_role_ids, pv.published_at,
          cp.valid_from, cp.valid_until,
+         to_char(publication_expiration_date(pv.published_version_id, pv.management), 'YYYY-MM-DD') AS expiration_date,
+         COALESCE(publication_expiration_date(pv.published_version_id, pv.management)
+           < (now() AT TIME ZONE 'UTC')::date, false) AS expired,
          ${readerSelectionColumns("pv.reader_selection_id")}
     FROM knowledge_current_publication cp
     JOIN published_knowledge_version pv ON pv.published_version_id = cp.published_version_id
     LEFT JOIN department owner_department ON owner_department.department_id = pv.responsible_department_id
       AND owner_department.organization_id = cp.organization_id`;
 function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
+  const management = currentManagement(row.management);
   return {
-    management: withoutTopic(row.management),
+    // A reviewed renewal (0068) replaces the frozen Valid until; the snapshot itself is never rewritten.
+    management: management ? { ...management, expirationDate: row.expiration_date } : null,
     id: row.published_version_id,
     draftId: row.shared_draft_id,
     title: row.title,
@@ -616,6 +674,7 @@ function mapPublishedKnowledge(row: PublishedKnowledgeRow): PublishedKnowledge {
     publishedAt: row.published_at,
     validFrom: row.valid_from,
     validUntil: row.valid_until,
+    expired: row.expired,
   };
 }
 export type OrganizationSetup = { name: string; departmentName?: string };
@@ -638,7 +697,9 @@ export type KnowledgeOptions = {
 
 export type DeleteDepartmentResult =
   | { success: true; unassignedCount?: number; reassignedCount?: number }
-  | { success: false; errorReason: "NOT_FOUND" | "BASE_DEPARTMENT" };
+  | { success: false; errorReason: "NOT_FOUND" | "BASE_DEPARTMENT" }
+  /** Decision 0032 D: the department still owns current publications that need handling first. */
+  | { success: false; errorReason: "OWNS_PUBLICATIONS"; publicationCount: number };
 
 export interface ArdenDataRepository {
   readonly notifications?: NotificationStore;
@@ -648,8 +709,11 @@ export interface ArdenDataRepository {
   readonly systemAdministration?: SystemAdministrationStore;
   readonly systemConsole?: SystemConsoleStore;
   readonly systemAuth?: SystemAuthStore;
+  ratePrivateAnswer?(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean>;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
+  /** Decision 0034: unreviewed, view-only sharing of private items with named members. */
+  readonly directShares?: DirectShareStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
   recordAiAnswerResult(userId: string, organizationId: string, requestId: string,
@@ -670,11 +734,11 @@ export interface ArdenDataRepository {
   deleteDepartment(userId: string, organizationId: string, departmentId: string, requestId: string): Promise<DeleteDepartmentResult>;
   changePrimaryDepartment(userId: string, organizationId: string, membershipId: string, departmentId: string, requestId: string): Promise<boolean>;
   listDrafts(userId: string, organizationId: string, limit: number, cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null>;
-  getDraft(userId: string, organizationId: string, draftId: string): Promise<PrivateDraft | null>;
+  getDraft(userId: string, organizationId: string, draftId: string, options?: { forQuestion: boolean }): Promise<PrivateDraft | null>;
   canCreateDraft(userId: string, organizationId: string): Promise<boolean>;
   createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, requestId: string): Promise<PrivateDraft | null>;
   canUpdateDraft(userId: string, organizationId: string, draftId: string): Promise<boolean>;
-  updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }>;
+  updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<DraftUpdateResult>;
   getPrivateContributionSource(userId: string, organizationId: string, sourceVersionId: string): Promise<PrivateContributionSource | null>;
   createKnowledgeDraft(userId: string, organizationId: string, input: {
     actorMembershipId: string;
@@ -740,8 +804,12 @@ export interface ArdenDataRepository {
     expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
     idempotencyKey: string, requestId: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
+  listPublicationRenewalState(userId: string, organizationId: string): Promise<PublicationRenewalState[] | null>;
+  requestPublicationRenewal(userId: string, organizationId: string, documentId: string,
+    input: PublicationRenewalInput, requestId: string): Promise<RequestPublicationRenewalResult>;
+  enqueuePublicationExpiryReminders(): Promise<number>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
-  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[], versionScope?: VersionScope): Promise<AuthorizedAiSource[] | null>;
+  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null>;
   readonly conversations?: ConversationStore;
   /** The caller as a TargetReaderPolicy actor, or null when they are not an active member. */
   getTargetReaderActor(userId: string, organizationId: string): Promise<ReaderActor | null>;
@@ -793,6 +861,7 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly systemAuth: SystemAuthStore;
   readonly maintenance: MaintenancePort;
   readonly privateOrganization: PgPrivateOrganizationStore;
+  readonly directShares: PgDirectShareStore;
   /** System-only retention capability for the in-process 30-day purge loop. */
   readonly privateTrashRetention: PrivateTrashRetentionStore;
   constructor(private readonly pool: Pool, content?: { read(sourceUri: string, expectedHash: string): Promise<string> }) {
@@ -809,6 +878,8 @@ export class ArdenRepository implements ArdenDataRepository {
     this.privateOrganization = new PgPrivateOrganizationStore((user, org, work) => this.withActorContext(user, org, work),
       (work) => this.withPrivateTrashRetention(work));
     this.privateTrashRetention = this.privateOrganization;
+    this.directShares = new PgDirectShareStore((user, org, work) => this.withActorContext(user, org, work),
+      (user, org, work) => this.withOrganizationAdmin(user, org, work));
   }
 
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
@@ -916,6 +987,22 @@ export class ArdenRepository implements ArdenDataRepository {
        GROUP BY o.organization_id, o.name, om.membership_id, om.status
        ORDER BY o.name, o.organization_id`, [userId, "PRIVATE_WORKSPACE_READ"]);
 
+    // Reviews is for Organization Admins and members with an active reviewer grant. Grants are readable only
+    // inside their organization's context, so each active membership is checked in its own context.
+    const reviewers = new Set<string>();
+    for (const row of result.rows) {
+      if (row.status !== "ACTIVE") continue;
+      if ((row.role_codes ?? []).includes("ORG_ADMIN")) { reviewers.add(row.organization_id); continue; }
+      await client.query("SELECT set_config('arden.organization_id', $1, true)", [row.organization_id]);
+      const grant = await client.query(`SELECT 1 FROM reviewer_grant g
+        JOIN organization_membership om ON om.membership_id = g.reviewer_membership_id
+       WHERE g.organization_id = $1 AND om.user_id = $2 AND om.status = 'ACTIVE' AND g.status = 'ACTIVE'
+         AND g.valid_from <= now() AND (g.valid_until IS NULL OR g.valid_until > now())
+       LIMIT 1`, [row.organization_id, userId]);
+      if (grant.rowCount) reviewers.add(row.organization_id);
+    }
+    await client.query("SELECT set_config('arden.organization_id', '', true)");
+
     return result.rows.map((row) => ({
       organizationId: row.organization_id,
       organizationName: row.organization_name,
@@ -924,6 +1011,7 @@ export class ArdenRepository implements ArdenDataRepository {
       departmentName: row.department_name,
       roleCodes: row.role_codes ?? [],
       canUsePrivateWorkspace: row.can_use_private_workspace,
+      canReview: reviewers.has(row.organization_id),
     }));
     });
   }
@@ -1275,6 +1363,11 @@ export class ArdenRepository implements ArdenDataRepository {
          FOR UPDATE`, [departmentId, organizationId]);
       const department = dept.rows[0];
       if (!department) return { success: false, errorReason: "NOT_FOUND" };
+      // Decision 0032 D: published documents keep their owner department, so it cannot disappear under them.
+      const owned = await client.query<{ count: number }>(`SELECT count(*)::integer AS count
+        FROM list_governance_publications() WHERE responsible_department_id = $1`, [departmentId]);
+      const publicationCount = owned.rows[0]?.count ?? 0;
+      if (publicationCount > 0) return { success: false, errorReason: "OWNS_PUBLICATIONS", publicationCount };
 
       const primaryMembers = await client.query<{ membership_id: string }>(`
         SELECT membership_id FROM department_membership
@@ -1606,6 +1699,19 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
+  async ratePrivateAnswer(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean> {
+    return this.withActorContext(userId, organizationId, async client => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return false;
+      await client.query("SELECT set_config('arden.private_feedback_key', $1, true)", [voteKey]);
+      await client.query(`
+        INSERT INTO private_ai_feedback(vote_key, feedback, rated_at)
+        VALUES ($1, $2::text, CASE WHEN $2 IS NULL THEN NULL ELSE now() END)
+        ON CONFLICT (vote_key) DO UPDATE SET feedback = EXCLUDED.feedback, rated_at = EXCLUDED.rated_at
+        WHERE private_ai_feedback.feedback IS DISTINCT FROM EXCLUDED.feedback`, [voteKey, feedback]);
+      return true;
+    });
+  }
+
   async listDrafts(userId: string, organizationId: string, limit: number, cursor: DraftCursor | null): Promise<{ items: DraftListItem[]; nextCursor: DraftCursor | null } | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
     const membershipId = await this.findMembership(userId, organizationId, "PRIVATE_WORKSPACE_READ", client);
@@ -1622,13 +1728,15 @@ export class ArdenRepository implements ArdenDataRepository {
       updated_at: Date;
       collection_id: string | null;
       favorited_at: Date | null;
+      sort_position: number | null;
     }>(`
       SELECT d.draft_id, d.title, d.current_version_no, v.draft_version_id, v.mime_type, v.content_hash,
-             d.created_at, d.updated_at, d.collection_id, d.favorited_at
+             d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position
         FROM draft_document d
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
         JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
        WHERE w.membership_id = $1 AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
+         AND d.archived_at IS NULL
          AND ($2::timestamptz IS NULL OR (d.updated_at, d.draft_id) < ($2, $3::uuid))
        ORDER BY d.updated_at DESC, d.draft_id DESC
        LIMIT $4`, [membershipId, cursor?.updatedAt ?? null, cursor?.draftId ?? null, limit + 1]);
@@ -1644,6 +1752,8 @@ export class ArdenRepository implements ArdenDataRepository {
       updatedAt: row.updated_at,
       collectionId: row.collection_id,
       favoritedAt: row.favorited_at,
+      position: row.sort_position,
+      archivedAt: null,
     }));
     const last = page.at(-1);
     return {
@@ -1653,7 +1763,7 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async getDraft(userId: string, organizationId: string, draftId: string): Promise<PrivateDraft | null> {
+  async getDraft(userId: string, organizationId: string, draftId: string, options?: { forQuestion: boolean }): Promise<PrivateDraft | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
     const result = await client.query<{
       draft_id: string;
@@ -1667,16 +1777,24 @@ export class ArdenRepository implements ArdenDataRepository {
       updated_at: Date;
       collection_id: string | null;
       favorited_at: Date | null;
+      sort_position: number | null;
+      text_source_uri: string | null;
+      text_content_hash: string | null;
     }>(`
       SELECT d.draft_id, v.draft_version_id, d.title, v.source_uri, v.mime_type, v.content_hash,
-             d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at
+             d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position,
+             v.text_source_uri, v.text_content_hash
         FROM draft_document d
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
         JOIN organization_membership om ON om.membership_id = w.membership_id
         JOIN draft_version v ON v.draft_id = d.draft_id AND v.version_no = d.current_version_no
        WHERE d.draft_id = $1 AND om.organization_id = $2 AND om.user_id = $3
          AND om.status = 'ACTIVE' AND w.status = 'ACTIVE' AND d.status = 'ACTIVE' AND d.trashed_at IS NULL
-         AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ"]);
+         AND (NOT $5::boolean OR (d.archived_at IS NULL AND EXISTS (
+           SELECT 1 FROM organization o JOIN user_account ua ON ua.user_id = om.user_id
+            WHERE o.organization_id = om.organization_id AND o.status = 'ACTIVE' AND ua.status = 'ACTIVE'
+         )))
+         AND ${membershipPermissionSql("$4")}`, [draftId, organizationId, userId, "PRIVATE_WORKSPACE_READ", options?.forQuestion ?? false]);
     const row = result.rows[0];
     return row ? {
       id: row.draft_id,
@@ -1691,6 +1809,8 @@ export class ArdenRepository implements ArdenDataRepository {
       updatedAt: row.updated_at,
       collectionId: row.collection_id,
       favoritedAt: row.favorited_at,
+      position: row.sort_position,
+      text: storedText(row.text_source_uri, row.text_content_hash),
     } : null;
     });
   }
@@ -1713,6 +1833,9 @@ export class ArdenRepository implements ArdenDataRepository {
       const createRequestHash = createHash("sha256")
         .update(`${input.sourceVersionId}:${input.classification}`)
         .digest("hex");
+      // Decision 0031: serialize with saves of the source note, which may overwrite an open version.
+      await client.query(`SELECT 1 FROM draft_version v JOIN draft_document d ON d.draft_id = v.draft_id
+        WHERE v.draft_version_id = $1 FOR UPDATE OF d, v`, [input.sourceVersionId]);
       const source = await this.findPrivateContributionSource(client, userId, organizationId, input.sourceVersionId);
       if (!source || !canCreateSharedDraft({
         actor: { membershipId: input.actorMembershipId, organizationId, status: "ACTIVE" },
@@ -1720,7 +1843,8 @@ export class ArdenRepository implements ArdenDataRepository {
         now: new Date(),
       })) return { kind: "unavailable" };
       if (source.sourceUri !== input.expectedSource.sourceUri || source.contentHash !== input.expectedSource.contentHash
-        || source.mimeType !== "text/plain" || input.copiedContent.mimeType !== source.mimeType
+        || !(source.mimeType === "text/plain" || source.mimeType === "application/pdf")
+        || input.copiedContent.mimeType !== source.mimeType
         || input.copiedContent.sourceUri === source.sourceUri) return { kind: "unavailable" };
 
       const existing = await this.findSharedDraftByCreateRequest(client, source.ownerMembershipId, organizationId, input.idempotencyKey);
@@ -1746,6 +1870,9 @@ export class ArdenRepository implements ArdenDataRepository {
         INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
         VALUES ($1, 1, $2, $3, $4, $5)`, [draftId, input.copiedContent.sourceUri,
         input.copiedContent.mimeType, input.copiedContent.contentHash, input.copiedContent.contentSizeBytes ?? null]);
+      // The contributed wording must stay exactly as reviewed: later saves start a new private version.
+      await client.query(`UPDATE draft_version SET sealed_at = now() WHERE draft_version_id = $1 AND sealed_at IS NULL`,
+        [input.sourceVersionId]);
       await this.appendAudit(client, organizationId, source.ownerMembershipId,
         "SHARED_DRAFT_CREATED", draftId, 1, input.requestId);
       const created = await this.findSharedDraftByCreateRequest(client, source.ownerMembershipId, organizationId, input.idempotencyKey);
@@ -1874,8 +2001,7 @@ export class ArdenRepository implements ArdenDataRepository {
       if (patch.management !== undefined) {
         if (!validKnowledgeMetadata(patch.management)) return { kind: "invalid-metadata" };
         const value = patch.management;
-        management = { schemaVersion: 1, type: value.type, version: value.version.trim(),
-          effectiveDate: value.effectiveDate, expirationDate: value.expirationDate, changeNote: value.changeNote.trim() };
+        management = { schemaVersion: 1, type: value.type, version: value.version.trim(), expirationDate: value.expirationDate, changeNote: value.changeNote.trim() };
       }
       // Decision 0014: the responsible department always follows the author's primary department.
       const responsible = resolveResponsibleDepartment(patch.responsibleDepartmentId,
@@ -2446,14 +2572,12 @@ export class ArdenRepository implements ArdenDataRepository {
       const grants = await this.loadActorReviewerGrants(client, membershipId, organizationId);
       if (!actor.isOrganizationAdmin && grants.length === 0) return [];
       if (submissionIds !== null && submissionIds.length === 0) return [];
-      const resourceFilter = submissionIds === null ? "" : "AND s.submission_id = ANY($4::uuid[])";
+      // Decision 0033: a reviewer's own submissions are listed like any other; the policy checks the grant.
+      const resourceFilter = submissionIds === null ? "" : "AND s.submission_id = ANY($2::uuid[])";
       const listLimit = submissionIds === null ? "LIMIT 100" : "";
-      const values = submissionIds === null
-        ? [organizationId, membershipId, actor.isOrganizationAdmin]
-        : [organizationId, membershipId, actor.isOrganizationAdmin, submissionIds];
+      const values = submissionIds === null ? [organizationId] : [organizationId, submissionIds];
       const result = await client.query<SharedSubmissionRow>(`${submissionSelect}
         WHERE s.organization_id = $1 AND s.status = 'PENDING_REVIEW'
-          AND ($3::boolean OR s.submitted_by_membership_id <> $2)
           ${resourceFilter}
         ORDER BY s.submitted_at DESC, s.submission_id DESC ${listLimit}`, values);
       const now = new Date();
@@ -2545,6 +2669,21 @@ export class ArdenRepository implements ArdenDataRepository {
       if (!actor) return { kind: "not-found" };
       const { membershipId } = actor;
       const requestedDecision = action === "APPROVE" ? "APPROVED" : "REJECTED";
+      // Decision 0032: the active author decides a renewal asked on their behalf without a reviewer grant.
+      // The reviewed routine answers NOT_APPLICABLE for everyone else, who continue on the regular path.
+      if (approvedReaders === undefined) {
+        const authorOutcome = (await client.query<{ outcome: string }>(
+          "SELECT decide_on_behalf_renewal($1, $2, $3, $4, $5, $6) AS outcome",
+          [submissionId, requestedDecision, expectedSnapshotVersionId, expectedContentHash, comment, idempotencyKey])).rows[0]?.outcome;
+        if (authorOutcome === "DECIDED" || authorOutcome === "REPLAYED") {
+          const decided = await client.query<SharedSubmissionRow>(`${submissionSelect}
+            WHERE s.organization_id = $1 AND s.submission_id = $2`, [organizationId, submissionId]);
+          if (!decided.rows[0]) throw new Error("Decided renewal is not readable");
+          return { kind: authorOutcome === "DECIDED" ? "decided" : "replayed", submission: mapSharedSubmission(decided.rows[0]) };
+        }
+        if (authorOutcome === "CONFLICT") return { kind: "conflict" };
+        if (authorOutcome === "COMMENT_REQUIRED") return { kind: "denied", reason: "COMMENT_REQUIRED" };
+      }
       const replay = await client.query<{ submission_id: string; decision: string; snapshot_version_id: string;
         content_hash: string; comment: string | null } & ApprovedReaderColumns>(`
         SELECT submission_id, decision, snapshot_version_id, content_hash, comment,
@@ -2584,14 +2723,12 @@ export class ArdenRepository implements ArdenDataRepository {
       const readerFacts: SelectionFacts = proposedReaders && approvedReaders !== undefined
         ? await this.loadSelectionFacts(client, organizationId, approvedReaders)
         : { organizationId, departments: [], members: [] };
-      // T6.2: a change request applies to the publication it names, which must still be current.
+      // T6.2: a change request applies to the publication it names, which must still be current. One trusted
+      // check for every request type: a reviewer whose grant covers the request need not be a reader (0010/0023),
+      // so this is not read through publication RLS. No row (fail closed) means PUBLICATION_CHANGED.
       const publicationChange = row.request_type === "CONTENT" ? undefined : (await client.query<{
-        target_is_current: boolean; newer_version_preparing: boolean }>(`
-        SELECT EXISTS (SELECT 1 FROM knowledge_current_publication cp WHERE cp.shared_draft_id = s.shared_draft_id
-                         AND cp.published_version_id = s.target_published_version_id) AS target_is_current,
-               EXISTS (SELECT 1 FROM shared_submission c WHERE c.shared_draft_id = s.shared_draft_id
-                         AND c.status = 'APPROVED' AND c.publication_state = 'PREPARING') AS newer_version_preparing
-          FROM shared_submission s WHERE s.submission_id = $1`, [submissionId])).rows
+        target_is_current: boolean; newer_version_preparing: boolean }>(
+        "SELECT target_is_current, newer_version_preparing FROM publication_change_target_state($1)", [submissionId])).rows
         .map((fact) => ({ targetIsCurrent: fact.target_is_current, newerVersionPreparing: fact.newer_version_preparing }))[0];
       const plan = planReviewDecision({
         actor,
@@ -2617,18 +2754,29 @@ export class ArdenRepository implements ArdenDataRepository {
       const approvedSelectionId = readers
         ? await this.insertReaderSelection(client, organizationId, readers.approved, 1) : null;
       const decisionId = randomUUID();
-      await client.query(`INSERT INTO review_decision (review_decision_id, submission_id,
-        reviewer_membership_id, decision, comment, flow2, decision_request_id,
-        snapshot_version_id, content_hash, approved_selection_id)
-        VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9)`, [decisionId, submissionId,
-        membershipId, plan.decision, plan.comment, idempotencyKey,
-        row.shared_draft_version_id, row.content_hash, approvedSelectionId]);
+      try {
+        await client.query("SAVEPOINT review_decision_insert");
+        await client.query(`INSERT INTO review_decision (review_decision_id, submission_id,
+          reviewer_membership_id, decision, comment, flow2, decision_request_id,
+          snapshot_version_id, content_hash, approved_selection_id)
+          VALUES ($1, $2, $3, $4, $5, true, $6, $7, $8, $9)`, [decisionId, submissionId,
+          membershipId, plan.decision, plan.comment, idempotencyKey,
+          row.shared_draft_version_id, row.content_hash, approvedSelectionId]);
+      } catch (error) {
+        // Decision 0032: a renewal asked on the author's behalf waits for the author first (0068 validator).
+        if (sqlStateOf(error) === "AR032") {
+          await client.query("ROLLBACK TO SAVEPOINT review_decision_insert");
+          return { kind: "denied", reason: "AUTHOR_DECISION_WINDOW" };
+        }
+        throw error;
+      }
       await client.query(`INSERT INTO audit_event (organization_id, actor_membership_id,
         review_decision_id, event_type, outcome, details_json)
         VALUES ($1, $2, $3, 'KNOWLEDGE_REVIEW_DECIDED', 'SUCCESS', $4::jsonb)`, [organizationId,
         membershipId, decisionId, JSON.stringify({ submissionId, snapshotVersionId: row.shared_draft_version_id,
           decision: plan.decision,
-          selfApproved: actor.isOrganizationAdmin === true && membershipId === row.submitted_by_membership_id,
+          // Decision 0033: any self-decision (reviewer or Admin) is recorded, never shown in the UI.
+          selfApproved: membershipId === row.submitted_by_membership_id,
           ...(row.request_type !== "CONTENT" ? { requestType: row.request_type,
             publishedVersionId: row.target_published_version_id } : {}),
           ...(readers ? { proposedReaders: readersAuditSummary(readers.proposed),
@@ -2644,37 +2792,122 @@ export class ArdenRepository implements ArdenDataRepository {
   async listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
-      const result = await client.query<PublishedKnowledgeRow>(`${publishedKnowledgeSelect}
-        WHERE cp.organization_id = $1 ORDER BY pv.published_at DESC, pv.published_version_id DESC`, [organizationId]);
-      return result.rows.map(mapPublishedKnowledge);
+      // Decision 0032: expired publications stay current but leave every reader listing.
+      const result = await client.query<PublishedKnowledgeRow>(`SELECT * FROM (${publishedKnowledgeSelect}
+        WHERE cp.organization_id = $1) listed WHERE NOT listed.expired
+        ORDER BY listed.published_at DESC, listed.published_version_id DESC`, [organizationId]);
+      const items = result.rows.map(mapPublishedKnowledge);
+      const names = new Map<string, string>();
+      if (items.length) {
+        const authors = await client.query<{ published_version_id: string; author_name: string }>(
+          "SELECT * FROM list_publication_author_names($1::uuid[])", [items.slice(0, 1000).map((item) => item.id)]);
+        for (const row of authors.rows) names.set(row.published_version_id, row.author_name);
+      }
+      return items.map((item) => ({ ...item, authorName: names.get(item.id) ?? null }));
     });
+  }
+
+  /** Decision 0032: renewal state of current publications the caller is responsible for (author, Admin, reviewer). */
+  async listPublicationRenewalState(userId: string, organizationId: string): Promise<PublicationRenewalState[] | null> {
+    return this.withActorContext(userId, organizationId, async (client) => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      const result = await client.query<{ document_id: string; published_version_id: string; title: string;
+        responsible_department_id: string | null; expiration_date: string | null; renewal_pending: boolean;
+        author_active: boolean; is_author: boolean; can_renew: boolean; pending_submission_id: string | null;
+        pending_snapshot_version_id: string | null; pending_content_hash: string | null; pending_on_behalf: boolean | null;
+        pending_requested_by: string | null; pending_reason: string | null; pending_expiration_date: string | null;
+        pending_requested_at: Date | null; author_window_until: Date | null; can_decide: boolean; author_name: string | null }>(
+        `SELECT document_id, published_version_id, title, responsible_department_id,
+                to_char(expiration_date, 'YYYY-MM-DD') AS expiration_date, renewal_pending, author_active,
+                is_author, can_renew, pending_submission_id, pending_snapshot_version_id, pending_content_hash,
+                pending_on_behalf, pending_requested_by, pending_reason,
+                to_char(pending_expiration_date, 'YYYY-MM-DD') AS pending_expiration_date, pending_requested_at,
+                author_window_until, can_decide, author_name FROM list_publication_renewal_state()`);
+      return result.rows.map((row) => ({ documentId: row.document_id, publishedVersionId: row.published_version_id,
+        title: row.title, responsibleDepartmentId: row.responsible_department_id, expirationDate: row.expiration_date,
+        renewalPending: row.renewal_pending, authorActive: row.author_active, isAuthor: row.is_author,
+        canRenew: row.can_renew, authorName: row.author_name,
+        pending: row.pending_submission_id && row.pending_snapshot_version_id && row.pending_content_hash && row.pending_requested_at
+          ? { submissionId: row.pending_submission_id, snapshotVersionId: row.pending_snapshot_version_id,
+            contentHash: row.pending_content_hash, onBehalfOfAuthor: row.pending_on_behalf === true,
+            requestedByName: row.pending_requested_by, reason: row.pending_reason ?? "",
+            expirationDate: row.pending_expiration_date, requestedAt: row.pending_requested_at,
+            authorWindowUntil: row.author_window_until, canDecide: row.can_decide }
+          : null }));
+    });
+  }
+
+  /** Decision 0032: asks for a reviewed renewal as the author, or on the author's behalf (0068 re-checks). */
+  async requestPublicationRenewal(userId: string, organizationId: string, documentId: string,
+    input: PublicationRenewalInput, requestId: string): Promise<RequestPublicationRenewalResult> {
+    const reason = input.reason.trim();
+    if (!reason || [...reason].length > 1000) return { kind: "invalid-reason" };
+    if (input.expirationDate !== null && !isIsoDate(input.expirationDate)) return { kind: "invalid-date" };
+    return this.withActorContext(userId, organizationId, async (client) => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return { kind: "not-found" };
+      let row: { outcome: string; submission_id: string | null } | undefined;
+      try {
+        await client.query("SAVEPOINT publication_renewal");
+        row = (await client.query<{ outcome: string; submission_id: string | null }>(
+          "SELECT outcome, submission_id FROM request_publication_renewal($1, $2::date, $3, $4)",
+          [documentId, input.expirationDate, reason, input.idempotencyKey])).rows[0];
+      } catch (error) {
+        // A concurrent renewal from someone else wins the unique pending index.
+        if (sqlStateOf(error) === "23505") {
+          await client.query("ROLLBACK TO SAVEPOINT publication_renewal");
+          return { kind: "pending" };
+        }
+        throw error;
+      }
+      const outcome = row?.outcome;
+      if ((outcome === "REQUESTED" || outcome === "REPLAYED") && row?.submission_id) {
+        const result = await client.query<SharedSubmissionRow>(`${submissionSelect} WHERE s.submission_id = $1`,
+          [row.submission_id]);
+        if (!result.rows[0]) throw new Error("Renewal request is not readable");
+        return { kind: outcome === "REQUESTED" ? "requested" : "replayed", submission: mapSharedSubmission(result.rows[0]) };
+      }
+      if (outcome === "NOT_RENEWABLE") return { kind: "not-renewable" };
+      if (outcome === "NOT_YET") return { kind: "not-yet" };
+      if (outcome === "PENDING") return { kind: "pending" };
+      if (outcome === "INVALID_DATE") return { kind: "invalid-date" };
+      if (outcome === "INVALID_REASON") return { kind: "invalid-reason" };
+      if (outcome === "NOT_FOUND") return { kind: "not-found" };
+      throw new Error(`Renewal request returned an unknown outcome (${requestId})`);
+    });
+  }
+
+  /** Decision 0032 C: idempotent 30/7-day reminders. Runs without an actor; the routine derives recipients. */
+  async enqueuePublicationExpiryReminders(): Promise<number> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE arden_runtime");
+      await client.query("SET LOCAL search_path TO arden, public");
+      const result = await client.query<{ written: number }>("SELECT enqueue_publication_expiry_reminders() AS written");
+      await client.query("COMMIT");
+      return result.rows[0]?.written ?? 0;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async getPublishedKnowledge(userId: string, organizationId: string,
     publishedVersionId: string): Promise<PublishedKnowledge | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
-      await client.query("SELECT set_config('arden.ai_version_scope', 'COMPARE', true)");
       const result = await client.query<PublishedKnowledgeRow>(`${publishedKnowledgeSelect}
         WHERE cp.organization_id = $1 AND pv.published_version_id = $2`, [organizationId, publishedVersionId]);
       if (result.rows[0]) return mapPublishedKnowledge(result.rows[0]);
-      const applicable = await client.query<PublishedKnowledgeRow>(`
-        SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
-          pv.document_code, pv.management, pv.responsible_department_id, pv.content_hash, pv.content_uri,
-          d.name AS responsible_department_name, pv.audience_role_ids, pv.published_at,
-          pv.valid_from, pv.valid_until, ${readerSelectionColumns("pv.reader_selection_id")}
-        FROM published_knowledge_version pv JOIN knowledge_base kb USING (knowledge_base_id)
-        LEFT JOIN department d ON d.department_id = pv.responsible_department_id AND d.organization_id = kb.organization_id
-        WHERE kb.organization_id = $1 AND pv.published_version_id = $2
-          AND pv.published_version_id IN (SELECT eligible_ai_publications('COMPARE'))`, [organizationId, publishedVersionId]);
-      return applicable.rows[0] ? mapPublishedKnowledge(applicable.rows[0]) : null;
+      return null;
     });
   }
 
-  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[], versionScope: VersionScope = "CURRENT"): Promise<AuthorizedAiSource[] | null> {
+  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null> {
     if ((generationIds && generationIds.length > 64) || (chunkIds && chunkIds.length > 64)) throw new Error("Too many evidence locations");
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
-      await client.query("SELECT set_config('arden.ai_version_scope', $1, true)", [versionScope]);
       const result = await client.query<AuthorizedAiSourceRow>(`
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
@@ -2687,13 +2920,13 @@ export class ArdenRepository implements ArdenDataRepository {
           JOIN knowledge_base kb ON kb.knowledge_base_id = pv.knowledge_base_id
           JOIN knowledge_index_generation g
             ON g.submission_id = pv.submission_id AND g.status = 'READY'
-         WHERE g.organization_id = $1 AND pv.published_version_id IN (SELECT eligible_ai_publications($4))
+         WHERE g.organization_id = $1 AND pv.published_version_id IN (SELECT eligible_ai_publications())
            AND ($2::uuid[] IS NULL OR g.generation_id = ANY($2::uuid[]))
          ORDER BY pv.published_at DESC, pv.published_version_id DESC
-         LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null, versionScope]);
+         LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null]);
       if (result.rows.length > 500) throw new Error("Authorized source count exceeds the request budget");
       return result.rows.map((row) => ({
-        management: withoutTopic(row.management),
+        management: currentManagement(row.management),
         generationId: row.generation_id,
         chunks: row.chunks,
         snapshotVersionId: row.snapshot_version_id,
@@ -2790,7 +3023,7 @@ export class ArdenRepository implements ArdenDataRepository {
       Boolean(await this.findMembership(userId, organizationId, "PRIVATE_WORKSPACE_WRITE", client)));
   }
 
-  async createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, requestId: string): Promise<PrivateDraft | null> {
+  async createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, _requestId: string): Promise<PrivateDraft | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const membershipId = await this.findMembership(userId, organizationId, "PRIVATE_WORKSPACE_WRITE", client);
       if (!membershipId) return null;
@@ -2818,13 +3051,14 @@ export class ArdenRepository implements ArdenDataRepository {
       const created = draft.rows[0];
       if (!created) throw new Error("Draft insert returned no row");
       const versionResult = await client.query<{ draft_version_id: string }>(`
-        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id)
-        VALUES ($1, 1, $2, $3, $4, $5, $6)
+        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id,
+                                   text_source_uri, text_content_hash)
+        VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)
         RETURNING draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash,
-        content.contentSizeBytes ?? null, membershipId]);
+        content.contentSizeBytes ?? null, membershipId,
+        content.text?.sourceUri ?? null, content.text?.contentHash ?? null]);
       const versionId = versionResult.rows[0]?.draft_version_id;
       if (!versionId) throw new Error("Draft version insert returned no row");
-      await this.appendAudit(client, organizationId, membershipId, "PRIVATE_DRAFT_CREATED", created.draft_id, 1, requestId);
       return {
         id: created.draft_id,
         organizationId,
@@ -2838,6 +3072,8 @@ export class ArdenRepository implements ArdenDataRepository {
         updatedAt: created.updated_at,
         collectionId,
         favoritedAt: null,
+        position: null,
+        text: content.text ?? null,
       };
     });
   }
@@ -2855,7 +3091,7 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }> {
+  async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, _requestId: string): Promise<DraftUpdateResult> {
     return this.withActorContext(userId, organizationId, async (client) => {
       // Lock the mutable document before reading its version join. Under READ
       // COMMITTED, a waiter otherwise rechecks the new document against an old
@@ -2881,9 +3117,17 @@ export class ArdenRepository implements ArdenDataRepository {
         updated_at: Date;
         collection_id: string | null;
         favorited_at: Date | null;
+        sort_position: number | null;
+        text_source_uri: string | null;
+        text_content_hash: string | null;
+        sealed: boolean;
       }>(`
         SELECT om.membership_id, d.title, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash, v.content_size_bytes,
-               d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at
+               d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position,
+               v.text_source_uri, v.text_content_hash,
+               (v.sealed_at IS NOT NULL
+                OR EXISTS (SELECT 1 FROM shared_draft s WHERE s.source_private_version_id = v.draft_version_id)
+                OR EXISTS (SELECT 1 FROM shared_submission s WHERE s.draft_version_id = v.draft_version_id)) AS sealed
           FROM draft_document d
           JOIN private_workspace w ON w.workspace_id = d.workspace_id
           JOIN organization_membership om ON om.membership_id = w.membership_id
@@ -2894,27 +3138,51 @@ export class ArdenRepository implements ArdenDataRepository {
       const current = currentResult.rows[0];
       if (!current) return { kind: "not-found" };
       if (current.current_version_no !== expectedVersion) return { kind: "conflict", currentVersion: current.current_version_no };
+      // Decision 0034: a text note takes text and a PDF item takes a PDF; only the title changes across kinds.
+      if (content && content.mimeType !== current.mime_type) return { kind: "wrong-kind" };
 
       const version = expectedVersion + 1;
       const title = patch.title ?? current.title;
-      const source = content ?? {
+      const source: StoredContentFields = content ? { ...content, text: content.text ?? null } : {
         sourceUri: current.source_uri,
-        mimeType: current.mime_type,
+        mimeType: current.mime_type as StoredContentFields["mimeType"],
         contentHash: current.content_hash,
         contentSizeBytes: current.content_size_bytes,
+        text: storedText(current.text_source_uri, current.text_content_hash),
       };
       await client.query(`
         UPDATE draft_document
            SET title = $2, current_version_no = $3, updated_at = now()
          WHERE draft_id = $1`, [draftId, title, version]);
-      const versionResult = await client.query<{ draft_version_id: string }>(`
-        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash,
-        source.contentSizeBytes ?? null, current.membership_id]);
-      const versionId = versionResult.rows[0]?.draft_version_id;
-      if (!versionId) throw new Error("Draft version insert returned no row");
-      await this.appendAudit(client, organizationId, current.membership_id, "PRIVATE_DRAFT_UPDATED", draftId, version, requestId);
+      let versionId: string;
+      const replacedSourceUris: string[] = [];
+      if (!current.sealed) {
+        // Decision 0031: the open current version is overwritten instead of adding history.
+        await client.query(`
+          UPDATE draft_version SET version_no = $2, source_uri = $3, mime_type = $4, content_hash = $5,
+                 content_size_bytes = $6, text_source_uri = $7, text_content_hash = $8
+           WHERE draft_version_id = $1`, [current.draft_version_id, version, source.sourceUri, source.mimeType, source.contentHash,
+          source.contentSizeBytes ?? null, source.text?.sourceUri ?? null, source.text?.contentHash ?? null]);
+        versionId = current.draft_version_id;
+        // Objects the overwrite made unreachable are erased by the caller after commit.
+        for (const replaced of [current.source_uri, current.text_source_uri]) {
+          if (!replaced || replaced === source.sourceUri || replaced === source.text?.sourceUri) continue;
+          const shared = await client.query(`SELECT 1 FROM draft_version WHERE source_uri = $1 OR text_source_uri = $1 LIMIT 1`, [replaced]);
+          if (!shared.rowCount) replacedSourceUris.push(replaced);
+        }
+      } else {
+        // A contributed (sealed) version stays as it is; the note continues in a new open version.
+        const versionResult = await client.query<{ draft_version_id: string }>(`
+          INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id,
+                                     text_source_uri, text_content_hash)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash,
+          source.contentSizeBytes ?? null, current.membership_id,
+          source.text?.sourceUri ?? null, source.text?.contentHash ?? null]);
+        const inserted = versionResult.rows[0]?.draft_version_id;
+        if (!inserted) throw new Error("Draft version insert returned no row");
+        versionId = inserted;
+      }
       const updated = await client.query<{ created_at: Date; updated_at: Date }>(`
         SELECT created_at, updated_at FROM draft_document WHERE draft_id = $1`, [draftId]);
       const timestamps = updated.rows[0];
@@ -2934,7 +3202,10 @@ export class ArdenRepository implements ArdenDataRepository {
           updatedAt: timestamps.updated_at,
           collectionId: current.collection_id,
           favoritedAt: current.favorited_at,
+          position: current.sort_position,
+          text: source.text ?? null,
         },
+        replacedSourceUris,
       };
     });
   }
@@ -3105,8 +3376,13 @@ export class ArdenRepository implements ArdenDataRepository {
 }
 
 export type DraftCursor = { updatedAt: string; draftId: string };
-export type StoredContentFields = { sourceUri: string; mimeType: "text/plain" | "application/pdf";
-  contentHash: string; contentSizeBytes?: number | null };
+export type StoredTextFields = { sourceUri: string; contentHash: string };
+function storedText(sourceUri: string | null, contentHash: string | null): StoredTextFields | null {
+  return sourceUri && contentHash ? { sourceUri, contentHash } : null;
+}
+/** Decision 0034: `text` is the extracted text of a PDF item (absent or null for text notes and PDFs without text). */
+export type StoredContentFields = { sourceUri: string; mimeType: "text/plain" | "application/pdf"; contentHash: string;
+  contentSizeBytes?: number | null; text?: StoredTextFields | null };
 
 function organizationSlug(name: string): string {
   const base = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()

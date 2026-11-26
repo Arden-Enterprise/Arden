@@ -2,8 +2,13 @@ import type { BlockNoteEditor } from "@blocknote/core";
 import { BlockNoteView } from "@blocknote/ariakit";
 import { useCreateBlockNote } from "@blocknote/react";
 import { useEffect, useId, useRef, useState } from "react";
+import { markdownToSemanticDocument, semanticBodyText, serializeSemanticDocument } from "@arden/domain";
 import { parseArdenDocument, serializeArdenDocument } from "./ardenDocumentModel";
 import { ardenDocumentSchema } from "./ardenDocumentSchema";
+import type { Platform } from "../shared/types";
+import { WritingActionPanel, type InlineFormat } from "../shared/WritingActionPanel";
+import { pointAnchor, type EditorActionAnchor } from "../shared/editor-action-anchor";
+import { runEditorClipboard, type EditorClipboardAction } from "../shared/editor-clipboard";
 
 type ArdenEditor = BlockNoteEditor<
   typeof ardenDocumentSchema.blockSchema,
@@ -17,7 +22,19 @@ type Props = {
   disabled?: boolean;
   maxLength?: number;
   onChange?: (body: string) => void;
+  platform?: Platform;
+  organizationId?: string;
+  /** Size of an encoded body against `maxLength`; characters by default, bytes for Private notes. */
+  measure?: (body: string) => number;
+  /** Private notes: AI writing without a selection works on the whole page. */
+  pageWriting?: boolean;
+  /** Private notes: the selection menu also toggles Bold, Italic, Strikethrough and Inline code. */
+  selectionFormatting?: boolean;
 };
+
+const selectionFormats: InlineFormat[] = ["bold", "italic", "strike", "code"];
+
+const writingLimit = 12_000;
 
 type TextSize = "paragraph" | "heading-3" | "heading-2";
 type BlockKind = "bulletListItem" | "numberedListItem" | "quote";
@@ -145,7 +162,10 @@ function TextSizeMenu({ value, disabled, onChange }: { value: TextSize; disabled
   </div>;
 }
 
-function ArdenFormattingToolbar({ editor, disabled, revision }: { editor: ArdenEditor; disabled: boolean; revision: number }) {
+function ArdenFormattingToolbar({ editor, disabled, revision, writingEnabled, pageWriting, onWriting }: {
+  editor: ArdenEditor; disabled: boolean; revision: number; writingEnabled: boolean; pageWriting: boolean;
+  onWriting: (source: HTMLButtonElement, keyboard: boolean) => void;
+}) {
   void revision;
   const styles = editor.getActiveStyles();
   const block = editor.getTextCursorPosition().block;
@@ -168,6 +188,11 @@ function ArdenFormattingToolbar({ editor, disabled, revision }: { editor: ArdenE
       <ToolbarButton className="arden-format-block" label="Numbered list" active={block.type === "numberedListItem"} disabled={disabled} onActivate={() => toggleBlock(editor, "numberedListItem")}>1.</ToolbarButton>
       <ToolbarButton className="arden-format-block" label="Quote" active={block.type === "quote"} disabled={disabled} onActivate={() => toggleBlock(editor, "quote")}>“</ToolbarButton>
     </div>
+    {writingEnabled && <><span className="arden-format-divider" aria-hidden="true" />
+      <button type="button" title={pageWriting ? "Use AI writing on the selection, or on the whole note when nothing is selected"
+        : "Select up to 12,000 characters to use AI writing"}
+        disabled={disabled || !writingTarget(editor, pageWriting)}
+        onMouseDown={event => event.preventDefault()} onClick={event => onWriting(event.currentTarget, event.detail === 0)}>AI writing</button></>}
   </div>;
 }
 
@@ -193,12 +218,72 @@ const disabledBlockNoteUi = {
   attributionTooltip: false,
 } as const;
 
-export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLength = 131_072, onChange }: Props) {
+type WritingSelection = { text: string; from: number; to: number; body: string; plain: boolean; wholeBlock: boolean; page?: boolean };
+
+function richTextAnchor(editor: ArdenEditor): EditorActionAnchor {
+  const { view, state } = editor._tiptapEditor;
+  const { from, to } = state.selection;
+  const selection = view.dom.ownerDocument.getSelection();
+  if (selection?.anchorNode && selection.focusNode && view.dom.contains(selection.anchorNode) &&
+    view.dom.contains(selection.focusNode) && selection.rangeCount) {
+    const range = selection.getRangeAt(0);
+    const lines = Array.from(range.getClientRects?.() ?? []).filter(rect => rect.height > 0);
+    const first = lines[0];
+    const last = lines.at(-1);
+    if (first && last) return { left: last.right, top: first.top, bottom: last.bottom };
+  }
+  const start = view.coordsAtPos(from);
+  const end = view.coordsAtPos(to, -1);
+  return { left: end.right,
+    top: Math.min(start.top, end.top), bottom: Math.max(start.bottom, end.bottom) };
+}
+
+function captureWritingSelection(editor: ArdenEditor): WritingSelection | null {
+  const text = editor.getSelectedText();
+  const state = editor._tiptapEditor.state;
+  const { from, to, $from, $to } = state.selection;
+  if (!text.trim() || from === to || text.length > 12_000) return null;
+  const sameBlock = $from.parent === $to.parent && $from.parent.isTextblock;
+  let plain = sameBlock;
+  state.doc.nodesBetween(from, to, node => {
+    if (node.isText && node.marks.length > 0) plain = false;
+  });
+  return { text, from, to, body: serializeArdenDocument(editor.document), plain,
+    wholeBlock: sameBlock && from === $from.start() && to === $to.end() };
+}
+
+/** The whole document as an AI writing target, for editors that allow page-scope actions. */
+function capturePage(editor: ArdenEditor): WritingSelection | null {
+  const body = serializeArdenDocument(editor.document);
+  const text = semanticBodyText(body) ?? "";
+  if (!text.trim() || text.length > writingLimit) return null;
+  // A page rewrite starts from plain text, so it cannot preserve blocks, links, or inline formatting.
+  const plain = editor.document.every(block => block.type === "paragraph" && !block.children.length
+    && block.content.every(part => part.type === "text" && !Object.keys(part.styles).length));
+  return { text, from: 0, to: editor._tiptapEditor.state.doc.content.size, body, plain, wholeBlock: false, page: true };
+}
+
+function writingTarget(editor: ArdenEditor, pageWriting: boolean): WritingSelection | null {
+  const { from, to } = editor._tiptapEditor.state.selection;
+  if (from !== to && editor.getSelectedText().trim()) return captureWritingSelection(editor);
+  return pageWriting ? capturePage(editor) : null;
+}
+
+export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLength = 131_072, onChange, platform, organizationId,
+  measure = (value) => value.length, pageWriting = false, selectionFormatting = false }: Props) {
   const { editor, initialDocument } = useArdenEditor(body, instanceKey);
   const acceptedBody = useRef(body);
   const reverting = useRef(false);
   const [selectionRevision, setSelectionRevision] = useState(0);
   const [limitReached, setLimitReached] = useState(false);
+  const [selectionTooLong, setSelectionTooLong] = useState(false);
+  const [writingSelection, setWritingSelection] = useState<WritingSelection | null>(null);
+  const [popup, setPopup] = useState<{
+    source: HTMLElement; anchor: EditorActionAnchor; keyboard?: boolean;
+    clipboard?: { hasSelection: boolean; run: (action: EditorClipboardAction, signal: AbortSignal) => Promise<void> };
+  } | null>(null);
+  const suppressSelection = useRef(false);
+  const formatting = useRef(false);
 
   useEffect(() => { acceptedBody.current = body; }, [body]);
 
@@ -209,7 +294,7 @@ export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLe
   const handleChange = () => {
     if (reverting.current) return;
     const encoded = serializeArdenDocument(editor.document);
-    if (encoded.length > maxLength) {
+    if (measure(encoded) > maxLength) {
       const accepted = parseArdenDocument(acceptedBody.current);
       reverting.current = true;
       editor.replaceBlocks(editor.document, accepted.blocks);
@@ -220,15 +305,107 @@ export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLe
     acceptedBody.current = encoded;
     setLimitReached(false);
     setSelectionRevision((value) => value + 1);
+    // A format toggled from the selection menu keeps the selection and its menu open.
+    if (formatting.current) { onChange?.(encoded); return; }
+    setPopup(null);
+    setWritingSelection(null);
     onChange?.(encoded);
+  };
+  const closePopup = (restoreFocus: boolean) => {
+    suppressSelection.current = true;
+    setPopup(null);
+    if (restoreFocus) {
+      if (popup?.source instanceof HTMLButtonElement) popup.source.focus({ preventScroll: true });
+      else editor.focus();
+    }
+  };
+  const openContext = (point: EditorActionAnchor | undefined, keyboard: boolean) => {
+    if (disabled || !platform || !organizationId) return;
+    const { view, state } = editor._tiptapEditor;
+    const { from, to } = state.selection;
+    suppressSelection.current = true;
+    setWritingSelection(from !== to ? captureWritingSelection(editor) : pageWriting ? capturePage(editor) : null);
+    setPopup({ source: view.dom, anchor: from !== to || !point ? richTextAnchor(editor) : point, keyboard,
+      clipboard: { hasSelection: from !== to, run: (action, signal) =>
+        runEditorClipboard(action, platform, signal, () => {
+          if (view.isDestroyed || !view.editable || !view.state.doc.eq(state.doc)) return false;
+          suppressSelection.current = true;
+          editor._tiptapEditor.commands.setTextSelection({ from, to });
+          editor.focus();
+          return true;
+        }, text => { editor.pasteText(text); }) },
+    });
   };
 
   return <div className={`arden-rich-text-shell${disabled ? " is-disabled" : ""}`}>
-    <ArdenFormattingToolbar editor={editor} disabled={disabled} revision={selectionRevision} />
-    <BlockNoteView editor={editor} theme="dark" editable={!disabled} onChange={handleChange}
-      onSelectionChange={() => setSelectionRevision((value) => value + 1)} className="arden-blocknote-editor"
-      {...disabledBlockNoteUi} />
+    <ArdenFormattingToolbar editor={editor} disabled={disabled} revision={selectionRevision}
+      writingEnabled={Boolean(platform && organizationId)} pageWriting={pageWriting} onWriting={(source, keyboard) => {
+        const captured = writingTarget(editor, pageWriting);
+        if (!captured) return;
+        suppressSelection.current = true;
+        setWritingSelection(captured);
+        setPopup({ source: keyboard ? source : editor._tiptapEditor.view.dom, anchor: richTextAnchor(editor), keyboard });
+      }} />
+    <div onMouseDownCapture={() => { suppressSelection.current = false; }}
+      onKeyDownCapture={(event) => {
+        if (event.key === "Escape") return;
+        if (!disabled && platform && organizationId && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
+          event.preventDefault();
+          openContext(undefined, true);
+          return;
+        }
+        suppressSelection.current = false;
+        if (popup?.clipboard) setPopup(null);
+      }}
+      onContextMenu={(event) => {
+        if (disabled || !platform || !organizationId || !editor._tiptapEditor.view.dom.contains(event.target as Node)) return;
+        event.preventDefault();
+        const keyboard = !event.clientX && !event.clientY && event.button === 0;
+        openContext(keyboard ? undefined : pointAnchor(event.clientX, event.clientY), keyboard);
+      }}><BlockNoteView editor={editor} theme="dark" editable={!disabled} onChange={handleChange}
+      onSelectionChange={() => {
+        setSelectionRevision((value) => value + 1);
+        setSelectionTooLong(editor.getSelectedText().length > writingLimit);
+        if (suppressSelection.current || !platform || !organizationId || disabled) return;
+        const captured = captureWritingSelection(editor);
+        setWritingSelection(captured);
+        setPopup(captured ? { source: editor._tiptapEditor.view.dom, anchor: richTextAnchor(editor) } : null);
+      }} className="arden-blocknote-editor"
+      {...disabledBlockNoteUi} /></div>
+    {platform && organizationId && !disabled && popup && <WritingActionPanel
+      key={`${popup.clipboard ? "context" : "selection"}:${writingSelection?.from}:${writingSelection?.to}`}
+      platform={platform} organizationId={organizationId} text={writingSelection?.text ?? ""} scope={writingSelection?.page ? "PAGE" : "SELECTION"}
+      anchor={popup.anchor} source={popup.source} focusOnOpen={popup.keyboard} clipboard={popup.clipboard}
+      formatting={selectionFormatting && writingSelection && !writingSelection.page ? {
+        active: Object.fromEntries(selectionFormats.map(format => [format, editor.getActiveStyles()[format] === true])) as Record<InlineFormat, boolean>,
+        onToggle: (format) => {
+          formatting.current = true;
+          try { editor.toggleStyles({ [format]: true }); } finally { formatting.current = false; }
+          setWritingSelection(captureWritingSelection(editor));
+        },
+      } : undefined}
+      canApply={action => Boolean(writingSelection?.plain && writingSelection.body === serializeArdenDocument(editor.document)
+        && (writingSelection.page || action !== "REFORMAT" || writingSelection.wholeBlock))}
+      onClose={closePopup} onApply={(replacement, action) => {
+        if (!writingSelection?.plain || writingSelection.body !== serializeArdenDocument(editor.document)) return;
+        if (writingSelection.page) {
+          // A whole-page result is Markdown; it replaces every block with the supported Arden blocks.
+          const parsed = parseArdenDocument(serializeSemanticDocument(markdownToSemanticDocument(replacement, () => crypto.randomUUID())));
+          if (parsed.status !== "ok") return;
+          editor.replaceBlocks(editor.document, parsed.blocks);
+        } else if (action === "REFORMAT") {
+          if (!writingSelection.wholeBlock) return;
+          editor._tiptapEditor.commands.setTextSelection({ from: writingSelection.from, to: writingSelection.to });
+          editor.pasteMarkdown(replacement);
+        } else {
+          const tiptap = editor._tiptapEditor;
+          tiptap.view.dispatch(tiptap.state.tr.insertText(replacement, writingSelection.from, writingSelection.to));
+        }
+        suppressSelection.current = true;
+        setPopup(null); setWritingSelection(null); editor.focus();
+      }} />}
     {limitReached && <p className="arden-document-limit" role="status">Edit not applied. Document limit: {maxLength.toLocaleString()} characters, including formatting.</p>}
+    {selectionTooLong && <p className="arden-document-limit" role="status">Select up to 12,000 characters to use AI writing.</p>}
   </div>;
 }
 

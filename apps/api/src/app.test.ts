@@ -1,11 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
-import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult, type RetryKnowledgePublicationResult, type GovernancePublication, type GovernanceInspectionView, type GovernanceDocumentView, type PublicationReport, type OpenGovernanceInspectionResult, type DirectWithdrawalResult, type ReportPublicationResult, type PublicationChangeInput, type RequestPublicationChangeResult } from "./db/repository.js";
+import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftUpdateResult, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult, type RetryKnowledgePublicationResult, type GovernancePublication, type GovernanceInspectionView, type GovernanceDocumentView, type PublicationReport, type OpenGovernanceInspectionResult, type DirectWithdrawalResult, type ReportPublicationResult, type PublicationChangeInput, type RequestPublicationChangeResult, type PublicationRenewalInput, type PublicationRenewalState, type RequestPublicationRenewalResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -28,6 +28,8 @@ const organizationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const otherOrganizationId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
 const draftId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const versionId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+const otherDraftA = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeee1";
+const otherDraftB = "ffffffff-ffff-4fff-8fff-fffffffffff2";
 const sharedDraftId = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const sharedVersionId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
 const createKey = "99999999-9999-4999-8999-999999999999";
@@ -153,7 +155,7 @@ describe("API auth and private draft routes", () => {
     const headers = { cookie: owner, origin: "http://localhost:5180" };
     const base = `/api/v1/organizations/${organizationId}/ai`;
     const payload = { query: "No matching knowledge?", conversationId: versionId,
-      requestId: createKey, expectedRevision: 0, versionScope: "CURRENT" };
+      requestId: createKey, expectedRevision: 0 };
     const answer = await app.inject({ method: "POST", url: `${base}/answers`, headers, payload });
     expect(answer.statusCode).toBe(200);
     expect(answer.json()).toMatchObject({ status: "INSUFFICIENT_EVIDENCE", conversationId: versionId, revision: 1 });
@@ -164,6 +166,21 @@ describe("API auth and private draft routes", () => {
     expect(loaded.statusCode).toBe(200);
     expect(loaded.json().turns).toHaveLength(1);
     expect(loaded.json().turns[0]).not.toHaveProperty("evidence");
+    expect(loaded.json().turns[0]).not.toHaveProperty("versionScope");
+    const feedbackUrl = `${base}/conversations/${versionId}/turns/${answer.json().turnId}/feedback`;
+    const rate = (feedback: unknown, cookie = owner) => app.inject({ method: "PUT", url: feedbackUrl,
+      headers: { ...headers, cookie }, payload: { feedback } });
+    expect((await rate("BAD", other)).statusCode).toBe(404);
+    expect((await rate("INVALID")).statusCode).toBe(400);
+    expect((await rate("GOOD")).json()).toEqual({ feedback: "GOOD" });
+    expect((await rate("BAD")).json()).toEqual({ feedback: "BAD" });
+    const rated = await app.inject({ method: "GET", url: `${base}/conversations/${versionId}`, headers });
+    expect(rated.json()).toMatchObject({ revision: 1, turns: [{ feedback: "BAD" }] });
+    expect((await rate(null)).json()).toEqual({ feedback: null });
+    for (const versionScope of ["CURRENT", "UPCOMING", "COMPARE"]) {
+      expect((await app.inject({ method: "POST", url: `${base}/answers`, headers,
+        payload: { ...payload, versionScope } })).statusCode).toBe(400);
+    }
     expect((await app.inject({ method: "GET", url: `${base}/conversations/${versionId}`,
       headers: { cookie: other } })).statusCode).toBe(404);
     expect((await app.inject({ method: "GET", url: `${base}/conversations` })).statusCode).toBe(401);
@@ -223,9 +240,11 @@ describe("API auth and private draft routes", () => {
       account: { passwordSetupRequired: false },
       canAccessSystemConsole: false,
       sessionExpiresAt: expect.any(String),
+      systemAdmin: true,
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
         status: "active", departmentId: null, departmentName: null, roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
+        canReview: false,
       }],
     });
   });
@@ -867,6 +886,20 @@ describe("API auth and private draft routes", () => {
       headers: { cookie: ordinaryMember } });
     expect(denied.statusCode).toBe(404);
     expect(denied.json().error.code).toBe("SYSTEM_ADMINISTRATION_UNAVAILABLE");
+
+    const feedbackUrl = "/api/v1/system/analytics/private-feedback";
+    const analytics = await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: candidate } });
+    expect(analytics.statusCode).toBe(200);
+    expect(analytics.headers["cache-control"]).toBe("no-store");
+    expect(analytics.json()).toEqual({ weeks: [{ weekStart: "2026-11-23", good: 2, bad: 1 }] });
+    expect((await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: ordinaryMember } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: feedbackUrl })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: `${feedbackUrl}?userId=${ownerId}`, headers: { cookie: candidate } })).statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: candidate } })).json().systemAdmin).toBe(true);
+    expect((await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: ordinaryMember } })).json().systemAdmin).toBeUndefined();
+    await app.inject({ method: "POST", url: `/api/v1/system/administrators/${systemAdminCandidateId}/revoke`,
+      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: {} });
+    expect((await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: candidate } })).statusCode).toBe(404);
   });
 
   it("does not allow revoking the last active Arden System Admin", async () => {
@@ -1197,6 +1230,85 @@ describe("API auth and private draft routes", () => {
     expect(repository.currentBody).toBe("Revised body");
   });
 
+  describe("private PDF items (decision 0034, spec F03-FILE)", () => {
+    const pdf = (marker: string) => Buffer.from(`%PDF-1.4\n${marker}\n%%EOF\n`).toString("base64");
+    const base = `/api/v1/organizations/${organizationId}/private-workspace/drafts`;
+    const objects = async () => (await readdir(root)).sort();
+
+    it("keeps an original PDF with its extracted text and serves the file only to the owner", async () => {
+      const session = await desktopSession(app, "owner@example.test");
+      const headers = { cookie: session, origin: "http://localhost:5180" };
+      const created = await app.inject({ method: "POST", url: `${base}/pdf`, headers,
+        payload: { title: " Board minutes ", pdfBase64: pdf("minutes"), text: "Decision: hire two engineers." } });
+      expect(created.statusCode).toBe(201);
+      expect(created.json()).toMatchObject({ title: "Board minutes", body: "", kind: "pdf", textAvailable: true,
+        currentVersion: { mimeType: "application/pdf" } });
+      expect((await objects()).filter((name) => name.endsWith(".pdf"))).toHaveLength(1);
+      expect((await objects()).filter((name) => name.endsWith(".txt"))).toHaveLength(1);
+
+      const read = await app.inject({ method: "GET", url: `${base}/${draftId}`, headers: { cookie: session } });
+      expect(read.json()).toMatchObject({ kind: "pdf", body: "", textAvailable: true });
+      const file = await app.inject({ method: "GET", url: `${base}/${draftId}/pdf`, headers: { cookie: session } });
+      expect(file.statusCode).toBe(200);
+      expect(file.headers["cache-control"]).toBe("no-store");
+      expect(file.json().pdfBase64).toBe(pdf("minutes"));
+
+      const other = await desktopSession(app, "other@example.test");
+      const denied = await app.inject({ method: "GET", url: `${base}/${draftId}/pdf`, headers: { cookie: other } });
+      expect(denied.statusCode).toBe(404);
+      expect(JSON.stringify(denied.json())).not.toContain("minutes");
+    });
+
+    it("accepts a PDF without text and refuses files that are not PDFs or are too large, storing nothing", async () => {
+      const session = await desktopSession(app, "owner@example.test");
+      const headers = { cookie: session, origin: "http://localhost:5180" };
+      const scan = await app.inject({ method: "POST", url: `${base}/pdf`, headers, payload: { title: "Scan", pdfBase64: pdf("scan"), text: "  " } });
+      expect(scan.statusCode).toBe(201);
+      expect(scan.json()).toMatchObject({ kind: "pdf", textAvailable: false });
+      const before = await objects();
+      const notPdf = await app.inject({ method: "POST", url: `${base}/pdf`, headers,
+        payload: { title: "Fake", pdfBase64: Buffer.from("plain text, not a PDF").toString("base64") } });
+      expect(notPdf.statusCode).toBe(400);
+      expect(notPdf.json().error.code).toBe("INVALID_PDF");
+      const large = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(5 * 1024 * 1024), Buffer.from("\n%%EOF\n")]).toString("base64");
+      const oversized = await app.inject({ method: "POST", url: `${base}/pdf`, headers, payload: { title: "Big", pdfBase64: large } });
+      expect(oversized.statusCode).toBe(400);
+      expect(await objects()).toEqual(before);
+    });
+
+    it("replaces the file under a version check, erases the old objects and keeps text notes and PDFs apart", async () => {
+      const session = await desktopSession(app, "owner@example.test");
+      const headers = { cookie: session, origin: "http://localhost:5180" };
+      await app.inject({ method: "POST", url: `${base}/pdf`, headers, payload: { title: "Policy", pdfBase64: pdf("v1"), text: "First text" } });
+      const stale = await app.inject({ method: "PUT", url: `${base}/${draftId}/pdf`, headers: { ...headers, "if-match": '"7"' },
+        payload: { pdfBase64: pdf("v2"), text: "Second text" } });
+      expect(stale.statusCode).toBe(412);
+      expect((await objects()).filter((name) => name.endsWith(".pdf"))).toHaveLength(1);
+
+      const replaced = await app.inject({ method: "PUT", url: `${base}/${draftId}/pdf`, headers: { ...headers, "if-match": '"1"' },
+        payload: { pdfBase64: pdf("v2"), text: "Second text" } });
+      expect(replaced.statusCode).toBe(200);
+      expect(replaced.headers.etag).toBe('"2"');
+      const file = await app.inject({ method: "GET", url: `${base}/${draftId}/pdf`, headers: { cookie: session } });
+      expect(file.json().pdfBase64).toBe(pdf("v2"));
+
+      const asText = await app.inject({ method: "PATCH", url: `${base}/${draftId}`, headers: { ...headers, "if-match": '"2"' }, payload: { body: "typed" } });
+      expect(asText.statusCode).toBe(409);
+      expect(asText.json().error.code).toBe("PDF_ITEM_NOT_EDITABLE");
+      const renamed = await app.inject({ method: "PATCH", url: `${base}/${draftId}`, headers: { ...headers, "if-match": '"2"' }, payload: { title: "Policy 2027" } });
+      expect(renamed.statusCode).toBe(200);
+      expect(renamed.json()).toMatchObject({ kind: "pdf", body: "" });
+
+      await app.inject({ method: "POST", url: base, headers, payload: { title: "Text note", body: "words" } });
+      const onText = await app.inject({ method: "PUT", url: `${base}/${draftId}/pdf`, headers: { ...headers, "if-match": '"1"' },
+        payload: { pdfBase64: pdf("v3") } });
+      expect(onText.statusCode).toBe(409);
+      expect(onText.json().error.code).toBe("NOT_A_PDF_ITEM");
+      const textNoteFile = await app.inject({ method: "GET", url: `${base}/${draftId}/pdf`, headers: { cookie: session } });
+      expect(textNoteFile.statusCode).toBe(404);
+    });
+  });
+
   it("validates tenant identifiers, unknown fields, NULs, and oversized request bodies", async () => {
     const session = await desktopSession(app, "owner@example.test");
     const headers = { cookie: session, origin: "http://localhost:5180" };
@@ -1258,8 +1370,8 @@ describe("API auth and private draft routes", () => {
       expect(list.statusCode).toBe(200);
       expect(list.headers["cache-control"]).toBe("no-store");
       expect(list.json().items.map((item: { title: string }) => item.title).sort()).toEqual(["Child", "Projects"]);
-      expect(repository.privateOrganization.audit.map((event) => event.eventType)).toContain("PRIVATE_COLLECTION_UPDATED");
-      expect(JSON.stringify(repository.privateOrganization.audit)).not.toContain("Projects");
+      // Decision 0035: collection changes are routine owner-only actions and are not audited.
+      expect(repository.privateOrganization.audit).toEqual([]);
 
       repository.privateOrganization.collectionLimit = 2;
       const overLimit = await app.inject({ method: "POST", url: `${base}/collections`, headers, payload: { title: "Third" } });
@@ -1284,6 +1396,8 @@ describe("API auth and private draft routes", () => {
         { method: "PUT" as const, url: `${noteUrl}/favorite`, payload: { favorite: true } },
         { method: "POST" as const, url: `${noteUrl}/duplicate` },
         { method: "POST" as const, url: `${noteUrl}/trash` },
+        { method: "PUT" as const, url: `${noteUrl}/archive`, payload: { archived: true } },
+        { method: "PUT" as const, url: `${noteUrl}/collection`, payload: { collectionId: null, index: 0 } },
         { method: "POST" as const, url: `${base}/trash/${batchId}/restore` },
         { method: "POST" as const, url: `${base}/trash/${batchId}/purge` },
       ];
@@ -1292,7 +1406,7 @@ describe("API auth and private draft routes", () => {
         expect(response.statusCode, `${attempt.method} ${attempt.url}`).toBe(404);
         expect(response.json().error.code).toBe("RESOURCE_NOT_AVAILABLE");
       }
-      for (const url of [`${base}/collections`, `${base}/trash`]) {
+      for (const url of [`${base}/collections`, `${base}/trash`, `${base}/archive`]) {
         const response = await app.inject({ method: "GET", url, headers: other });
         expect(response.statusCode).toBe(200);
         expect(response.json().items).toEqual([]);
@@ -1332,6 +1446,96 @@ describe("API auth and private draft routes", () => {
       expect((await app.inject({ method: "POST", url: `${base}/collections`, headers, payload: { title: "Nested", parentId: collection.id } })).statusCode).toBe(404);
       const created = await app.inject({ method: "POST", url: `${base}/drafts`, headers, payload: { title: "New", body: "Body", collectionId: collection.id } });
       expect(created.statusCode).toBe(404);
+    });
+
+    it("places notes at an index of their collection order, clamping past the end (spec F03-ARR)", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const collection = await createCollection(headers, "Ordered");
+      const store = repository.privateOrganization;
+      for (const id of [otherDraftA, otherDraftB]) {
+        store.addNote({ id, title: id, collectionId: collection.id, content: () => ({ versionId, version: 1, ...repository.currentSource }) });
+      }
+      const placed = await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id, index: 1 } });
+      expect(placed.statusCode).toBe(200);
+      expect(placed.json()).toMatchObject({ id: draftId, collectionId: collection.id, position: 2, archivedAt: null });
+      expect(store.ordered(collection.id).map((note) => [note.id, note.position])).toEqual([[otherDraftB, 1], [draftId, 2], [otherDraftA, 3]]);
+      // Without an index the note goes last; an index past the end is clamped.
+      const last = await app.inject({ method: "PUT", url: `${base}/drafts/${otherDraftB}/collection`, headers, payload: { collectionId: collection.id } });
+      expect(last.json().position).toBe(3);
+      const clamped = await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id, index: 99 } });
+      expect(clamped.json().position).toBe(3);
+      for (const index of [-1, 1.5, "first", 2_000_000]) {
+        const invalid = await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id, index } });
+        expect(invalid.statusCode, String(index)).toBe(400);
+      }
+      const list = await app.inject({ method: "GET", url: `${base}/drafts`, headers });
+      expect(list.json().items.find((item: { id: string }) => item.id === draftId)).toMatchObject({ position: 3 });
+    });
+
+    it("overwrites an open version and erases its old content, but keeps a contributed version's content (decision 0031)", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const before = repository.currentSource;
+      const saved = await app.inject({ method: "PATCH", url: noteUrl, headers: { ...headers, "if-match": '"2"' }, payload: { body: "Autosaved body" } });
+      expect(saved.statusCode).toBe(200);
+      expect(saved.headers.etag).toBe('"3"');
+      expect(saved.json()).toMatchObject({ body: "Autosaved body", currentVersion: { id: versionId, version: 3 } });
+      await expect(storage.read(before.sourceUri, before.contentHash)).rejects.toThrow();
+      const stale = await app.inject({ method: "PATCH", url: noteUrl, headers: { ...headers, "if-match": '"2"' }, payload: { body: "Stale" } });
+      expect(stale.statusCode).toBe(412);
+
+      repository.sourceVersionSealed = true;
+      const contributed = repository.currentSource;
+      await app.inject({ method: "PATCH", url: noteUrl, headers: { ...headers, "if-match": '"3"' }, payload: { body: "After contribution" } });
+      await expect(storage.read(contributed.sourceUri, contributed.contentHash)).resolves.toBe("Autosaved body");
+      repository.sourceVersionSealed = false;
+    });
+
+    it("archives a note out of the tree and lists, and unarchives it to its collection or the root (spec F03-ARR)", async () => {
+      repository.currentSource = await storage.write(repository.currentBody);
+      const headers = await ownerHeaders();
+      const collection = await createCollection(headers, "Projects");
+      await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: collection.id } });
+      await app.inject({ method: "PUT", url: `${noteUrl}/favorite`, headers, payload: { favorite: true } });
+
+      const archived = await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: true } });
+      expect(archived.statusCode).toBe(200);
+      expect(archived.headers["cache-control"]).toBe("no-store");
+      expect(archived.json().archivedAt).not.toBeNull();
+      const again = await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: true } });
+      expect(again.json().archivedAt).toBe(archived.json().archivedAt);
+      expect((await app.inject({ method: "GET", url: `${base}/drafts`, headers })).json().items).toEqual([]);
+      // Archived notes are outside the tree: no favorite, move or duplicate until unarchived.
+      expect((await app.inject({ method: "PUT", url: `${noteUrl}/favorite`, headers, payload: { favorite: false } })).statusCode).toBe(404);
+      expect((await app.inject({ method: "PUT", url: `${noteUrl}/collection`, headers, payload: { collectionId: null } })).statusCode).toBe(404);
+      expect((await app.inject({ method: "POST", url: `${noteUrl}/duplicate`, headers })).statusCode).toBe(404);
+      // Trashing the collection leaves the archived note archived.
+      const trashed = await app.inject({ method: "POST", url: `${base}/collections/${collection.id}/trash`, headers });
+      expect(trashed.json().itemCount).toBe(1);
+
+      const archive = await app.inject({ method: "GET", url: `${base}/archive`, headers });
+      expect(archive.statusCode).toBe(200);
+      expect(archive.headers["cache-control"]).toBe("no-store");
+      expect(archive.json()).toEqual({ hasMore: false, items: [expect.objectContaining({
+        id: draftId, title: "Review notes", collectionId: null, collectionTitle: null, archivedAt: archived.json().archivedAt })] });
+      expect((await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: "no" } })).statusCode).toBe(400);
+
+      const restored = await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: false } });
+      expect(restored.json()).toMatchObject({ id: draftId, collectionId: null, archivedAt: null, position: null });
+      expect(restored.json().favoritedAt).not.toBeNull();
+      expect((await app.inject({ method: "GET", url: `${base}/archive`, headers })).json().items).toEqual([]);
+      expect((await app.inject({ method: "GET", url: `${base}/drafts`, headers })).json().items).toHaveLength(1);
+      // Decision 0035: archiving is a routine owner-only action and is not audited.
+      expect(repository.privateOrganization.audit).toEqual([]);
+
+      // Delete from the Archived view is Move to trash, which clears the archive flag.
+      await app.inject({ method: "PUT", url: `${noteUrl}/archive`, headers, payload: { archived: true } });
+      const toTrash = await app.inject({ method: "POST", url: `${noteUrl}/trash`, headers });
+      expect(toTrash.statusCode).toBe(200);
+      expect((await app.inject({ method: "GET", url: `${base}/archive`, headers })).json().items).toEqual([]);
+      await app.inject({ method: "POST", url: `${base}/trash/${toTrash.json().batchId}/restore`, headers });
+      expect((await app.inject({ method: "GET", url: `${base}/drafts`, headers })).json().items).toHaveLength(1);
     });
 
     it("hides a trashed note from get, patch, list and contribution, and restores it to the root when its collection is gone", async () => {
@@ -1628,8 +1832,7 @@ describe("API auth and private draft routes", () => {
     // Decision0027: an older client that still sends a Topic is refused rather than silently dropped.
     const withTopic = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
-      payload: { management: { type: "Guide", topicId: "11111111-1111-4111-8111-111111111111", version: "1.0",
-        effectiveDate: null, expirationDate: null, changeNote: "" } } });
+      payload: { management: { type: "Guide", topicId: "11111111-1111-4111-8111-111111111111", version: "1.0", expirationDate: null, changeNote: "" } } });
     expect(withTopic.statusCode).toBe(400);
     const updated = await app.inject({ method: "PATCH", url: `${root}/drafts/${sharedDraftId}`,
       headers: { cookie: owner, origin: "http://localhost:5180", "if-match": '"1"' },
@@ -1726,7 +1929,7 @@ describe("API auth and private draft routes", () => {
     expect((await app.inject({ method: "POST", url: `${root}/new`, headers,
       payload: { title: "Topic-free", body: "Synthetic guidance" } })).statusCode).toBe(201);
     const update = vi.spyOn(repository, "updateKnowledgeDraft");
-    const management = { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "",
+    const management = { type: "Guide", version: "1.0", expirationDate: null, changeNote: "",
       ...(topicId === undefined ? {} : { topicId }) };
     const response = await app.inject({ method: "PATCH", url: `${root}/${sharedDraftId}`,
       headers: { ...headers, "if-match": '"1"' }, payload: { management } });
@@ -1739,12 +1942,13 @@ describe("API auth and private draft routes", () => {
 
   it.each([
     { topicId: "malformed" }, { type: "Free text" }, { version: "x".repeat(31) },
+    { effectiveDate: null }, { effectiveDate: "2027-01-01" },
   ])("rejects malformed metadata at the request boundary: %j", async invalid => {
     const session = await desktopSession(app, "owner@example.test");
     const update = vi.spyOn(repository, "updateKnowledgeDraft");
     const response = await app.inject({ method: "PATCH", url: `/api/v1/organizations/${organizationId}/knowledge/drafts/${sharedDraftId}`,
       headers: { cookie: session, origin: "http://localhost:5180", "if-match": '"1"' },
-      payload: { management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "", ...invalid } } });
+      payload: { management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "", ...invalid } } });
     expect(response.statusCode).toBe(400);
     expect(update).not.toHaveBeenCalled();
   });
@@ -2482,6 +2686,101 @@ describe("API auth and private draft routes", () => {
       requestReason: "The policy was replaced" });
   });
 
+  it("refuses to delete a department that still owns current publications (0032 D)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const url = `/api/v1/organizations/${organizationId}/departments/${salesDepartmentId}/delete`;
+    repository.departmentPublications = 3;
+    const refused = await app.inject({ method: "POST", url, headers: { cookie: owner, origin: "http://localhost:5180" } });
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().error).toMatchObject({ code: "DEPARTMENT_OWNS_PUBLICATIONS", publicationCount: 3,
+      message: "This department owns 3 published documents. Withdraw them before deleting it." });
+    repository.departmentPublications = 0;
+    expect((await app.inject({ method: "POST", url, headers: { cookie: owner, origin: "http://localhost:5180" } })).statusCode).toBe(200);
+  });
+
+  it("refuses a reviewer decision during the author's renewal window with a safe 409 (0032)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    repository.authorDecisionWindow = true;
+    const response = await app.inject({ method: "POST",
+      url: `/api/v1/organizations/${organizationId}/knowledge/reviews/c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1/decisions`,
+      headers: { cookie: owner, origin: "http://localhost:5180", "idempotency-key": "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2" },
+      payload: { action: "APPROVE", expectedSnapshotVersionId: sharedVersionId, expectedContentHash: "a".repeat(64) } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error.code).toBe("AUTHOR_DECISION_WINDOW");
+    repository.authorDecisionWindow = false;
+  });
+
+  it("hides an expired publication from readers and explains an old link instead of serving it (0032 A)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const headers = { cookie: owner, origin: "http://localhost:5180" };
+    const root = `/api/v1/organizations/${organizationId}/knowledge`;
+    const stored = await storage.write("Expired body");
+    const publicationId = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2";
+    repository.publication = { id: publicationId, draftId: sharedDraftId, title: "Travel policy", classification: "INTERNAL",
+      responsibleDepartmentId: salesDepartmentId, responsibleDepartmentName: "Sales", contentHash: stored.contentHash,
+      sourceUri: stored.sourceUri, audienceRoleIds: [], targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
+      management: { type: "Policy & Standard", version: "1.0", expirationDate: "2026-11-01", changeNote: "" },
+      publishedAt: new Date("2026-10-01T00:00:00.000Z"), validFrom: new Date("2026-10-01T00:00:00.000Z"), validUntil: null,
+      expired: true, authorName: "Avery Author" };
+    const listed = await app.inject({ method: "GET", url: `${root}/published`, headers });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().items).toEqual([]);
+    const opened = await app.inject({ method: "GET", url: `${root}/published/${publicationId}`, headers });
+    expect(opened.statusCode).toBe(410);
+    expect(opened.json().error).toMatchObject({ code: "DOCUMENT_EXPIRED", expiredOn: "2026-11-01", ownerDepartmentName: "Sales",
+      message: "This document expired on Nov 1, 2026. Contact Sales." });
+    expect(JSON.stringify(opened.json())).not.toContain("Expired body");
+    const reported = await app.inject({ method: "POST", url: `${root}/published/${publicationId}/reports`, headers,
+      payload: { message: "Out of date" } });
+    expect(reported.statusCode).toBe(404);
+
+    repository.publication = { ...repository.publication!, expired: false };
+    const current = await app.inject({ method: "GET", url: `${root}/published`, headers });
+    expect(current.json().items[0]).toMatchObject({ id: publicationId, authorName: "Avery Author",
+      management: { expirationDate: "2026-11-01" } });
+    expect((await app.inject({ method: "GET", url: `${root}/published/${publicationId}`, headers })).statusCode).toBe(200);
+  });
+
+  it("accepts a reviewed renewal request with an idempotency key and maps refusals (0032 B)", async () => {
+    const owner = await desktopSession(app, "owner@example.test");
+    const url = `/api/v1/organizations/${organizationId}/knowledge/documents/${sharedDraftId}/renewal`;
+    const headers = { cookie: owner, origin: "http://localhost:5180", "idempotency-key": "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1" };
+    const send = (payload: object, extra: Record<string, string> = headers) => app.inject({ method: "POST", url, headers: extra, payload });
+    expect((await send({ expirationDate: "2027-06-30", reason: "Still valid" }, { cookie: owner, origin: "http://localhost:5180" })).statusCode).toBe(400);
+    expect((await send({ expirationDate: "2027-06-30" })).statusCode).toBe(400);
+    expect((await send({ expirationDate: "2027-06-30", reason: "Still valid", readers: [] })).statusCode).toBe(400);
+    repository.sharedSubmission = { id: "abababab-abab-4aba-8aba-abababababab", draftId: sharedDraftId,
+      snapshotVersionId: sharedVersionId, title: "Runbook", classification: "INTERNAL",
+      responsibleDepartmentId: salesDepartmentId, targetScopeType: "ORGANIZATION", targetDepartmentId: null,
+      audienceRoleIds: [], proposedTargetReaders: null, approvedTargetReaders: null, contentHash: "a".repeat(64),
+      status: "APPROVED", publicationState: "ACTIVE", submittedAt: new Date("2026-11-10T09:00:00.000Z"),
+      publishedVersionId: "efefefef-efef-4efe-8efe-efefefefefef", decisionComment: null,
+      requestType: "CONTENT", requestReason: null, publicationFailure: null, withdrawal: null };
+    const requested = await send({ expirationDate: "2027-06-30", reason: " Reviewed again " });
+    expect(requested.statusCode).toBe(201);
+    expect(requested.json()).toMatchObject({ status: "PENDING_REVIEW", requestType: "RENEWAL", requestReason: "Reviewed again",
+      renewal: { expirationDate: "2027-06-30", onBehalfOfAuthor: false } });
+    expect(repository.renewalInputs.at(-1)).toEqual({ expirationDate: "2027-06-30", reason: " Reviewed again ",
+      idempotencyKey: "d1d1d1d1-d1d1-4d1d-8d1d-d1d1d1d1d1d1" });
+    const refusals: Array<[RequestPublicationRenewalResult["kind"], number, string]> = [
+      ["not-yet", 409, "RENEWAL_NOT_YET_AVAILABLE"], ["pending", 409, "RENEWAL_PENDING"],
+      ["not-renewable", 409, "NOT_RENEWABLE"], ["invalid-date", 400, "INVALID_EXPIRATION_DATE"],
+      ["invalid-reason", 400, "INVALID_REASON"], ["not-found", 404, "RESOURCE_NOT_AVAILABLE"]];
+    for (const [kind, status, code] of refusals) {
+      repository.renewalResult = kind;
+      const refused = await send({ expirationDate: null, reason: "Keep it" });
+      expect(refused.statusCode).toBe(status);
+      expect(refused.json().error.code).toBe(code);
+    }
+    repository.renewalState = [{ documentId: sharedDraftId, publishedVersionId: "efefefef-efef-4efe-8efe-efefefefefef",
+      title: "Runbook", responsibleDepartmentId: salesDepartmentId, expirationDate: "2026-11-30", renewalPending: false,
+      authorActive: true, isAuthor: true, canRenew: true, authorName: "Avery Author", pending: null }];
+    const state = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/knowledge/renewals`,
+      headers: { cookie: owner, origin: "http://localhost:5180" } });
+    expect(state.statusCode).toBe(200);
+    expect(state.json().items).toEqual(repository.renewalState);
+  });
+
   it("routes desktop-compatible sign-in through the same HttpOnly Supabase session", async () => {
     const response = await app.inject({
       method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
@@ -2664,6 +2963,15 @@ class MemorySystemAdministrationStore implements SystemAdministrationStore {
     }
   }
 
+  async canAccess(actorUserId: string) {
+    return this.administrators.some(item => item.userId === actorUserId && item.status === "ACTIVE");
+  }
+
+  async privateFeedback(actorUserId: string) {
+    this.authorize(actorUserId);
+    return [{ weekStart: "2026-11-23", good: 2, bad: 1 }];
+  }
+
   async overview(actorUserId: string) {
     this.authorize(actorUserId);
     return { administrators: this.administrators, recentEvents: [] };
@@ -2825,6 +3133,7 @@ class MemoryRepository implements ArdenDataRepository {
   async createDepartment(userId: string, requestedOrganization: string, _name: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
   async deleteDepartment(userId: string, requestedOrganization: string, _departmentId: string): Promise<DeleteDepartmentResult> {
     if (userId !== ownerId || requestedOrganization !== organizationId) return { success: false, errorReason: "NOT_FOUND" };
+    if (this.departmentPublications > 0) return { success: false, errorReason: "OWNS_PUBLICATIONS", publicationCount: this.departmentPublications };
     return { success: true, unassignedCount: 0, reassignedCount: 0 };
   }
   async changePrimaryDepartment(userId: string, requestedOrganization: string, _membershipId: string, _departmentId: string): Promise<boolean> { return userId === ownerId && requestedOrganization === organizationId; }
@@ -3216,6 +3525,7 @@ class MemoryRepository implements ArdenDataRepository {
   async decideReview(userId: string, requestedOrganization: string, submissionId: string, action: ReviewAction,
     expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
     idempotencyKey: string, _requestId?: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult> {
+    if (this.authorDecisionWindow) return { kind: "denied", reason: "AUTHOR_DECISION_WINDOW" };
     const submission = this.sharedSubmission;
     if (this.reviewRequestKey === idempotencyKey && submission && submissionId === submission.id) {
       const expected = approvedReaders === undefined ? submission.proposedTargetReaders
@@ -3260,7 +3570,37 @@ class MemoryRepository implements ArdenDataRepository {
 
   async listPublishedKnowledge(userId: string, requestedOrganization: string): Promise<PublishedKnowledge[] | null> {
     if (requestedOrganization !== organizationId) return null;
-    return userId === ownerId && this.publication ? [this.publication] : [];
+    // Same rule as the database projection: expired publications leave reader listings (decision 0032).
+    return userId === ownerId && this.publication && !this.publication.expired ? [this.publication] : [];
+  }
+
+  departmentPublications = 0;
+  authorDecisionWindow = false;
+  renewalState: PublicationRenewalState[] = [];
+  renewalResult: RequestPublicationRenewalResult["kind"] = "requested";
+  renewalInputs: PublicationRenewalInput[] = [];
+  reminderRuns = 0;
+  async listPublicationRenewalState(userId: string, requestedOrganization: string): Promise<PublicationRenewalState[] | null> {
+    if (requestedOrganization !== organizationId) return null;
+    return userId === ownerId ? this.renewalState : [];
+  }
+
+  async requestPublicationRenewal(userId: string, requestedOrganization: string, documentId: string,
+    input: PublicationRenewalInput): Promise<RequestPublicationRenewalResult> {
+    if (userId !== ownerId || requestedOrganization !== organizationId || documentId !== sharedDraftId) return { kind: "not-found" };
+    this.renewalInputs.push(input);
+    if (this.renewalResult !== "requested" && this.renewalResult !== "replayed") return { kind: this.renewalResult };
+    const released = this.sharedSubmission;
+    if (!released) return { kind: "not-found" };
+    this.sharedSubmission = { ...released, id: "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1", status: "PENDING_REVIEW",
+      publicationState: "NONE", requestType: "RENEWAL", requestReason: input.reason.trim(),
+      renewal: { expirationDate: input.expirationDate, onBehalfOfAuthor: false } };
+    return { kind: this.renewalResult, submission: this.sharedSubmission };
+  }
+
+  async enqueuePublicationExpiryReminders(): Promise<number> {
+    this.reminderRuns += 1;
+    return 0;
   }
 
   async getPublishedKnowledge(userId: string, requestedOrganization: string, publishedVersionId: string): Promise<PublishedKnowledge | null> {
@@ -3293,17 +3633,23 @@ class MemoryRepository implements ArdenDataRepository {
       && !this.privateOrganization.hidden(draftId);
   }
 
-  async updateDraft(_userId: string, _organization: string, _draft: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null): Promise<{ kind: "not-found" } | { kind: "conflict"; currentVersion: number } | { kind: "updated"; draft: PrivateDraft }> {
+  async updateDraft(_userId: string, _organization: string, _draft: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null): Promise<DraftUpdateResult> {
     if (this.privateOrganization.hidden(draftId)) return { kind: "not-found" };
     if (expectedVersion !== this.currentVersion) return { kind: "conflict", currentVersion: this.currentVersion };
+    if (content && content.mimeType !== this.currentSource.mimeType) return { kind: "wrong-kind" };
     this.currentVersion += 1;
-    if (patch.body !== undefined) {
-      this.currentBody = patch.body;
-      if (content) this.currentSource = content;
+    // Decision 0031: an open version is overwritten; its previous content object becomes unreachable.
+    let replacedSourceUri: string | null = null;
+    if (patch.body !== undefined) this.currentBody = patch.body;
+    if (content) {
+      if (!this.sourceVersionSealed && content.sourceUri !== this.currentSource.sourceUri) replacedSourceUri = this.currentSource.sourceUri;
+      this.currentSource = content;
     }
     const draft = { ...this.note(), title: patch.title ?? this.note().title };
-    return { kind: "updated", draft };
+    return { kind: "updated", draft, replacedSourceUris: replacedSourceUri ? [replacedSourceUri] : [] };
   }
+  /** Set when the note's version was contributed (decision 0031). */
+  sourceVersionSealed = false;
 
   private note(): PrivateDraft {
     return {
@@ -3313,6 +3659,8 @@ class MemoryRepository implements ArdenDataRepository {
       createdAt: new Date("2026-10-05T09:00:00.000Z"), updatedAt: new Date("2026-10-05T09:00:00.000Z"),
       collectionId: this.privateOrganization.notes.get(draftId)?.collectionId ?? null,
       favoritedAt: this.privateOrganization.notes.get(draftId)?.favoritedAt ?? null,
+      position: this.privateOrganization.notes.get(draftId)?.position ?? null,
+      text: this.currentSource.text ?? null,
     };
   }
 }

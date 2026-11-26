@@ -1,16 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { adminNavigation, AppSidebar, knowledgeNavigation, navigationDisabled, workNavigation } from "../src/app/AppSidebar";
+import { MobileTabIsland } from "../src/app/MobileTabIsland";
 
 describe("workspace navigation with Ask Arden", () => {
-  it.each(["member", "admin"] as const)("shows Ask Arden and governance destinations for %s", (previewRole) => {
+  it.each([false, true])("shows Ask Arden and governance destinations (admin: %s)", (showAdmin) => {
     const sidebar = AppSidebar({
-      activeView: "knowledge", platform: "web", previewRole, organization: null,
+      activeView: "knowledge", platform: "web", authenticated: true, showAdmin,
       onNavigate: () => undefined, onSignOut: () => undefined,
     });
     const markup = JSON.stringify(sidebar);
     expect(markup).toContain("Ask Arden");
     expect(workNavigation).toContainEqual(expect.objectContaining({ label: "Ask Arden", view: "ask-arden" }));
-    for (const label of ["Home", "Ask Arden", "Private Notes", "Reviews"]) {
+    for (const label of ["Home", "Ask Arden", "Private", "Reviews"]) {
       expect(markup).toContain(label);
     }
     // Home replaced the sample My Work dashboard and the Library label (15 Nov 2026).
@@ -20,10 +21,22 @@ describe("workspace navigation with Ask Arden", () => {
   });
 
   it("shows Administration only to organization admins", () => {
-    const base = { activeView: "knowledge" as const, platform: "web" as const, organization: null, onNavigate: () => undefined, onSignOut: () => undefined };
-    expect(JSON.stringify(AppSidebar({ ...base, previewRole: "member" }))).not.toContain("Administration");
-    expect(JSON.stringify(AppSidebar({ ...base, previewRole: "admin" }))).toContain("Administration");
-    expect(JSON.stringify(AppSidebar({ ...base, previewRole: "member", authenticated: true, showAdmin: true }))).toContain("Administration");
+    const base = { activeView: "knowledge" as const, platform: "web" as const, authenticated: true, onNavigate: () => undefined, onSignOut: () => undefined };
+    expect(JSON.stringify(AppSidebar(base))).not.toContain("Administration");
+    expect(JSON.stringify(AppSidebar({ ...base, showAdmin: true }))).toContain("Administration");
+  });
+});
+
+describe("Reviews visibility", () => {
+  it("hides the REVIEW section and the phone tab for members without review authority", () => {
+    const base = { activeView: "knowledge" as const, platform: "web" as const, previewRole: "member" as const, organization: null,
+      authenticated: true, onNavigate: () => undefined, onSignOut: () => undefined };
+    expect(JSON.stringify(AppSidebar({ ...base, showReviews: false }))).not.toContain("Reviews");
+    expect(JSON.stringify(AppSidebar({ ...base, showReviews: true }))).toContain("Reviews");
+    const tabs = (showReviews: boolean) => JSON.stringify(MobileTabIsland({ activeView: "knowledge", authenticated: true, showAdmin: false,
+      showReviews, onNavigate: () => undefined }));
+    expect(tabs(false)).not.toContain("Reviews");
+    expect(tabs(true)).toContain("Reviews");
   });
 });
 

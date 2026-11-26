@@ -10,10 +10,11 @@ const passageKey = (citation: AnswerCitation) =>
  * version, scope and quoted passages. It shows only citation data already validated with the answer;
  * Open in document takes the governed reader path, which rechecks access and highlights the passage.
  */
-export function CitationSourcesPanel({ id, citations, selected, onOpenDocument, onClose }: {
+export function CitationSourcesPanel({ id, citations, selected, hideOpenDocument, onOpenDocument, onClose }: {
   id: string;
   citations: readonly AnswerCitation[];
-  selected: AnswerCitation;
+  selected: AnswerCitation | null;
+  hideOpenDocument?: boolean;
   onOpenDocument?: (citation: AnswerCitation) => void;
   onClose: () => void;
 }) {
@@ -32,10 +33,10 @@ export function CitationSourcesPanel({ id, citations, selected, onOpenDocument, 
     }
     return [...byVersion.entries()];
   }, [citations]);
-  const selectedKey = passageKey(selected);
+  const selectedKey = selected ? passageKey(selected) : null;
 
   useEffect(() => {
-    const target = root.current?.querySelector<HTMLElement>(".ask-source-passage.is-selected");
+    const target = root.current?.querySelector<HTMLElement>(selectedKey === null ? ".ask-sources-header h2" : ".ask-source-passage.is-selected");
     target?.scrollIntoView?.({ block: "nearest" });
     target?.focus({ preventScroll: true });
   }, [selectedKey]);
@@ -43,7 +44,7 @@ export function CitationSourcesPanel({ id, citations, selected, onOpenDocument, 
   return <aside ref={root} id={id} className="ask-sources-panel" aria-labelledby={`${id}-title`}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <header className="ask-sources-header">
-      <h2 id={`${id}-title`}>Sources</h2>
+      <h2 id={`${id}-title`} tabIndex={-1}>Sources</h2>
       <span className="ask-sources-count">{documents.length} {documents.length === 1 ? "document" : "documents"}</span>
       <button type="button" className="island-icon-button" aria-label="Close sources" title="Close sources" onClick={onClose}>
         <Icon name="close" size={13} />
@@ -61,10 +62,10 @@ export function CitationSourcesPanel({ id, citations, selected, onOpenDocument, 
             aria-current={isSelected ? "true" : undefined} aria-label={citation.page ? `Passage on page ${citation.page}` : "Cited passage"}>
             {citation.page && <small>Page {citation.page}</small>}
             <q>{citation.excerpt}</q>
-            <button type="button" className="ask-source-open" disabled={!onOpenDocument}
+            {!hideOpenDocument && <button type="button" className="ask-source-open" disabled={!onOpenDocument}
               aria-label={`Open ${citation.title} at this passage`} onClick={() => onOpenDocument?.(citation)}>
               Open in document <Icon name="open-external" size={11} />
-            </button>
+            </button>}
           </article>;
         })}
       </section>)}

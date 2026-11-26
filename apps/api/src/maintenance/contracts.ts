@@ -5,7 +5,7 @@ export type { PublicationProof };
 
 export type PublicationSubmission = {
   documentId: string;
-  requestType: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+  requestType: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
   status: string;
   producedVersionId: string | null;
   targetPublishedVersionId: string | null;

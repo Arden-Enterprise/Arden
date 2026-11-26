@@ -70,7 +70,7 @@ export function registerHomeHttpVerification(context: () => Context) {
         { "idempotency-key": randomUUID() });
       const id = string(created.body, "id");
       const saved = await request(owner, `${knowledge()}/drafts/${id}`, 200, "PATCH", {
-        targetReaders: readers, management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" },
+        targetReaders: readers, management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" },
       }, { "if-match": created.headers.get("etag")! });
       const submission = await request(owner, `${knowledge()}/drafts/${id}/submit`, 201, "POST", undefined,
         { "if-match": saved.headers.get("etag")!, "idempotency-key": randomUUID() });
@@ -190,7 +190,7 @@ export function registerHomeHttpVerification(context: () => Context) {
         sourcePrivateVersionId: string(record(note.body.currentVersion), "id") }, { "idempotency-key": randomUUID() });
       const draftId = string(copied.body, "id");
       const saved = await request(owner, `${knowledge()}/drafts/${draftId}`, 200, "PATCH", {
-        targetReaders: { mode: "ORGANIZATION" }, management: { type: "Guide", version: "1.0", effectiveDate: null, expirationDate: null, changeNote: "" },
+        targetReaders: { mode: "ORGANIZATION" }, management: { type: "Guide", version: "1.0", expirationDate: null, changeNote: "" },
       }, { "if-match": copied.headers.get("etag")! });
       const submission = await request(owner, `${knowledge()}/drafts/${draftId}/submit`, 201, "POST", undefined,
         { "if-match": saved.headers.get("etag")!, "idempotency-key": randomUUID() });

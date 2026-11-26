@@ -9,6 +9,7 @@ export function WorkspaceSelectPage({
   onContinue,
   onBack,
   onCreateOrganization,
+  onOpenSystemFeedback,
   testMode = false,
 }: {
   organizationName: string;
@@ -17,6 +18,7 @@ export function WorkspaceSelectPage({
   onContinue: (organizationId?: string) => void;
   onBack: () => void;
   onCreateOrganization?: (name: string, departmentName?: string) => Promise<void>;
+  onOpenSystemFeedback?: () => void;
 }) {
   const [organizationInput, setOrganizationInput] = useState("");
   const [creating, setCreating] = useState(false);
@@ -238,6 +240,8 @@ export function WorkspaceSelectPage({
               )}
             </>
           )}
+          {onOpenSystemFeedback && <button type="button" className="auth-google-button workspace-system-feedback"
+            onClick={onOpenSystemFeedback}>Private AI feedback</button>}
         </div>
       </section>
     </AuthLayout>

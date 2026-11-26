@@ -1,12 +1,13 @@
 import type { Platform, PrivateCollection, PrivateNote } from "../shared/types";
 import { ApiError } from "../shared/api-client";
 import * as api from "../shared/private-workspace-api";
-import type { PrivateCollectionRecord, PrivateNoteRecord, PrivateNoteSummary, PrivateTrashEntry } from "../shared/private-workspace-api";
-import { itemSubtree, UNTITLED_COLLECTION, UNTITLED_NOTE, type TreeItemRef } from "./privateNotesModel";
+import type { PrivateArchiveList, PrivateCollectionRecord, PrivateNoteRecord, PrivateNoteSummary, PrivatePdfUpload,
+  PrivateTrashEntry } from "../shared/private-workspace-api";
+import { itemSubtree, placeNote, UNTITLED_COLLECTION, UNTITLED_NOTE, type TreeItemRef } from "./privateNotesModel";
 
 /** A loaded note plus the content version its next edit must be based on. */
 export type LoadedNote = PrivateNote & { version: number };
-export type NotePlacement = { id: string; collectionId: string | null; favoritedAt: string | null };
+export type NotePlacement = { id: string; collectionId: string | null; favoritedAt: string | null; position: number | null };
 
 /**
  * Every Private Notes operation, served either by the Core API or by the in-memory demo.
@@ -17,11 +18,22 @@ export interface PrivateNotesBackend {
   load(): Promise<{ notes: LoadedNote[]; collections: PrivateCollection[]; trash: PrivateTrashEntry[] }>;
   loadTrash(): Promise<PrivateTrashEntry[]>;
   createNote(input: { title: string; body: string; collectionId: string | null }): Promise<LoadedNote>;
-  updateNote(id: string, version: number, input: { title: string; body: string }): Promise<LoadedNote>;
+  /** A PDF item takes a title only (decision 0034). */
+  updateNote(id: string, version: number, input: { title: string; body?: string }): Promise<LoadedNote>;
+  /** Decision 0034: keeps an original PDF in Private. */
+  createPdf(input: PrivatePdfUpload & { collectionId: string | null }): Promise<LoadedNote>;
+  replacePdf(id: string, version: number, input: { pdfBase64: string; text: string }): Promise<LoadedNote>;
+  /** The PDF item's file as base64; read only when the item is opened. */
+  loadPdf(id: string): Promise<string>;
   createCollection(title: string, parentId: string | null): Promise<PrivateCollection>;
   updateCollection(id: string, input: { title?: string; parentId?: string | null }): Promise<PrivateCollection>;
-  moveNote(id: string, collectionId: string | null): Promise<NotePlacement>;
+  /** Moves a note to `index` (0-based) of the destination's order; null appends it last (spec F03-ARR). */
+  moveNote(id: string, collectionId: string | null, index: number | null): Promise<NotePlacement>;
   favoriteNote(id: string, favorite: boolean): Promise<NotePlacement>;
+  archiveNote(id: string): Promise<NotePlacement>;
+  /** Returns the note to its collection (or the root) with its current content. */
+  unarchiveNote(id: string): Promise<LoadedNote>;
+  loadArchive(): Promise<PrivateArchiveList>;
   favoriteCollection(id: string, favorite: boolean): Promise<PrivateCollection>;
   duplicateNote(id: string): Promise<LoadedNote>;
   duplicateCollection(id: string): Promise<{ collection: PrivateCollection; collections: PrivateCollection[]; notes: LoadedNote[] }>;
@@ -40,11 +52,14 @@ function toNote(record: PrivateNoteRecord): LoadedNote {
     updatedLabel: `Saved ${new Date(record.updatedAt).toLocaleString()}`,
     sourceVersionId: record.currentVersion.id, version: record.currentVersion.version,
     collectionId: record.collectionId ?? null, favoritedAt: record.favoritedAt ?? null,
+    position: record.position ?? null, createdAt: record.createdAt,
+    ...(record.kind === "pdf" ? { kind: "pdf" as const, textAvailable: record.textAvailable ?? false } : {}),
   };
 }
 
 const toPlacement = (summary: PrivateNoteSummary): NotePlacement => ({
   id: summary.id, collectionId: summary.collectionId ?? null, favoritedAt: summary.favoritedAt ?? null,
+  position: summary.position ?? null,
 });
 
 export function createServerBackend(platform: Platform, organizationId: string): PrivateNotesBackend {
@@ -77,9 +92,18 @@ export function createServerBackend(platform: Platform, organizationId: string):
     loadTrash: () => api.listPrivateTrash(platform, organizationId),
     async createNote(input) { return toNote(await api.createPrivateNote(platform, organizationId, input)); },
     async updateNote(id, version, input) { return toNote(await api.updatePrivateNote(platform, organizationId, id, version, input)); },
+    async createPdf(input) { return toNote(await api.createPrivatePdf(platform, organizationId, input)); },
+    async replacePdf(id, version, input) { return toNote(await api.replacePrivatePdf(platform, organizationId, id, version, input)); },
+    loadPdf: (id) => api.loadPrivatePdf(platform, organizationId, id),
     async createCollection(title, parentId) { return toCollection(await api.createPrivateCollection(platform, organizationId, { title, parentId })); },
     async updateCollection(id, input) { return toCollection(await api.updatePrivateCollection(platform, organizationId, id, input)); },
-    async moveNote(id, collectionId) { return toPlacement(await api.movePrivateNote(platform, organizationId, id, collectionId)); },
+    async moveNote(id, collectionId, index) { return toPlacement(await api.movePrivateNote(platform, organizationId, id, collectionId, index)); },
+    async archiveNote(id) { return toPlacement(await api.setPrivateNoteArchived(platform, organizationId, id, true)); },
+    async unarchiveNote(id) {
+      await api.setPrivateNoteArchived(platform, organizationId, id, false);
+      return toNote(await api.loadPrivateNote(platform, organizationId, id));
+    },
+    loadArchive: () => api.listPrivateArchive(platform, organizationId),
     async favoriteNote(id, favorite) { return toPlacement(await api.setPrivateNoteFavorite(platform, organizationId, id, favorite)); },
     async favoriteCollection(id, favorite) { return toCollection(await api.setPrivateCollectionFavorite(platform, organizationId, id, favorite)); },
     async duplicateNote(id) { return toNote(await api.duplicatePrivateNote(platform, organizationId, id)); },
@@ -100,24 +124,30 @@ export function createServerBackend(platform: Platform, organizationId: string):
 }
 
 type DemoBatch = { entry: PrivateTrashEntry; notes: LoadedNote[]; collections: PrivateCollection[] };
+type DemoArchived = { note: LoadedNote; archivedAt: string };
 const TRASH_RETENTION_MS = 30 * 86_400_000;
 
 /**
- * In-memory stand-in used by the sign-in Demo and `?preview=1`. Nothing leaves this
+ * In-memory stand-in used before the controller connects to the server, and by tests. Nothing leaves this
  * browser tab or is written to storage; refreshing or exiting clears it (DESIGN.md private-note contract).
  */
 export function createDemoBackend(seed: { notes: PrivateNote[]; collections: PrivateCollection[] }, now: () => Date = () => new Date()): PrivateNotesBackend {
   let notes: LoadedNote[] = seed.notes.map((note) => ({ ...note, version: 1, collectionId: note.collectionId ?? null, favoritedAt: note.favoritedAt ?? null }));
   let collections: PrivateCollection[] = seed.collections.map((collection) => ({ ...collection }));
   const batches = new Map<string, DemoBatch>();
+  /** Demo PDF items keep their file in this tab only. */
+  const pdfFiles = new Map<string, string>();
+  const archived = new Map<string, DemoArchived>();
   const newId = () => `preview-${crypto.randomUUID()}`;
   const stamp = () => now().toISOString();
   const missing = () => Promise.reject(new ApiError(404, "This item is no longer available.", "NOT_FOUND"));
   const findNote = (id: string) => notes.find((note) => note.id === id);
   const findCollection = (id: string) => collections.find((collection) => collection.id === id);
-  const placement = (note: LoadedNote): NotePlacement => ({ id: note.id, collectionId: note.collectionId ?? null, favoritedAt: note.favoritedAt ?? null });
+  const placement = (note: LoadedNote): NotePlacement => ({ id: note.id, collectionId: note.collectionId ?? null,
+    favoritedAt: note.favoritedAt ?? null, position: note.position ?? null });
   const copyNote = (note: LoadedNote, collectionId: string | null, title: string): LoadedNote =>
-    ({ ...note, id: newId(), title, collectionId, favoritedAt: null, version: 1, sourceVersionId: undefined, updatedLabel: "Saved in this preview" });
+    ({ ...note, id: newId(), title, collectionId, favoritedAt: null, version: 1, sourceVersionId: undefined, updatedLabel: "Saved in this preview",
+      position: null, createdAt: stamp() });
 
   return {
     kind: "demo",
@@ -126,7 +156,7 @@ export function createDemoBackend(seed: { notes: PrivateNote[]; collections: Pri
     async createNote(input) {
       if (input.collectionId && !findCollection(input.collectionId)) return missing();
       const note: LoadedNote = { id: newId(), title: input.title.trim() || UNTITLED_NOTE, body: input.body, updatedLabel: "Saved in this preview",
-        version: 1, collectionId: input.collectionId, favoritedAt: null };
+        version: 1, collectionId: input.collectionId, favoritedAt: null, position: null, createdAt: stamp() };
       notes = [note, ...notes];
       return { ...note };
     },
@@ -134,9 +164,32 @@ export function createDemoBackend(seed: { notes: PrivateNote[]; collections: Pri
       const note = findNote(id);
       if (!note) return missing();
       if (note.version !== version) return Promise.reject(new ApiError(409, "This note has changed.", "VERSION_CONFLICT"));
-      const updated = { ...note, title: input.title.trim() || UNTITLED_NOTE, body: input.body, version: note.version + 1, updatedLabel: "Saved in this preview" };
+      if (note.kind === "pdf" && input.body !== undefined) return Promise.reject(new ApiError(409, "A PDF can't be edited as text.", "PDF_ITEM_NOT_EDITABLE"));
+      const updated = { ...note, title: input.title.trim() || UNTITLED_NOTE, body: input.body ?? note.body, version: note.version + 1, updatedLabel: "Saved in this preview" };
       notes = notes.map((entry) => entry.id === id ? updated : entry);
       return { ...updated };
+    },
+    async createPdf(input) {
+      if (input.collectionId && !findCollection(input.collectionId)) return missing();
+      const note: LoadedNote = { id: newId(), title: input.title.trim() || "Untitled PDF", body: "", updatedLabel: "Saved in this preview",
+        version: 1, collectionId: input.collectionId, favoritedAt: null, position: null, createdAt: stamp(),
+        kind: "pdf", textAvailable: Boolean(input.text.trim()) };
+      pdfFiles.set(note.id, input.pdfBase64);
+      notes = [note, ...notes];
+      return { ...note };
+    },
+    async replacePdf(id, version, input) {
+      const note = findNote(id);
+      if (!note || note.kind !== "pdf") return missing();
+      if (note.version !== version) return Promise.reject(new ApiError(409, "This file has changed.", "VERSION_CONFLICT"));
+      const updated: LoadedNote = { ...note, version: note.version + 1, textAvailable: Boolean(input.text.trim()), updatedLabel: "Saved in this preview" };
+      pdfFiles.set(id, input.pdfBase64);
+      notes = notes.map((entry) => entry.id === id ? updated : entry);
+      return { ...updated };
+    },
+    async loadPdf(id) {
+      const file = pdfFiles.get(id);
+      return file ?? missing();
     },
     async createCollection(title, parentId) {
       if (parentId && !findCollection(parentId)) return missing();
@@ -159,11 +212,38 @@ export function createDemoBackend(seed: { notes: PrivateNote[]; collections: Pri
       collections = collections.map((entry) => entry.id === id ? updated : entry);
       return { ...updated };
     },
-    async moveNote(id, collectionId) {
+    async moveNote(id, collectionId, index) {
       const note = findNote(id);
       if (!note || (collectionId && !findCollection(collectionId))) return missing();
-      note.collectionId = collectionId;
+      const changed = new Map(placeNote(collections, notes, id, collectionId, index).map((entry) => [entry.id, entry]));
+      notes = notes.map((entry) => changed.has(entry.id) ? { ...entry, ...changed.get(entry.id) } : entry);
+      return placement(findNote(id)!);
+    },
+    async archiveNote(id) {
+      const note = findNote(id);
+      if (!note) return missing();
+      archived.set(id, { note, archivedAt: stamp() });
+      notes = notes.filter((entry) => entry.id !== id);
       return placement(note);
+    },
+    async unarchiveNote(id) {
+      const entry = archived.get(id);
+      if (!entry) return missing();
+      archived.delete(id);
+      const collectionId = entry.note.collectionId && findCollection(entry.note.collectionId) ? entry.note.collectionId : null;
+      const note: LoadedNote = { ...entry.note, collectionId, position: null };
+      notes = [note, ...notes];
+      return { ...note };
+    },
+    async loadArchive() {
+      return {
+        hasMore: false,
+        items: [...archived.values()].reverse().map(({ note, archivedAt }) => {
+          const collection = note.collectionId ? findCollection(note.collectionId) : undefined;
+          return { id: note.id, title: note.title || UNTITLED_NOTE, collectionId: collection?.id ?? null, collectionTitle: collection?.title ?? null,
+            archivedAt, createdAt: note.createdAt ?? archivedAt, updatedAt: note.createdAt ?? archivedAt };
+        }),
+      };
     },
     async favoriteNote(id, favorite) {
       const note = findNote(id);
@@ -182,6 +262,8 @@ export function createDemoBackend(seed: { notes: PrivateNote[]; collections: Pri
       const note = findNote(id);
       if (!note) return missing();
       const copy = copyNote(note, note.collectionId ?? null, `${note.title} (copy)`);
+      const file = pdfFiles.get(id);
+      if (file) pdfFiles.set(copy.id, file);
       notes = [copy, ...notes];
       return { ...copy };
     },
@@ -202,6 +284,12 @@ export function createDemoBackend(seed: { notes: PrivateNote[]; collections: Pri
       return { collection: copiedCollections.find((collection) => collection.id === ids.get(id))!, collections: copiedCollections, notes: copiedNotes };
     },
     async trash(item) {
+      // An archived note goes to trash like any note; restoring it brings it back to the tree.
+      const fromArchive = item.kind === "note" ? archived.get(item.id) : undefined;
+      if (fromArchive) {
+        archived.delete(item.id);
+        notes = [fromArchive.note, ...notes];
+      }
       const source = item.kind === "note" ? findNote(item.id) : findCollection(item.id);
       if (!source) return missing();
       const subtree = itemSubtree(collections, notes, item);

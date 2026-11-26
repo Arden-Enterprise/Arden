@@ -20,7 +20,7 @@ export class ReaderSourcePreparation {
     const actor = await this.repository.getTargetReaderActor(user, organization);
     if (!actor) throw new ReaderSourceError("NOT_FOUND");
     const reader = await this.repository.getPublishedKnowledge(user, organization, publication);
-    if (!reader || reader.id !== publication || !canRead(actor, { organizationId: organization, readers: reader.targetReaders }))
+    if (!reader || reader.id !== publication || reader.expired || !canRead(actor, { organizationId: organization, readers: reader.targetReaders }))
       throw new ReaderSourceError("NOT_FOUND");
     const record = await this.sources.resolve(user, organization, publication);
     if (!record) throw new ReaderSourceError("SOURCE_UNAVAILABLE");

@@ -10,7 +10,7 @@ import { useReaderAccess } from "./useReaderAccess";
 
 const citationHighlightName = "arden-citation";
 
-export type ReaderDocumentStatus = "EFFECTIVE" | "EXPIRING" | "UPCOMING" | "EXPIRED";
+export type ReaderDocumentStatus = "EFFECTIVE" | "EXPIRING" | "EXPIRED";
 
 export type ReaderDocumentVersion = {
   id: string;
@@ -18,8 +18,6 @@ export type ReaderDocumentVersion = {
   status: ReaderDocumentStatus | "PUBLISHED";
   /** Whole days until the expiration date, for EXPIRING. */
   expiresInDays?: number;
-  /** Retained for sample history; the reader no longer shows effective dates. */
-  effectiveDate?: string;
 };
 
 export type ReaderDocumentMetadata = {
@@ -48,7 +46,6 @@ function writeInformationCollapsed(collapsed: boolean): void {
 }
 
 function statusLabel(version: ReaderDocumentVersion): string {
-  if (version.status === "UPCOMING") return "Upcoming";
   if (version.status === "EXPIRED") return "Expired";
   if (version.status === "EXPIRING") {
     const days = version.expiresInDays ?? 0;
@@ -198,7 +195,11 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
           <div><dt>Status</dt><dd><span className={`island-chip knowledge-reader-status is-${activeVersion.status === "PUBLISHED" ? "effective" : activeVersion.status.toLowerCase()}`}>
             {statusLabel(activeVersion)}</span></dd></div>
           {metadata.sensitiveLabel && <div><dt>Classification</dt><dd><span className="island-chip tone-warning">{metadata.sensitiveLabel}</span></dd></div>}
-          {metadata.expirationDate && <div><dt>Valid until</dt><dd>{dateLabel(metadata.expirationDate)}</dd></div>}
+          {metadata.expirationDate && <div><dt>Valid until</dt>{activeVersion.status === "EXPIRING"
+            // Decision 0032: amber with the days left at 30 days or less.
+            ? <dd className="knowledge-reader-expiring">{dateLabel(metadata.expirationDate)}<small>{activeVersion.expiresInDays === 0
+              ? "Expires today" : `Expires in ${activeVersion.expiresInDays} ${activeVersion.expiresInDays === 1 ? "day" : "days"}`}</small></dd>
+            : <dd>{dateLabel(metadata.expirationDate)}</dd>}</div>}
           {metadata.readers && <div><dt>Readers</dt><dd>{metadata.readers}</dd></div>}
           <div><dt>Owner department</dt><dd>{metadata.ownerDepartment}</dd></div>
           {metadata.publishedDate && <div><dt>Published</dt><dd>{dateLabel(metadata.publishedDate)}</dd></div>}

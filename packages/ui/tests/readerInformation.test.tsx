@@ -29,7 +29,11 @@ describe("reader document information (15 Nov 2026 layout)", () => {
   it("shows the optional expiration date and the days left when it is close", () => {
     show({ ...base, expirationDate: "2026-11-27", versions: [{ id: "v1", label: "1.0", status: "EXPIRING", expiresInDays: 12 }] });
     expect(screen.getByText("Valid until")).toBeTruthy();
-    expect(screen.getByText("Expires in 12 days")).toBeTruthy();
+    // Decision 0032: the status chip and the amber Valid until both say how many days are left.
+    expect(screen.getAllByText("Expires in 12 days")).toHaveLength(2);
+    const validUntil = screen.getByText("Valid until").nextElementSibling as HTMLElement;
+    expect(validUntil.className).toContain("knowledge-reader-expiring");
+    expect(validUntil.textContent).toContain("Expires in 12 days");
   });
 
   it("says when an older publication has no recorded version instead of inventing one", () => {

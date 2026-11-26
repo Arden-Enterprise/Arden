@@ -110,6 +110,7 @@ describe("System Console", () => {
   });
 
   it("keeps the organization route when membership exists even if a stale session claims Console access", async () => {
+    window.history.replaceState(null, "", "/workspaces");
     api.restoreSession.mockResolvedValue({
       actor: { id: "33333333-3333-4333-8333-333333333333", email: "member@example.test", emailVerified: true },
       account: { passwordSetupRequired: false },

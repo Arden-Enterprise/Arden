@@ -17,8 +17,11 @@ export type NotePreviewAction =
   | { type: "reset"; notes: PrivateNote[] }
   /** Replaces notes by id (new ones go first) without touching any draft. */
   | { type: "upsert"; notes: PrivateNote[] }
-  /** Replaces a saved note (a pending id may become the server id) and clears only its draft. */
-  | { type: "saved"; previousId: string; note: PrivateNote }
+  /**
+   * Replaces a saved note (a pending id may become the server id) and clears its draft. With `sent`, a draft
+   * that changed while the save was in flight is kept (under the new id) so typing during an autosave is not lost.
+   */
+  | { type: "saved"; previousId: string; note: PrivateNote; sent?: NoteDraft }
   /** Drops notes and their drafts, for example after moving them to trash. */
   | { type: "remove"; ids: string[] }
   /** Reloaded notes; notes with unsaved drafts and never-saved notes keep their local state. */
@@ -49,8 +52,11 @@ export function notePreviewReducer(state: NotePreviewState, action: NotePreviewA
   }
   if (action.type === "saved") {
     const drafts = { ...state.drafts };
+    const latest = drafts[action.previousId];
+    const newer = action.sent && latest && (latest.title !== action.sent.title || latest.body !== action.sent.body) ? latest : null;
     delete drafts[action.previousId];
     delete drafts[action.note.id];
+    if (newer) drafts[action.note.id] = newer;
     const notes = state.notes.some((note) => note.id === action.previousId)
       ? state.notes.filter((note) => note.id !== action.note.id || action.note.id === action.previousId)
         .map((note) => note.id === action.previousId ? action.note : note)
@@ -72,7 +78,7 @@ export function notePreviewReducer(state: NotePreviewState, action: NotePreviewA
     // Unsaved work is never dropped by a reload, even when the server no longer lists the note.
     const notes = [...kept.filter((note) => !loadedIds.has(note.id)),
       ...action.notes.map((note) => keptIds.has(note.id) ? { ...kept.find((entry) => entry.id === note.id)!,
-        collectionId: note.collectionId, favoritedAt: note.favoritedAt } : note)];
+        collectionId: note.collectionId, favoritedAt: note.favoritedAt, position: note.position } : note)];
     const present = new Set(notes.map((note) => note.id));
     const drafts = Object.fromEntries(Object.entries(state.drafts).filter(([id]) => present.has(id)));
     return { ...state, notes, drafts, selectedId: present.has(state.selectedId) ? state.selectedId : "" };

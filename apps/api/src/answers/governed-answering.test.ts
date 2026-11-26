@@ -18,7 +18,7 @@ function fixture() {
   const source: AuthorizedAiSource = { ...evidence, publishedVersionId: randomUUID(), draftId: randomUUID(),
     title: "Access guide", versionNo: 27, classification: "INTERNAL", targetScopeType: "ORGANIZATION",
     targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] },
-    management: { type: "Guide", version: "2.1", effectiveDate: "2026-01-01", expirationDate: null, changeNote: "" },
+    management: { type: "Guide", version: "2.1", expirationDate: null, changeNote: "" },
     chunks: [{ ...evidence }] };
   const store = new MemoryConversationStore();
   let permitted = true;
@@ -39,7 +39,7 @@ function fixture() {
     citations: [{ chunkId: evidence.chunkId, quote: "All team members must use MFA." }],
     usedEvidence: value.evidence.map(chunk => chunk.chunkId) }));
   const ai: AskArdenClient = { retrieve, generate };
-  const input = { conversationId: randomUUID(), requestId: randomUUID(), expectedRevision: 0, query: "What is required?", versionScope: "CURRENT" as const };
+  const input = { conversationId: randomUUID(), requestId: randomUUID(), expectedRevision: 0, query: "What is required?" };
   return { engine: new GovernedAnswering(repository, ai), repository, store, ai, input, user, org, evidence, source,
     retrieve, generate, revoke: () => { permitted = false; } };
 }

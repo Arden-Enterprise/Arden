@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/shared/api-client";
 import { AskArdenPage } from "../src/ask-arden/AskArdenPage";
@@ -9,7 +9,7 @@ import { installTestDialogs } from "./dialogTestSupport";
 
 let restoreDialogs: () => void;
 beforeEach(() => { restoreDialogs = installTestDialogs(); });
-afterEach(() => { cleanup(); restoreDialogs(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); restoreDialogs(); vi.restoreAllMocks(); Reflect.deleteProperty(navigator, "clipboard"); });
 
 const policy = { documentId: "doc-1", versionId: "ver-1", title: "Synthetic Lifecycle Policy", version: "1.0", scope: "Company-wide",
   classification: "INTERNAL" as const };
@@ -22,7 +22,7 @@ const send = (text: string) => {
 describe("Ask Arden sources panel", () => {
   it("opens the cited passage beside the chat and keeps the reader path behind Open in document", async () => {
     vi.spyOn(api, "askArden").mockResolvedValue({ status: "ANSWERED", conversationId: "c1", revision: 1, citations: [access],
-      answer: "**Request access** five working days before the start date." });
+      answer: "**Request access** five working days before the start date [1]." });
     const onOpenCitation = vi.fn();
     render(createElement(AskArdenPage, { platform: "web", organizationId: "org", onOpenCitation }));
     send("When do I request access?");
@@ -30,7 +30,7 @@ describe("Ask Arden sources panel", () => {
     expect(strong.tagName).toBe("STRONG");
     expect(document.body.textContent).not.toContain("**");
 
-    const chip = screen.getByRole("button", { name: /^Source:/ });
+    const chip = screen.getByRole("button", { name: "Source 1: Synthetic Lifecycle Policy" });
     chip.focus(); fireEvent.click(chip);
     expect(onOpenCitation).not.toHaveBeenCalled();
     const panel = screen.getByRole("complementary", { name: "Sources" });
@@ -45,6 +45,23 @@ describe("Ask Arden sources panel", () => {
 
     fireEvent.keyDown(passage, { key: "Escape" });
     expect(screen.queryByRole("complementary", { name: "Sources" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(chip));
+  });
+
+  it("opens all sources from the answer actions even when no inline markers are present", async () => {
+    const handbook = { ...access, versionId: "ver-2", title: "Synthetic Staff Handbook", excerpt: "The employee keeps a copy." };
+    vi.spyOn(api, "askArden").mockResolvedValue({ status: "ANSWERED", conversationId: "c1", revision: 1,
+      citations: [access, handbook], answer: "Request access before onboarding." });
+    render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
+    send("When?");
+    const trigger = await screen.findByRole("button", { name: "View sources" });
+    fireEvent.click(trigger);
+    const panel = screen.getByRole("complementary", { name: "Sources" });
+    expect(within(panel).getByText("2 documents")).toBeTruthy();
+    expect(within(panel).getByText(handbook.excerpt)).toBeTruthy();
+    expect(document.activeElement).toBe(within(panel).getByRole("heading", { name: "Sources" }));
+    fireEvent.click(within(panel).getByRole("button", { name: "Close sources" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 
   it("clears the panel when a new chat starts", async () => {
@@ -52,11 +69,45 @@ describe("Ask Arden sources panel", () => {
       answer: "Request access five working days before the start date." });
     render(createElement(AskArdenPage, { platform: "web", organizationId: "org", onOpenCitation: vi.fn() }));
     send("When?");
-    fireEvent.click(await screen.findByRole("button", { name: /^Source:/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "View sources" }));
     expect(screen.getByRole("complementary", { name: "Sources" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     fireEvent.click(within(await screen.findByRole("alertdialog", { name: "Start a new chat?" })).getByRole("button", { name: "New chat" }));
     expect(screen.queryByRole("complementary", { name: "Sources" })).toBeNull();
+  });
+});
+
+describe("Ask Arden answer actions", () => {
+  it("copies the readable answer and saves one adjustable rating per Company turn", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    vi.spyOn(api, "askArden").mockResolvedValue({ status: "ANSWERED", conversationId: "c1", turnId: "t1", revision: 1,
+      citations: [access], answer: "**Request access** five days early [1]." });
+    const rate = vi.spyOn(api, "rateAiAnswer")
+      .mockResolvedValueOnce({ feedback: "GOOD" })
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce({ feedback: "BAD" })
+      .mockResolvedValueOnce({ feedback: null });
+    render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
+    send("How early?");
+    fireEvent.click(await screen.findByRole("button", { name: "Copy answer" }));
+    expect(await screen.findByText("Answer copied.")).toBeTruthy();
+    expect(writeText.mock.calls).toEqual([["Request access five days early."]]);
+    const good = screen.getByRole("button", { name: "Good response" });
+    const bad = screen.getByRole("button", { name: "Bad response" });
+    fireEvent.click(good);
+    await waitFor(() => expect(good.getAttribute("aria-pressed")).toBe("true"));
+    expect(rate).toHaveBeenCalledWith("web", "org", "c1", "t1", "GOOD");
+    fireEvent.click(bad);
+    expect(await screen.findByText("Could not save feedback. Try again.")).toBeTruthy();
+    expect(good.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(bad);
+    await waitFor(() => expect(bad.getAttribute("aria-pressed")).toBe("true"));
+    expect(good.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(bad);
+    expect(await screen.findByText("Feedback removed.")).toBeTruthy();
+    expect(bad.getAttribute("aria-pressed")).toBe("false");
+    expect(rate.mock.lastCall).toEqual(["web", "org", "c1", "t1", null]);
   });
 });
 

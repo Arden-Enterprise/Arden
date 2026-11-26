@@ -19,6 +19,8 @@ import { NotificationOutboxWorker, notificationWorkerPollMilliseconds } from "./
 import { notificationRealtimeConfiguration } from "./notifications/realtime.js";
 import { PrivateTrashRetention, startPrivateTrashRetentionLoop } from "./private-notes/trash-retention.js";
 
+const publicationExpiryReminderIntervalMs = 60 * 60 * 1000;
+
 const databaseUrl = process.env.DATABASE_URL ??
   (process.env.NODE_ENV === "production"
     ? undefined
@@ -84,6 +86,15 @@ if (Boolean(aiUrl) !== Boolean(aiServiceToken)) {
   throw new Error("ARDEN_AI_URL and ARDEN_AI_SERVICE_TOKEN must be configured together");
 }
 const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServiceToken) : null;
+function optedInOrganizations(variable: string): ReadonlySet<string> {
+  const ids = new Set((process.env[variable] ?? "").split(",").map(id => id.trim().toLowerCase()).filter(Boolean));
+  if ([...ids].some(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))) {
+    throw new Error(`${variable} requires comma-separated organization UUIDs`);
+  }
+  return ids;
+}
+const privateNoteAiOrganizations = optedInOrganizations("ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS");
+const reviewerAiOrganizations = optedInOrganizations("ARDEN_REVIEWER_AI_ORGANIZATIONS");
 const indexPool = askArden && indexDatabaseUrl
   ? new Pool({ connectionString: indexDatabaseUrl, max: 2, connectionTimeoutMillis: 10_000 }) : null;
 const contentStorage = new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot);
@@ -169,6 +180,8 @@ const app = buildApp({
   storage: contentStorage,
   invitationMailer,
   askArden,
+  privateNoteAiOrganizations,
+  reviewerAiOrganizations,
   readerAi: askArden,
   notificationRealtime,
   invitationDeliveryMode: smtpConfiguration ? "email" : "local-test-no-email",
@@ -232,7 +245,22 @@ const privateTrashRetention = new PrivateTrashRetention(repository.privateTrashR
 let privateTrashRetentionLoop: { stop(): void } | undefined;
 let indexWorkerTimer: NodeJS.Timeout | undefined;
 let notificationWorkerTimer: NodeJS.Timeout | undefined;
+let expiryReminderTimer: NodeJS.Timeout | undefined;
 let stopping = false;
+
+/** Decision 0032 C: hourly, idempotent 30/7-day expiry reminders written into the in-app inbox. */
+function scheduleExpiryReminders(delayMs: number): void {
+  if (stopping) return;
+  expiryReminderTimer = setTimeout(() => {
+    void repository.enqueuePublicationExpiryReminders()
+      .then((written) => { if (written) app.log.info({ written }, "Publication expiry reminders written"); })
+      .catch((error: unknown) => {
+        app.log.error({ errorType: error instanceof Error ? error.name : "UnknownError" }, "Publication expiry reminders failed");
+      })
+      .finally(() => scheduleExpiryReminders(publicationExpiryReminderIntervalMs));
+  }, delayMs);
+  expiryReminderTimer.unref();
+}
 
 function scheduleIndexWorker(delayMs: number): void {
   if (!indexWorker || stopping) return;
@@ -264,6 +292,7 @@ async function shutdown() {
   stopping = true;
   if (indexWorkerTimer) clearTimeout(indexWorkerTimer);
   if (notificationWorkerTimer) clearTimeout(notificationWorkerTimer);
+  if (expiryReminderTimer) clearTimeout(expiryReminderTimer);
   privateTrashRetentionLoop?.stop();
   await app.close();
   invitationMailer?.close();
@@ -294,6 +323,7 @@ try {
 }
 scheduleIndexWorker(250);
 scheduleNotificationWorker(250);
+scheduleExpiryReminders(30_000);
 privateTrashRetentionLoop = startPrivateTrashRetentionLoop(privateTrashRetention, {
   error: (fields, message) => app.log.error(fields, message),
 });

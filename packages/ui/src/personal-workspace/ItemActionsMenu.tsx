@@ -14,6 +14,12 @@ export type ItemActions = {
   onRename: () => void;
   onMove: (collectionId: string | null) => void;
   onTrash: () => void;
+  /** Notes only (spec F03-ARR): keyboard alternative to dragging inside the same place. */
+  order?: { canMoveUp: boolean; canMoveDown: boolean; onMoveUp: () => void; onMoveDown: () => void };
+  /** Notes only (spec F03-PDF revision 2): add a PDF's text to this note. */
+  onImportPdf?: () => void;
+  /** Notes only (spec F03-ARR): `available` is false for never-saved notes and unsaved edits. */
+  archive?: { available: boolean; onArchive: () => void };
 };
 
 const MENU_WIDTH = 240;
@@ -153,10 +159,26 @@ export function ItemActionsMenu({ actions, label, placement = "side", triggerCla
         <button type="button" role="menuitem" onClick={() => choose(actions.onRename, false)}>
           <Icon name="edit" size={15} /><span>Rename</span>
         </button>
+        {actions.onImportPdf && <button type="button" role="menuitem" onClick={() => choose(actions.onImportPdf!, false)}>
+          <Icon name="pdf" size={15} /><span>Import PDF</span>
+        </button>}
         <button type="button" role="menuitem" aria-haspopup="menu" onClick={() => setMode("move")}>
           <Icon name="move" size={15} /><span className="pn-menu-grow">Move to</span><Icon name="chevron" size={13} />
         </button>
+        {actions.order && <>
+          <button type="button" role="menuitem" disabled={!actions.order.canMoveUp} onClick={() => choose(actions.order!.onMoveUp)}>
+            <Icon name="arrow-up" size={15} /><span>Move up</span>
+          </button>
+          <button type="button" role="menuitem" disabled={!actions.order.canMoveDown} onClick={() => choose(actions.order!.onMoveDown)}>
+            <Icon name="arrow-down" size={15} /><span>Move down</span>
+          </button>
+        </>}
         <div className="pn-menu-separator" role="separator" />
+        {actions.archive && <button type="button" role="menuitem" disabled={!actions.archive.available}
+          title={actions.archive.available ? undefined : "Save or discard your changes first"}
+          onClick={() => choose(actions.archive!.onArchive, false)}>
+          <Icon name="archive" size={15} /><span>Archive</span>
+        </button>}
         <button type="button" role="menuitem" className="is-danger" onClick={() => choose(actions.onTrash, false)}>
           <Icon name="trash" size={15} /><span>Move to trash</span>
         </button>

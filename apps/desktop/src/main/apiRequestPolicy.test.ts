@@ -8,6 +8,30 @@ const idempotencyKey = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
 const sharedDraftPath = `/api/v1/organizations/${organizationId}/knowledge/drafts`;
 
 describe("desktop API request allowlist", () => {
+  it("permits reviewer AI only with a snapshot identity and a main-owned timeout", () => {
+    const path = `/api/v1/organizations/${organizationId}/knowledge/reviews/${sourcePrivateVersionId}/ai-review`;
+    const input = { snapshotVersionId: sourcePrivateVersionId, snapshotContentHash: "a".repeat(64) };
+    const request = { path, method: "POST" as const, body: JSON.stringify(input) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 85_000);
+    assert.equal(validateDesktopApiRequest({ ...request, path: `${path}?scope=all` }), false);
+    assert.equal(validateDesktopApiRequest({ ...request, timeoutMs: 60_000 }), false);
+    assert.equal(validateDesktopApiRequest({ ...request, body: JSON.stringify({ ...input, content: "draft" }) }), false);
+  });
+  it("allows only a bounded writing action body with a Core-owned deadline", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/writing-actions`;
+    const payload = { requestId: idempotencyKey, action: "IMPROVE", scope: "SELECTION", text: "A sentence." };
+    const request = { path, method: "POST" as const, body: JSON.stringify(payload) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 90_000);
+    for (const body of ["{}", JSON.stringify({ ...payload, text: " " }), JSON.stringify({ ...payload, text: "x".repeat(12_001) }),
+      JSON.stringify({ ...payload, scope: "ALL" }), JSON.stringify({ ...payload, source: "private-note" })]) {
+      assert.equal(validateDesktopApiRequest({ ...request, body }), false);
+    }
+    for (const change of [{ method: "GET" }, { path: `${path}?all=1` }, { timeoutMs: 60_000 }, { idempotencyKey }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+  });
   it("allows only versioned placement reads and mutations", () => {
     const path = `/api/v1/organizations/${organizationId}/knowledge/catalog/placements/${sourcePrivateVersionId}`;
     assert.equal(validateDesktopApiRequest({ path, method: "GET" }), true);
@@ -62,6 +86,20 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${path}/access?all=1`, method: "GET" }), false);
     assert.equal(desktopApiTimeout({ path: "/api/v1/me", method: "GET" }), undefined);
   });
+  it("allows questions for one saved private note revision without a scope override", () => {
+    const path = `/api/v1/organizations/${organizationId}/private-workspace/drafts/${sourcePrivateVersionId}/questions`;
+    const payload = { requestId: idempotencyKey, query: "Summarize this note", expectedVersion: 2 };
+    const request = { path, method: "POST" as const, body: JSON.stringify(payload) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    assert.equal(desktopApiTimeout(request), 240_000);
+    for (const expectedVersion of [undefined, "2", 0, -1, 1.5, 2_147_483_648]) {
+      assert.equal(validateDesktopApiRequest({ ...request, body: JSON.stringify({ ...payload, expectedVersion }) }), false);
+    }
+    for (const change of [{ path: `${path}?scope=all` }, { method: "GET" }, { timeoutMs: 45_000 },
+      { body: JSON.stringify({ ...payload, source: "company" }) }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+  });
   it("allows only exact bodyless private conversation reads", () => {
     const list = `/api/v1/organizations/${organizationId}/ai/conversations`;
     for (const path of [list, `${list}/${sourcePrivateVersionId}`]) {
@@ -73,6 +111,30 @@ describe("desktop API request allowlist", () => {
     }
     assert.equal(validateDesktopApiRequest({ path: `${list}/not-a-uuid`, method: "GET" }), false);
     assert.equal(validateDesktopApiRequest({ path: `${list}/${sourcePrivateVersionId}/turns`, method: "GET" }), false);
+  });
+  it("allows an exact Company turn feedback update", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/conversations/${sourcePrivateVersionId}/turns/${idempotencyKey}/feedback`;
+    for (const feedback of ["GOOD", "BAD", null]) {
+      assert.equal(validateDesktopApiRequest({ path, method: "PUT", body: JSON.stringify({ feedback }) }), true);
+    }
+    const request = { path, method: "PUT", body: '{"feedback":"GOOD"}' };
+    for (const change of [{ method: "POST" }, { path: `${path}?all=1` }, { body: '{"feedback":true}' },
+      { body: '{"feedback":"BAD","answer":"sensitive text"}' }, { ifMatch: '"1"' }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+  });
+  it("limits private feedback and analytics to their exact IPC shapes", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/private-feedback`;
+    const token = `${idempotencyKey}.1795500000000.${"A".repeat(43)}`;
+    const request = { path, method: "PUT", body: JSON.stringify({ token, feedback: "GOOD" }) };
+    assert.equal(validateDesktopApiRequest(request), true);
+    for (const change of [{ path: `${path}?all=1` }, { method: "POST" },
+      { body: JSON.stringify({ token, feedback: "BAD", documentId: sourcePrivateVersionId }) }]) {
+      assert.equal(validateDesktopApiRequest({ ...request, ...change }), false);
+    }
+    const analytics = { path: "/api/v1/system/analytics/private-feedback", method: "GET" };
+    assert.equal(validateDesktopApiRequest(analytics), true);
+    assert.equal(validateDesktopApiRequest({ ...analytics, path: `${analytics.path}?all=1` }), false);
   });
   it("permits only the scoped bodyless submission withdrawal action", () => {
     const path = `/api/v1/organizations/${organizationId}/knowledge/submissions/${sourcePrivateVersionId}/withdraw`;
@@ -177,7 +239,50 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ ...request, path: "https://other.invalid/api/v1/me" }), false);
   });
 
-  it("allows exactly the decision 0029 private-notes organization routes and methods", () => {
+  it("allows exactly the decision 0034 direct-share routes", () => {
+    const organization = `/api/v1/organizations/${organizationId}`;
+    const id = sourcePrivateVersionId;
+    const shares = `${organization}/private-workspace/drafts/${id}/shares`;
+    const allowed = [
+      { path: shares, method: "GET" },
+      { path: shares, method: "POST", body: JSON.stringify({ recipientMembershipIds: [id] }) },
+      { path: `${shares}/${id}/revoke`, method: "POST" },
+      { path: `${shares}/revoke-all`, method: "POST" },
+      { path: `${organization}/shared-with-me`, method: "GET" },
+      { path: `${organization}/shared-with-me/${id}`, method: "GET" },
+      { path: `${organization}/shared-with-me/${id}/pdf`, method: "GET" },
+      { path: `${organization}/direct-sharing`, method: "GET" },
+      { path: `${organization}/direct-sharing`, method: "PUT", body: JSON.stringify({ enabled: true, recipientLimit: 10 }) },
+    ];
+    for (const request of allowed) assert.equal(validateDesktopApiRequest(request), true, `${request.method} ${request.path}`);
+    assert.equal(desktopApiResponseLimit({ path: `${organization}/shared-with-me/${id}/pdf`, method: "GET" }), 7_100_000);
+    const refused = [
+      { path: `${shares}/revoke-all`, method: "POST", body: "{}" },
+      { path: `${organization}/shared-with-me/${id}`, method: "PATCH", body: "{}", ifMatch: '"1"' },
+      { path: `${organization}/shared-with-me?all=1`, method: "GET" },
+      { path: `${organization}/direct-sharing`, method: "POST", body: "{}" },
+      { path: shares, method: "PUT", body: "{}" },
+    ];
+    for (const request of refused) assert.equal(validateDesktopApiRequest(request), false, `${request.method} ${request.path}`);
+  });
+
+  it("allows exactly the decision 0034 private PDF routes and their size limits", () => {
+    const base = `/api/v1/organizations/${organizationId}/private-workspace/drafts`;
+    const id = sourcePrivateVersionId;
+    const upload = JSON.stringify({ title: "Minutes", pdfBase64: "a".repeat(6_900_000), text: "" });
+    assert.equal(validateDesktopApiRequest({ path: `${base}/pdf`, method: "POST", body: upload }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "PUT", body: upload, ifMatch: '"2"' }), true);
+    assert.equal(desktopApiResponseLimit({ path: `${base}/${id}/pdf`, method: "GET" }), 7_100_000);
+    // Replacing needs the version it was based on; no other method, query or oversized body is accepted.
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "PUT", body: upload }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}/pdf`, method: "PATCH", body: upload, ifMatch: '"2"' }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/pdf?x=1`, method: "POST", body: upload }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/pdf`, method: "POST", body: "a".repeat(7_200_000) }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${base}/${id}`, method: "PATCH", body: upload, ifMatch: '"2"' }), false);
+  });
+
+  it("allows exactly the decision 0029 and F03-ARR private-notes organization routes and methods", () => {
     const base = `/api/v1/organizations/${organizationId}/private-workspace`;
     const id = sourcePrivateVersionId;
     const allowed = [
@@ -185,6 +290,9 @@ describe("desktop API request allowlist", () => {
       { path: `${base}/collections`, method: "POST", body: JSON.stringify({ title: "Projects", parentId: null }) },
       { path: `${base}/collections/${id}`, method: "PATCH", body: JSON.stringify({ parentId: id }) },
       { path: `${base}/drafts/${id}/collection`, method: "PUT", body: JSON.stringify({ collectionId: null }) },
+      { path: `${base}/drafts/${id}/collection`, method: "PUT", body: JSON.stringify({ collectionId: id, index: 2 }) },
+      { path: `${base}/drafts/${id}/archive`, method: "PUT", body: JSON.stringify({ archived: true }) },
+      { path: `${base}/archive`, method: "GET" },
       { path: `${base}/drafts/${id}/favorite`, method: "PUT", body: JSON.stringify({ favorite: true }) },
       { path: `${base}/collections/${id}/favorite`, method: "PUT", body: JSON.stringify({ favorite: false }) },
       { path: `${base}/drafts/${id}/duplicate`, method: "POST" },
@@ -215,6 +323,11 @@ describe("desktop API request allowlist", () => {
       { path: `${base}/trash/${id}/restore`, method: "GET" },
       { path: `${base}/trash/not-a-uuid/purge`, method: "POST" },
       { path: `${base}/trash`, method: "POST" },
+      { path: `${base}/drafts/${id}/archive`, method: "PUT" },
+      { path: `${base}/drafts/${id}/archive`, method: "POST", body: "{}" },
+      { path: `${base}/archive`, method: "POST", body: "{}" },
+      { path: `${base}/archive/${id}`, method: "GET" },
+      { path: `${base}/collections/${id}/archive`, method: "PUT", body: JSON.stringify({ archived: true }) },
     ];
     for (const request of denied) assert.equal(validateDesktopApiRequest(request), false, `${request.method} ${request.path}`);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/me", method: "PUT", body: "{}" }), false);

@@ -16,7 +16,7 @@ describe("notification routes", () => {
   afterEach(async () => { await Promise.all(apps.splice(0).map(app => app.close())); vi.restoreAllMocks(); });
 
   function makeApp(input: { reviewResourceIds?: string[]; reviewIds?: string[]; ownedSubmissionIds?: string[];
-    readablePublicationIds?: string[];
+    readablePublicationIds?: string[]; sharedItemIds?: string[];
     list?: NotificationStore["list"]; realtime?: boolean } = {}) {
     const app = Fastify();
     apps.push(app);
@@ -48,16 +48,41 @@ describe("notification routes", () => {
       listReadableCurrentPublicationIds: vi.fn(async (_userId, _organizationId, publishedVersionIds: readonly string[]) =>
         (input.readablePublicationIds ?? [sharedPublicationId]).filter(id => publishedVersionIds.includes(id))),
       requireActiveMembership: vi.fn(async () => ({ organizationId, membershipId: "ffffffff-ffff-4fff-8fff-ffffffffffff", userId })),
+      directShares: { listSharedWithMe: vi.fn(async () => (input.sharedItemIds ?? []).map(id => ({ id } as never))) },
     } as unknown as ArdenDataRepository;
     const secret = "ab".repeat(32);
     registerNotificationRoutes(app, {
       repository, store,
       requestActor: async () => ({ userId, email: "member@example.test", fullName: null, emailVerified: true }),
-      realtime: input.realtime ? { endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
+      realtime: input.realtime ? { endpoint: "https://realtime.example.test/realtime/v1",
         signingKey: new TextEncoder().encode(secret), namespace: "staging-blue" } : null,
     });
     return { app, list, store, repository };
   }
+
+  it("shows renewal notices only while the member is still responsible for the document (0032)", async () => {
+    const documentId = "c2c2c2c2-c2c2-4c2c-8c2c-c2c2c2c2c2c2", goneId = "c3c3c3c3-c3c3-4c3c-8c3c-c3c3c3c3c3c3";
+    const { app, repository } = makeApp({ list: async () => ({ unreadCount: 3, nextCursor: null, items: [
+      { id: "21212121-2121-4212-8212-212121212121", type: "PUBLICATION_EXPIRING", resourceType: "DOCUMENT", resourceId: documentId,
+        publicationTitle: "Travel policy", expiresOn: "2026-12-01", createdAt: "2026-11-24T10:00:00.000Z", readAt: null },
+      { id: "31313131-3131-4313-8313-313131313131", type: "PUBLICATION_RENEWAL_ON_BEHALF", resourceType: "DOCUMENT",
+        resourceId: documentId, publicationTitle: "Travel policy", sharedByName: "Blake Reviewer", requestReason: "Still valid",
+        createdAt: "2026-11-24T09:00:00.000Z", readAt: null },
+      { id: "41414141-4141-4414-8414-414141414141", type: "PUBLICATION_EXPIRING", resourceType: "DOCUMENT", resourceId: goneId,
+        publicationTitle: "Secret plan", expiresOn: "2026-12-02", createdAt: "2026-11-24T08:00:00.000Z", readAt: null },
+    ] }) });
+    (repository as unknown as Record<string, unknown>).listPublicationRenewalState = vi.fn(async () => [{ documentId, isAuthor: true }]);
+    const response = await app.inject(`/api/v1/organizations/${organizationId}/notifications`);
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items).toEqual([
+      expect.objectContaining({ message: "“Travel policy” expires on 2026-12-01. Renew it to keep it visible to readers.",
+        target: { view: "contribution", documentId } }),
+      expect.objectContaining({ message: "Blake Reviewer asked to renew “Travel policy” on your behalf: Still valid",
+        target: { view: "contribution", documentId } }),
+      expect.objectContaining({ message: "This notification's item is no longer available." }),
+    ]);
+    expect(JSON.stringify(response.json())).not.toContain("Secret plan");
+  });
 
   it("returns generic messages and links only items currently visible to the actor", async () => {
     const { app, list, repository } = makeApp();
@@ -154,6 +179,21 @@ describe("notification routes", () => {
     expect(JSON.stringify(hiddenResponse.json())).not.toContain(sharedPublicationId);
     expect(JSON.stringify(hiddenResponse.json())).not.toContain("Ava Patel");
     expect(JSON.stringify(hiddenResponse.json())).not.toContain("Contract review procedure");
+  });
+
+  it("names a direct share only while the item is still shared with the reader (decision 0034)", async () => {
+    const itemId = "14141414-1414-4141-8141-141414141414";
+    const direct = { id: "15151515-1515-4151-8151-151515151515", type: "DOCUMENT_SHARED_DIRECT" as const,
+      resourceType: "PRIVATE_ITEM" as const, resourceId: itemId, publicationTitle: "Onboarding plan", sharedByName: "Ava Patel",
+      createdAt: "2026-11-26T08:00:00.000Z", readAt: null };
+    const list = vi.fn(async () => ({ items: [direct], unreadCount: 1, nextCursor: null }));
+    const shared = await makeApp({ list, sharedItemIds: [itemId] }).app.inject(`/api/v1/organizations/${organizationId}/notifications`);
+    expect(shared.json().items).toEqual([expect.objectContaining({ type: "DOCUMENT_SHARED_DIRECT",
+      message: "Ava Patel shared “Onboarding plan” with you. It has not been reviewed.", target: { view: "shared-item", itemId } })]);
+    const revoked = await makeApp({ list, sharedItemIds: [] }).app.inject(`/api/v1/organizations/${organizationId}/notifications`);
+    expect(revoked.json().items[0]).toEqual(expect.objectContaining({ message: "This notification's item is no longer available." }));
+    expect(revoked.json().items[0]).not.toHaveProperty("target");
+    expect(JSON.stringify(revoked.json())).not.toMatch(/Onboarding plan|Ava Patel/);
   });
 
   it("rejects an invalid page cursor", async () => {

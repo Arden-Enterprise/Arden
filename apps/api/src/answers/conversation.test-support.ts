@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Conversation, ConversationStore, ConversationTurn } from "./conversation-store.js";
+import type { AnswerFeedback, Conversation, ConversationStore, ConversationTurn } from "./conversation-store.js";
 import { GovernedAnswerError } from "./governed-contracts.js";
 
 export const evidenceText = "All team members must use MFA.";
@@ -25,6 +25,14 @@ export class MemoryConversationStore implements ConversationStore {
     }
     this.records.set(id, { owner: user, organization, value: { id, title: title.slice(0, 120),
       revision: 0, updatedAt: new Date().toISOString(), turns: [] } });
+  }
+  async setFeedback(user: string, organization: string, id: string, turnId: string, feedback: AnswerFeedback) {
+    const current = await this.load(user, organization, id);
+    const turn = current?.turns.find(entry => entry.id === turnId);
+    if (!current || !turn) return false;
+    turn.feedback = feedback;
+    this.records.get(id)!.value = current;
+    return true;
   }
   async append(user: string, organization: string, id: string, expectedRevision: number,
     turn: Omit<ConversationTurn, "sequence">) {

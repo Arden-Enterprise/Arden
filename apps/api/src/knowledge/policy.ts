@@ -151,8 +151,8 @@ export function canRespondToSubmission(input: Omit<Parameters<typeof canReviewSn
     || !Number.isInteger(submission.policyVersion) || submission.policyVersion <= 0
     || submission.policyVersion !== input.effectivePolicyVersion) return false;
   if (actor.isOrganizationAdmin === true) return true;
-  return actor.membershipId !== submission.submittedByMembershipId
-    && grant !== null && grant.status === "ACTIVE"
+  // Decision 0033: a reviewer whose current grant matches may decide their own submission like any other.
+  return grant !== null && grant.status === "ACTIVE"
     && grant.membershipId === actor.membershipId && grant.organizationId === submission.organizationId
     && grantMatchesFrozenSubmission(input, grant)
     // Decision 0015: scopes are disjoint for new submissions. Anything other than an explicit LIMITED breadth

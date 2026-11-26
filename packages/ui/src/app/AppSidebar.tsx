@@ -1,22 +1,20 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Icon, type IconName } from "../shared/Icon";
 import type { Platform, WorkspaceView } from "../shared/types";
-import type { OrganizationPreview } from "../organization/previewModel";
 import type { PrivateNotesController } from "../personal-workspace/usePrivateNotes";
 import { PrivateNotesNavSection } from "../personal-workspace/PrivateNotesTree";
 
 type AppSidebarProps = {
   activeView: WorkspaceView;
   platform: Platform;
-  previewRole: "member" | "admin";
-  organization: OrganizationPreview | null;
   organizationLabel?: string;
   authenticated?: boolean;
   showAdmin?: boolean;
+  /** False for members without review authority: the REVIEW section is not shown. */
+  showReviews?: boolean;
   isUnassigned?: boolean;
   memberName?: string;
   memberRole?: string;
-  memberDepartment?: string;
   environmentLabel?: string;
   assignedReviewCount?: number;
   canSwitchWorkspace?: boolean;
@@ -27,11 +25,13 @@ type AppSidebarProps = {
   onNavigate: (view: WorkspaceView) => void;
   onSignOut: () => void;
   onOpenSettings?: () => void;
-  /** Private Notes tree inside the main navigation (ADR 0029); omitted when the private workspace is unavailable. */
+  /** Private tree inside the main navigation (ADR 0029); omitted when the private workspace is unavailable. */
   privateNotes?: { controller: PrivateNotesController; pageVisible: boolean; onOpen: () => void };
-  /** Private Notes trash, reached from the account menu. */
+  /** Private trash, reached from the account menu. */
   trashCount?: number;
   onOpenTrash?: () => void;
+  /** Archived private notes (spec F03-ARR), reached from the account menu. */
+  onOpenArchive?: () => void;
 };
 
 export type NavigationItem = {
@@ -46,7 +46,7 @@ export type NavigationItem = {
 export const workNavigation: NavigationItem[] = [
   { label: "Home", shortLabel: "Home", icon: "home", view: "knowledge" },
   { label: "Ask Arden", shortLabel: "Ask", icon: "chat", view: "ask-arden" },
-  { label: "Private Notes", shortLabel: "Notes", icon: "lock", view: "personal-workspace" },
+  { label: "Private", shortLabel: "Private", icon: "lock", view: "personal-workspace" },
 ];
 
 export const knowledgeNavigation: NavigationItem[] = [
@@ -69,16 +69,16 @@ export function initialsOf(label: string): string {
   return label.split(/[\s.@]+/).filter(Boolean).map((part) => part[0]).slice(0, 2).join("").toUpperCase();
 }
 
-/** Notion-style account menu: identity, Settings, Private Notes Trash and sign-out. */
-function SidebarAccountMenu({ memberName, memberRole, organizationName, authenticated, trashCount, onSignOut, onOpenSettings, onOpenTrash }: {
+/** Notion-style account menu: identity, Settings, Private Archived and Trash, and sign-out. */
+function SidebarAccountMenu({ memberName, memberRole, organizationName, trashCount, onSignOut, onOpenSettings, onOpenTrash, onOpenArchive }: {
   memberName: string;
   memberRole: string;
   organizationName: string;
-  authenticated: boolean;
   trashCount?: number;
   onSignOut: () => void;
   onOpenSettings?: () => void;
   onOpenTrash?: () => void;
+  onOpenArchive?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
@@ -134,11 +134,14 @@ function SidebarAccountMenu({ memberName, memberRole, organizationName, authenti
         </div>
         <div className="sidebar-account-separator" role="separator" />
         <button type="button" role="menuitem" onClick={() => choose(onOpenSettings)}><Icon name="settings" size={15} /><b>Settings</b></button>
+        {onOpenArchive && <button type="button" role="menuitem" onClick={() => choose(onOpenArchive)}>
+          <Icon name="archive" size={15} /><b>Archived</b>
+        </button>}
         {onOpenTrash && <button type="button" role="menuitem" onClick={() => choose(onOpenTrash)}>
           <Icon name="trash" size={15} /><b>Trash</b>{trashCount ? <small className="sidebar-account-count" data-count={trashCount} aria-hidden="true" /> : null}
         </button>}
         <div className="sidebar-account-separator" role="separator" />
-        <button type="button" role="menuitem" className="sidebar-account-signout" onClick={() => { setOpen(false); onSignOut(); }}><b>{authenticated ? "Log out" : "Exit preview"}</b></button>
+        <button type="button" role="menuitem" className="sidebar-account-signout" onClick={() => { setOpen(false); onSignOut(); }}><b>Log out</b></button>
       </div>}
     </div>
   );
@@ -147,15 +150,13 @@ function SidebarAccountMenu({ memberName, memberRole, organizationName, authenti
 export function AppSidebar({
   activeView,
   platform,
-  previewRole,
-  organization,
   organizationLabel,
   authenticated = false,
   showAdmin = false,
+  showReviews = true,
   isUnassigned = false,
   memberName = "Lan Nguyen",
   memberRole = "Member",
-  memberDepartment = "Product Engineering",
   environmentLabel,
   assignedReviewCount,
   canSwitchWorkspace = false,
@@ -169,9 +170,10 @@ export function AppSidebar({
   privateNotes,
   trashCount,
   onOpenTrash,
+  onOpenArchive,
 }: AppSidebarProps) {
-  const organizationName = organizationLabel ?? organization?.name ?? "FPT Digital";
-  const sessionLabel = environmentLabel ?? (authenticated ? "Signed in" : "Preview");
+  const organizationName = organizationLabel ?? "Organization";
+  const sessionLabel = environmentLabel ?? "Signed in";
   const navButton = (item: NavigationItem) => {
     const active = item.view === activeView;
     const reviewCount = item.view === "review-queue" ? assignedReviewCount : undefined;
@@ -211,7 +213,7 @@ export function AppSidebar({
           aria-label={`Workspace: ${organizationName}${canSwitchWorkspace ? ". Switch or create workspace" : ""}`} title={organizationName}>
           <span className="access-card-mark" aria-hidden="true">{initialsOf(organizationName)}</span>
           <span className="access-card-copy"><strong id="access-card-title">{organizationName}</strong>
-            <span>{canSwitchWorkspace ? "Switch or create workspace" : authenticated || previewRole === "admin" ? "Organization workspace" : `${memberDepartment} · Member`} · {sessionLabel}</span></span>
+            <span>{canSwitchWorkspace ? "Switch or create workspace" : "Organization workspace"} · {sessionLabel}</span></span>
           {canSwitchWorkspace && <span className="access-card-switch" aria-hidden="true"><Icon name="expand" size={14} /></span>}
         </button>
         {onToggleCollapsed && <button type="button" className="sidebar-nav-item sidebar-collapse" onClick={onToggleCollapsed}
@@ -226,18 +228,20 @@ export function AppSidebar({
           ? <PrivateNotesNavSection key={item.label} controller={privateNotes.controller} navItem={navButton(item)}
             pageVisible={privateNotes.pageVisible} collapsed={collapsed} onOpen={privateNotes.onOpen} />
           : navButton(item))}
-        <span className="meta-label navigation-label">REVIEW</span>
-        {knowledgeNavigation.map(navButton)}
-        {((previewRole === "admin" && !authenticated) || showAdmin) && <>
+        {showReviews && <>
+          <span className="meta-label navigation-label">REVIEW</span>
+          {knowledgeNavigation.map(navButton)}
+        </>}
+        {showAdmin && <>
           <span className="meta-label navigation-label">MANAGE ORGANIZATION</span>
           {navButton(adminNavigation)}
         </>}
       </nav>
 
       <div className="sidebar-session">
-        <SidebarAccountMenu memberName={memberName} memberRole={memberRole} organizationName={organizationName} authenticated={authenticated}
-          trashCount={trashCount} onSignOut={onSignOut} onOpenSettings={onOpenSettings} onOpenTrash={onOpenTrash} />
-        <span className="sidebar-platform">{platform === "desktop" ? "WINDOWS" : "WEB"} · {authenticated ? "SIGNED IN" : "SAMPLE SESSION"}</span>
+        <SidebarAccountMenu memberName={memberName} memberRole={memberRole} organizationName={organizationName}
+          trashCount={trashCount} onSignOut={onSignOut} onOpenSettings={onOpenSettings} onOpenTrash={onOpenTrash} onOpenArchive={onOpenArchive} />
+        <span className="sidebar-platform">{platform === "desktop" ? "WINDOWS" : "WEB"} · SIGNED IN</span>
       </div>
     </aside>
   );

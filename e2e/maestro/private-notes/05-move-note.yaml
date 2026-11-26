@@ -1,12 +1,12 @@
 # F03-ORG-AC2: move a note from one collection to another, then to the
 # top level ("Private Notes" destination).
-url: http://127.0.0.1:5180/?preview=1
+url: http://127.0.0.1:5180/
 name: Private Notes - move a note between collections and to the top level
 tags:
   - private-notes
   - f03-org
 ---
-- runFlow: subflows/login-demo.yaml
+- runFlow: subflows/login.yaml
 
 - runFlow:
     file: subflows/create-collection.yaml

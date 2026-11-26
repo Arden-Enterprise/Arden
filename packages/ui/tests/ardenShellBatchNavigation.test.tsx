@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ArdenShell } from "../src/app/ArdenShell";
 import * as apiClient from "../src/shared/api-client";
+import * as privateApi from "../src/shared/private-workspace-api";
 
 vi.mock("../src/shared/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/shared/api-client")>();
@@ -13,6 +14,67 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
     restoreSession: vi.fn(),
     apiRequest: vi.fn(),
   };
+});
+
+describe("ArdenShell Private sidebar", () => {
+  it("uses the open note in Private and removes the composer from the Private root", async () => {
+    const note = { id: "note-a", organizationId: "org-1", title: "Personal handover",
+      currentVersion: { id: "version-a", version: 3 }, createdAt: "2026-11-24T00:00:00Z",
+      updatedAt: "2026-11-24T00:00:00Z", body: "Return the badge Friday.", collectionId: null, favoritedAt: null };
+    vi.spyOn(privateApi, "listPrivateNotes").mockResolvedValue({ items: [note], nextCursor: null });
+    vi.spyOn(privateApi, "loadPrivateNote").mockResolvedValue(note);
+    vi.spyOn(privateApi, "listPrivateCollections").mockResolvedValue([]);
+    vi.spyOn(privateApi, "listPrivateTrash").mockResolvedValue([]);
+    const ask = vi.spyOn(privateApi, "askPrivateNote").mockResolvedValue({
+      status: "ANSWERED", answer: "Friday.", citations: [],
+    });
+    render(createElement(ArdenShell, { platform: "web" }));
+    // A restored session with one organization opens it directly.
+    await screen.findByRole("button", { name: /Workspace: Test Org/i });
+    fireEvent.click(screen.getAllByRole("button", { name: "Private" })[0]);
+    const privateRoot = await within(screen.getByRole("main", { name: "Private" }))
+      .findByRole("button", { name: "Private", exact: true });
+    fireEvent.click(within(screen.getByRole("main", { name: "Private" })).getByRole("button", { name: "Ask Arden", exact: true }));
+    const ready = screen.getByRole("complementary", { name: "Ask Arden" });
+    expect(within(ready).getByText("Personal handover")).toBeTruthy();
+    fireEvent.change(within(ready).getByRole("textbox", { name: "Ask Arden" }), { target: { value: "When?" } });
+    fireEvent.click(within(ready).getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Friday.")).toBeTruthy();
+    expect(ask).toHaveBeenCalledWith("web", "org-1", "note-a", 3, "When?", expect.any(String));
+    fireEvent.click(privateRoot);
+    const root = screen.getByRole("complementary", { name: "Ask Arden" });
+    expect(within(root).queryByRole("textbox")).toBeNull();
+    expect(within(root).queryByText("Friday.")).toBeNull();
+  });
+});
+
+describe("System Admin feedback analytics", () => {
+  it("opens anonymous weekly feedback from the workspace chooser even without an organization", async () => {
+    vi.mocked(apiClient.restoreSession).mockResolvedValue({
+      actor: { id: "sys-1", email: "system@example.test" },
+      account: { passwordSetupRequired: false }, systemAdmin: true, memberships: [],
+    });
+    const analytics = vi.spyOn(apiClient, "loadPrivateFeedbackAnalytics").mockResolvedValue({ weeks: [
+      { weekStart: "2026-11-23", good: 2, bad: 1 },
+      { weekStart: "2026-11-16", good: 0, bad: 0 },
+    ] });
+    render(createElement(ArdenShell, { platform: "web" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Private AI feedback" }));
+    expect(await screen.findByRole("table", { name: "Weekly Private AI feedback" })).toBeTruthy();
+    expect(screen.getByRole("cell", { name: "67%" })).toBeTruthy();
+    expect(analytics).toHaveBeenCalledWith("web");
+    fireEvent.click(screen.getByRole("button", { name: "Back to workspaces" }));
+    expect(screen.getByRole("button", { name: "Private AI feedback" })).toBeTruthy();
+  });
+
+  it("offers no analytics entry to organization admins without System Admin access", async () => {
+    const analytics = vi.spyOn(apiClient, "loadPrivateFeedbackAnalytics");
+    window.history.replaceState(null, "", "/workspaces");
+    render(createElement(ArdenShell, { platform: "web" }));
+    await screen.findByRole("heading", { name: "Choose your workspace" });
+    expect(screen.queryByRole("button", { name: "Private AI feedback" })).toBeNull();
+    expect(analytics).not.toHaveBeenCalled();
+  });
 });
 
 vi.mock("../src/organization/OrganizationAdminPage", async () => {
@@ -32,6 +94,8 @@ vi.mock("../src/organization/OrganizationAdminPage", async () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.history.replaceState(null, "", "/");
+  window.localStorage.clear();
   Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
     configurable: true,
     value: function (this: HTMLDialogElement) { this.open = true; },
@@ -54,6 +118,7 @@ beforeEach(() => {
   vi.spyOn(apiClient, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, collections: [] });
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   vi.stubGlobal("scrollTo", vi.fn());
+  Object.defineProperty(document, "fonts", { configurable: true, value: { ready: Promise.resolve() } });
 });
 
 afterEach(() => {
@@ -61,13 +126,15 @@ afterEach(() => {
   vi.restoreAllMocks();
   Reflect.deleteProperty(HTMLDialogElement.prototype, "showModal");
   Reflect.deleteProperty(HTMLDialogElement.prototype, "close");
+  Reflect.deleteProperty(document, "fonts");
   vi.unstubAllGlobals();
 });
 
 describe("ArdenShell invitation batch navigation", () => {
   it("preserves an unsaved shared draft until workspace switching is confirmed", async () => {
     render(createElement(ArdenShell, { platform: "web" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+    // A restored session with one organization opens it directly.
+    await screen.findByRole("button", { name: /Workspace: Test Org/i });
     fireEvent.click(screen.getAllByRole("button", { name: "Home", exact: true })[0]);
     fireEvent.click(await screen.findByRole("button", { name: "Create from PDF" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved shared draft" } });
@@ -85,6 +152,7 @@ describe("ArdenShell invitation batch navigation", () => {
   });
 
   it("lets a member with one workspace open the selector and create another", async () => {
+    window.history.replaceState(null, "", "/workspaces");
     render(createElement(ArdenShell, { platform: "web" }));
     expect(await screen.findByRole("heading", { name: "Choose your workspace" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Create another organization/i })).toBeTruthy();
@@ -98,11 +166,12 @@ describe("ArdenShell invitation batch navigation", () => {
 
   it("keeps the administrator on the result page until sending finishes", async () => {
     render(createElement(ArdenShell, { platform: "web" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+    // A restored session with one organization opens it directly.
+    await screen.findByRole("button", { name: /Workspace: Test Org/i });
     fireEvent.click(await screen.findByRole("button", { name: "Administration" }));
     expect(screen.getByText("Batch in progress")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Start batch" }));
-    fireEvent.click(screen.getAllByRole("button", { name: "Private Notes" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Private" })[0]);
     expect(screen.getByText("Batch in progress")).toBeTruthy();
     const unloadWhileSending = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(unloadWhileSending);
@@ -114,13 +183,14 @@ describe("ArdenShell invitation batch navigation", () => {
     const unloadAfterSending = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(unloadAfterSending);
     expect(unloadAfterSending.defaultPrevented).toBe(false);
-    fireEvent.click(screen.getAllByRole("button", { name: "Private Notes" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Private" })[0]);
     await waitFor(() => expect(screen.queryByText("Batch in progress")).toBeNull());
   });
 
   it("asks before leaving unsaved organization edits for the workspace chooser", async () => {
     render(createElement(ArdenShell, { platform: "web" }));
-    fireEvent.click(await screen.findByRole("button", { name: /Test Org/i }));
+    // A restored session with one organization opens it directly.
+    await screen.findByRole("button", { name: /Workspace: Test Org/i });
     fireEvent.click(screen.getByRole("button", { name: "Administration" }));
     fireEvent.click(screen.getByRole("button", { name: "Mark unsaved" }));
     const workspaceButton = screen.getByRole("button", { name: /Workspace: Test Org.*Switch or create workspace/i });

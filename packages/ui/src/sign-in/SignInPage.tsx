@@ -25,9 +25,6 @@ function isValidEmail(value: string): boolean {
 
 export function SignInPage({
   platform,
-  onEnterPreview,
-  onOpenSetup,
-  onEnterAdminPreview,
   onAuthenticated,
   onRecoveryComplete,
   onOpenSystemConsole,
@@ -36,9 +33,6 @@ export function SignInPage({
   recoveryTokens = null,
 }: {
   platform: Platform;
-  onEnterPreview: () => void;
-  onOpenSetup: () => void;
-  onEnterAdminPreview?: () => void;
   onAuthenticated: (session: CurrentSession) => Promise<void>;
   onRecoveryComplete?: () => void;
   onOpenSystemConsole?: () => void;
@@ -105,7 +99,6 @@ export function SignInPage({
     if (mode === "check-email" && busy === null) checkEmailHeading.current?.focus();
   }, [mode, busy]);
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
-  const showPreview = new URLSearchParams(window.location.search).get("preview") === "1";
 
   const switchMode = (newMode: SignInMode) => {
     if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
@@ -497,14 +490,6 @@ export function SignInPage({
                 {busy === "google" ? "Opening Google..." : "Continue with Google"}
               </button>
             </>
-          )}
-          {showPreview && (
-            <details className="auth-preview-tools">
-              <summary>Demo</summary>
-              <button type="button" onClick={onEnterPreview}>Member</button>
-              <button type="button" onClick={onOpenSetup}>Setup</button>
-              {onEnterAdminPreview && <button type="button" onClick={onEnterAdminPreview}>Admin</button>}
-            </details>
           )}
         </div>
       </section>

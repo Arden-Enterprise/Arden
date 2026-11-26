@@ -1,11 +1,14 @@
 <#
 .SYNOPSIS
-  Runs the Private Notes Maestro web flows against the demo web app.
+  Runs the Private Notes Maestro web flows against a local signed-in test stack.
 
 .DESCRIPTION
   Sets JAVA_HOME and PATH for this process only (no system or user environment
   change) and runs `maestro test`. The web dev server must already be serving
-  http://127.0.0.1:5180 (`pnpm dev:web`).
+  http://127.0.0.1:5180 (`pnpm dev:web`), with the API in local Mainflow 1 test
+  mode on a disposable arden_test_* database. The synthetic account and its
+  organization come from -Email/-Password/-Organization or ARDEN_E2E_EMAIL,
+  ARDEN_E2E_PASSWORD and ARDEN_E2E_ORGANIZATION.
 
 .EXAMPLE
   pwsh -File e2e/maestro/private-notes/run.ps1                 # all feature flows
@@ -20,7 +23,10 @@ param(
   [switch]$CheckSyntax,
   [string]$MaestroPath = $(if ($env:MAESTRO_BIN) { $env:MAESTRO_BIN } else { "maestro" }),
   [string]$JavaHome = $env:MAESTRO_JAVA_HOME,
-  [string]$BaseUrl = "http://127.0.0.1:5180"
+  [string]$BaseUrl = "http://127.0.0.1:5180",
+  [string]$Email = $env:ARDEN_E2E_EMAIL,
+  [string]$Password = $env:ARDEN_E2E_PASSWORD,
+  [string]$Organization = $env:ARDEN_E2E_ORGANIZATION
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,6 +57,10 @@ try {
   throw "The web app is not reachable at $BaseUrl. Start it first: pnpm dev:web"
 }
 
+if (-not $Email -or -not $Password -or -not $Organization) {
+  throw "Set ARDEN_E2E_EMAIL, ARDEN_E2E_PASSWORD and ARDEN_E2E_ORGANIZATION (or pass -Email, -Password, -Organization) for a synthetic local test account."
+}
+
 $path = Join-Path $here $Target
-& $MaestroPath test $path
+& $MaestroPath test -e "ARDEN_E2E_EMAIL=$Email" -e "ARDEN_E2E_PASSWORD=$Password" -e "ARDEN_E2E_ORGANIZATION=$Organization" $path
 exit $LASTEXITCODE

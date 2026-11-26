@@ -1,5 +1,13 @@
 # Implementation status and rollout boundaries
 
+## Reviewer AI (BM04 F-06) — local feature, 26 November 2026
+
+Reviews → Publications includes on-demand assistance for the exact pending content submission. Core reuses pending-review authorization and Arden-AI returns summary points and optional checks with source excerpts. The decision remains in the existing review controls. Requires both service releases and organization opt-in. No database migration. See [contract and rollout](reviewer-ai.md).
+
+## F22 writing actions — feature branch, 25 November 2026
+
+Arden UI and Core implement the merged Arden-AI writing-action endpoint for editable Private notes and shared text drafts on the `feat/editor-writing-actions` branch, now based on staging `871e960`. The selection/right-click menu offers Improve Writing, Reformat and Explain. Core validates membership, requires string action statuses and checks the AI result; client-supplied text uses the existing organization AI opt-in. Focused API/UI tests and workspace typecheck pass locally. Genuine signed-in web/Electron and provider acceptance remain separate. Integration and deployment remain pending. See [F22](../product/writing-actions.md).
+
 ## Topic contraction integration —20 November2026
 
 PR58 follows PR60's flat Organization Collection contract and notifications0039.

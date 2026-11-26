@@ -1,13 +1,31 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Icon } from "../shared/Icon";
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from "react";
+import { Icon, type IconName } from "../shared/Icon";
 import type { PrivateNotesController } from "./usePrivateNotes";
 import { ItemActionsMenu, type ItemActions } from "./ItemActionsMenu";
-import { childrenOf, favoriteItems, moveDestinations, type TreeItem } from "./privateNotesModel";
+import { childrenOf, favoriteItems, moveDestinations, notesIn, ROOT_LABEL, type TreeItem } from "./privateNotesModel";
 import { getNoteDraft } from "./noteDraftModel";
 
+/** Where a dragged note lands: into a collection (or the root) last, or before/after a note in the same place. */
+type DropTarget =
+  | { key: string; mode: "into"; collectionId: string | null; title: string }
+  | { key: string; mode: "before" | "after"; collectionId: string | null; noteId: string; title: string };
+
+function dropHalf(event: DragEvent<HTMLElement>): "before" | "after" {
+  const box = event.currentTarget.getBoundingClientRect();
+  return event.clientY < box.top + box.height / 2 ? "before" : "after";
+}
+
 /** Builds the shared `···` actions for a tree item; `onRename` lets the caller choose where renaming happens. */
-export function itemActions(controller: PrivateNotesController, item: TreeItem, onRename: () => void): ItemActions {
+/** Decision 0034: a PDF item shows the PDF icon. */
+export function itemIcon(item: TreeItem): IconName {
+  return item.kind === "collection" ? "folder" : item.note.kind === "pdf" ? "pdf" : "document";
+}
+
+export function itemActions(controller: PrivateNotesController, item: TreeItem, onRename: () => void,
+  onPdfImported?: () => void): ItemActions {
   const ref = { kind: item.kind, id: item.id };
+  const siblings = item.kind === "note" ? notesIn(controller.collections, controller.state.notes, item.parentId) : [];
+  const index = siblings.findIndex((note) => note.id === item.id);
   return {
     kind: item.kind,
     title: item.title,
@@ -19,6 +37,17 @@ export function itemActions(controller: PrivateNotesController, item: TreeItem, 
     onRename,
     onMove: (collectionId) => void controller.moveTo(ref, collectionId),
     onTrash: () => void controller.requestTrash(ref),
+    ...(item.kind === "note" ? {
+      // A PDF item keeps its file; Import PDF adds text to a text note only.
+      ...(item.note.kind === "pdf" ? {} : { onImportPdf: () => void controller.pickPdf(item.id).then(imported => {
+        if (imported) onPdfImported?.();
+      }) }),
+      order: {
+        canMoveUp: index > 0, canMoveDown: index >= 0 && index < siblings.length - 1,
+        onMoveUp: () => void controller.shiftNote(item.id, -1), onMoveDown: () => void controller.shiftNote(item.id, 1),
+      },
+      archive: { available: controller.canArchive(item.note), onArchive: () => void controller.archiveNote(item.id) },
+    } : {}),
   };
 }
 
@@ -53,6 +82,49 @@ export function PrivateNotesNavSection({ controller, navItem, pageVisible, colla
 }) {
   const { state, collections, treeOpen, expanded, renaming, loading, error, actionError } = controller;
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const latestOnOpen = useRef(onOpen);
+  latestOnOpen.current = onOpen;
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const expandTimer = useRef<{ id: string; timer: number } | null>(null);
+  const clearExpandTimer = () => {
+    if (expandTimer.current) window.clearTimeout(expandTimer.current.timer);
+    expandTimer.current = null;
+  };
+  useEffect(() => clearExpandTimer, []);
+  const endDrag = () => { setDragging(null); setDropTarget(null); clearExpandTimer(); };
+
+  /** Drag and drop of notes (spec F03-ARR); Move up/down and Move to in `···` are the keyboard alternative. */
+  const dropProps = (target: DropTarget["key"], resolve: (event: DragEvent<HTMLElement>) => DropTarget | null) => dragging ? {
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      const next = resolve(event);
+      if (!next) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      if (dropTarget?.key !== next.key || dropTarget.mode !== next.mode) setDropTarget(next);
+      // Hovering a closed collection opens it so the note can be dropped between its notes.
+      if (next.mode === "into" && next.collectionId && !expanded.has(next.collectionId) && expandTimer.current?.id !== next.collectionId) {
+        clearExpandTimer();
+        const id = next.collectionId;
+        expandTimer.current = { id, timer: window.setTimeout(() => controller.expandCollection(id), 650) };
+      }
+    },
+    onDragLeave: (event: DragEvent<HTMLElement>) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null) && dropTarget?.key === target) setDropTarget(null);
+    },
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      event.preventDefault();
+      const next = resolve(event);
+      const noteId = dragging;
+      endDrag();
+      if (!next || !noteId) return;
+      if (next.mode === "into") { void controller.placeNoteAt(noteId, next.collectionId, null, `Moved to ${next.title}`); return; }
+      const siblings = notesIn(collections, state.notes, next.collectionId).filter((note) => note.id !== noteId);
+      const anchor = siblings.findIndex((note) => note.id === next.noteId);
+      if (anchor < 0) return;
+      void controller.placeNoteAt(noteId, next.collectionId, anchor + (next.mode === "after" ? 1 : 0), "Note moved");
+    },
+  } : {};
   const titleOf = (note: (typeof state.notes)[number]) => {
     const draft = state.drafts[note.id];
     return draft ? getNoteDraft(state, note).title : note.title;
@@ -75,15 +147,30 @@ export function PrivateNotesNavSection({ controller, navItem, pageVisible, colla
     const isRenaming = section === "tree" && renaming?.where === "tree" && renaming.kind === item.kind && renaming.id === item.id;
     const unsaved = item.kind === "note" && (controller.isPending(item.note) || Boolean(state.drafts[item.id]
       && (state.drafts[item.id]!.title !== item.note.title || state.drafts[item.id]!.body !== item.note.body)));
+    const inTree = section === "tree";
+    const draggable = inTree && item.kind === "note" && !isRenaming && !loading;
+    const dropKey = `${item.kind}:${item.id}`;
+    const drop = inTree && dragging && dragging !== item.id ? dropProps(dropKey, (event) => isCollection
+      ? { key: dropKey, mode: "into", collectionId: item.id, title: item.title }
+      : { key: dropKey, mode: dropHalf(event), collectionId: item.parentId, noteId: item.id, title: "" }) : {};
+    const dropClass = dropTarget?.key === dropKey && inTree ? ` is-drop-${dropTarget.mode}` : "";
     const rows: ReactNode[] = [
-      <div key={key} className={`pn-row${selectedKey === `${item.kind}:${item.id}` ? " is-selected" : ""}${menuFor === key ? " has-menu" : ""}`}
-        style={{ paddingLeft: 2 + depth * 14 }}>
+      <div key={key} className={`pn-row${selectedKey === `${item.kind}:${item.id}` ? " is-selected" : ""}${menuFor === key ? " has-menu" : ""}${dragging === item.id && inTree ? " is-dragging" : ""}${dropClass}`}
+        style={{ paddingLeft: 2 + depth * 14 }}
+        draggable={draggable || undefined}
+        onDragStart={draggable ? (event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("text/plain", item.title);
+          setDragging(item.id);
+        } : undefined}
+        onDragEnd={draggable ? endDrag : undefined}
+        {...drop}>
         {showChevron ? <button type="button" className={`pn-icon-button pn-chevron${isOpen ? " is-open" : ""}`}
           aria-label={`${isOpen ? "Collapse" : "Expand"} ${item.title}`} aria-expanded={isOpen}
           onClick={() => controller.toggleExpanded(item.id)}><Icon name="chevron" size={13} /></button>
           : <span className="pn-chevron-space" aria-hidden="true" />}
         {isRenaming ? <>
-          <span className="pn-row-icon" aria-hidden="true"><Icon name={isCollection ? "folder" : "document"} size={15} /></span>
+          <span className="pn-row-icon" aria-hidden="true"><Icon name={itemIcon(item)} size={15} /></span>
           <RenameInput title={item.title} onCommit={(value) => void controller.commitRename(item, value)}
             onCancel={() => {
               controller.cancelRename();
@@ -92,12 +179,13 @@ export function PrivateNotesNavSection({ controller, navItem, pageVisible, colla
         </> : <>
           <button type="button" className="pn-row-main" data-pn-row={section === "tree" ? `${item.kind}:${item.id}` : undefined}
             aria-current={selectedKey === `${item.kind}:${item.id}` ? "page" : undefined} onClick={() => open(item)}>
-            <Icon name={isCollection ? "folder" : "document"} size={15} />
+            <Icon name={itemIcon(item)} size={15} />
             <span className="pn-ellipsis">{item.title}</span>
             {unsaved && <span className="pn-unsaved" title="Unsaved changes"><span className="sr-only">, unsaved changes</span></span>}
           </button>
           <span className="pn-row-actions">
-            <ItemActionsMenu label={`More actions for ${item.title}`} actions={itemActions(controller, item, () => controller.startRename(item))}
+            <ItemActionsMenu label={`More actions for ${item.title}`} actions={itemActions(controller, item,
+              () => controller.startRename(item), () => latestOnOpen.current())}
               onOpenChange={(isMenuOpen) => setMenuFor(isMenuOpen ? key : null)} />
             {isCollection && <button type="button" className="pn-icon-button" aria-label={`Add a note to ${item.title}`} title="New note inside"
               onClick={() => { void controller.addNote(item.id); onOpen(); }}><Icon name="plus" size={14} /></button>}
@@ -107,7 +195,12 @@ export function PrivateNotesNavSection({ controller, navItem, pageVisible, colla
     ];
     if (isOpen) {
       const children = childrenOf(collections, state.notes, item.id, titleOf);
-      if (!children.length) rows.push(<div key={`${key}:empty`} className="pn-empty" style={{ paddingLeft: 2 + (depth + 1) * 14 + 26 }}>No notes inside</div>);
+      if (!children.length) {
+        const emptyKey = `empty:${item.id}`;
+        rows.push(<div key={`${key}:empty`} className={`pn-empty${dropTarget?.key === emptyKey ? " is-drop-into" : ""}`}
+          style={{ paddingLeft: 2 + (depth + 1) * 14 + 26 }}
+          {...dropProps(emptyKey, () => ({ key: emptyKey, mode: "into", collectionId: item.id, title: item.title }))}>No notes inside</div>);
+      }
       for (const child of children) rows.push(...row(child, "tree", depth + 1));
     }
     return rows;
@@ -116,8 +209,10 @@ export function PrivateNotesNavSection({ controller, navItem, pageVisible, colla
   const rootItems = childrenOf(collections, state.notes, null, titleOf);
   const showTree = treeOpen && !collapsed;
 
+  const rootKey = "root";
   return <div className="pn-nav-section">
-    <div className="pn-nav-row">
+    <div className={`pn-nav-row${dropTarget?.key === rootKey ? " is-drop-into" : ""}`}
+      {...dropProps(rootKey, () => ({ key: rootKey, mode: "into", collectionId: null, title: ROOT_LABEL }))}>
       {navItem}
       {!collapsed && <span className="pn-row-actions pn-nav-actions">
         <button type="button" className="pn-icon-button" aria-label="New collection" title="New collection" disabled={loading}

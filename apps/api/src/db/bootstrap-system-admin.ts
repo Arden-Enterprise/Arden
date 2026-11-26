@@ -16,9 +16,9 @@ try {
     const migrated = await client.query(`SELECT 1 FROM public.arden_schema_migrations
       WHERE migration_id = '0017_audience_and_instance_admin_foundation'`);
     const leastPrivilegeMigration = await client.query(`SELECT 1 FROM public.arden_schema_migrations
-      WHERE migration_id = '0063_system_console_least_privilege'`);
+      WHERE migration_id = '0071_system_console_least_privilege'`);
     if (!migrated.rowCount || !leastPrivilegeMigration.rowCount) {
-      throw new Error("Migrations 0017 and 0063 must be applied before System Admin bootstrap");
+      throw new Error("Migrations 0017 and 0071 must be applied before System Admin bootstrap");
     }
     const existing = await client.query<{ active_admins: string; active_managers: string }>(`
       SELECT count(*) FILTER (WHERE sa.status='ACTIVE' AND ua.status='ACTIVE')::text AS active_admins,

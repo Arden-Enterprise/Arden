@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/shared/api-client";
+import * as privateApi from "../src/shared/private-workspace-api";
 import { AgentPanel } from "../src/app/AgentPanel";
 import { AskArdenPage } from "../src/ask-arden/AskArdenPage";
 import { installTestDialogs } from "./dialogTestSupport";
@@ -11,7 +12,8 @@ beforeEach(() => { restoreDialogs = installTestDialogs(); });
 afterEach(() => { cleanup(); restoreDialogs(); vi.restoreAllMocks(); });
 
 const answer: api.AskArdenAnswer = { status: "ANSWERED", answer: "Use bin B.", citations: [], conversationId: "chat", revision: 1 };
-const panelProps = { platform: "web" as const, organizationId: "org", onClose: () => undefined, onOpenAskArden: () => undefined };
+const panelProps = { platform: "web" as const, organizationId: "org", source: { kind: "company" } as const,
+  onClose: () => undefined, onOpenAskArden: () => undefined };
 const ask = (panel: HTMLElement, text: string) => {
   fireEvent.change(within(panel).getByRole("textbox", { name: "Ask Arden" }), { target: { value: text } });
   fireEvent.click(within(panel).getByRole("button", { name: "Send message" }));
@@ -27,7 +29,7 @@ describe("agent panel", () => {
     const panel = screen.getByRole("complementary", { name: "Ask Arden" });
     ask(panel, "Where does paper go?");
     expect((await within(panel).findByText("Paper")).tagName).toBe("STRONG");
-    fireEvent.click(within(panel).getByRole("button", { name: /^Source:/ }));
+    fireEvent.click(within(panel).getByRole("button", { name: "View sources" }));
     expect(onOpenCitation).not.toHaveBeenCalled();
     const sources = within(panel).getByRole("complementary", { name: "Sources" });
     fireEvent.click(within(sources).getByRole("button", { name: "Open Synthetic Waste Guide at this passage" }));
@@ -41,7 +43,7 @@ describe("agent panel", () => {
     const view = render(<AgentPanel open {...panelProps} />);
     ask(screen.getByRole("complementary", { name: "Ask Arden" }), "Which bin?");
     expect(await screen.findByText("Use bin B.")).toBeTruthy();
-    expect(send.mock.calls[0]).toMatchObject(["web", "org", "Which bin?", { versionScope: "CURRENT" }]);
+    expect(send.mock.calls[0]).toMatchObject(["web", "org", "Which bin?", { }]);
     view.rerender(<AgentPanel open={false} {...panelProps} />);
     expect(view.container.querySelector("#arden-agent-panel")?.getAttribute("data-state")).toBe("closed");
     view.rerender(<AgentPanel open {...panelProps} />);
@@ -74,5 +76,61 @@ describe("agent panel", () => {
     render(<AgentPanel open {...panelProps} organizationId={null} />);
     expect(screen.getByText("Open an organization to ask Arden.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Send message" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("asks only the selected saved private note and shows its cited passage", async () => {
+    const company = vi.spyOn(api, "askArden");
+    const rate = vi.spyOn(api, "rateAiAnswer");
+    const privateRate = vi.spyOn(privateApi, "ratePrivateAnswer").mockResolvedValue({ feedback: "GOOD" });
+    const source = { kind: "private-note" as const, id: "note-a", version: 2, title: "Handover notes" };
+    const send = vi.spyOn(privateApi, "askPrivateNote").mockResolvedValue({
+      status: "ANSWERED", answer: "Return it on Friday.", feedbackToken: "fake-opaque-token", noteCoverage: "PARTIAL", citations: [{ documentId: source.id, versionId: "version-a",
+        title: source.title, version: "Version 2", scope: "Private note", classification: "INTERNAL",
+        excerpt: "Return the badge on Friday." }],
+    });
+    render(<AgentPanel open {...panelProps} source={source} />);
+    expect(screen.getByText(source.title)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open Ask Arden" })).toBeNull();
+    const panel = screen.getByRole("complementary", { name: "Ask Arden" });
+    ask(panel, "When do I return the badge?");
+    expect(await screen.findByText("Return it on Friday.")).toBeTruthy();
+    expect(screen.getByText("Based on selected passages. Other parts of this note were not reviewed.")).toBeTruthy();
+    expect(send).toHaveBeenCalledWith("web", "org", source.id, 2, "When do I return the badge?", expect.any(String));
+    expect(company).not.toHaveBeenCalled();
+    fireEvent.click(within(panel).getByRole("button", { name: "Good response" }));
+    expect(await within(panel).findByText("Feedback saved.")).toBeTruthy();
+    expect(privateRate).toHaveBeenCalledWith("web", "org", "fake-opaque-token", "GOOD");
+    expect(rate).not.toHaveBeenCalled();
+    fireEvent.click(within(panel).getByRole("button", { name: "View sources" }));
+    expect(screen.getByText("Return the badge on Friday.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /at this passage/ })).toBeNull();
+  });
+
+  it("ignores late replies after switching notes and clears the transcript after a save", async () => {
+    let finish!: (value: api.AskArdenAnswer) => void;
+    const send = vi.spyOn(privateApi, "askPrivateNote")
+      .mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValueOnce({ status: "ANSWERED", answer: "Second note answer.", citations: [] });
+    const first = { kind: "private-note" as const, id: "note-a", version: 1, title: "First note" };
+    const second = { kind: "private-note" as const, id: "note-b", version: 1, title: "Second note" };
+    const view = render(<AgentPanel open {...panelProps} source={first} />);
+    ask(screen.getByRole("complementary", { name: "Ask Arden" }), "First question?");
+    view.rerender(<AgentPanel open {...panelProps} source={second} />);
+    await act(async () => { finish(answer); });
+    expect(screen.queryByText("Use bin B.")).toBeNull();
+    expect(screen.queryByText("First question?")).toBeNull();
+    ask(screen.getByRole("complementary", { name: "Ask Arden" }), "Second question?");
+    expect(await screen.findByText("Second note answer.")).toBeTruthy();
+    expect(send.mock.lastCall?.slice(2, 4)).toEqual([second.id, 1]);
+    view.rerender(<AgentPanel open {...panelProps} source={{ ...second, version: 2 }} />);
+    expect(screen.queryByText("Second note answer.")).toBeNull();
+  });
+
+  it("has no question composer in Private when no saved note is selected", () => {
+    const company = vi.spyOn(api, "askArden");
+    render(<AgentPanel open {...panelProps} source={{ kind: "private-empty", hint: "Open a saved note in Private to ask Arden." }} />);
+    expect(screen.getByText("Open a saved note in Private to ask Arden.")).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: "Ask Arden" })).toBeNull();
+    expect(company).not.toHaveBeenCalled();
   });
 });

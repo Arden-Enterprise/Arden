@@ -23,6 +23,7 @@ export type SystemAdministrationOverview = {
   administrators: SystemAdministrator[];
   recentEvents: SystemAdministrationEvent[];
 };
+export type PrivateFeedbackWeek = { weekStart: string; good: number; bad: number };
 
 export type SystemAdministrationErrorCode =
   | "SYSTEM_ADMINISTRATION_UNAVAILABLE"
@@ -35,6 +36,8 @@ export class SystemAdministrationError extends Error {
 }
 
 export interface SystemAdministrationStore {
+  canAccess(actorUserId: string): Promise<boolean>;
+  privateFeedback(actorUserId: string): Promise<PrivateFeedbackWeek[]>;
   overview(actorUserId: string): Promise<SystemAdministrationOverview>;
   grant(actorUserId: string, targetUserId: string, requestId: string): Promise<SystemAdministrator>;
   revoke(actorUserId: string, targetUserId: string, requestId: string): Promise<SystemAdministrator>;
@@ -62,6 +65,24 @@ function mapAdministrator(row: AdministratorRow): SystemAdministrator {
 
 export class PgSystemAdministrationStore implements SystemAdministrationStore {
   constructor(private readonly withSystemAdmin: SystemAdminTransaction) {}
+
+  async canAccess(actorUserId: string): Promise<boolean> {
+    return (await this.withSystemAdmin(actorUserId, async () => true)) === true;
+  }
+
+  privateFeedback(actorUserId: string): Promise<PrivateFeedbackWeek[]> {
+    return this.transaction(actorUserId, async client => (await client.query<PrivateFeedbackWeek>(`
+      WITH cutoff AS (SELECT date_trunc('week', now() AT TIME ZONE 'UTC') AS current_week),
+      weeks AS (SELECT current_week + offset_week * interval '1 week' AS week_start
+        FROM cutoff CROSS JOIN generate_series(-11, 0) AS offset_week)
+      SELECT to_char(week_start, 'YYYY-MM-DD') AS "weekStart",
+        count(*) FILTER (WHERE feedback = 'GOOD')::integer AS good,
+        count(*) FILTER (WHERE feedback = 'BAD')::integer AS bad
+      FROM weeks LEFT JOIN private_ai_feedback
+        ON rated_at >= week_start AT TIME ZONE 'UTC'
+        AND rated_at < (week_start + interval '1 week') AT TIME ZONE 'UTC'
+      GROUP BY week_start ORDER BY week_start DESC`)).rows);
+  }
 
   private async transaction<T>(actorUserId: string, work: (client: PoolClient) => Promise<T>) {
     const result = await this.withSystemAdmin(actorUserId, work);

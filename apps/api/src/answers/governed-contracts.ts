@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import type { AuthorizedAiSource } from "../db/repository.js";
 import { parseUsageEvents, usageContractVersion, type ProviderUsageEvent, type UsageOperation } from "./usage-contracts.js";
 
-export type VersionScope = "CURRENT" | "UPCOMING" | "COMPARE";
 export type DialogueTurn = { question: string; answer: string };
 export type EvidenceReference = { generationId: string; publishedVersionId: string; snapshotVersionId: string;
   snapshotContentHash: string; chunkId: string };
@@ -111,7 +110,7 @@ export function evidenceMatchesManifest(evidence: Evidence, source: Pick<Authori
 export function sourceLabel(source: AuthorizedAiSource): string {
   const metadata = source.management;
   return [source.title, metadata?.version ? `Version ${metadata.version}` : null,
-    metadata?.type, metadata?.effectiveDate ? `Effective ${metadata.effectiveDate}` : null,
+    metadata?.type,
     metadata?.expirationDate ? `Expires ${metadata.expirationDate}` : null].filter(Boolean).join(" · ").slice(0, 800);
 }
 

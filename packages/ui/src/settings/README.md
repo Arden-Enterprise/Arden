@@ -86,11 +86,10 @@ unregister();
 | --- | --- | --- |
 | `platform` | `"web" \| "desktop"` | Current platform environment |
 | `session` | `CurrentSession \| null` | Authenticated user session or null if in preview |
-| `organization` | `OrganizationPreview \| null` | Current organization details |
 | `memberName` | `string \| undefined` | User display name or email |
 | `memberRole` | `string \| undefined` | User role (e.g. "Organization Admin", "Member") |
 | `memberDepartment` | `string \| undefined` | Assigned primary department |
 | `onClose` | `() => void` | Function to close the Settings dialog |
 | `onRefreshSession` | `(() => Promise<void>) \| undefined` | Re-fetch session from server after mutations |
-| `onSignOut` | `(() => void) \| undefined` | Trigger sign out / exit preview |
+| `onSignOut` | `(() => void) \| undefined` | Trigger sign out |
 

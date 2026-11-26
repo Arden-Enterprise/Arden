@@ -4,12 +4,11 @@ export type KnowledgeType = typeof knowledgeTypes[number];
 export type KnowledgeMetadata = {
   type: KnowledgeType | null;
   version: string;
-  effectiveDate: string | null;
   expirationDate: string | null;
   changeNote: string;
 };
 export const emptyKnowledgeMetadata = (): KnowledgeMetadata => ({
-  type: null, version: "", effectiveDate: null, expirationDate: null, changeNote: "",
+  type: null, version: "", expirationDate: null, changeNote: "",
 });
 export function isCalendarDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value.startsWith("0000")) return false;
@@ -21,9 +20,7 @@ export function validKnowledgeMetadata(value: KnowledgeMetadata): boolean {
   return (value.type === null || knowledgeTypes.includes(value.type))
     && value.version.length <= 30 && (!value.version || /^[\w][\w.\- ]{0,29}$/.test(value.version))
     && value.changeNote.length <= 1000
-    && (value.effectiveDate === null || isCalendarDate(value.effectiveDate))
-    && (value.expirationDate === null || isCalendarDate(value.expirationDate))
-    && !(value.effectiveDate && value.expirationDate && value.expirationDate < value.effectiveDate);
+    && (value.expirationDate === null || isCalendarDate(value.expirationDate));
 }
 export function metadataSubmissionErrors(value: KnowledgeMetadata, isUpdate: boolean): string[] {
   const errors: string[] = [];
@@ -35,15 +32,10 @@ export function metadataSubmissionErrors(value: KnowledgeMetadata, isUpdate: boo
 }
 /** Days before the expiration date at which readers see "Expires in N days". */
 export const expiringSoonDays = 30;
-export type ValidityStatus = "Current" | "Expiring soon" | "Expired" | "Upcoming";
-/**
- * Reader-facing validity (requested 15 Nov 2026): a publication is in force from approval and
- * shows only its optional expiration date. "Upcoming" remains only for older drafts that still
- * carry a future effective date, so their state is never misreported.
- */
+export type ValidityStatus = "Current" | "Expiring soon" | "Expired";
+/** Reader validity follows publication; only the optional expiration date changes this status. */
 export function validityStatus(metadata: KnowledgeMetadata | null | undefined, today: string):
   { status: ValidityStatus; daysLeft: number | null } {
-  if (metadata?.effectiveDate && today < metadata.effectiveDate) return { status: "Upcoming", daysLeft: null };
   const expiration = metadata?.expirationDate;
   if (!expiration) return { status: "Current", daysLeft: null };
   if (today > expiration) return { status: "Expired", daysLeft: 0 };

@@ -10,6 +10,7 @@ import { OrganizationAdminPage } from "../src/organization/OrganizationAdminPage
 import { ServerAudienceGroupPanel } from "../src/organization/ServerAudienceGroupPanel";
 import { installTestDialogs } from "./dialogTestSupport";
 
+vi.mock("../src/knowledge/ArdenRichTextEditor", () => import("./richEditorStub"));
 vi.mock("../src/shared/useAutosizeTextarea", () => ({ useAutosizeTextarea: () => ({ current: null }) }));
 
 let restoreDialogs: () => void;
@@ -92,7 +93,7 @@ describe("explicit cancellation", () => {
       });
     }
     render(createElement(Notes));
-    fireEvent.change(screen.getByRole("textbox", { name: "Note content" }), { target: { value: "Local edit" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Note content" }), { target: { value: "Local edit" } });
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     fireEvent.click(screen.getByRole("button", { name: "Keep working" }));
     expect((screen.getByRole("textbox", { name: "Note content" }) as HTMLTextAreaElement).value).toBe("Local edit");

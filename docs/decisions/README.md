@@ -111,3 +111,13 @@ The current release migration policy is [0016: run approved expand migrations th
 - Keep examples, ports, commands, versions, package paths, implementation status, tests, and configuration accurate. If an old document disagrees with source, identify the discrepancy and resolve it explicitly.
 - Capture reusable constraints and rationale, not secrets, customer content, transient logs, or an unfiltered transcript. Review privacy of referenced screenshots/output too.
 - When documentation gaps remain, name them in the handoff/PR and obtain a decision where necessary; do not quietly promote an assumption into policy.
+
+Current Company AI version selection: [0030 — Published-date AI sources](0030-published-date-ai-sources.md) supersedes the temporal parts of 0021.
+
+Expired documents and Home columns: [0032 — Expired documents, reviewed renewal and the Home document columns](0032-expired-documents-renewal-and-home-columns.md) (accepted 24 November 2026) supersedes 0022 item 4 and its Home column list and extends 0024/0025. Implementation is on branch `feat/expired-document-visibility` only.
+
+Reviewer self-approval: [0033 — Reviewers with a matching grant may decide their own submissions](0033-reviewer-self-approval.md) (accepted 24 November 2026) supersedes the reviewer self-review ban in 0011/0015 and amends the 0032 renewal decision order. Branch `feat/expired-document-visibility` only.
+
+Share button and direct sharing: [0034 — One Share button, unreviewed direct sharing with individuals and private PDF items](0034-share-button-direct-share-and-private-pdf.md) (accepted 26 November 2026) allows explicitly selected members to read a private item and lets Private store PDF files.
+
+Audit policy: [0035 — Audit only consequential actions](0035-audit-only-consequential-actions.md) (accepted 26 November 2026) supersedes the audit line of 0002. Permanent deletion and changes to share access are audited.

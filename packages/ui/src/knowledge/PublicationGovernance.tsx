@@ -1,14 +1,27 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, dismissPublicationReport, listClosedPublicationReports, listGovernancePublications, listPublicationReports, loadGovernanceInspection,
+  listPublicationRenewals, type PublicationRenewalState,
   loadResponsiblePublication, openGovernanceInspection, withdrawPublication,
   type GovernanceDocument, type GovernanceInspection, type GovernancePublication, type GovernanceReaderMode,
   type PublicationReport } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 import { importOpenMaintenanceReports } from "../maintenance/maintenance-client";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
+import type { IconName } from "../shared/Icon";
 import { KnowledgeDialog } from "./KnowledgeDialog";
 import { libraryDateLabel } from "./libraryDisplay";
+import { ReasonField, ReasonNotice } from "./ReasonField";
 import { PdfDocument } from "./PdfDocument";
+import { RenewPublicationDialog, renewalStatus } from "./RenewPublicationDialog";
+
+export type GovernanceValidityFilter = "" | "EXPIRING" | "EXPIRED";
+/** Decision 0032: Administration → Documents filters on the effective Valid until. */
+export function matchesValidityFilter(state: PublicationRenewalState | undefined, filter: GovernanceValidityFilter): boolean {
+  if (!filter) return true;
+  if (!state) return false;
+  const label = renewalStatus({ expirationDate: state.expirationDate, renewalPending: false }).label;
+  return filter === "EXPIRED" ? label === "Expired" : label.startsWith("Expires");
+}
 
 const ArdenDocumentView = lazy(() => import("./ArdenRichTextEditor").then((module) => ({ default: module.ArdenDocumentView })));
 
@@ -21,10 +34,10 @@ export function governanceReadersLabel(mode: GovernanceReaderMode, departmentId:
   return "Selected members";
 }
 
-/** One required reason (1-1000 characters) before an action that is recorded with it. */
-export function ReasonDialog({ title, effect, label, placeholder, submitLabel, danger = false, onSubmit, onClose }: {
-  title: string; effect: ReactNode; label: string; placeholder: string; submitLabel: string; danger?: boolean;
-  onSubmit: (reason: string) => Promise<void>; onClose: () => void;
+/** One required reason (1-1000 characters) before an action that is recorded with it, in the compact dialog island. */
+export function ReasonDialog({ title, subtitle, icon, notice, noticeIcon, label, placeholder, submitLabel, danger = false, onSubmit, onClose }: {
+  title: string; subtitle: string; icon: IconName; notice: ReactNode; noticeIcon: IconName; label: string; placeholder: string;
+  submitLabel: string; danger?: boolean; onSubmit: (reason: string) => Promise<void>; onClose: () => void;
 }) {
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
@@ -37,17 +50,18 @@ export function ReasonDialog({ title, effect, label, placeholder, submitLabel, d
     setBusy(true); setError("");
     try { await onSubmit(reason.trim()); } catch (cause) { setError(failure(cause, "Couldn’t complete this action.")); setBusy(false); }
   };
-  return <KnowledgeDialog title={title} dismissible={!busy} onClose={onClose}>
-    <form className="publication-change-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-      <div className="publication-change-effect">{effect}</div>
-      <label className="island-field publication-change-reason">{label} *
-        <textarea rows={4} maxLength={1000} value={reason} disabled={busy} aria-invalid={attempted && missing}
-          placeholder={placeholder} onChange={(event) => setReason(event.target.value)} />
-        <small className={attempted && missing ? "field-error" : ""} role={attempted && missing ? "alert" : undefined}>
-          {attempted && missing ? "Enter a reason." : `${reason.length}/1000`}</small>
-      </label>
-      {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-      <div className="publication-change-actions">
+  const tone = danger ? "danger" : "default";
+  const noticeBlock = <ReasonNotice icon={noticeIcon} tone={tone}>{notice}</ReasonNotice>;
+  return <KnowledgeDialog title={title} subtitle={subtitle} icon={icon} tone={tone} compact dismissible={!busy} onClose={onClose}>
+    <form className="reason-dialog-form" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+      <div className="reason-dialog-body">
+        {danger && noticeBlock}
+        <ReasonField label={label} value={reason} placeholder={placeholder} busy={busy} showMissing={attempted && missing}
+          onChange={setReason} />
+        {!danger && noticeBlock}
+        {error && <p role="alert" className="knowledge-live-error">{error}</p>}
+      </div>
+      <div className="reason-dialog-footer">
         <button type="button" className="secondary-button" disabled={busy} onClick={onClose}>Cancel</button>
         <button type="submit" className={danger ? "primary-button governance-danger" : "primary-button"} disabled={busy}>
           {busy ? "Working…" : submitLabel}</button>
@@ -77,11 +91,10 @@ type WithdrawTarget = { documentId: string; title: string };
 function WithdrawPublicationDialog({ target, platform, organizationId, onDone, onClose }: {
   target: WithdrawTarget; platform: Platform; organizationId: string; onDone: () => void; onClose: () => void;
 }) {
-  return <ReasonDialog title="Withdraw publication" danger label="Reason" submitLabel="Withdraw"
-    placeholder="Why must this document stop being used?"
-    effect={<><p><strong>{target.title}</strong></p><p>It leaves the Library, search and Ask Arden at once. Its versions stay in
-      history, the author sees your reason, and publishing it again needs a new review. Copies people already
-      downloaded cannot be recalled.</p></>}
+  return <ReasonDialog title="Withdraw publication" subtitle={target.title} icon="warning" noticeIcon="warning" danger
+    label="Reason" submitLabel="Withdraw" placeholder="Why must this document stop being used?"
+    notice={<p>It leaves the Library, search and Ask Arden at once. Its versions stay in history, the author sees your
+      reason, and publishing it again needs a new review. Copies people already downloaded cannot be recalled.</p>}
     onClose={onClose}
     onSubmit={async (reason) => { await withdrawPublication(platform, organizationId, target.documentId, reason); onDone(); }} />;
 }
@@ -245,14 +258,21 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
   const [inspection, setInspection] = useState<GovernanceInspection | null>(null);
   const [withdrawing, setWithdrawing] = useState<WithdrawTarget | null>(null);
   const [refresh, setRefresh] = useState(0);
+  const [validity, setValidity] = useState<Map<string, PublicationRenewalState>>(() => new Map());
+  const [validityFilter, setValidityFilter] = useState<GovernanceValidityFilter>("");
+  const [renewing, setRenewing] = useState<PublicationRenewalState | null>(null);
   useEffect(() => {
     let present = true;
     setError("");
     listGovernancePublications(platform, organizationId).then((loaded) => { if (present) setItems(loaded); })
       .catch((cause: unknown) => { if (present) { setItems([]); setError(failure(cause, "Couldn’t load documents.")); } });
+    listPublicationRenewals(platform, organizationId)
+      .then((loaded) => { if (present) setValidity(new Map(loaded.map((item) => [item.documentId, item]))); })
+      .catch(() => { if (present) setValidity(new Map()); });
     return () => { present = false; };
   }, [platform, organizationId, refresh]);
-  const shown = (items ?? []).filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase()));
+  const shown = (items ?? []).filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase())
+    && matchesValidityFilter(validity.get(item.documentId), validityFilter));
   const reload = () => setRefresh((value) => value + 1);
 
   return <div className="admin-tabpanel governance-documents">
@@ -264,29 +284,37 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
       refreshSignal={refresh} onInspect={(documentId, title) => setInspectTarget({ documentId, title })} />
     <label className="island-field governance-search">Search documents
       <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Title" /></label>
+    <label className="island-field governance-search">Validity
+      <select value={validityFilter} onChange={(event) => setValidityFilter(event.target.value as GovernanceValidityFilter)}>
+        <option value="">All documents</option><option value="EXPIRING">Expiring soon</option><option value="EXPIRED">Expired</option>
+      </select></label>
     {items === null ? <div className="island island-empty" role="status">Loading documents…</div>
       : shown.length ? <IslandTable label="Published documents" minWidth={760}
-        columns="minmax(220px, 2fr) minmax(120px, 1fr) minmax(150px, 1.1fr) 80px 110px minmax(190px, auto)"
-        headers={["DOCUMENT", "DEPARTMENT", "SHARED WITH", "VERSION", "PUBLISHED", <span className="sr-only">Actions</span>]}>
-        {shown.map((item) => <IslandRow key={item.documentId}>
+        columns="minmax(220px, 2fr) minmax(120px, 1fr) minmax(150px, 1.1fr) 80px 110px minmax(130px, auto) minmax(190px, auto)"
+        headers={["DOCUMENT", "DEPARTMENT", "SHARED WITH", "VERSION", "PUBLISHED", "STATUS", <span className="sr-only">Actions</span>]}>
+        {shown.map((item) => { const state = validity.get(item.documentId); const status = state ? renewalStatus(state) : null;
+          return <IslandRow key={item.documentId}>
           <IslandCell className="island-row-cell is-name"><strong>{item.title}</strong>
             {item.openReports > 0 && <span className="island-chip is-danger">{item.openReports} reported</span>}</IslandCell>
           <IslandCell className="island-row-cell">{departmentName(item.responsibleDepartmentId)}</IslandCell>
           <IslandCell className="island-row-cell">{governanceReadersLabel(item.readerMode, item.readerDepartmentId, departmentName)}</IslandCell>
           <IslandCell className="island-row-cell">{item.versionLabel ?? (item.snapshotVersionNo ? `v${item.snapshotVersionNo}` : "—")}</IslandCell>
           <IslandCell className="island-row-cell">{libraryDateLabel(item.publishedAt)}</IslandCell>
+          <IslandCell className="island-row-cell">{status ? <span className={`island-chip has-dot ${status.tone === "is-danger" ? "tone-danger"
+            : status.tone === "is-attention" ? "tone-warning" : status.tone === "is-info" ? "tone-info" : ""}`}>{status.label}</span> : "—"}</IslandCell>
           <IslandCell className="island-row-cell governance-row-actions">
+            {state?.canRenew && <button type="button" className="secondary-button" onClick={() => setRenewing(state)}>Renew</button>}
             {item.readable ? <span className="island-meta">Readable in Library</span>
               : <button type="button" className="secondary-button" onClick={() => setInspectTarget({ documentId: item.documentId, title: item.title })}>Inspect</button>}
             <button type="button" className="secondary-button governance-danger-text"
               onClick={() => setWithdrawing({ documentId: item.documentId, title: item.title })}>Withdraw</button>
           </IslandCell>
-        </IslandRow>)}
+        </IslandRow>; })}
       </IslandTable> : <div className="island island-empty"><h3>{items.length ? "No matching documents" : "No published documents"}</h3></div>}
-    {inspectTarget && <ReasonDialog title="Inspect document" label="Reason" submitLabel="Open"
-      placeholder="Why do you need to open this document?"
-      effect={<><p><strong>{inspectTarget.title}</strong></p><p>Your reason is recorded before the document opens. You won’t
-        become a reader: it stays out of your Library and Ask Arden.</p></>}
+    {inspectTarget && <ReasonDialog title="Inspect document" subtitle={inspectTarget.title} icon="shield" noticeIcon="shield"
+      label="Reason" submitLabel="Open" placeholder="Why do you need to open this document?"
+      notice={<p>Your reason is recorded before the document opens. You won’t become a reader: it stays out of your
+        Library and Ask Arden.</p>}
       onClose={() => setInspectTarget(null)}
       onSubmit={async (reason) => {
         const id = await openGovernanceInspection(platform, organizationId, inspectTarget.documentId, reason);
@@ -303,5 +331,8 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
       </dl>} />}
     {withdrawing && <WithdrawPublicationDialog target={withdrawing} platform={platform} organizationId={organizationId}
       onClose={() => setWithdrawing(null)} onDone={() => { setWithdrawing(null); setMessage("Publication withdrawn"); reload(); }} />}
+    {renewing && <RenewPublicationDialog target={renewing} platform={platform} organizationId={organizationId}
+      departmentName={departmentName}
+      onClose={() => setRenewing(null)} onSent={() => { setRenewing(null); setMessage("Renewal sent for review"); reload(); }} />}
   </div>;
 }

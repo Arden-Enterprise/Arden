@@ -9,7 +9,7 @@ SELECT pg_advisory_xact_lock(hashtext('arden:migrations'));
 DO $repair_internal_execution$
 DECLARE
     item record;
-    -- Exact inventory after migrations 0001-0063 (52 routines). Any other count or name refuses.
+    -- Exact inventory after migrations 0001-0072 (58 routines). Any other count or name refuses.
     expected_names text[] := ARRAY[
         -- Reviewed baseline (0001-0022).
         'audience_snapshot_enforceable', 'claim_knowledge_index_job',
@@ -23,7 +23,7 @@ DECLARE
         'validate_selected_reader', 'validate_submission_reader_selection',
         'submission_proposed_reader_directory', 'review_submission_authors',
         -- 0027 categories; 0030 reader directory; 0032 governed AI sources.
-        'seed_document_categories', 'eligible_ai_publications', 'maintain_knowledge_ai_release',
+        'seed_document_categories', 'eligible_ai_publications',
         'knowledge_reader_directory',
         -- 0035 publication changes; 0036 preparation retry.
         'apply_publication_change', 'retry_knowledge_publication',
@@ -34,7 +34,18 @@ DECLARE
         -- 0039 notification fan-out; 0040 trigger-only placement validator;
         -- 0061 approved reader-change share fan-out; 0063 least-privilege System Console.
         'notify_arden_notification', 'notify_arden_publication_share',
-        'validate_collection_placement', 'record_index_ai_usage', 'system_admin_lifecycle_counts',
+        'validate_collection_placement',
+        -- 0068 renewal requests, renewal state and expiry reminders (decision 0032).
+        'request_publication_renewal', 'list_publication_renewal_state',
+        'enqueue_publication_expiry_reminders', 'list_publication_author_names',
+        -- 0068 author decision on renewals asked on their behalf (decisions 0032/0033).
+        'decide_on_behalf_renewal',
+        -- 0068 change-request target check for reviewers who are not readers.
+        'publication_change_target_state',
+        -- 0070 direct-share notice (decision 0034).
+        'notify_private_item_share',
+        -- 0071 least-privilege System Console.
+        'record_index_ai_usage', 'system_admin_lifecycle_counts',
         'guard_system_admin_membership', 'system_console_report'];
     -- Flow 4 includes overloaded routines: match their exact signatures.
     expected_maintenance_signatures text[] := ARRAY[

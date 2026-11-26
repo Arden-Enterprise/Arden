@@ -87,18 +87,18 @@ Owner Department filters. Topics were removed by [ADR0027](../decisions/0027-rem
 Use original Arden artwork for collection covers, not reference-company assets.
 
 Required **at submission**, not draft save: Title, Type,
-Content (editor or text-extractable PDF), business Version, Effective Date and
+Content (editor or text-extractable PDF), business Version and
 explicit Target Readers. Types: Policy & Standard, Procedure, Guide, Reference,
-Lessons Learned. Expiration Date is optional and cannot precede Effective Date.
+Lessons Learned. Expiration Date is optional and inclusive through that UTC calendar day.
 An update to previously published knowledge requires a Change Note. Business
 Version is not the technical save revision. Document Code is retired
 ([ADR 0021](../decisions/0021-reader-email-search-and-no-document-code.md), 14 November 2026): documents are
 identified by title, version and link, and the explicit Target Readers picker finds members by name or email.
 Owner Department follows the author's primary department. Author, Published Date,
 Last Updated and current-version identity are system-owned. Published Date means
-availability; Effective Date means applicability. An upcoming Effective Date alone
-does not prevent authorized reading. Applicability is Upcoming / Effective /
-Expired, separate from submission/preparation states. Do not introduce a separate
+availability; there is no separate Effective Date input or upcoming-publication
+AI mode ([ADR0030](../decisions/0030-published-date-ai-sources.md)). Reader validity
+is Current / Expiring soon / Expired, separate from submission/preparation states. Do not introduce a separate
 Superseded reader status.
 
 Remove Classification, Team/Project permission tags, redundant Category/Location/
@@ -148,6 +148,13 @@ Path requested in ARD-50: left navigation → dominant central graph → search/
 
 ## F13 Grounded agent
 
+The [Company/Personal context contract](../engineering/knowledge-source-contexts.md)
+records the 24 November refinement. Ask Arden uses permitted Company publications.
+In Private, the right sidebar answers from the saved note currently open and resets
+when the note or its revision changes. PDF imports participate via the text already
+saved in the note. Private questions require organization opt-in for the configured
+inference destination.
+
 Path: user asks with explicit permitted context → Core calculates allowed versions → retrieval → permitted evidence/context → generation → validated answer/citations with final access recheck. ARD-52 is the umbrella; later branch ADR 0012 changes its older architecture wording.
 
 | Acceptance ID | Complete path to verify | Evidence / remaining |
@@ -168,13 +175,37 @@ purpose-restricted hybrid path and reader UI; source identity and current access
 are rechecked. Selection explanation is not delivered. No general-chat history is
 imported into reader Q&A; no live-provider/release acceptance is implied.
 
+### F13-RESIZE Resizable Ask Arden side panel
+
+- Spec revision/date: 1 / 2026-11-24. Originator and decision owner: requesting project maintainer, who asked whether the
+  user can resize Ask Arden, reviewed the proposed behavior and said to build it, together with more room between the
+  notification bell and the docked panel. Record author: coding agent. Decision state: the feature is **accepted**; the
+  limits below are *agent choices*, **proposed — confirmation needed**. Branch `feat/resizable-ask-panel` from `staging`;
+  not merged or deployed.
+- Scope: while Ask Arden is docked beside the page, its left edge is a splitter. Dragging it changes the panel's width
+  and the page narrows or widens beside it. With the keyboard the splitter is focusable (`role="separator"` with its
+  current, minimum and maximum width); Left widens and Right narrows by 16 px, Home and End go to the narrowest and
+  widest; a double-click returns to the default (360 px, 340 px below 1200 px of window width). The chosen width is
+  remembered in this browser only (local storage); when storage is unavailable the default is used. The floating panel
+  and the phone sheet are unchanged and have no splitter. With the panel docked the top bar keeps 20 px between the
+  notification bell and the panel.
+- *Agent choices:* minimum 320 px; maximum 720 px and never so wide that the page has less than 520 px (the width that
+  already decides docking versus floating). A saved width wider than the current room is shown at the widest allowed
+  and recovers when the window grows. No API, database or dependency change.
+
+| Acceptance ID | Complete path to verify | Evidence / remaining |
+| --- | --- | --- |
+| F13-RESIZE-AC1 | Dragging the docked panel's edge changes its width within the limits; the page narrows beside it; the width survives a reload in the same browser; double-click restores the default. | Unit tests for limits and storage; UI tests for the splitter. Signed-in browser check not yet run. |
+| F13-RESIZE-AC2 | The splitter works by keyboard (Left/Right/Home/End), announces its value, and is absent when the panel floats or is a phone sheet. | UI tests. Screen-reader check not run. |
+| F13-RESIZE-AC3 | With the panel docked, the notification bell keeps visible space from the panel edge. | CSS only; not checked in the signed-in app. |
+
 ## F14 Conversation history
 
 The maintainer-approved combined F13/F14 implementation is specified by
 [GA-v2](../engineering/governed-hybrid-answering.md), including hybrid retrieval,
-staged evidence authorization, applicable-version selection and owner-private
+staged evidence authorization, current-publication selection and owner-private
 history. It is in progress, not a deployment receipt. ADR 0021 records the explicit
-currently-applicable default and forward-only lineage boundary.
+current-publication default; ADR0030 retires its temporal modes and lineage.
 
 Path: start conversation → exchange grounded messages → reopen history → revalidate changed access/version availability → continue or show unavailable evidence. Related work: ARD-59.
 

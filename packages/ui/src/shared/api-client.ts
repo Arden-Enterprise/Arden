@@ -1,14 +1,19 @@
 import type { Platform } from "./types";
-import type { KnowledgeMetadata, PublicationScope, KnowledgeType } from "@arden/domain";
+import { rememberReturnPath } from "../app/workspaceRoute";
+import type { KnowledgeMetadata, PublicationScope, KnowledgeType, SubmissionReviewResult } from "@arden/domain";
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
   departmentId: string | null; memberIds: string[] };
-export type NotificationTarget = { view: "review-queue"; id: string } | { view: "knowledge"; publicationId?: string };
+export type NotificationTarget = { view: "review-queue"; id: string } | { view: "knowledge"; publicationId?: string }
+  /** Decision 0032: My Contributions with this document selected (e.g. to decide an on-behalf renewal). */
+  | { view: "contribution"; documentId: string }
+  /** Decision 0034: a private item shared directly with this member. */
+  | { view: "shared-item"; itemId: string };
 export type NotificationItem = {
   id: string;
   type: "REVIEW_REQUESTED" | "REVIEW_APPROVED" | "REVIEW_REJECTED" | "PUBLICATION_ACTIVE"
     | "PUBLICATION_FAILED" | "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP"
-    | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED";
+    | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED" | "DOCUMENT_SHARED_DIRECT";
   message: string;
   createdAt: string;
   readAt: string | null;
@@ -36,6 +41,8 @@ export type OrganizationMembership = {
   departmentName?: string | null;
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
+  /** Organization Admin or an active reviewer grant. Older servers omit it; the UI then keeps Reviews visible. */
+  canReview?: boolean;
 };
 export type CurrentSession = {
   actor: { id: string; email?: string; fullName?: string | null; emailVerified?: boolean };
@@ -45,6 +52,7 @@ export type CurrentSession = {
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
   testMode?: boolean;
+  systemAdmin?: boolean;
 };
 export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
@@ -143,12 +151,14 @@ export type KnowledgeSubmission = {
   publishedVersionId: string | null;
   decisionComment: string | null;
   /** T6.1/T6.2: CONTENT, or a READER_CHANGE / WITHDRAWAL request about the current publication. */
-  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
   requestReason?: string | null;
   /** T6.3: why preparation failed, only while publicationState is FAILED. Only TEMPORARY can be retried. */
   publicationFailure?: "TEMPORARY" | "CONTENT" | "SYSTEM" | null;
   /** Historical provenance; new direct withdrawals require Organization Admin authority (0024). */
   withdrawal?: { by: "REVIEWER" | "ORGANIZATION_ADMIN"; reason: string; at: string } | null;
+  /** RENEWAL only (decision 0032): the requested Valid until (null = no expiry). */
+  renewal?: { expirationDate: string | null; onBehalfOfAuthor: boolean } | null;
 };
 export type AssignedKnowledgeReview = {
   submissionId: string;
@@ -163,7 +173,7 @@ export type AssignedKnowledgeReview = {
   /** Submitter's display name, visible to reviewers; absent or null when unavailable. */
   authorName?: string | null;
   /** T6.1: what the request asks for; absent from older servers means CONTENT. */
-  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL";
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
 };
 /** A submission the signed-in reviewer already decided (REV-02 history). */
 export type DecidedKnowledgeReview = {
@@ -185,6 +195,7 @@ export type ProposedReadersDetail = {
   members: Array<{ membershipId: string; displayName: string | null }>;
 };
 export type KnowledgeReviewDetail = KnowledgeSubmission & {
+  reviewAiAvailable?: boolean;
   /** Absent from older servers and null for a legacy audience submission. */
   proposedReaders?: ProposedReadersDetail | null;
   body: string;
@@ -209,9 +220,12 @@ export type PublishedKnowledge = {
   /** Approved readers without member identities; null for publications from before Target Readers. */
   targetReaders?: { mode: TargetReaders["mode"]; departmentId: string | null } | null;
   contentHash: string;
+  /** Published date of the current version (Home UPDATED column). */
   publishedAt: string;
   validFrom: string;
   validUntil: string | null;
+  /** Home AUTHOR column: the active author's display name; null shows "—" (decision 0032). */
+  authorName?: string | null;
   body?: string;
   mimeType?: "text/plain" | "application/pdf";
   pdfBase64?: string;
@@ -229,11 +243,15 @@ export type ReviewerGrant = {
   validUntil: string | null;
   status: "ACTIVE" | "INACTIVE";
 };
+export type AnswerFeedback = "GOOD" | "BAD" | null;
 export type AskArdenAnswer = {
   requestId?: string;
   conversationId?: string;
   revision?: number;
   turnId?: string;
+  feedback?: AnswerFeedback;
+  feedbackToken?: string;
+  noteCoverage?: "FULL" | "PARTIAL";
   status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
   answer: string;
   citations: Array<{
@@ -250,12 +268,12 @@ export type AskArdenAnswer = {
     endOffset?: number;
   }>;
 };
-export type AiVersionScope = "CURRENT" | "UPCOMING" | "COMPARE";
 export type AiConversationSummary = { id: string; title: string; revision: number; updatedAt: string };
 export type AiConversation = AiConversationSummary & { turns: Array<{
   id: string; requestId: string; question: string; sequence: number; answer: string;
-  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE"; versionScope: AiVersionScope;
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE";
   citations: AskArdenAnswer["citations"];
+  feedback?: AnswerFeedback;
 }> };
 
 export type SystemConsoleQuery = { from: string; to: string; search?: string; status?: string; page?: number; pageSize?: number; organizationId?: string };
@@ -468,6 +486,14 @@ export function loadKnowledgeReview(platform: Platform, organizationId: string, 
   return request(platform, `${knowledgePath(organizationId)}/reviews/${submissionId}`);
 }
 
+export function runSubmissionReview(platform: Platform, organizationId: string, review: KnowledgeReviewDetail,
+  signal: AbortSignal): Promise<SubmissionReviewResult> {
+  return request(platform, `${knowledgePath(organizationId)}/reviews/${review.id}/ai-review`, {
+    method: "POST", signal,
+    body: JSON.stringify({ snapshotVersionId: review.snapshotVersionId, snapshotContentHash: review.contentHash }),
+  }, platform === "web" ? 85_000 : undefined);
+}
+
 /**
  * `approvedReaders` (T2.1) keeps or narrows the proposed readers on approval; omit it to approve them as proposed.
  * The server rejects widening (409 READERS_WIDENED) and invalid selections (400 INVALID_READERS).
@@ -559,6 +585,43 @@ export function requestPublicationChange(platform: Platform, organizationId: str
   });
 }
 
+/** Decision 0032: validity of current publications the caller is responsible for (author, reviewer, Admin). */
+export type PublicationRenewalState = {
+  documentId: string; publishedVersionId: string; title: string; responsibleDepartmentId: string | null;
+  /** Effective Valid until (YYYY-MM-DD); null means no expiry. */
+  expirationDate: string | null; renewalPending: boolean; authorActive: boolean; isAuthor: boolean; canRenew: boolean;
+  /** Active author's display name; null when the author is no longer active. */
+  authorName?: string | null;
+  /** The renewal waiting for review. `canDecide`: you are the author of a request made on your behalf (0032). */
+  pending?: { submissionId: string; snapshotVersionId: string; contentHash: string; onBehalfOfAuthor: boolean;
+    requestedByName: string | null; reason: string; expirationDate: string | null; requestedAt: string;
+    authorWindowUntil: string | null; canDecide: boolean } | null;
+};
+
+/** Decision 0032: the author approves or rejects a renewal asked on their behalf (same decision endpoint). */
+export function decidePublicationRenewal(platform: Platform, organizationId: string,
+  pending: NonNullable<PublicationRenewalState["pending"]>, action: "APPROVE" | "REJECT", comment: string | null,
+  idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/reviews/${pending.submissionId}/decisions`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ action, expectedSnapshotVersionId: pending.snapshotVersionId,
+      expectedContentHash: pending.contentHash, comment }),
+  });
+}
+
+export async function listPublicationRenewals(platform: Platform, organizationId: string): Promise<PublicationRenewalState[]> {
+  const result = await request<{ items: PublicationRenewalState[] }>(platform, `${knowledgePath(organizationId)}/renewals`);
+  return result.items;
+}
+
+/** Decision 0032 B: asks a reviewer to renew the Valid until of the current publication (null = no expiry). */
+export function requestPublicationRenewal(platform: Platform, organizationId: string, documentId: string,
+  input: { expirationDate: string | null; reason: string }, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/renewal`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
+  });
+}
+
 export async function listPublishedKnowledge(platform: Platform, organizationId: string,
   scope?: PublicationScope): Promise<PublishedKnowledge[]> {
   const path = `${knowledgePath(organizationId)}/published${scope ? `?scope=${encodeURIComponent(scope)}` : ""}`;
@@ -571,7 +634,7 @@ export function loadPublishedKnowledge(platform: Platform, organizationId: strin
 }
 
 export function askArden(platform: Platform, organizationId: string, query: string, conversation?: {
-  conversationId: string; requestId: string; expectedRevision: number; versionScope: AiVersionScope;
+  conversationId: string; requestId: string; expectedRevision: number;
 }): Promise<AskArdenAnswer> {
   return request(platform, `/api/v1/organizations/${organizationId}/ai/answers`, {
     method: "POST", body: JSON.stringify({ query, ...conversation }),
@@ -590,6 +653,18 @@ export async function listAiConversations(platform: Platform, organizationId: st
 }
 export function loadAiConversation(platform: Platform, organizationId: string, id: string): Promise<AiConversation> {
   return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${id}`);
+}
+
+export function rateAiAnswer(platform: Platform, organizationId: string, conversationId: string, turnId: string,
+  feedback: AnswerFeedback): Promise<{ feedback: AnswerFeedback }> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${conversationId}/turns/${turnId}/feedback`, {
+    method: "PUT", body: JSON.stringify({ feedback }),
+  });
+}
+
+export type PrivateFeedbackWeek = { weekStart: string; good: number; bad: number };
+export function loadPrivateFeedbackAnalytics(platform: Platform): Promise<{ weeks: PrivateFeedbackWeek[] }> {
+  return request(platform, "/api/v1/system/analytics/private-feedback");
 }
 
 export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {
@@ -634,6 +709,8 @@ export async function signIn(platform: Platform, email: string, password: string
 
 export async function beginGoogleSignIn(platform: Platform): Promise<CurrentSession | null> {
   if (platform === "web") {
+    // Google returns to `/`; keep the workspace page the member was opening so sign-in lands there.
+    rememberReturnPath(window.location.pathname);
     window.location.assign("/api/v1/auth/google/start?client=web");
     return null;
   }

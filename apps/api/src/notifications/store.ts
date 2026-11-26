@@ -12,6 +12,8 @@ type NotificationRow = {
   resource_id: string;
   publication_title: string | null;
   shared_by_name: string | null;
+  expires_on: string | null;
+  request_reason: string | null;
   created_at: Date;
   read_at: Date | null;
 };
@@ -52,7 +54,8 @@ export class PgNotificationStore implements NotificationStore {
           AND (n.event_type <> 'REVIEW_REQUESTED' OR n.resource_id = ANY($2::uuid[]))`,
       [organizationId, visibleReviewIds]);
       const rows = await client.query<NotificationRow>(`SELECT n.notification_id, n.event_type,
-          n.resource_type, n.resource_id, n.publication_title, n.shared_by_name, n.created_at, n.read_at
+          n.resource_type, n.resource_id, n.publication_title, n.shared_by_name,
+          to_char(n.expires_on, 'YYYY-MM-DD') AS expires_on, n.request_reason, n.created_at, n.read_at
         FROM arden_notification n
         WHERE n.organization_id = $1
           AND ($2::boolean = false OR n.read_at IS NULL)
@@ -67,8 +70,16 @@ export class PgNotificationStore implements NotificationStore {
       const items: NotificationRecord[] = pageRows.map(row => ({
         id: row.notification_id, type: row.event_type, resourceType: row.resource_type,
         resourceId: row.resource_id, createdAt: row.created_at.toISOString(), readAt: row.read_at?.toISOString() ?? null,
-        ...(row.event_type === "DOCUMENT_SHARED_PERSONAL" || row.event_type === "DOCUMENT_SHARED_GROUP" ? {
+        ...(row.event_type === "DOCUMENT_SHARED_PERSONAL" || row.event_type === "DOCUMENT_SHARED_GROUP"
+          || row.event_type === "DOCUMENT_SHARED_DIRECT" ? {
           publicationTitle: row.publication_title ?? undefined, sharedByName: row.shared_by_name ?? undefined,
+        } : {}),
+        ...(row.event_type === "PUBLICATION_EXPIRING" ? {
+          publicationTitle: row.publication_title ?? undefined, expiresOn: row.expires_on ?? undefined,
+        } : {}),
+        ...(row.event_type === "PUBLICATION_RENEWAL_ON_BEHALF" ? {
+          publicationTitle: row.publication_title ?? undefined, sharedByName: row.shared_by_name ?? undefined,
+          requestReason: row.request_reason ?? undefined,
         } : {}),
       }));
       return { items, unreadCount: Number(count.rows[0]?.unread_count ?? 0),

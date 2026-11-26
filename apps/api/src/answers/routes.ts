@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ArdenDataRepository } from "../db/repository.js";
 import type { AskArdenClient } from "./ai-client.js";
+import type { AnswerFeedback } from "./conversation-store.js";
 import { GovernedAnswering } from "./governed-answering.js";
-import { GovernedAnswerError, type VersionScope } from "./governed-contracts.js";
+import { GovernedAnswerError } from "./governed-contracts.js";
 
 type Actor = (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>;
 type Params = { organizationId: string; conversationId: string };
-type Body = { query: string; conversationId?: string; requestId?: string; expectedRevision?: number; versionScope?: VersionScope };
+type Body = { query: string; conversationId?: string; requestId?: string; expectedRevision?: number };
 export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenDataRepository, ai: AskArdenClient | null,
   actor: Actor, uuidPattern: string): void {
   const base = "/api/v1/organizations/:organizationId/ai";
@@ -31,7 +32,6 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
       query: { type: "string", minLength: 1, maxLength: 4_000 },
       conversationId: { type: "string", pattern: uuidPattern }, requestId: { type: "string", pattern: uuidPattern },
       expectedRevision: { type: "integer", minimum: 0, maximum: 1_000_000 },
-      versionScope: { type: "string", enum: ["CURRENT", "UPCOMING", "COMPARE"] },
     } } } }, async (request, reply) => {
     const context = await actor(request, reply);
     if (!context) return;
@@ -44,7 +44,7 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
       const requestId = request.body.requestId ?? randomUUID();
       const answer = await engine.answer(context.userId, request.params.organizationId, { query,
         conversationId: request.body.conversationId ?? randomUUID(), requestId,
-        expectedRevision: request.body.expectedRevision ?? 0, versionScope: request.body.versionScope ?? "CURRENT" });
+        expectedRevision: request.body.expectedRevision ?? 0 });
       const recorded = await repository.recordAiAnswerResult(context.userId, request.params.organizationId, requestId,
         "CHAT", answer.status, answer.citations.length);
       if (!recorded) throw new Error("Answer result metadata was not recorded");
@@ -88,4 +88,28 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
       return found;
     } catch (error) { return fail(reply, error, request); }
   });
+  app.put<{ Params: Params & { turnId: string }; Body: { feedback: AnswerFeedback } }>(
+    `${base}/conversations/:conversationId/turns/:turnId/feedback`, {
+      schema: {
+        params: { ...params, required: ["organizationId", "conversationId", "turnId"],
+          properties: { ...params.properties, conversationId: { type: "string", pattern: uuidPattern },
+            turnId: { type: "string", pattern: uuidPattern } } },
+        querystring: { type: "object", additionalProperties: false, properties: {} },
+        body: { type: "object", additionalProperties: false, required: ["feedback"],
+          properties: { feedback: { enum: ["GOOD", "BAD", null] } } },
+      },
+    }, async (request, reply) => {
+      const context = await actor(request, reply);
+      if (!context) return;
+      reply.header("Cache-Control", "no-store");
+      const { organizationId, conversationId, turnId } = request.params;
+      const { feedback } = request.body;
+      try {
+        if (!repository.conversations) throw new Error("Conversation persistence unavailable");
+        if (!await repository.conversations.setFeedback(context.userId, organizationId, conversationId, turnId, feedback)) {
+          throw new GovernedAnswerError("NOT_FOUND");
+        }
+        return { feedback };
+      } catch (error) { return fail(reply, error, request); }
+    });
 }

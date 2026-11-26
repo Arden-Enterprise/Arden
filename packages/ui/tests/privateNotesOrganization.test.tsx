@@ -11,6 +11,7 @@ import { trashMeta } from "../src/personal-workspace/PrivateNotesTrash";
 import type { PrivateCollection, PrivateNote } from "../src/shared/types";
 import { installTestDialogs } from "./dialogTestSupport";
 
+vi.mock("../src/knowledge/ArdenRichTextEditor", () => import("./richEditorStub"));
 vi.mock("../src/shared/useAutosizeTextarea", () => ({ useAutosizeTextarea: () => ({ current: null }) }));
 
 const collections: PrivateCollection[] = [
@@ -43,8 +44,7 @@ function Workspace({ seedNotes = notes, seedCollections = collections, connect }
   controllerRef = controller;
   return createElement("div", { className: "arden-app-shell" },
     createElement(AppSidebar, {
-      activeView: "personal-workspace", platform: "web", previewRole: "member", organization: null,
-      memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
+      activeView: "personal-workspace", platform: "web", memberName: "Lan Nguyen", memberRole: "Member", onNavigate: vi.fn(), onSignOut: vi.fn(), onOpenSettings: vi.fn(),
       privateNotes: { controller, pageVisible: true, onOpen: vi.fn() },
       trashCount: controller.trash.length, onOpenTrash: () => controller.openTrash(),
     }),
@@ -75,11 +75,11 @@ describe("private notes model", () => {
 
   it("excludes a collection and its descendants from Move to and marks the current place", () => {
     const destinations = moveDestinations(collections, { kind: "collection", id: "c1", parentId: null });
-    expect(destinations.map((entry) => entry.title)).toEqual(["Private Notes", "Reading"]);
+    expect(destinations.map((entry) => entry.title)).toEqual(["Private", "Reading"]);
     expect(destinations[0]).toMatchObject({ current: true });
     const forNote = moveDestinations(collections, { kind: "note", id: "n2", parentId: "c2" });
     expect(forNote.map((entry) => [entry.title, entry.depth, entry.current])).toEqual([
-      ["Private Notes", 0, false], ["Capstone", 1, false], ["Sprints", 2, true], ["Reading", 1, false]]);
+      ["Private", 0, false], ["Capstone", 1, false], ["Sprints", 2, true], ["Reading", 1, false]]);
   });
 
   it("lists favorites oldest first across notes and collections", () => {
@@ -92,13 +92,13 @@ describe("private notes model", () => {
   it("describes trash batches with their origin and remaining days", () => {
     const now = Date.parse("2026-11-23T00:00:00Z");
     expect(trashMeta({ batchId: "b", kind: "note", id: "n", title: "x", fromCollectionTitle: null, itemCount: 1,
-      trashedAt: "2026-11-23T00:00:00Z", purgeAfter: "2026-12-23T00:00:00Z" }, now)).toBe("From Private Notes · Deletes in 30 days");
+      trashedAt: "2026-11-23T00:00:00Z", purgeAfter: "2026-12-23T00:00:00Z" }, now)).toBe("From Private · Deletes in 30 days");
     expect(trashMeta({ batchId: "b", kind: "collection", id: "c", title: "x", fromCollectionTitle: "Capstone", itemCount: 3,
       trashedAt: "2026-11-23T00:00:00Z", purgeAfter: "2026-11-24T00:00:00Z" }, now)).toBe("From Capstone · 3 items · Deletes in 1 day");
   });
 });
 
-describe("Private Notes tree in demo mode", () => {
+describe("Private tree in demo mode", () => {
   it("renders collections before notes, expands nested collections and shows no Favorites section without favorites", () => {
     render(createElement(Workspace));
     expect(rowTitles()).toEqual(["Capstone", "Reading", "Loose idea"]);
@@ -159,7 +159,7 @@ describe("Private Notes tree in demo mode", () => {
     expect(within(menu).getByText("Move to…")).toBeTruthy();
     expect(within(menu).queryByRole("menuitem", { name: "Move to Capstone" })).toBeNull();
     expect(within(menu).queryByRole("menuitem", { name: "Move to Sprints" })).toBeNull();
-    const current = within(menu).getByRole("menuitem", { name: "Move to Private Notes" }) as HTMLButtonElement;
+    const current = within(menu).getByRole("menuitem", { name: "Move to Private" }) as HTMLButtonElement;
     expect(current.disabled).toBe(true);
     expect(within(current).getByText("Current")).toBeTruthy();
     fireEvent.keyDown(menu, { key: "Escape" });
@@ -207,7 +207,7 @@ describe("Private Notes tree in demo mode", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Trash" }));
     expect(screen.getByRole("heading", { name: "Trash" })).toBeTruthy();
     expect(screen.getByText("Items in trash are permanently deleted after 30 days. Only you can see them.")).toBeTruthy();
-    expect(screen.getByText("From Private Notes · 4 items · Deletes in 30 days")).toBeTruthy();
+    expect(screen.getByText("From Private · 4 items · Deletes in 30 days")).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Restore" })));
     expect(rowTitles()).toEqual(["Capstone", "Reading", "Loose idea"]);
     expect(controllerRef.state.notes).toHaveLength(3);
@@ -228,7 +228,7 @@ describe("Private Notes tree in demo mode", () => {
   it("asks before trashing a note with unsaved edits", async () => {
     render(createElement(Workspace));
     fireEvent.click(within(tree()).getByRole("button", { name: "Loose idea" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Note content" }), { target: { value: "Unsaved" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Note content" }), { target: { value: "Unsaved" } });
     openRowMenu("Loose idea");
     await act(async () => fireEvent.click(menuItem("Move to trash")));
     expect(controllerRef.trashConfirm).toEqual({ kind: "note", id: "n1" });
@@ -260,14 +260,14 @@ describe("top bar breadcrumb", () => {
     expect(within(bar).queryByRole("button", { name: "Sprint plan" })).toBeNull();
     fireEvent.click(within(bar).getByRole("button", { name: "Capstone" }));
     expect(screen.getByRole("region", { name: "Capstone" })).toBeTruthy();
-    expect(crumbs()).toEqual(["Private Notes", "Capstone"]);
+    expect(crumbs()).toEqual(["Private", "Capstone"]);
   });
 
-  it("shows the Private Notes root only for top-level notes and returns to it", () => {
+  it("shows the Private root only for top-level notes and returns to it", () => {
     render(createElement(Workspace));
     act(() => controllerRef.openNote("n1"));
-    expect(crumbs()).toEqual(["Private Notes", "Loose idea"]);
-    fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("button", { name: "Private Notes" }));
+    expect(crumbs()).toEqual(["Private", "Loose idea"]);
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("button", { name: "Private" }));
     expect(controllerRef.focus.kind).toBe("root");
   });
 });
@@ -279,8 +279,8 @@ describe("account menu", () => {
     expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
     fireEvent.click(trigger);
     const menu = screen.getByRole("menu", { name: "Account" });
-    expect(within(menu).getByText("Member · FPT Digital")).toBeTruthy();
-    expect(within(menu).getAllByRole("menuitem").map(textOf)).toEqual(["Settings", "Trash", "Exit preview"]);
+    expect(within(menu).getByText("Member · Organization")).toBeTruthy();
+    expect(within(menu).getAllByRole("menuitem").map(textOf)).toEqual(["Settings", "Trash", "Log out"]);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("menu", { name: "Account" })).toBeNull();
     expect(document.activeElement).toBe(trigger);
