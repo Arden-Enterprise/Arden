@@ -109,6 +109,20 @@ the existing audience, review, ownership and no-content-bypass contracts.
 - A one-time operator bootstrap selects an active eligible account and establishes the first manager.
   Later grants use the manager-only API. Migration operators must inspect current admins/memberships
   and complete the documented handoff before choosing the initial manager.
+- **First-time setup & isolated identity refinement (2026-11-26):** Approved directly by the
+  requesting maintainer for open-source self-hosted operation. System Admin credentials and audit
+  events are stored in a dedicated PostgreSQL schema (`arden_system`) accessed only through a
+  dedicated non-bypass role (`arden_system_auth`), completely separate from Supabase Auth and
+  `arden.user_account` (`arden_runtime` receives zero privileges on `arden_system`). Initial
+  provisioning uses a First-Time Setup UI (`POST /api/v1/system/setup`) protected by two layers:
+  (1) a PostgreSQL advisory-locked check closing setup permanently once any active manager exists,
+  and (2) a one-time operator setup token (`ARDEN_SYSTEM_SETUP_TOKEN` or a startup-generated token
+  printed once to the API console) preventing unauthorized takeover before setup completes. On a
+  fresh installation with no organizations, Arden opens First-Time Setup automatically; on an
+  already-running development/staging installation with existing organizations, operators can still
+  initialize the first System Admin via `/system/setup` without disrupting active members. System
+  Admin sign-in (`/api/v1/system/auth/*`) uses a dedicated HMAC-signed HttpOnly session cookie
+  non-interchangeable with ordinary user sessions.
 - System Console queries return explicit aggregates and anonymous quality references. They do not
   expose tenant content fields, individual names, prompts, answers, document text, raw document IDs
   or error text. Health reports return sanitized status/latency and queue counts only.

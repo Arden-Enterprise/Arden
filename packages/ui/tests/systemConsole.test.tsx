@@ -9,6 +9,11 @@ import type { CurrentSession } from "../src/shared/api-client";
 
 const api = vi.hoisted(() => ({
   restoreSession: vi.fn(),
+  getSystemSetupStatus: vi.fn(async () => ({ needsInitialSetup: false, hasOrganizations: true })),
+  restoreSystemSession: vi.fn(async () => null),
+  completeSystemSetup: vi.fn(),
+  systemSignIn: vi.fn(),
+  systemSignOut: vi.fn(async () => undefined),
   getSystemConsoleReport: vi.fn(),
   getSystemConsoleOrganization: vi.fn(),
 }));
@@ -132,5 +137,62 @@ describe("System Console", () => {
     fireEvent.click(screen.getByRole("button", { name: /continue without creating an organization/i }));
     expect(await screen.findByRole("heading", { name: /account setup complete/i })).toBeTruthy();
     expect(api.getSystemConsoleReport).not.toHaveBeenCalled();
+  });
+
+  it("opens First-Time System Admin Setup automatically on a fresh installation and enters the Console after setup", async () => {
+    api.restoreSession.mockResolvedValue(null);
+    api.getSystemSetupStatus.mockResolvedValue({ needsInitialSetup: true, hasOrganizations: false });
+    api.restoreSystemSession.mockResolvedValue(null);
+    api.completeSystemSetup.mockResolvedValue({
+      administrator: {
+        id: "44444444-4444-4444-8444-444444444444",
+        email: "sysadmin@arden.local",
+        fullName: "System Operator",
+        canManageSystemAdmins: true,
+      },
+      sessionExpiresAt: "2026-11-27T00:00:00.000Z",
+    });
+    api.getSystemConsoleReport.mockResolvedValue({ organizations: { total: 0 } });
+
+    render(createElement(ArdenShell, { platform: "web" }));
+    expect(await screen.findByRole("heading", { name: /create the first system admin/i })).toBeTruthy();
+
+    fireEvent.change(screen.getByLabelText("One-time setup token"), { target: { value: "valid-setup-token-123456" } });
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "System Operator" } });
+    fireEvent.change(screen.getByLabelText("System Admin email"), { target: { value: "sysadmin@arden.local" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "StrongPassword!1" } });
+    fireEvent.change(screen.getByLabelText("Confirm password"), { target: { value: "StrongPassword!1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create System Admin" }));
+
+    expect(await screen.findByRole("heading", { name: "Tổng quan" })).toBeTruthy();
+    expect(api.completeSystemSetup).toHaveBeenCalledWith("web", {
+      setupToken: "valid-setup-token-123456",
+      email: "sysadmin@arden.local",
+      fullName: "System Operator",
+      password: "StrongPassword!1",
+    });
+  });
+
+  it("keeps member sign-in on / when organizations already exist while allowing /system/setup to initialize System Admin", async () => {
+    api.restoreSession.mockResolvedValue(null);
+    api.getSystemSetupStatus.mockResolvedValue({ needsInitialSetup: true, hasOrganizations: true });
+    api.restoreSystemSession.mockResolvedValue(null);
+
+    render(createElement(ArdenShell, { platform: "web" }));
+    expect(await screen.findByRole("heading", { name: /sign in to your account/i })).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: /initialize system admin/i }));
+    expect(await screen.findByRole("heading", { name: /create the first system admin/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /back to member sign in/i })).toBeTruthy();
+  });
+
+  it("redirects /system/setup to System Admin sign-in when initial setup is already completed", async () => {
+    window.history.replaceState(null, "", "/system/setup");
+    api.restoreSession.mockResolvedValue(null);
+    api.getSystemSetupStatus.mockResolvedValue({ needsInitialSetup: false, hasOrganizations: true });
+    api.restoreSystemSession.mockResolvedValue(null);
+
+    render(createElement(ArdenShell, { platform: "web" }));
+    expect(await screen.findByRole("heading", { name: /system admin sign in/i })).toBeTruthy();
+    expect(screen.getByText(/initial system admin setup has already been completed/i)).toBeTruthy();
   });
 });

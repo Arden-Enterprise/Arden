@@ -68,6 +68,11 @@ const systemAdministratorCollection = /^\/api\/v1\/system\/administrators$/;
 const systemAdministratorRevoke = new RegExp(`^/api/v1/system/administrators/${uuid}/revoke$`);
 const systemAdministratorCapability = new RegExp(`^/api/v1/system/administrators/${uuid}$`);
 const systemConsoleRead = new RegExp(`^/api/v1/system/(overview|organizations|organizations/${uuid}|reports/(knowledge|ai-usage|contributions|feedback|quality)|health)$`);
+const systemSetupStatusPath = /^\/api\/v1\/system\/setup\/status$/;
+const systemSetupPostPath = /^\/api\/v1\/system\/setup$/;
+const systemAuthMePath = /^\/api\/v1\/system\/auth\/me$/;
+const systemAuthSignInPath = /^\/api\/v1\/system\/auth\/sign-in$/;
+const systemAuthSignOutPath = /^\/api\/v1\/system\/auth\/sign-out$/;
 const aiAnswerFeedback = new RegExp(`^/api/v1/organizations/${uuid}/ai/feedback$`);
 const invitationPreview = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}$/;
 const notificationCollection = new RegExp(`^/api/v1/organizations/${uuid}/notifications$`);
@@ -215,6 +220,11 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   const systemConsoleGet = systemConsoleRead.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey
     && [...url.searchParams.keys()].every(key => systemConsoleQueryKeys.has(key));
+  const systemAuthRequest = !url.search && !request.ifMatch && !request.idempotencyKey && (
+    ((systemSetupStatusPath.test(url.pathname) || systemAuthMePath.test(url.pathname)) && request.method === "GET" && !request.body)
+    || ((systemSetupPostPath.test(url.pathname) || systemAuthSignInPath.test(url.pathname)) && request.method === "POST" && Boolean(request.body))
+    || (systemAuthSignOutPath.test(url.pathname) && request.method === "POST" && !request.body)
+  );
   const aiFeedback = aiAnswerFeedback.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const adminPost = (adminCreatePath.test(url.pathname) || adminMemberDepartmentPath.test(url.pathname))
@@ -277,7 +287,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || maintenanceImportPost || maintenanceList || maintenanceCreate || maintenanceRead || maintenanceWrite
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke || systemAdministrationCapability
-    || systemConsoleGet || aiFeedback
+    || systemConsoleGet || systemAuthRequest || aiFeedback
     || notificationsGet || notificationReadRequest || notificationReadAllRequest)
     && (!url.search || queryAllowed || catalogQuery || notificationsGet || publicationScopeQuery || maintenanceList || maintenanceRead || closedReports || systemConsoleGet);
 }

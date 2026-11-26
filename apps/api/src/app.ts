@@ -12,6 +12,7 @@ import { allKnowledgeClassifications, defaultKnowledgeClassification, type Knowl
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
 import { registerSystemConsoleRoutes } from "./system-console/routes.js";
+import { createSystemActorResolver, registerSystemAuthRoutes } from "./system-auth/routes.js";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { registerAnswerRoutes } from "./answers/routes.js";
 import { registerReaderSummaryRoutes } from "./reader-ai/routes.js";
@@ -49,6 +50,7 @@ type AppDependencies = {
   authTrustedOrigins: string[];
   secureCookies: boolean;
   sessionSigningKey?: Buffer;
+  systemSetupToken?: string;
   repository: ArdenDataRepository;
   storage: PrivateContentStorage;
   invitationMailer?: InvitationMailer | null;
@@ -85,7 +87,7 @@ export function buildApp(dependencies: AppDependencies) {
       },
       redact: {
         paths: ["req.headers.authorization", "req.headers.cookie", "req.body.password", "req.body.currentPassword", "req.body.newPassword",
-          "req.body.token", "req.body.accessToken", "req.body.refreshToken", "res.headers.set-cookie"],
+          "req.body.setupToken", "req.body.token", "req.body.accessToken", "req.body.refreshToken", "res.headers.set-cookie"],
         censor: "[REDACTED]",
       },
     },
@@ -110,8 +112,17 @@ export function buildApp(dependencies: AppDependencies) {
   registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern);
   registerReaderSummaryRoutes(app, dependencies.repository, dependencies.storage, dependencies.readerAi ?? null, requestActor, uuidPattern);
   registerReaderQuestionRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null, requestActor, uuidPattern);
+  registerSystemAuthRoutes(app, {
+    store: dependencies.repository.systemAuth,
+    setupToken: dependencies.systemSetupToken,
+    sessionKey,
+    secureCookies: dependencies.secureCookies,
+  });
+  const systemConsoleActor = dependencies.repository.systemAuth
+    ? createSystemActorResolver(dependencies.repository.systemAuth, sessionKey, dependencies.secureCookies)
+    : requestActor;
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
-  registerSystemConsoleRoutes(app, dependencies.repository.systemConsole, requestActor, uuidPattern, async () => ({
+  registerSystemConsoleRoutes(app, dependencies.repository.systemConsole, systemConsoleActor, uuidPattern, async () => ({
     auth: await probeSystemDependency(process.env.SUPABASE_URL, "/auth/v1/health"),
     ardenAi: await probeSystemDependency(process.env.ARDEN_AI_URL, "/health/ready",
       process.env.ARDEN_AI_SERVICE_TOKEN ? { authorization: `Bearer ${process.env.ARDEN_AI_SERVICE_TOKEN}` } : undefined),

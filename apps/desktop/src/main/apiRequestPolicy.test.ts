@@ -263,6 +263,14 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/system/administrators/${sourcePrivateVersionId}`, method: "PATCH", body: JSON.stringify({ canManageSystemAdmins: true }) }), true);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/reports/ai-usage?from=2026-01-01&to=2026-01-31", method: "GET" }), true);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/health?secret=1", method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/setup/status", method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/setup/status?all=1", method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/setup", method: "POST", body: JSON.stringify({ setupToken: "tok", email: "a@b.c", fullName: "Op", password: "Password!1" }) }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/setup", method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/auth/me", method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/auth/sign-in", method: "POST", body: JSON.stringify({ email: "a@b.c", password: "Password!1" }) }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/auth/sign-out", method: "POST" }), true);
+    assert.equal(validateDesktopApiRequest({ path: "/api/v1/system/auth/sign-out", method: "POST", body: "{}" }), false);
   });
 
   it("allows only a single explicit publication scope on the published list", () => {

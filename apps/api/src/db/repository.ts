@@ -9,6 +9,7 @@ import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/stor
 import { departmentAudienceName } from "./department-audience-name.js";
 import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { PgSystemConsoleStore, type SystemConsoleStore } from "../system-console/store.js";
+import { PgSystemAuthStore, type SystemAuthStore } from "../system-auth/store.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
 import { PgPrivateOrganizationStore, isActiveCollection, lockTree, type PrivateOrganizationStore,
@@ -646,6 +647,7 @@ export interface ArdenDataRepository {
   readonly audienceGroups?: AudienceGroupStore;
   readonly systemAdministration?: SystemAdministrationStore;
   readonly systemConsole?: SystemConsoleStore;
+  readonly systemAuth?: SystemAuthStore;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
@@ -788,6 +790,7 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly audienceGroups: AudienceGroupStore;
   readonly systemAdministration: SystemAdministrationStore;
   readonly systemConsole: SystemConsoleStore;
+  readonly systemAuth: SystemAuthStore;
   readonly maintenance: MaintenancePort;
   readonly privateOrganization: PgPrivateOrganizationStore;
   /** System-only retention capability for the in-process 30-day purge loop. */
@@ -800,7 +803,8 @@ export class ArdenRepository implements ArdenDataRepository {
       (user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.systemAdministration = new PgSystemAdministrationStore((user, work) => this.withSystemAdminManager(user, work));
-    this.systemConsole = new PgSystemConsoleStore((user, work) => this.withSystemAdmin(user, work));
+    this.systemConsole = new PgSystemConsoleStore((user, work) => this.withSystemConsoleAdmin(user, work));
+    this.systemAuth = new PgSystemAuthStore(pool);
     this.maintenance = new PgMaintenanceStore((user, org, work) => this.withActorContext(user, org, work), content);
     this.privateOrganization = new PgPrivateOrganizationStore((user, org, work) => this.withActorContext(user, org, work),
       (work) => this.withPrivateTrashRetention(work));
@@ -1511,6 +1515,34 @@ export class ArdenRepository implements ArdenDataRepository {
     } finally {
       client.release();
     }
+  }
+
+  private async withSystemConsoleAdmin<T>(actorId: string, work: (client: PoolClient) => Promise<T>): Promise<T | null> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("SET LOCAL ROLE arden_system_auth");
+      await client.query("SET LOCAL search_path TO arden_system, arden, public");
+      await client.query(`SELECT set_config('arden.system_auth_mode', 'session', true),
+        set_config('arden.actor_id', $1, true),
+        set_config('arden.instance_admin', 'true', true)`, [actorId]);
+      const isolated = await client.query(
+        "SELECT 1 FROM arden_system.administrator WHERE admin_id = $1 AND status = 'ACTIVE'",
+        [actorId],
+      );
+      if (isolated.rowCount) {
+        const result = await work(client);
+        await client.query("COMMIT");
+        return result;
+      }
+      await client.query("ROLLBACK");
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+    return this.withSystemAdmin(actorId, work);
   }
 
   private async withSystemAdmin<T>(userId: string, work: (client: PoolClient) => Promise<T>): Promise<T | null> {

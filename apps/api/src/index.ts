@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -143,6 +143,12 @@ try {
   throw new Error("Notification worker database role or schema is unavailable; verify ARDEN_NOTIFICATION_DATABASE_URL and its arden_notification_worker membership");
 }
 
+const configuredSystemSetupToken = process.env.ARDEN_SYSTEM_SETUP_TOKEN?.trim();
+if (configuredSystemSetupToken !== undefined && configuredSystemSetupToken.length < 16) {
+  throw new Error("ARDEN_SYSTEM_SETUP_TOKEN must be at least 16 characters when configured");
+}
+const systemSetupToken = configuredSystemSetupToken ?? randomBytes(32).toString("base64url");
+
 const repository = new ArdenRepository(pool, contentStorage);
 const app = buildApp({
   checkDatabase: checkRuntimeDatabase,
@@ -158,6 +164,7 @@ const app = buildApp({
   secureCookies: process.env.NODE_ENV === "production",
   sessionSigningKey: sessionSigningKey(process.env.ARDEN_SESSION_SIGNING_KEY,
     process.env.NODE_ENV === "production"),
+  systemSetupToken,
   repository,
   storage: contentStorage,
   invitationMailer,
@@ -269,6 +276,22 @@ process.once("SIGINT", () => void shutdown());
 process.once("SIGTERM", () => void shutdown());
 
 await app.listen({ port, host });
+try {
+  const setupStatus = await repository.systemAuth.setupStatus();
+  if (setupStatus.needsInitialSetup) {
+    if (configuredSystemSetupToken) {
+      app.log.warn("System Admin is not initialized. Open /system/setup and enter your configured ARDEN_SYSTEM_SETUP_TOKEN.");
+    } else {
+      process.stdout.write(
+        `\n[Arden System Setup] System Admin is not initialized.\n` +
+        `[Arden System Setup] Open /system/setup and enter this one-time setup token:\n` +
+        `[Arden System Setup] ${systemSetupToken}\n\n`,
+      );
+    }
+  }
+} catch {
+  app.log.warn("System Admin setup status could not be checked; verify migration 0064 is applied.");
+}
 scheduleIndexWorker(250);
 scheduleNotificationWorker(250);
 privateTrashRetentionLoop = startPrivateTrashRetentionLoop(privateTrashRetention, {

@@ -1,4 +1,4 @@
-"""Rehearse the publication reset, 0022-0063 forward upgrade and scoped restore on a disposable CI DB.
+"""Rehearse the publication reset, 0022-0064 forward upgrade and scoped restore on a disposable CI DB.
 
 This is verification, not a release/migration command. It accepts only the
 GitHub job's PostgreSQL service and creates its own unpredictable test database.
@@ -16,7 +16,7 @@ import uuid
 
 def validate_migration_inventory(migrations):
     """Keep this destructive disposable rehearsal bounded to reviewed history."""
-    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 64)]:
+    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 65)]:
         raise ValueError("Revisit this bounded rehearsal before changing migration inventory")
 
 
@@ -112,7 +112,7 @@ def main():
         except subprocess.CalledProcessError:
             assert snapshot() == before_reviewer_upgrade, "Failed reviewer upgrade changed baseline"
         sql(forward + "COMMIT;")
-        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"63"
+        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"64"
         assert sql("SELECT name FROM arden.knowledge_base;").strip() == b"Preserve on reviewer upgrade"
         assert sql("SELECT count(*) FROM arden.organization;").strip() == b"1"
         assert sql("SELECT column_default FROM information_schema.columns "

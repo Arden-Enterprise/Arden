@@ -260,6 +260,51 @@ export type AiConversation = AiConversationSummary & { turns: Array<{
 
 export type SystemConsoleQuery = { from: string; to: string; search?: string; status?: string; page?: number; pageSize?: number; organizationId?: string };
 export type SystemConsoleReport = Record<string, unknown>;
+export type SystemSetupStatus = { needsInitialSetup: boolean; hasOrganizations: boolean };
+export type SystemAdminSession = {
+  administrator: {
+    id: string;
+    email: string;
+    fullName: string;
+    canManageSystemAdmins: boolean;
+  };
+  sessionExpiresAt: string;
+};
+
+export function getSystemSetupStatus(platform: Platform): Promise<SystemSetupStatus> {
+  return request(platform, "/api/v1/system/setup/status");
+}
+
+export function completeSystemSetup(
+  platform: Platform,
+  input: { setupToken: string; email: string; fullName: string; password: string },
+): Promise<SystemAdminSession> {
+  return request(platform, "/api/v1/system/setup", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function systemSignIn(platform: Platform, email: string, password: string): Promise<SystemAdminSession> {
+  return request(platform, "/api/v1/system/auth/sign-in", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export async function systemSignOut(platform: Platform): Promise<void> {
+  await request<void>(platform, "/api/v1/system/auth/sign-out", { method: "POST" });
+}
+
+export async function restoreSystemSession(platform: Platform): Promise<SystemAdminSession | null> {
+  try {
+    return await request<SystemAdminSession>(platform, "/api/v1/system/auth/me");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
+  }
+}
+
 export function getSystemConsoleReport(platform: Platform, report: "overview" | "organizations" | "knowledge" |
   "ai-usage" | "contributions" | "feedback" | "quality" | "health", query: SystemConsoleQuery): Promise<SystemConsoleReport> {
   const params = new URLSearchParams();
