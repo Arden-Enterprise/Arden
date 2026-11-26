@@ -17,6 +17,9 @@ export type IndexGenerationJob = {
   maxAttempts: number;
 };
 
+/** Immutable snapshot identity, without worker lease/attempt authority. */
+export type IndexGenerationSource = Omit<IndexGenerationJob, "attemptCount" | "maxAttempts">;
+
 export type IndexGenerationRequest = {
   contractVersion: 1;
   jobId: string;
@@ -69,7 +72,7 @@ export class IndexGenerationSupersededError extends Error {
 }
 
 export function buildIndexGenerationRequest(
-  job: IndexGenerationJob,
+  job: IndexGenerationSource,
   snapshot: string | Buffer,
 ): IndexGenerationRequest {
   const bytes = typeof snapshot === "string" ? Buffer.from(snapshot, "utf8") : snapshot;
@@ -94,7 +97,7 @@ export function buildIndexGenerationRequest(
   throw new IndexContractError("Snapshot MIME type does not match its stored representation");
 }
 
-export function parseIndexGenerationManifest(value: unknown, job: IndexGenerationJob): IndexGenerationManifest {
+export function parseIndexGenerationManifest(value: unknown, job: IndexGenerationSource): IndexGenerationManifest {
   const manifest = objectValue(value, "manifest");
   exactKeys(manifest, ["contractVersion", "jobId", "generationId", "snapshotVersionId",
     "snapshotContentHash", "compilerVersion", "chunkingVersion", "embeddingModel",
@@ -218,7 +221,7 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export function assertIndexGenerationJob(value: IndexGenerationJob): void {
+export function assertIndexGenerationJob(value: IndexGenerationSource): void {
   for (const id of [value.jobId, value.generationId, value.organizationId, value.submissionId, value.snapshotVersionId]) {
     if (!uuidPattern.test(id)) throw new IndexContractError("Claimed index job contains an invalid identifier");
   }

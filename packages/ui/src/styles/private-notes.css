@@ -1,0 +1,228 @@
+/*
+ * Private Notes organization (ADR 0029, approved canvas 23 Nov 2026): the tree lives in the main
+ * navigation, so the Private Notes page is a single column. Island tokens only.
+ */
+
+/* ---------- Sidebar tree ---------- */
+.arden-app-shell .pn-nav-section { display: flex; flex-direction: column; min-width: 0; }
+.arden-app-shell .pn-nav-row { position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; border-radius: 8px; }
+.arden-app-shell .pn-nav-row > .sidebar-nav-item { flex: 1; min-width: 0; }
+.arden-app-shell .pn-nav-row > .pn-chevron { margin-right: 4px; }
+.arden-app-shell .pn-icon-button {
+  display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0;
+  border: 0; border-radius: 6px; color: var(--arden-text-secondary); background: transparent; cursor: pointer;
+}
+.arden-app-shell .pn-icon-button:hover:not(:disabled) { color: var(--arden-text-primary); background: rgb(255 255 255 / 9%); }
+.arden-app-shell .pn-icon-button:disabled { color: var(--arden-text-disabled); cursor: default; }
+.arden-app-shell .pn-icon-button:focus-visible,
+.arden-app-shell .pn-row-main:focus-visible,
+.arden-app-shell .pn-card:focus-visible,
+.arden-app-shell .pn-menu button:focus-visible { outline: 2px solid var(--arden-focus-ring); outline-offset: -2px; }
+.arden-app-shell .pn-chevron .arden-icon { transition: transform .15s var(--arden-morph); }
+.arden-app-shell .pn-chevron.is-open .arden-icon { transform: rotate(90deg); }
+.arden-app-shell .pn-flip { display: inline-flex; transform: rotate(180deg); }
+.arden-app-shell .pn-row-actions { display: inline-flex; flex: none; gap: 1px; opacity: 0; }
+.arden-app-shell .pn-nav-row:hover .pn-row-actions,
+.arden-app-shell .pn-nav-row:focus-within .pn-row-actions,
+.arden-app-shell .pn-row:hover .pn-row-actions,
+.arden-app-shell .pn-row:focus-within .pn-row-actions,
+.arden-app-shell .pn-row.has-menu .pn-row-actions { opacity: 1; }
+@media (hover: none) {
+  .arden-app-shell .pn-row-actions { opacity: 1; }
+}
+
+.arden-app-shell .pn-tree {
+  display: flex; flex-direction: column; gap: 1px; min-width: 0; margin: 2px 0 6px 14px; padding-left: 4px;
+  border-left: 1px solid var(--arden-border);
+}
+.arden-app-shell .pn-favorites { display: flex; flex-direction: column; gap: 1px; }
+.arden-app-shell .pn-section-label {
+  padding: 10px 0 4px 8px; color: var(--arden-text-secondary); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+}
+.arden-app-shell .pn-row {
+  position: relative; display: flex; align-items: center; gap: 2px; min-width: 0; height: 30px; padding-right: 4px;
+  border-radius: 6px; color: var(--arden-text-secondary);
+}
+.arden-app-shell .pn-row:hover, .arden-app-shell .pn-row.has-menu { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+.arden-app-shell .pn-row.is-selected { color: var(--arden-text-primary); background: var(--arden-accent-subtle); }
+.arden-app-shell .pn-row.is-selected .pn-row-main .arden-icon { color: var(--arden-violet-hover); }
+.arden-app-shell .pn-chevron-space { flex: none; width: 24px; }
+.arden-app-shell .pn-row-main {
+  display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 30px; padding: 0 4px;
+  border: 0; border-radius: 6px; color: inherit; background: transparent; font-size: 13px; text-align: left; cursor: pointer;
+}
+.arden-app-shell .pn-row-main .arden-icon, .arden-app-shell .pn-row-icon { flex: none; color: var(--arden-text-muted); }
+.arden-app-shell .pn-row-icon { display: inline-flex; padding: 0 4px; }
+.arden-app-shell .pn-ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arden-app-shell .pn-unsaved { flex: none; width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--arden-warning); }
+.arden-app-shell .pn-rename {
+  flex: 1; min-width: 0; height: 24px; padding: 0 6px; border: 1px solid var(--arden-violet); border-radius: 6px;
+  color: var(--arden-text-primary); background: var(--arden-surface-base); font: inherit; font-size: 13px; outline: none;
+}
+.arden-app-shell .pn-empty { display: flex; align-items: center; min-height: 28px; padding-left: 30px; color: var(--arden-text-secondary); font-size: 12px; }
+.arden-app-shell .pn-feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; color: var(--arden-danger); font-size: 12px; }
+.arden-app-shell .pn-link-button {
+  padding: 0; border: 0; color: var(--arden-violet-hover); background: none; font: inherit; font-weight: 600; cursor: pointer;
+}
+.arden-app-shell .pn-link-button:hover { text-decoration: underline; text-underline-offset: 3px; }
+.arden-app-shell .pn-link-button:focus-visible { outline: 2px solid var(--arden-focus-ring); outline-offset: 2px; border-radius: 4px; }
+
+/* The icon rail and the collapsed sidebar show only the Private Notes button. */
+.arden-app-shell .app-sidebar.is-collapsed .pn-tree,
+.arden-app-shell .app-sidebar.is-collapsed .pn-row-actions,
+.arden-app-shell .app-sidebar.is-collapsed .pn-nav-row > .pn-chevron { display: none; }
+@media (min-width: 640px) and (max-width: 899px) {
+  .arden-app-shell .pn-tree, .arden-app-shell .pn-nav-row .pn-row-actions, .arden-app-shell .pn-nav-row > .pn-chevron { display: none; }
+}
+
+/* ---------- Menus ---------- */
+.arden-app-shell .pn-menu {
+  z-index: 40; display: grid; gap: 1px; width: 240px; max-height: min(420px, calc(100dvh - 16px)); padding: 6px; overflow-y: auto;
+  border: 1px solid rgb(255 255 255 / 10%); border-radius: 10px; background: #22222b; box-shadow: var(--arden-shadow-float);
+  text-align: left;
+}
+.arden-app-shell .pn-menu button[role="menuitem"]:not(.pn-icon-button) {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 0 8px; border: 0; border-radius: 6px;
+  color: var(--arden-text-primary); background: transparent; font-size: 13px; font-weight: 500; text-align: left; cursor: pointer;
+}
+.arden-app-shell .pn-menu button[role="menuitem"]:hover:not(:disabled) { background: var(--arden-surface-hover); }
+.arden-app-shell .pn-menu button[role="menuitem"]:disabled { color: var(--arden-text-disabled); cursor: default; }
+.arden-app-shell .pn-menu button .arden-icon { flex: none; color: var(--arden-text-muted); }
+.arden-app-shell .pn-menu button.is-danger, .arden-app-shell .pn-menu button.is-danger .arden-icon { color: var(--arden-danger); }
+.arden-app-shell .pn-menu button.is-danger:hover { background: var(--arden-danger-subtle); }
+.arden-app-shell .pn-menu-grow { flex: 1; }
+.arden-app-shell .pn-menu-label { padding: 4px 8px 6px; color: var(--arden-text-secondary); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.arden-app-shell .pn-menu-separator { height: 1px; margin: 5px 2px; background: var(--arden-border); }
+.arden-app-shell .pn-menu-head { display: flex; align-items: center; gap: 6px; padding: 2px 2px 6px; color: var(--arden-text-secondary); font-size: 12px; }
+.arden-app-shell .pn-menu-current { color: var(--arden-text-secondary); font-size: 11px; }
+
+/* ---------- Account menu ---------- */
+.arden-app-shell .sidebar-account-chevron { display: inline-flex; margin-left: auto; color: var(--arden-text-muted); font-style: normal; transform: rotate(90deg); }
+.arden-app-shell .sidebar-member[aria-expanded="true"] .sidebar-account-chevron { transform: rotate(-90deg); }
+.arden-app-shell .app-sidebar.is-collapsed .sidebar-account-chevron { display: none; }
+@media (min-width: 640px) and (max-width: 899px) {
+  .arden-app-shell .sidebar-account-chevron { display: none; }
+}
+.arden-app-shell .sidebar-account-menu { min-width: 240px; }
+.arden-app-shell .sidebar-account-identity { display: flex; align-items: center; gap: 10px; padding: 6px 8px 8px; }
+.arden-app-shell .sidebar-account-identity .sidebar-avatar { display: grid; place-items: center; flex: none; width: 34px; height: 34px; font-style: normal; }
+.arden-app-shell .sidebar-account-identity > div { display: grid; gap: 2px; min-width: 0; }
+.arden-app-shell .sidebar-account-identity strong { overflow: hidden; color: var(--arden-text-primary); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.arden-app-shell .sidebar-account-identity small { overflow: hidden; color: var(--arden-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.arden-app-shell .sidebar-account-separator { height: 1px; margin: 4px 2px; background: var(--arden-border); }
+.arden-app-shell .sidebar-account-menu button[role="menuitem"] { justify-content: flex-start; gap: 10px; text-align: left; }
+.arden-app-shell .sidebar-account-menu button[role="menuitem"] b { flex: 1; font-weight: 500; }
+.arden-app-shell .sidebar-account-menu button[role="menuitem"] .arden-icon { flex: none; color: var(--arden-text-muted); }
+.arden-app-shell .sidebar-account-menu button.sidebar-account-signout { color: var(--arden-text-secondary); }
+.arden-app-shell .sidebar-account-count::after { content: attr(data-count); color: var(--arden-text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* ---------- Page ---------- */
+.arden-app-shell:has(.personal-content.is-single) .workspace-page { grid-template-columns: minmax(0, 1fr); }
+.arden-app-shell:has(.personal-content.is-single) .workspace-topbar { grid-column: 1; }
+.arden-app-shell .personal-content.is-single .personal-grid { grid-template-columns: minmax(0, 1fr); }
+.arden-app-shell .personal-content.is-single .note-editor-card { border-left: 0; border-radius: 16px; }
+.arden-app-shell .personal-content.is-single .workspace-scroll-region { border-radius: 16px 0 0 16px; }
+.arden-app-shell .pn-page-status { margin: 84px 24px 0; }
+.arden-app-shell .pn-page { display: flex; flex-direction: column; min-height: 0; padding-top: 76px; overflow: auto; background: var(--arden-notes-surface); }
+.arden-app-shell .pn-page-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px;
+  border-top: 1px solid #16161a; border-bottom: 1px solid var(--arden-notes-line);
+}
+.arden-app-shell .pn-page-toolbar .island-chip { height: 32px; padding: 0 12px; border-color: #2a2a32; border-radius: 8px; background: #1c1c22; }
+.arden-app-shell .pn-page-toolbar .private-state { color: var(--arden-text-secondary); background: none; font-weight: 500; }
+.arden-app-shell .pn-header-button { width: 32px; height: 32px; border-radius: 8px; }
+.arden-app-shell .pn-star.is-on { color: var(--arden-warning); }
+.arden-app-shell .pn-page-body, .arden-app-shell .pn-trash, .arden-app-shell .pn-archive { width: 100%; max-width: 760px; margin: 0 auto; padding: 36px 32px 96px; }
+.arden-app-shell .pn-trash, .arden-app-shell .pn-archive { padding-top: 112px; }
+.arden-app-shell .pn-page-heading { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; min-width: 0; }
+.arden-app-shell .pn-page-heading h2 { margin: 0; font-size: 30px; line-height: 1.2; overflow-wrap: anywhere; }
+.arden-app-shell .pn-page-icon { display: inline-flex; flex: none; color: var(--arden-violet-hover); }
+.arden-app-shell .pn-trash .pn-page-icon, .arden-app-shell .pn-archive .pn-page-icon { color: var(--arden-text-secondary); }
+.arden-app-shell .pn-title-input {
+  flex: 1; min-width: 0; padding: 2px 8px; border: 1px solid var(--arden-violet); border-radius: 8px;
+  color: var(--arden-text-primary); background: var(--arden-surface-base); font: 600 28px/1.2 var(--arden-font-heading); outline: none;
+}
+.arden-app-shell .pn-page-meta { margin: 0 0 24px; color: var(--arden-text-secondary); font-size: 13px; }
+.arden-app-shell .pn-empty-page { margin: 0 0 8px; color: var(--arden-text-secondary); font-size: 14px; }
+.arden-app-shell .pn-page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.arden-app-shell .pn-card-list, .arden-app-shell .pn-trash-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.arden-app-shell .pn-card {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; border: 1px solid var(--arden-border); border-radius: 10px;
+  color: var(--arden-text-primary); background: var(--arden-surface-base); text-align: left; cursor: pointer;
+}
+.arden-app-shell .pn-card:hover { border-color: var(--arden-border-strong); background: var(--arden-surface-raised); }
+.arden-app-shell .pn-card .arden-icon { flex: none; color: var(--arden-text-muted); }
+.arden-app-shell .pn-card-copy, .arden-app-shell .pn-trash-copy { display: grid; flex: 1 1 200px; gap: 2px; min-width: 0; }
+.arden-app-shell .pn-card-copy strong, .arden-app-shell .pn-trash-copy strong { overflow-wrap: anywhere; font-size: 14px; font-weight: 600; }
+.arden-app-shell .pn-card-copy span, .arden-app-shell .pn-trash-copy span { color: var(--arden-text-secondary); font-size: 12px; }
+.arden-app-shell .pn-trash-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 14px;
+  border: 1px solid var(--arden-border); border-radius: 10px; background: var(--arden-surface-base);
+}
+.arden-app-shell .pn-trash-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.arden-app-shell .pn-danger-button { color: var(--arden-danger); }
+
+/* Spec F03-ARR: click-to-edit collection title. */
+.arden-app-shell .pn-page-heading h2:has(> .pn-title-button) { flex: 1 1 auto; min-width: 0; }
+.arden-app-shell .pn-title-button {
+  display: inline-block; max-width: calc(100% + 8px); margin: 0 0 0 -8px; padding: 2px 8px; border: 1px solid transparent; border-radius: 8px;
+  color: inherit; background: none; font: inherit; line-height: inherit; text-align: left; overflow-wrap: anywhere; cursor: text;
+}
+.arden-app-shell .pn-title-button:hover { background: var(--arden-surface-hover); }
+.arden-app-shell .pn-title-button:focus-visible { border-color: var(--arden-violet); outline: none; }
+.arden-app-shell .pn-title-field { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.arden-app-shell .pn-title-input[aria-invalid="true"] { border-color: var(--arden-danger); }
+.arden-app-shell .pn-title-error { color: var(--arden-danger); font-size: 12px; }
+
+/* Spec F03-ARR: drag and drop of notes in the sidebar tree. */
+.arden-app-shell .pn-row[draggable="true"] { cursor: grab; }
+.arden-app-shell .pn-row.is-dragging { opacity: 0.45; }
+.arden-app-shell .pn-row.is-drop-before, .arden-app-shell .pn-row.is-drop-after { position: relative; }
+.arden-app-shell .pn-row.is-drop-before::before, .arden-app-shell .pn-row.is-drop-after::after {
+  content: ""; position: absolute; right: 4px; left: 4px; height: 2px; border-radius: 2px; background: var(--arden-violet); pointer-events: none;
+}
+.arden-app-shell .pn-row.is-drop-before::before { top: -1px; }
+.arden-app-shell .pn-row.is-drop-after::after { bottom: -1px; }
+.arden-app-shell .pn-row.is-drop-into, .arden-app-shell .pn-nav-row.is-drop-into, .arden-app-shell .pn-empty.is-drop-into {
+  border-radius: 8px; background: var(--arden-accent-subtle); box-shadow: inset 0 0 0 1px var(--arden-accent-border);
+}
+
+/* Spec F03-ARR: Archived view. */
+.arden-app-shell .pn-archive-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
+.arden-app-shell .pn-archive-search, .arden-app-shell .pn-archive-sort {
+  display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 12px; border: 1px solid var(--arden-border); border-radius: 8px;
+  color: var(--arden-text-muted); background: var(--arden-surface-base);
+}
+.arden-app-shell .pn-archive-search { flex: 1 1 260px; min-width: 0; }
+.arden-app-shell .pn-archive-search:focus-within, .arden-app-shell .pn-archive-sort:focus-within { border-color: var(--arden-violet); }
+.arden-app-shell .pn-archive-search input, .arden-app-shell .pn-archive-sort select {
+  flex: 1; min-width: 0; border: 0; color: var(--arden-text-primary); background: transparent; font: inherit; font-size: 14px; outline: none;
+}
+.arden-app-shell .pn-archive-sort select { cursor: pointer; }
+.arden-app-shell .pn-archive-sort select option { color: var(--arden-text-primary); background: var(--arden-surface-raised); }
+.arden-app-shell .pn-archive-group { margin-bottom: 24px; }
+.arden-app-shell .pn-archive-group-head {
+  display: flex; align-items: center; gap: 8px; min-width: 0; margin-bottom: 8px; padding-bottom: 8px;
+  border-bottom: 1px solid var(--arden-border); color: var(--arden-text-secondary);
+}
+.arden-app-shell .pn-archive-group-head strong { flex: 1; min-width: 0; color: var(--arden-text-primary); font-size: 14px; }
+.arden-app-shell .pn-archive-group-head span { flex: none; font-size: 12px; }
+
+@container workspace (max-width: 760px) {
+  .arden-app-shell .pn-page-body, .arden-app-shell .pn-trash, .arden-app-shell .pn-archive { padding-left: 18px; padding-right: 18px; }
+  .arden-app-shell .pn-page-heading h2 { font-size: 24px; }
+}
+@media (max-width: 639px) {
+  .arden-app-shell .pn-page { padding-top: 0; }
+  .arden-app-shell .pn-trash, .arden-app-shell .pn-archive { padding-top: 24px; }
+  .arden-app-shell .pn-page-status { margin-top: 12px; }
+  .arden-app-shell .pn-row, .arden-app-shell .pn-row-main { height: 36px; }
+  .arden-app-shell .pn-icon-button { width: 32px; height: 32px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arden-app-shell .pn-chevron .arden-icon { transition: none; }
+}
+
+/* Decision 0034: an original PDF kept in Private opens in the PDF viewer under its title. */
+.pn-pdf-body { display: grid; gap: 16px; min-width: 0; }
+.pn-pdf-body .knowledge-pdf-document object { height: min(74vh, 900px); }

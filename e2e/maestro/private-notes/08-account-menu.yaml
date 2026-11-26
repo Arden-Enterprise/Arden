@@ -1,0 +1,21 @@
+# F03-ORG scope: the account button at the bottom-left opens a menu with
+# Settings, Trash and Log out; Trash states the 30-day retention.
+url: http://127.0.0.1:5180/
+name: Private Notes - account menu offers Settings, Trash and Log out
+tags:
+  - private-notes
+  - f03-org
+---
+- runFlow: subflows/login.yaml
+
+- tapOn:
+    id: "Account menu"
+- assertVisible: "Settings"
+- assertVisible: "Trash"
+- assertVisible: "Log out"
+- takeScreenshot: 08-account-menu
+
+- tapOn: "Trash"
+- assertVisible: ".*Items in trash are permanently deleted after 30 days\\..*"
+- assertVisible: "Trash is empty."
+- takeScreenshot: 08-trash-page

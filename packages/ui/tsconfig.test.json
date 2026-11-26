@@ -4,9 +4,25 @@
     "types": ["react", "vitest/globals"]
   },
   "include": [
+    "src/assets.d.ts",
+    "src/asset-modules.d.ts",
     "tests/departmentConfirmation.test.ts",
     "tests/invitationFeedback.test.ts",
     "tests/memberAdministration.test.ts",
-    "tests/membershipAssignment.test.ts"
+    "tests/membershipAssignment.test.ts",
+    "tests/readerSummary.test.tsx",
+    "tests/readerSummaryApi.test.ts",
+    "tests/readerQuestion.test.tsx",
+    "tests/citationTextMatch.test.ts",
+    "tests/inlineCitations.test.tsx",
+    "tests/notifications.test.tsx",
+    "tests/knowledgeHome.test.tsx",
+    "tests/knowledgeManagement.test.tsx",
+    "tests/collectionManagement.test.tsx",
+    "tests/workspaceRouting.test.tsx",
+    "tests/knowledgeRoute.test.tsx",
+    "tests/privateNotesShare.test.tsx",
+    "tests/privateNotesPdfItems.test.tsx",
+    "tests/privateNotesDirectShare.test.tsx"
   ]
 }

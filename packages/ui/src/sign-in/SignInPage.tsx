@@ -1,71 +1,38 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements } from "@arden/domain";
 import type { Platform } from "../shared/types";
 import {
   beginGoogleSignIn,
   signIn,
   signUp,
   requestPasswordReset,
-  resetPasswordWithToken,
+  resetPasswordFromLink,
   ApiError,
   type CurrentSession,
 } from "../shared/api-client";
 import { AuthLayout } from "./AuthLayout";
+import { GoogleMark } from "./GoogleMark";
+import { NewPasswordField, accountPasswordRequirementMessage } from "./NewPasswordField";
+import { UnconfirmedEmailDialog } from "./UnconfirmedEmailDialog";
+import { VisiblePasswordField } from "./VisiblePasswordField";
 
-export type SignInMode = "sign-in" | "register" | "forgot-password" | "reset-password";
+export type SignInMode = "sign-in" | "register" | "forgot-password" | "check-email" | "reset-password";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 function isValidEmail(value: string): boolean {
   return EMAIL_PATTERN.test(value.trim());
 }
 
-function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement;
-    dialog.current?.showModal();
-    return () => {
-      dialog.current?.close();
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
-    };
-  }, []);
-  return (
-    <dialog
-      ref={dialog}
-      className="organization-dialog admin-confirm"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="unconfirmed-email-title"
-      onCancel={(event) => { event.preventDefault(); onClose(); }}
-    >
-      <div className="organization-dialog-heading">
-        <h2 id="unconfirmed-email-title">Verify your email</h2>
-      </div>
-      <p className="organization-dialog-description">
-        Check <strong>{email}</strong> for a verification link.
-      </p>
-      <div className="organization-dialog-actions">
-        <button type="button" className="auth-primary" autoFocus onClick={onClose}>
-          OK
-        </button>
-      </div>
-    </dialog>
-  );
-}
-
 export function SignInPage({
   platform,
-  onEnterPreview,
-  onOpenSetup,
-  onEnterAdminPreview,
   onAuthenticated,
+  onRecoveryComplete,
   initialMode = "sign-in",
   recoveryTokens = null,
 }: {
   platform: Platform;
-  onEnterPreview: () => void;
-  onOpenSetup: () => void;
-  onEnterAdminPreview?: () => void;
   onAuthenticated: (session: CurrentSession) => Promise<void>;
+  onRecoveryComplete?: () => void;
   initialMode?: SignInMode;
   recoveryTokens?: { accessToken: string; refreshToken: string } | null;
 }) {
@@ -74,9 +41,7 @@ export function SignInPage({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [resetToken, setResetToken] = useState("");
-  const [useResetCode, setUseResetCode] = useState(false);
-  const usingRecoverySession = Boolean(recoveryTokens) && !useResetCode;
+  const checkEmailHeading = useRef<HTMLHeadingElement>(null);
   const [notice, setNotice] = useState<{ text: string; isSuccess?: boolean } | null>(() => {
     if (typeof window === "undefined") return null;
     const searchParams = new URLSearchParams(window.location.search);
@@ -126,8 +91,10 @@ export function SignInPage({
     }
   }, []);
   const [busy, setBusy] = useState<"submit" | "google" | null>(null);
+  useEffect(() => {
+    if (mode === "check-email" && busy === null) checkEmailHeading.current?.focus();
+  }, [mode, busy]);
   const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
-  const showPreview = new URLSearchParams(window.location.search).get("preview") === "1";
 
   const switchMode = (newMode: SignInMode) => {
     if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
@@ -137,12 +104,13 @@ export function SignInPage({
     setNotice(null);
     setPassword("");
     setConfirmPassword("");
-    setResetToken("");
   };
 
   const handleSignIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isValidEmail(email)) {
+    const normalizedEmail = email.trim();
+    setEmail(normalizedEmail);
+    if (!isValidEmail(normalizedEmail)) {
       setNotice({ text: "Enter a valid email address." });
       return;
     }
@@ -150,13 +118,17 @@ export function SignInPage({
       setNotice({ text: "Enter your password." });
       return;
     }
+    if (password.length > accountPasswordMaximumLength) {
+      setNotice({ text: accountPasswordMaximumLengthMessage });
+      return;
+    }
     setBusy("submit");
     setNotice(null);
     try {
-      await onAuthenticated(await signIn(platform, email.trim(), password));
+      await onAuthenticated(await signIn(platform, normalizedEmail, password));
     } catch (error) {
       if (error instanceof ApiError && error.code === "EMAIL_NOT_CONFIRMED") {
-        setUnconfirmedEmail(email.trim());
+        setUnconfirmedEmail(normalizedEmail);
         setNotice({ text: "Check your email to verify your account." });
       } else {
         setNotice({ text: error instanceof Error ? error.message : "Sign in could not be completed." });
@@ -169,7 +141,9 @@ export function SignInPage({
 
   const handleSignUp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isValidEmail(email)) {
+    const normalizedEmail = email.trim();
+    setEmail(normalizedEmail);
+    if (!isValidEmail(normalizedEmail)) {
       setNotice({ text: "Enter a valid email address." });
       return;
     }
@@ -177,51 +151,56 @@ export function SignInPage({
       setNotice({ text: "Enter your name." });
       return;
     }
-    if ([...password].length < 8) {
-      setNotice({ text: "Password must be at least 8 characters long." });
+    if (password.length > accountPasswordMaximumLength) {
+      setNotice({ text: accountPasswordMaximumLengthMessage });
+      return;
+    }
+    if (!meetsAccountPasswordRequirements(password)) {
+      setNotice({ text: accountPasswordRequirementMessage });
       return;
     }
     setBusy("submit");
     setNotice(null);
     try {
-      await signUp(platform, email.trim(), password, fullName.trim());
+      await signUp(platform, normalizedEmail, password, fullName.trim());
       setNotice({
-        text: "Check your email to continue.",
+        text: "If email confirmation is required, check your inbox. Otherwise, sign in to continue.",
         isSuccess: true,
       });
       setMode("sign-in");
+      setPassword("");
     } catch (cause) {
       if (cause instanceof ApiError && (cause.code === "ACCOUNT_ALREADY_EXISTS" || cause.status === 409)) {
         setNotice({ text: "An account with this email address already exists. Please sign in instead." });
         setMode("sign-in");
+        setPassword("");
       } else if (cause instanceof ApiError && (cause.code === "INVALID_EMAIL" || cause.message === "Enter a valid email address.")) {
         setNotice({ text: "Enter a valid email address." });
+      } else if (cause instanceof ApiError && cause.code === "ACCOUNT_SETUP_UNAVAILABLE") {
+        setNotice({ text: "Your password meets the listed requirements, but account setup could not be completed. Try a different password or sign in." });
       } else if (cause instanceof ApiError && cause.message) {
         setNotice({ text: cause.message });
       } else {
-        setNotice({ text: "Account setup could not be completed. Check the password requirements or try signing in." });
+        setNotice({ text: "Account setup could not be completed. Try again or sign in." });
       }
     } finally {
       setBusy(null);
-      setPassword("");
     }
   };
 
   const handleForgotPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!isValidEmail(email)) {
+    const normalizedEmail = email.trim();
+    setEmail(normalizedEmail);
+    if (!isValidEmail(normalizedEmail)) {
       setNotice({ text: "Enter a valid email address." });
       return;
     }
     setBusy("submit");
     setNotice(null);
     try {
-      await requestPasswordReset(platform, email.trim());
-      setNotice({
-        text: "A verification code has been sent to your email. Enter the code and your new password below.",
-        isSuccess: true,
-      });
-      setMode("reset-password");
+      await requestPasswordReset(platform, normalizedEmail);
+      setMode("check-email");
     } catch (cause) {
       setNotice({
         text: cause instanceof ApiError ? cause.message : "Password reset could not be requested. Try again later.",
@@ -233,12 +212,12 @@ export function SignInPage({
 
   const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!usingRecoverySession && !isValidEmail(email)) {
-      setNotice({ text: "Enter a valid email address." });
+    if (!recoveryTokens) {
+      setNotice({ text: "This reset link is invalid or has expired. Request a new link." });
       return;
     }
-    if (!usingRecoverySession && !resetToken.trim()) {
-      setNotice({ text: "Enter the verification code sent to your email." });
+    if (password.length > accountPasswordMaximumLength) {
+      setNotice({ text: accountPasswordMaximumLengthMessage });
       return;
     }
     if (password.length < 8) {
@@ -252,27 +231,19 @@ export function SignInPage({
     setBusy("submit");
     setNotice(null);
     try {
-      if (usingRecoverySession && recoveryTokens) {
-        await resetPasswordWithToken(platform, {
-          accessToken: recoveryTokens.accessToken,
-          refreshToken: recoveryTokens.refreshToken,
-          newPassword: password,
-        });
-      } else {
-        await resetPasswordWithToken(platform, {
-          email: email.trim(),
-          token: resetToken.trim(),
-          newPassword: password,
-        });
-      }
+      await resetPasswordFromLink(platform, {
+        accessToken: recoveryTokens.accessToken,
+        refreshToken: recoveryTokens.refreshToken,
+        newPassword: password,
+      });
       if (typeof window !== "undefined" && window.location.pathname === "/reset-password") {
         try { window.history.replaceState(null, "", "/"); } catch {}
       }
+      onRecoveryComplete?.();
       setNotice({
         text: "Password updated successfully. You can now sign in with your new password.",
         isSuccess: true,
       });
-      setResetToken("");
       setMode("sign-in");
     } catch (cause) {
       setNotice({
@@ -319,24 +290,15 @@ export function SignInPage({
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
+                    onBlur={(event) => setEmail(event.target.value.trim())}
                     autoComplete="username"
                     placeholder="name@company.com"
                     maxLength={320}
                     required
                   />
                 </label>
-                <label>
-                  <span>Password</span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete="current-password"
-                    placeholder="Enter your password"
-                    maxLength={1024}
-                    required
-                  />
-                </label>
+                <VisiblePasswordField label="Password" value={password} onChange={setPassword}
+                  autoComplete="current-password" placeholder="Enter your password" />
                 <button type="submit" className="auth-primary" disabled={busy !== null}>
                   {busy === "submit" ? "Signing in..." : "Sign in"}
                 </button>
@@ -382,25 +344,14 @@ export function SignInPage({
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
+                    onBlur={(event) => setEmail(event.target.value.trim())}
                     autoComplete="username"
                     placeholder="name@company.com"
                     maxLength={320}
                     required
                   />
                 </label>
-                <label>
-                  <span>Password</span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete="new-password"
-                    placeholder="Create a secure password"
-                    minLength={8}
-                    maxLength={1024}
-                    required
-                  />
-                </label>
+                <NewPasswordField value={password} onChange={setPassword} />
                 <button type="submit" className="auth-primary" disabled={busy !== null}>
                   {busy === "submit" ? "Creating account..." : "Create account"}
                 </button>
@@ -421,7 +372,7 @@ export function SignInPage({
               )}
               <form noValidate onSubmit={handleForgotPassword}>
                 <p className="auth-helper-text">
-                  Enter your email address and we will send you instructions to reset your password.
+                  Enter your email address and we will send you a password reset link.
                 </p>
                 <label>
                   <span>Email address</span>
@@ -429,6 +380,7 @@ export function SignInPage({
                     type="email"
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
+                    onBlur={(event) => setEmail(event.target.value.trim())}
                     autoComplete="email"
                     placeholder="name@company.com"
                     maxLength={320}
@@ -436,7 +388,7 @@ export function SignInPage({
                   />
                 </label>
                 <button type="submit" className="auth-primary" disabled={busy !== null}>
-                  {busy === "submit" ? "Sending instructions..." : "Send reset instructions"}
+                  {busy === "submit" ? "Sending link..." : "Send reset link"}
                 </button>
                 <div className="auth-footer-links">
                   <button
@@ -451,90 +403,62 @@ export function SignInPage({
             </>
           )}
 
+          {mode === "check-email" && (
+            <>
+              <h1 id="auth-title" ref={checkEmailHeading} tabIndex={-1}>Check your email</h1>
+              <div className="auth-message is-success" role="status">
+                If an account with this email exists, check your inbox for a password reset link. Open it to set a new password. Another link may take time.
+              </div>
+              <button type="button" className="auth-primary" onClick={() => switchMode("forgot-password")}>Send another link</button>
+              <div className="auth-footer-links">
+                <button type="button" className="auth-text-link" onClick={() => switchMode("sign-in")}>← Back to sign in</button>
+              </div>
+            </>
+          )}
+
           {mode === "reset-password" && (
             <>
-              <h1 id="auth-title">Set a new password</h1>
-              <p className="auth-new-account">
-                Return to sign in? <button type="button" onClick={() => switchMode("sign-in")}>Sign in</button>
-              </p>
-              {notice && (
+              <h1 id="auth-title">{recoveryTokens ? "Set a new password" : "Reset link unavailable"}</h1>
+              {notice && recoveryTokens && (
                 <div className={`auth-message ${notice.isSuccess ? "is-success" : ""}`} role="alert">
                   {notice.text}
                 </div>
               )}
-              <form noValidate onSubmit={handleResetPassword}>
-                {!usingRecoverySession && (
-                  <>
-                    <label>
-                      <span>Email address</span>
-                      <input
-                        type="email"
-                        value={email}
-                        onChange={(event) => setEmail(event.target.value)}
-                        autoComplete="email"
-                        placeholder="name@company.com"
-                        maxLength={320}
-                        required
-                      />
-                    </label>
-                    <label>
-                      <span>Verification code</span>
-                      <input
-                        type="text"
-                        value={resetToken}
-                        onChange={(event) => setResetToken(event.target.value)}
-                        placeholder="Enter code from email"
-                        required
-                      />
-                    </label>
-                  </>
-                )}
-                <label>
-                  <span>New password</span>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    autoComplete="new-password"
-                    placeholder="Enter new password (min. 8 characters)"
-                    minLength={8}
-                    maxLength={1024}
-                    required
-                  />
-                </label>
-                <label>
-                  <span>Confirm new password</span>
-                  <input
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    autoComplete="new-password"
-                    placeholder="Confirm new password"
-                    minLength={8}
-                    maxLength={1024}
-                    required
-                  />
-                </label>
-                <button type="submit" className="auth-primary" disabled={busy !== null}>
-                  {busy === "submit" ? "Updating password..." : "Update password"}
-                </button>
-                <div className="auth-footer-links">
-                  <button
-                    type="button"
-                    className="auth-text-link"
-                    onClick={() => switchMode("sign-in")}
-                  >
-                    ← Back to sign in
+              {!recoveryTokens ? (
+                <>
+                  <p className="auth-helper-text">This reset link is invalid or has expired. Request a new link to continue.</p>
+                  <button type="button" className="auth-primary" onClick={() => switchMode("forgot-password")}>Request a new link</button>
+                  <div className="auth-footer-links">
+                    <button type="button" className="auth-text-link" onClick={() => switchMode("sign-in")}>← Back to sign in</button>
+                  </div>
+                </>
+              ) : (
+                <form noValidate onSubmit={handleResetPassword}>
+                  <VisiblePasswordField label="New password" value={password} onChange={setPassword}
+                    autoComplete="new-password" placeholder="Enter new password (min. 8 characters)" minLength={8} />
+                  <VisiblePasswordField label="Confirm new password" value={confirmPassword} onChange={setConfirmPassword}
+                    autoComplete="new-password" placeholder="Confirm new password" minLength={8} />
+                  <button type="submit" className="auth-primary" disabled={busy !== null}>
+                    {busy === "submit" ? "Updating password..." : "Update password"}
                   </button>
-                  <button
-                    type="button"
-                    className="auth-text-link"
-                    onClick={() => { setUseResetCode(true); switchMode("forgot-password"); }}
-                  >
-                    Request new code
-                  </button>
-                </div>
-              </form>
+                  <div className="auth-footer-links">
+                    <button
+                      type="button"
+                      className="auth-text-link"
+                      onClick={() => switchMode("sign-in")}
+                    >
+                      ← Back to sign in
+                    </button>
+                    <button
+                      type="button"
+                      className="auth-text-link"
+                      onClick={() => switchMode("forgot-password")}
+                    >
+                      Request a new link
+                    </button>
+                  </div>
+                </form>
+              )}
             </>
           )}
         </div>
@@ -549,18 +473,10 @@ export function SignInPage({
                 onClick={handleGoogle}
                 disabled={busy !== null}
               >
-                <i className="auth-google-mark fi fi-brands-google" aria-hidden="true" />
+                <GoogleMark />
                 {busy === "google" ? "Opening Google..." : "Continue with Google"}
               </button>
             </>
-          )}
-          {showPreview && (
-            <details className="auth-preview-tools">
-              <summary>Demo</summary>
-              <button type="button" onClick={onEnterPreview}>Member</button>
-              <button type="button" onClick={onOpenSetup}>Setup</button>
-              {onEnterAdminPreview && <button type="button" onClick={onEnterAdminPreview}>Admin</button>}
-            </details>
           )}
         </div>
       </section>

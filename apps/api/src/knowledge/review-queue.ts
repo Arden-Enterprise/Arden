@@ -9,11 +9,15 @@ export type ReviewQueueCandidate = {
   submissionId: string;
   snapshotId: string;
   title: string;
+  /** The frozen snapshot's draft version number (v1, v2…). */
+  versionNo: number;
   submittedAt: Date;
   submission: ReviewAuthorization["submission"];
   reviewerGrants: readonly ReviewerGrant[];
   effectivePolicyVersion: number;
   audienceEnforceable: boolean;
+  /** T6.1: CONTENT, READER_CHANGE or WITHDRAWAL; omitted means CONTENT. */
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
 };
 
 export type AssignedReview = {
@@ -24,6 +28,10 @@ export type AssignedReview = {
   classification: ReviewAuthorization["submission"]["classification"];
   submittedAt: Date;
   approvalBlocked: boolean;
+  versionNo: number;
+  requestType: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
+  /** Filled by the repository after authorization; null when the name is unavailable. */
+  authorName: string | null;
 };
 
 export function listAssignedReviews(input: {
@@ -60,6 +68,9 @@ export function listAssignedReviews(input: {
       classification: candidate.submission.classification,
       submittedAt: candidate.submittedAt,
       approvalBlocked: !candidate.audienceEnforceable,
+      versionNo: candidate.versionNo,
+      requestType: candidate.requestType ?? "CONTENT",
+      authorName: null,
     });
   }
 

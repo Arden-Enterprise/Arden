@@ -51,17 +51,35 @@ describe("explicit cancellation", () => {
     await act(() => finishFirst({ status: "ANSWERED", answer: "Late old answer", citations: [] }));
     expect(screen.queryByText("Late old answer")).toBeNull();
     expect(screen.getByRole("button", { name: "Stop waiting" })).toBeTruthy();
-    await act(() => finishSecond({ status: "ANSWERED", answer: "Current answer", citations: [] }));
+    await act(() => finishSecond({ status: "ANSWERED", answer: "Current answer", citations: [], conversationId: "saved", revision: 1, turnId: "turn" }));
     expect(screen.getByText("Current answer")).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox", { name: "Ask Arden" }), { target: { value: "Unsent prompt" } });
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
-    expect(within(screen.getByRole("alertdialog")).getByText("This clears this chat and your unsent prompt.")).toBeTruthy();
+    expect(within(screen.getByRole("alertdialog")).getByText("Your unsent message will be discarded. Saved chats stay in History.")).toBeTruthy();
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
     expect(screen.getByText("Current answer")).toBeTruthy();
     expect((screen.getByRole("textbox", { name: "Ask Arden" }) as HTMLTextAreaElement).value).toBe("Unsent prompt");
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "New chat" }));
     expect(screen.queryByText("Current answer")).toBeNull();
+  });
+
+  it("resends a stopped question as a replay of its original turn after a late answer", async () => {
+    let finishFirst!: (answer: api.AskArdenAnswer) => void;
+    const ask = vi.spyOn(api, "askArden")
+      .mockImplementationOnce(() => new Promise((resolve) => { finishFirst = resolve; }))
+      .mockImplementationOnce(async (_platform, _org, _query, options) => ({ status: "ANSWERED", answer: "Replayed answer",
+        citations: [], conversationId: options?.conversationId, revision: 1, turnId: "turn" }));
+    render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask Arden" }), { target: { value: "First question" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stop waiting" }));
+    const first = ask.mock.calls[0]![3]!;
+    await act(() => finishFirst({ status: "ANSWERED", answer: "Late answer", citations: [],
+      conversationId: first.conversationId, revision: 1, turnId: "turn" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(await screen.findByText("Replayed answer")).toBeTruthy();
+    expect(ask.mock.calls[1]![3]).toMatchObject({ requestId: first.requestId, expectedRevision: first.expectedRevision });
   });
 
   it("allows keeping or discarding selected note edits without a server write", async () => {
@@ -111,16 +129,19 @@ describe("explicit cancellation", () => {
   it("returns focus to creating a note when the last unsaved note is discarded", async () => {
     function Notes() {
       const controller = usePrivateNotes([]);
-      return createElement(PersonalWorkspacePage, {
-        controller, platform: "web", organizationId: "org", contributionAttempt: null,
-        onContributionAttemptChange: vi.fn(), onKnowledgeDraftCreated: vi.fn(), contextOpen: false, onToggleContext: vi.fn(),
-      });
+      // A never-saved local note (the controller API still offers one); the visible buttons create saved notes.
+      return createElement("div", null,
+        createElement("button", { type: "button", onClick: () => controller.createNote() }, "Start local note"),
+        createElement(PersonalWorkspacePage, {
+          controller, platform: "web", organizationId: "org", contributionAttempt: null,
+          onContributionAttemptChange: vi.fn(), onKnowledgeDraftCreated: vi.fn(), contextOpen: false, onToggleContext: vi.fn(),
+        }));
     }
     render(createElement(Notes));
-    fireEvent.click(screen.getByLabelText("New private note"));
+    fireEvent.click(screen.getByRole("button", { name: "Start local note" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard changes" }));
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("New private note")));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "New note" })));
     expect(screen.queryByRole("textbox", { name: "Note content" })).toBeNull();
   });
 

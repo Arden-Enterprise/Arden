@@ -1,11 +1,15 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useId, useRef, useState, useEffect } from "react";
 import { Icon } from "../shared/Icon";
-import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { useWorkspaceNavigation } from "../shared/WorkspaceNavigationContext";
 import type { KnowledgeCitationReference } from "../knowledge/knowledgeCitation";
-import { ApiError, askArden } from "../shared/api-client";
 import type { Platform } from "../shared/types";
-import { answerMessage, starterPrompts, type AskArdenMessage } from "./askArdenModel";
+import { starterPrompts } from "./askArdenModel";
+import { ChatComposer } from "./ChatComposer";
+import { ChatMessages } from "./ChatMessages";
+import { ChatHistoryPopover } from "./ChatHistoryPopover";
+import { CitationSourcesPanel } from "./CitationSourcesPanel";
+import { NewChatDialog } from "./NewChatDialog";
+import { useArdenChat } from "./useArdenChat";
 
 const ardenOrbSource = new URL("./assets/arden-orb-source.png", import.meta.url).href;
 
@@ -14,108 +18,93 @@ type AskArdenPageProps = {
   platform: Platform;
   organizationId: string | null;
   onOpenCitation?: (citation: KnowledgeCitationReference) => void;
+  /** Opens a saved chat (or a new one for null) from the address bar, handled once per navigation. */
+  routeRequest?: { conversationId: string | null; navigationId: string } | null;
+  /** Reports the open saved chat; a first question turns the new chat into a saved one in place. */
+  onConversationChange?: (conversationId: string | null, options: { replace: boolean }) => void;
+  /** Called once a route request has been shown, refused or has failed. */
+  onRouteSettled?: () => void;
 };
 
-export function AskArdenPage({ platform, organizationId, onOpenCitation, active = true }: AskArdenPageProps) {
-  const [draft, setDraft] = useState("");
-  const [messages, setMessages] = useState<AskArdenMessage[]>([]);
+export function AskArdenPage({ platform, organizationId, onOpenCitation, active = true, routeRequest, onConversationChange, onRouteSettled }: AskArdenPageProps) {
+  const chat = useArdenChat({ platform, organizationId, source: { kind: "company" } });
   const [examplesVisible, setExamplesVisible] = useState(true);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
-  const pendingQuestion = useRef<{ id: string; query: string } | null>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
-  const requestGeneration = useRef(0);
+  const historyButton = useRef<HTMLButtonElement>(null);
+  const historyId = useId(), sourcesId = useId();
   const navigation = useWorkspaceNavigation();
-  const empty = messages.length === 0;
-  const threadTitle = messages.find((message) => message.role === "member")?.body ?? "New conversation";
+  const focusComposer = () => requestAnimationFrame(() => composerRef.current?.focus());
 
-  const submit = async (event?: FormEvent) => {
-    event?.preventDefault();
-    const query = draft.trim();
-    if (!query || pending || !organizationId) return;
-    const generation = ++requestGeneration.current;
-    const questionId = crypto.randomUUID();
-    pendingQuestion.current = { id: questionId, query };
-    setMessages((current) => [...current, { id: questionId, role: "member", body: query }]);
-    setDraft("");
-    setError(null);
-    setPending(true);
-    try {
-      const answer = await askArden(platform, organizationId, query);
-      if (generation !== requestGeneration.current) return;
-      setMessages((current) => [...current, answerMessage(answer, crypto.randomUUID())]);
-    } catch (cause) {
-      if (generation === requestGeneration.current) {
-        setError(cause instanceof ApiError ? cause.message : "Ask Arden could not prepare an answer.");
-      }
-    } finally {
-      if (generation === requestGeneration.current) { setPending(false); pendingQuestion.current = null; }
-    }
-  };
+  const openingSaved = useRef(false);
+  const reportedId = useRef<string | null>(null);
+  useEffect(() => {
+    // Asking the first question saves the new chat under its id: the address changes in place, not as a new page.
+    const replace = reportedId.current === null && chat.currentId !== null && !openingSaved.current;
+    openingSaved.current = false;
+    reportedId.current = chat.currentId;
+    onConversationChange?.(chat.currentId, { replace });
+  }, [chat.currentId, onConversationChange]);
+  const handledRoute = useRef<string | null>(null);
+  useEffect(() => {
+    if (!routeRequest || handledRoute.current === routeRequest.navigationId) return;
+    handledRoute.current = routeRequest.navigationId;
+    const target = routeRequest.conversationId;
+    // A waiting answer is never abandoned by Back; the address returns to this chat instead.
+    if (target === chat.currentId || chat.pending) { onRouteSettled?.(); return; }
+    if (!target) { chat.reset(); onRouteSettled?.(); return; }
+    openingSaved.current = true;
+    void chat.openConversation(target).finally(() => onRouteSettled?.());
+  }, [routeRequest]);
 
   const ask = (prompt: string) => {
-    setDraft(prompt);
-    requestAnimationFrame(() => composerRef.current?.focus());
+    chat.setDraft(prompt);
+    focusComposer();
   };
 
   const reset = () => {
-    requestGeneration.current++;
-    setPending(false);
-    setDraft("");
-    setMessages([]);
-    setError(null);
-    pendingQuestion.current = null;
+    chat.reset();
     setResetting(false);
-    requestAnimationFrame(() => composerRef.current?.focus());
+    focusComposer();
   };
 
-  const stopWaiting = () => {
-    // This dismisses the local wait, not the provider's already-started work or cost.
-    const question = pendingQuestion.current;
-    requestGeneration.current++; pendingQuestion.current = null;
-    setPending(false); setError(null);
-    if (question) {
-      setMessages((current) => current.filter((message) => message.id !== question.id));
-      setDraft((current) => current ? `${question.query}\n\n${current}` : question.query);
-    }
-    requestAnimationFrame(() => composerRef.current?.focus());
-  };
-
-  const composer = (placement: "center" | "dock") => <form className={`ask-composer is-${placement}`} onSubmit={submit}>
-    <label className="sr-only" htmlFor="ask-arden-prompt">Ask Arden</label>
-    <textarea id="ask-arden-prompt" ref={composerRef} rows={2} value={draft} onChange={(event) => setDraft(event.target.value)}
-      onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) submit(); }}
-      placeholder="Ask Arden…" />
-    <div className="ask-composer-tools">
-      <span className="ask-scope"><Icon name="knowledge" size={13} />Published documents<Icon name="chevron" size={10} /></span>
-      <div className="ask-composer-actions">
-      {pending ? <button type="button" className="island-link-button" onClick={stopWaiting}>Stop waiting</button>
-        : draft && <button type="button" className="island-link-button" onClick={() => { setDraft(""); composerRef.current?.focus(); }}>Clear</button>}
-      <button type="button" className="ask-attach" disabled title="Attachments aren’t available yet" aria-label="Attachments aren’t available yet">
-        <Icon name="plus" size={15} />
-      </button>
-      <button type="submit" className="ask-send" disabled={!draft.trim() || pending || !organizationId} aria-label="Send message"><Icon name="arrow" size={15} /></button>
-      </div>
-    </div>
-  </form>;
+  // The first send swaps the centered composer for the docked one; move focus with it.
+  const composerFocused = useRef(false);
+  const wasEmpty = useRef(chat.empty);
+  useEffect(() => {
+    if (wasEmpty.current && !chat.empty && composerFocused.current) composerRef.current?.focus();
+    wasEmpty.current = chat.empty;
+  }, [chat.empty]);
 
   return <main id={active ? "arden-main" : undefined} className="workspace-page ask-arden-page" aria-labelledby="ask-arden-title" tabIndex={-1}>
     <h1 id="ask-arden-title" className="sr-only">Ask Arden</h1>
-    <div className={`ask-arden-stage${empty ? " is-empty" : " is-thread"}`}>
+    <div className={`ask-arden-stage${chat.empty ? " is-empty" : " is-thread"}${chat.sourcePanel ? " has-sources" : ""}`}
+      onFocusCapture={(event) => { composerFocused.current = (event.target as Element) === composerRef.current; }}
+      onBlurCapture={(event) => { if ((event.target as Element) === composerRef.current && event.relatedTarget) composerFocused.current = false; }}>
       <header className="ask-thread-header">
         {navigation && <button type="button" className="ask-menu-button" aria-label={navigation.open ? "Close navigation" : "Open navigation"}
           aria-controls="arden-primary-navigation" aria-expanded={navigation.open} onClick={() => navigation.setOpen((open) => !open)}>
           <Icon name={navigation.open ? "close" : "menu"} size={17} />
         </button>}
-        <div className="ask-thread-title"><strong>{empty ? "New chat" : threadTitle}</strong></div>
-        {!empty && <button type="button" className="island-link-button" onClick={() => setResetting(true)}>New chat</button>}
+        <div className="ask-thread-title"><strong>{chat.empty ? "New chat" : chat.threadTitle}</strong></div>
+        <span className="ask-history-anchor">
+          <button ref={historyButton} type="button" className={`island-link-button ask-history-trigger${chat.historyOpen ? " is-open" : ""}`}
+            aria-expanded={chat.historyOpen} aria-controls={chat.historyOpen ? historyId : undefined}
+            disabled={chat.pending && !chat.historyOpen} onClick={chat.toggleHistory}>History <Icon name="arrow-down" size={11} /></button>
+          {chat.historyOpen && <ChatHistoryPopover id={historyId} anchor={historyButton} items={chat.history}
+            loading={chat.historyLoading} error={chat.historyError} currentId={chat.currentId} openingId={chat.openingId}
+            onOpen={(id) => { openingSaved.current = true; void chat.openConversation(id, true).then((opened) => { if (opened) focusComposer(); }); }}
+            onRetry={() => void chat.loadHistory()} onClose={chat.closeHistory} />}
+        </span>
+        {!chat.empty && <button type="button" className="island-link-button" disabled={chat.pending || chat.historyLoading}
+          onClick={chat.reloadConversation}>Reload chat</button>}
+        {!chat.empty && <button type="button" className="island-link-button" onClick={() => setResetting(true)}>New chat</button>}
       </header>
 
       <div className="ask-thread-scroll" aria-live="polite">
-        {empty ? <section className="ask-empty-state" aria-labelledby="ask-arden-title">
+        {chat.empty ? <section className="ask-empty-state" aria-labelledby="ask-arden-title">
           <img className="ask-brand-watermark" src={ardenOrbSource} alt="" aria-hidden="true" />
-          {composer("center")}
+          <ChatComposer chat={chat} placement="center" composerRef={composerRef} />
 
           {examplesVisible && <div className="ask-examples">
             <div className="ask-examples-heading"><span>Try asking</span><button type="button" aria-label="Hide examples" onClick={() => setExamplesVisible(false)}><Icon name="close" size={12} /></button></div>
@@ -128,32 +117,13 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
             </div>
           </div>}
 
-        </section> : <section className="ask-conversation" aria-label="Conversation">
-          {error && <div className="ask-thread-notice" role="alert"><Icon name="warning" size={14} /><span>{error}</span></div>}
-          {messages.map((message) => <article key={message.id} className={`ask-message is-${message.role}`}>
-            <div className="ask-message-meta"><span>{message.role === "member" ? "You" : "Arden"}</span>{message.insufficientEvidence && <small>Not enough information</small>}</div>
-            <div className="ask-message-body"><p>{message.body}</p></div>
-            {message.citations && <div className="ask-citations" aria-label="Sources">
-              <span className="ask-citation-label">Sources</span>
-              {message.citations.map((citation, index) => <button type="button" className="ask-citation"
-                key={`${citation.documentId}:${citation.versionId}:${citation.blockId ?? "source"}`}
-                onClick={() => onOpenCitation?.(citation)} disabled={!onOpenCitation}
-                aria-label={`Open source ${index + 1}: ${citation.title}, ${citation.version}`}>
-                <span>{index + 1}</span><div><strong>{citation.title}</strong><small>{citation.version}{citation.page ? ` · Page ${citation.page}` : ""} · {citation.scope}</small></div>
-                <Icon name="arrow" size={13} />
-              </button>)}
-            </div>}
-          </article>)}
-          {pending && <div className="ask-answer-pending" role="status"><span />Searching documents…</div>}
-        </section>}
+        </section> : <ChatMessages chat={chat} sourcesId={sourcesId} />}
       </div>
 
-      {!empty && composer("dock")}
+      {!chat.empty && <ChatComposer chat={chat} placement="dock" composerRef={composerRef} />}
+      {chat.sourcePanel && <CitationSourcesPanel key={chat.sourcePanel.messageId} id={sourcesId} citations={chat.sourcePanel.citations}
+        selected={chat.sourcePanel.selected} onOpenDocument={onOpenCitation} onClose={chat.closeSources} />}
     </div>
-    {resetting && <KnowledgeDialog confirmation title="Start a new chat?" onClose={() => setResetting(false)}>
-      <p>{draft.trim() ? "This clears this chat and your unsent prompt." : "This clears the current conversation."}</p>
-      <div className="dialog-actions"><button type="button" className="secondary-button" onClick={() => setResetting(false)}>Cancel</button>
-        <button type="button" className="primary-button" onClick={reset}>New chat</button></div>
-    </KnowledgeDialog>}
+    {resetting && <NewChatDialog hasDraft={Boolean(chat.draft.trim())} onCancel={() => setResetting(false)} onConfirm={reset} />}
   </main>;
 }

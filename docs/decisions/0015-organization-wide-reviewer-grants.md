@@ -4,6 +4,7 @@ Status: accepted
 Date: 2026-10-26
 Decision owner/approval: originally requested by the repository user on 2026-10-26; explicitly confirmed by the requesting maintainer on 2026-10-29 after comparison with main `be27d2c`, including disjoint grant scopes, Org Admin authority and legacy pending compatibility. No separate team consultation is claimed.
 Implementation: implemented in this checkout; real-PostgreSQL migration and RLS evidence not yet obtained
+Superseded in part by: [0033](0033-reviewer-self-approval.md) (reviewers with a matching grant may decide their own submissions).
 Supersedes in part: [0013](0013-audience-breadth-review-levels.md), specifically the Specialist/Senior responsible-department rule for organization-wide snapshots and the product use of reviewer levels
 
 ## Context

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "./app.js";
 import { resolveSupabaseAuthPublicUrl, SupabaseAuthProvider } from "./auth/provider.js";
+import { sessionSigningKey } from "./auth/session-timebox.js";
 import { assertLocalFlow1TestTarget, LocalFlow1TestAuthProvider, parseLocalTestAccounts } from "./auth/local-flow1-test.js";
 import { ArdenRepository } from "./db/repository.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
@@ -14,6 +15,11 @@ import { HttpAskArdenClient } from "./answers/ai-client.js";
 import { HttpArdenAiClient } from "./indexing/ai-client.js";
 import { PgIndexGenerationStore } from "./indexing/store.js";
 import { IndexingWorker, indexWorkerLeaseSeconds } from "./indexing/worker.js";
+import { NotificationOutboxWorker, notificationWorkerPollMilliseconds } from "./notifications/outbox.js";
+import { notificationRealtimeConfiguration } from "./notifications/realtime.js";
+import { PrivateTrashRetention, startPrivateTrashRetentionLoop } from "./private-notes/trash-retention.js";
+
+const publicationExpiryReminderIntervalMs = 60 * 60 * 1000;
 
 const databaseUrl = process.env.DATABASE_URL ??
   (process.env.NODE_ENV === "production"
@@ -80,9 +86,21 @@ if (Boolean(aiUrl) !== Boolean(aiServiceToken)) {
   throw new Error("ARDEN_AI_URL and ARDEN_AI_SERVICE_TOKEN must be configured together");
 }
 const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServiceToken) : null;
+const privateNoteAiOrganizations = new Set((process.env.ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS ?? "")
+  .split(",").map(id => id.trim().toLowerCase()).filter(Boolean));
+if ([...privateNoteAiOrganizations].some(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))) {
+  throw new Error("ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS requires comma-separated organization UUIDs");
+}
 const indexPool = askArden && indexDatabaseUrl
   ? new Pool({ connectionString: indexDatabaseUrl, max: 2, connectionTimeoutMillis: 10_000 }) : null;
 const contentStorage = new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot);
+const notificationRealtime = notificationRealtimeConfiguration(process.env);
+const notificationDatabaseUrl = process.env.ARDEN_NOTIFICATION_DATABASE_URL?.trim();
+if (Boolean(notificationRealtime) !== Boolean(notificationDatabaseUrl)) {
+  throw new Error("Realtime notifications require both complete Realtime configuration and ARDEN_NOTIFICATION_DATABASE_URL");
+}
+const notificationPool = notificationDatabaseUrl
+  ? new Pool({ connectionString: notificationDatabaseUrl, max: 2, connectionTimeoutMillis: 10_000 }) : null;
 
 async function checkRuntimeDatabase(): Promise<void> {
   const client = await pool.connect();
@@ -101,13 +119,38 @@ async function checkRuntimeDatabase(): Promise<void> {
   }
 }
 
+async function checkNotificationDatabase(): Promise<void> {
+  if (!notificationPool) return;
+  const client = await notificationPool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL ROLE arden_notification_worker");
+    await client.query("SET LOCAL search_path TO arden, public");
+    await client.query("SELECT 1 FROM arden_notification_outbox LIMIT 0");
+    await client.query("SELECT 1 FROM arden_notification LIMIT 0");
+    await client.query("ROLLBACK");
+  } catch {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw new Error("Notification worker database role or schema is unavailable");
+  } finally { client.release(); }
+}
+
 try {
   await checkRuntimeDatabase();
 } catch {
   await pool.end();
+  await notificationPool?.end();
   throw new Error("Arden database schema or API runtime roles are unavailable; apply migrations and verify the configured database roles");
 }
+try {
+  await checkNotificationDatabase();
+} catch {
+  await pool.end();
+  await notificationPool?.end();
+  throw new Error("Notification worker database role or schema is unavailable; verify ARDEN_NOTIFICATION_DATABASE_URL and its arden_notification_worker membership");
+}
 
+const repository = new ArdenRepository(pool, contentStorage);
 const app = buildApp({
   checkDatabase: checkRuntimeDatabase,
   auth: localFlow1TestMode
@@ -118,15 +161,20 @@ const app = buildApp({
       })
       : null,
   testActor: remoteFlow1TestMode ? kietLocalFlow1TestActor : undefined,
-  authTrustedOrigins: flow1TestMode ? ["http://127.0.0.1:5180"] : trustedOrigins,
+  authTrustedOrigins: flow1TestMode ? [localFlow1Origin("ARDEN_PUBLIC_WEB_ORIGIN", "http://127.0.0.1:5180")] : trustedOrigins,
   secureCookies: process.env.NODE_ENV === "production",
-  repository: new ArdenRepository(pool),
+  sessionSigningKey: sessionSigningKey(process.env.ARDEN_SESSION_SIGNING_KEY,
+    process.env.NODE_ENV === "production"),
+  repository,
   storage: contentStorage,
   invitationMailer,
   askArden,
+  privateNoteAiOrganizations,
+  readerAi: askArden,
+  notificationRealtime,
   invitationDeliveryMode: smtpConfiguration ? "email" : "local-test-no-email",
   publicWebOrigin: (() => {
-    if (flow1TestMode) return "http://127.0.0.1:5180";
+    if (flow1TestMode) return localFlow1Origin("ARDEN_PUBLIC_WEB_ORIGIN", "http://127.0.0.1:5180");
     const configured = process.env.ARDEN_PUBLIC_WEB_ORIGIN ?? (process.env.NODE_ENV === "production" ? null : "http://127.0.0.1:5180");
     if (!configured) return null;
     const parsed = new URL(configured);
@@ -136,7 +184,7 @@ const app = buildApp({
     return parsed.origin;
   })(),
   publicApiOrigin: (() => {
-    if (flow1TestMode) return "http://127.0.0.1:3001";
+    if (flow1TestMode) return localFlow1Origin("ARDEN_PUBLIC_API_ORIGIN", "http://127.0.0.1:3001");
     const configured = process.env.ARDEN_PUBLIC_API_ORIGIN ?? (process.env.NODE_ENV === "production" ? null : "http://127.0.0.1:3001");
     if (!configured) return null;
     const parsed = new URL(configured);
@@ -170,8 +218,37 @@ const indexWorker = aiUrl && aiServiceToken && indexPool
     },
   )
   : null;
+const notificationWorker = notificationRealtime
+  ? new NotificationOutboxWorker(randomUUID(), notificationPool!, notificationRealtime, {
+    info: (fields, message) => app.log.info(fields, message),
+    warn: (fields, message) => app.log.warn(fields, message),
+    error: (fields, message) => app.log.error(fields, message),
+  })
+  : null;
+// Decision 0029: hourly in-process purge of private trash batches older than 30 days.
+const privateTrashRetention = new PrivateTrashRetention(repository.privateTrashRetention, contentStorage, {
+  info: (fields, message) => app.log.info(fields, message),
+  error: (fields, message) => app.log.error(fields, message),
+});
+let privateTrashRetentionLoop: { stop(): void } | undefined;
 let indexWorkerTimer: NodeJS.Timeout | undefined;
+let notificationWorkerTimer: NodeJS.Timeout | undefined;
+let expiryReminderTimer: NodeJS.Timeout | undefined;
 let stopping = false;
+
+/** Decision 0032 C: hourly, idempotent 30/7-day expiry reminders written into the in-app inbox. */
+function scheduleExpiryReminders(delayMs: number): void {
+  if (stopping) return;
+  expiryReminderTimer = setTimeout(() => {
+    void repository.enqueuePublicationExpiryReminders()
+      .then((written) => { if (written) app.log.info({ written }, "Publication expiry reminders written"); })
+      .catch((error: unknown) => {
+        app.log.error({ errorType: error instanceof Error ? error.name : "UnknownError" }, "Publication expiry reminders failed");
+      })
+      .finally(() => scheduleExpiryReminders(publicationExpiryReminderIntervalMs));
+  }, delayMs);
+  expiryReminderTimer.unref();
+}
 
 function scheduleIndexWorker(delayMs: number): void {
   if (!indexWorker || stopping) return;
@@ -186,13 +263,30 @@ function scheduleIndexWorker(delayMs: number): void {
   indexWorkerTimer.unref();
 }
 
+function scheduleNotificationWorker(delayMs: number): void {
+  if (!notificationWorker || stopping) return;
+  notificationWorkerTimer = setTimeout(() => {
+    void notificationWorker.runOnce()
+      .then((worked) => scheduleNotificationWorker(notificationWorkerPollMilliseconds(worked)))
+      .catch((error: unknown) => {
+        app.log.error({ errorType: error instanceof Error ? error.name : "UnknownError" }, "Notification outbox poll failed");
+        scheduleNotificationWorker(5_000);
+      });
+  }, delayMs);
+  notificationWorkerTimer.unref();
+}
+
 async function shutdown() {
   stopping = true;
   if (indexWorkerTimer) clearTimeout(indexWorkerTimer);
+  if (notificationWorkerTimer) clearTimeout(notificationWorkerTimer);
+  if (expiryReminderTimer) clearTimeout(expiryReminderTimer);
+  privateTrashRetentionLoop?.stop();
   await app.close();
   invitationMailer?.close();
   await pool.end();
   await indexPool?.end();
+  await notificationPool?.end();
 }
 
 process.once("SIGINT", () => void shutdown());
@@ -200,6 +294,23 @@ process.once("SIGTERM", () => void shutdown());
 
 await app.listen({ port, host });
 scheduleIndexWorker(250);
+scheduleNotificationWorker(250);
+scheduleExpiryReminders(30_000);
+privateTrashRetentionLoop = startPrivateTrashRetentionLoop(privateTrashRetention, {
+  error: (fields, message) => app.log.error(fields, message),
+});
+
+function localFlow1Origin(name: string, fallback: string): string {
+  const origin = process.env[name] || fallback;
+  const parsed = new URL(origin);
+  const host = parsed.hostname;
+  const loopback = host === "127.0.0.1" || host === "localhost" || host === "[::1]";
+  if (parsed.origin !== origin || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash
+    || parsed.protocol !== "http:" || !loopback) {
+    throw new Error(`${name} must be an exact loopback HTTP origin`);
+  }
+  return parsed.origin;
+}
 
 function assertBooleanEnvironmentValue(name: string, value: string | undefined): void {
   if (value !== undefined && value !== "true" && value !== "false") throw new Error(`${name} must be true or false`);

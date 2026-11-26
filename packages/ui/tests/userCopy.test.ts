@@ -33,12 +33,13 @@ function mockKnowledge(publicationState: api.KnowledgeSubmission["publicationSta
   };
   vi.spyOn(api, "listKnowledgeDrafts").mockResolvedValue([]);
   vi.spyOn(api, "listPublishedKnowledge").mockResolvedValue([]);
-  vi.spyOn(api, "listAssignedKnowledgeReviews").mockResolvedValue([]);
+  vi.spyOn(api, "listKnowledgeReviewBoard").mockResolvedValue({ items: [], decided: [] });
   vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({
     departments: [{ id: "dept", name: "Engineering" }], audiences: [{ id: "readers", name: "Engineering", kind: "DEPARTMENT_ALL", departmentId: "dept" }],
     primaryDepartmentId: "dept", organizationReviewerAvailable: true,
   });
   vi.spyOn(api, "loadKnowledgeDraft").mockResolvedValue(draft);
+  vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, collections: [] });
   vi.spyOn(api, "listKnowledgeSubmissions").mockResolvedValue([{
     id: "submission", draftId: "draft", snapshotVersionId: "version", title: draft.title,
     classification: "INTERNAL", responsibleDepartmentId: "dept", targetScopeType: "DEPARTMENT",
@@ -57,7 +58,7 @@ describe("concise user-facing copy", () => {
       platform: "web", organizationId: "org", organizationName: "Example", view: "knowledge",
       active: true, createdDraftId: "draft", contextOpen: false, onToggleContext: vi.fn(),
     }));
-    await screen.findByRole("heading", { name: "Before you submit" });
+    await screen.findByRole("heading", { name: "Document details" });
     expect(screen.getByText("Reviewer: Engineering reviewer")).toBeTruthy();
     await waitFor(() => expect(screen.getAllByText(label)).toHaveLength(1));
     expect(screen.queryByText("private-hash")).toBeNull();
@@ -67,10 +68,10 @@ describe("concise user-facing copy", () => {
 
   it("does not claim an index is ready in the empty chat", () => {
     render(createElement(AskArdenPage, { platform: "web", organizationId: "org" }));
-    expect(screen.getByText("Published documents")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Knowledge version scope" })).toBeNull();
     expect(screen.queryByText(/indexed|permission-aware/i)).toBeNull();
     expect((screen.getByRole("button", { name: "Send message" }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Attachments aren’t available yet" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Attachments aren’t available yet" })).toBeNull();
   });
 
   it.each(["DEPARTMENT", "ORGANIZATION"] as const)("shows the %s boundary before approving group readers", async (scope) => {
@@ -79,10 +80,10 @@ describe("concise user-facing copy", () => {
       departments: [{ id: "dept", name: "Engineering" }], primaryDepartmentId: "dept",
       audiences: [{ id: "readers", name: "Project group", kind: "GROUP", departmentId: null }],
     });
-    vi.mocked(api.listAssignedKnowledgeReviews).mockResolvedValue([{
+    vi.mocked(api.listKnowledgeReviewBoard).mockResolvedValue({ items: [{
       submissionId: "submission", snapshotId: "version", title: "Group guide", departmentId: "dept",
       classification: "INTERNAL", submittedAt: "2026-10-01T00:00:00Z", approvalBlocked: false,
-    }]);
+    }], decided: [] });
     vi.spyOn(api, "loadKnowledgeReview").mockResolvedValue({
       id: "submission", draftId: "draft", snapshotVersionId: "version", title: "Group guide",
       classification: "INTERNAL", responsibleDepartmentId: "dept", targetScopeType: scope,
@@ -103,10 +104,10 @@ describe("concise user-facing copy", () => {
     expect(screen.queryByText("private-hash")).toBeNull();
     const decide = vi.spyOn(api, "decideKnowledgeReview");
     fireEvent.change(screen.getByRole("textbox", { name: /Note to the author/ }), { target: { value: "Unsent review note" } });
-    fireEvent.click(screen.getByRole("button", { name: "Back to queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reviews", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Keep working" }));
     expect((screen.getByRole("textbox", { name: /Note to the author/ }) as HTMLTextAreaElement).value).toBe("Unsent review note");
-    fireEvent.click(screen.getByRole("button", { name: "Back to queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reviews", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(screen.queryByRole("button", { name: "Approve", exact: true })).toBeNull();
     expect(decide).not.toHaveBeenCalled();
@@ -152,14 +153,14 @@ describe("concise user-facing copy", () => {
       platform: "web", organizationId: "org", organizationName: "Example", view: "knowledge",
       active: true, createdDraftId: "draft", contextOpen: false, onToggleContext: vi.fn(),
     }));
-    await screen.findByRole("heading", { name: "Before you submit" });
+    await screen.findByRole("heading", { name: "Document details" });
     fireEvent.change(screen.getByRole("textbox", { name: "Title" }), { target: { value: "Unsaved title" } });
     fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
     fireEvent.click(screen.getByRole("button", { name: "Keep working" }));
     expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("Unsaved title");
     fireEvent.click(screen.getByRole("button", { name: "← My Contributions" }));
     fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(screen.queryByRole("heading", { name: "Before you submit" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Document details" })).toBeNull();
     expect(save).not.toHaveBeenCalled();
   });
 

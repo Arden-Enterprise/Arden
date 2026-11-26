@@ -1,6 +1,6 @@
 import type { PrivateContentStorage } from "../private-notes/content-storage.js";
 import { ArdenAiRequestError, type IndexGenerationClient } from "./ai-client.js";
-import { buildIndexGenerationRequest, IndexContractError, IndexGenerationSupersededError, type IndexGenerationJob } from "./contracts.js";
+import { buildIndexGenerationRequest, IndexContractError, IndexGenerationSupersededError } from "./contracts.js";
 import type { IndexGenerationStore } from "./store.js";
 
 export type IndexingWorkerLogger = {
@@ -55,10 +55,6 @@ function classifyFailure(error: unknown): WorkerFailure {
     return new WorkerFailure("SNAPSHOT_INTEGRITY_FAILURE", false);
   }
   return new WorkerFailure("INDEXING_UNEXPECTED_FAILURE", true);
-}
-
-export function workerJobFields(job: IndexGenerationJob): Record<string, unknown> {
-  return { jobId: job.jobId, generationId: job.generationId, attemptCount: job.attemptCount };
 }
 
 export function indexWorkerLeaseSeconds(value: string | undefined): number {

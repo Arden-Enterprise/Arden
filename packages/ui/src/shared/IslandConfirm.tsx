@@ -16,9 +16,10 @@ export function IslandConfirm(props: Props) {
   handlers.current = props;
 
   useEffect(() => {
+    if (!setConfirm) return; // The native dialog restores focus after leaving the top layer.
     const opener = document.activeElement;
     return () => { if (opener instanceof HTMLElement && opener.isConnected) opener.focus(); };
-  }, []);
+  }, [setConfirm]);
 
   useEffect(() => {
     if (!setConfirm) return;
@@ -34,7 +35,15 @@ export function IslandConfirm(props: Props) {
 function ConfirmDialog({ title, description, actionLabel, busy, error, onCancel, onConfirm }: Props) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
-  useEffect(() => { dialog.current?.showModal(); return () => dialog.current?.close(); }, []);
+  useEffect(() => {
+    const element = dialog.current;
+    const opener = document.activeElement;
+    element?.showModal();
+    return () => {
+      element?.close();
+      if (opener instanceof HTMLElement && opener.isConnected) opener.focus();
+    };
+  }, []);
   return <dialog ref={dialog} className="organization-dialog admin-confirm" role="alertdialog" aria-modal="true" aria-labelledby={titleId}
     onCancel={(event) => { event.preventDefault(); if (!busy) onCancel(); }}>
     <h2 id={titleId}>{title}</h2><p>{description}</p>{error && <p className="admin-feedback is-error" role="alert">{error}</p>}

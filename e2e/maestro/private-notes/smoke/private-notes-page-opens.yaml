@@ -1,0 +1,20 @@
+# Harness check: a signed-in member opens Private, and Maestro web resolves an
+# icon-only button by its aria-label ("New collection"), which the feature flows
+# rely on ("More actions for <title>", "Add a note to <title>").
+url: http://127.0.0.1:5180/
+name: Smoke - Private opens for a signed-in member
+tags:
+  - smoke
+---
+- runFlow: ../subflows/login.yaml
+- tapOn: "Private"
+- extendedWaitUntil:
+    visible:
+      text: "Private"
+      index: 1
+    timeout: 10000
+# Icon-only button, resolvable only through its aria-label. Maestro web
+# exposes aria-label/title/id as `resource-id`, so it needs `id:`, not text.
+- assertVisible:
+    id: "New collection"
+- takeScreenshot: smoke-private-page

@@ -24,12 +24,6 @@
 }
 
 @container workspace (max-width: 760px) {
-  .my-work-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .member-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
-  }
   .member-identity {
     grid-column: 1 / -1;
   }
@@ -59,9 +53,6 @@
   .preview-state {
     display: none;
   }
-  .editor-header {
-    flex-wrap: wrap;
-  }
   .organization-overview {
     grid-template-columns: 1fr;
   }
@@ -71,16 +62,6 @@
   }
   .organization-overview > div:last-child {
     border-bottom: 0;
-  }
-  .member-row {
-    grid-template-columns: minmax(0, 1fr) 36px;
-  }
-  .member-row label {
-    grid-column: 1;
-  }
-  .member-row .organization-icon-button {
-    grid-column: 2;
-    grid-row: 1;
   }
   .organization-information-row {
     grid-template-columns: 1fr;
@@ -133,9 +114,6 @@
   .organization-setup-rail h1 {
     font-size: 36px;
   }
-  .organization-setup-main .member-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 36px;
-  }
   .organization-setup-main .member-identity {
     grid-column: 1 / -1;
   }
@@ -145,36 +123,6 @@
 }
 
 @media (max-width: 760px) {
-  .sign-in-page {
-    grid-template-columns: 1fr;
-  }
-  .sign-in-intro {
-    min-height: auto;
-    gap: 24px;
-    padding: 24px;
-    border-right: 0;
-    border-bottom: 1px solid var(--arden-line);
-  }
-  .sign-in-intro .meta-label, .sign-in-intro > div:nth-child(2) > p, .sign-in-boundary {
-    display: none;
-  }
-  .sign-in-intro h1 {
-    max-width: 460px;
-    margin: 0;
-    font-size: 32px;
-    line-height: 1.1;
-  }
-  .sign-in-panel {
-    min-height: auto;
-    padding: 32px 24px;
-    align-items: stretch;
-  }
-  .sign-in-card {
-    margin: 0 auto;
-  }
-  .platform-label {
-    text-align: center;
-  }
   .arden-app-shell, .arden-app-shell.is-context-collapsed {
     display: block;
   }
@@ -290,29 +238,6 @@
   .status-strip span {
     font-size: 10px;
   }
-  .my-work-grid {
-    gap: 28px;
-    margin-top: 28px;
-  }
-  .knowledge-pane-redesign {
-    position: static;
-    height: auto;
-    min-height: 0;
-    scroll-margin-top: 124px;
-    border-top: 1px solid var(--arden-line);
-    border-left: 0;
-  }
-  .knowledge-pane-redesign.is-collapsed {
-    display: none;
-  }
-  .knowledge-pane-body {
-    overflow: visible;
-    padding: 24px;
-  }
-  .knowledge-pane-header {
-    padding-right: 24px;
-    padding-left: 24px;
-  }
   .personal-content .note-editor-card {
     display: none;
   }
@@ -322,22 +247,12 @@
   .personal-content.is-editing-note .personal-title-row {
     display: none;
   }
-  .personal-content.is-editing-note .note-list-card, .personal-content.is-editing-note .workspace-search, .personal-content.is-editing-note .privacy-banner {
+  .personal-content.is-editing-note .note-list-card, .personal-content.is-editing-note .workspace-search {
     display: none;
-  }
-  .personal-content.is-editing-note .mobile-editor-back {
-    display: inline-flex;
-  }
-  .mobile-editor-back svg {
-    transform: rotate(180deg);
   }
   .personal-grid {
     grid-template-columns: minmax(0, 1fr);
     margin-top: 20px;
-  }
-  .editor-header {
-    gap: 12px;
-    padding: 16px 18px;
   }
   .editor-title-label {
     padding: 22px 20px 0;
@@ -358,10 +273,6 @@
   .organization-setup-rail {
     min-height: auto;
     padding: 24px 18px;
-  }
-  .organization-setup-rail-content {
-    margin: 0;
-    padding: 24px 0 0;
   }
   .organization-setup-rail h1 {
     max-width: 500px;
@@ -406,7 +317,7 @@
 }
 
 @media (max-width: 480px) {
-  .organization-template-grid, .member-add-form, .organization-review-summary {
+  .organization-template-grid, .organization-review-summary {
     grid-template-columns: 1fr;
   }
   .organization-review-summary div {
@@ -423,13 +334,6 @@
     order: 3;
     width: 100%;
   }
-  .organization-inline-form, .organization-save-bar, .organization-confirm-panel {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .organization-confirm-panel > div:last-child {
-    flex-wrap: wrap;
-  }
   .department-row {
     grid-template-columns: 24px minmax(0, 1fr) 36px;
   }
@@ -439,16 +343,6 @@
   }
   .department-row .organization-icon-button {
     grid-column: 3;
-    grid-row: 1;
-  }
-  .organization-setup-main .member-row {
-    grid-template-columns: minmax(0, 1fr) 36px;
-  }
-  .organization-setup-main .member-row label {
-    grid-column: 1;
-  }
-  .organization-setup-main .member-row .organization-icon-button {
-    grid-column: 2;
     grid-row: 1;
   }
 }
@@ -472,9 +366,7 @@
   .workspace-topbar { flex-wrap: wrap; }
   .workspace-topbar > span { flex: 1 0 100%; }
   .topbar-actions { width: 100%; justify-content: space-between; }
-  .topbar-search { flex: 1; width: auto; min-width: 0; }
   .personal-content.is-editing-note .personal-title-row { display: flex; }
   .personal-content.is-editing-note .note-editor-card { display: flex; }
   .private-editor-toolbar .private-state { flex-basis: 100%; }
-  .knowledge-pane-redesign { scroll-margin-top: 172px; }
 }

@@ -1,123 +1,40 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { AppSidebar } from "./AppSidebar";
+import { ASK_PANEL_MAX, askPanelMaxFor, clampAskPanelWidth, defaultAskPanelWidth, readAskPanelWidth, writeAskPanelWidth } from "./askPanelWidth";
 import { MobileTabIsland } from "./MobileTabIsland";
-import { KnowledgePane } from "./KnowledgePane";
-import { MyWorkPage } from "../my-work/MyWorkPage";
+import { AgentPanel } from "./AgentPanel";
+import type { ChatSource } from "../ask-arden/useArdenChat";
 import { PersonalWorkspacePage } from "../personal-workspace/PersonalWorkspacePage";
 import { SignInPage } from "../sign-in/SignInPage";
+import { clearRecoveryTokens, readRecoveryTokens, storeRecoveryTokens } from "../sign-in/recovery-session";
 import { SetPasswordPage } from "../sign-in/SetPasswordPage";
 import { WorkspaceSelectPage } from "../sign-in/WorkspaceSelectPage";
+import { SystemFeedbackPage } from "../sign-in/SystemFeedbackPage";
 import { KnowledgeFeaturePage } from "../knowledge/KnowledgeFeaturePage";
 import { AskArdenPage } from "../ask-arden/AskArdenPage";
-import type { KnowledgeCitationReference, KnowledgeNavigationTarget } from "../knowledge/knowledgeCitation";
+import type { KnowledgeCitationReference, KnowledgeReaderTarget } from "../knowledge/knowledgeCitation";
 import { WaitingRoomPage } from "./WaitingRoomPage";
-import { InvitationAcceptPage } from "../organization/InvitationAcceptPage";
 import { InvitationLinkPage } from "../organization/InvitationLinkPage";
 import { OrganizationAdminPage } from "../organization/OrganizationAdminPage";
-import { MembershipAccessPage } from "../organization/MembershipAccessPage";
-import { OrganizationSetupPage } from "../organization/OrganizationSetupPage";
-import { OrganizationAccessPage } from "../organization/OrganizationAccessPage";
 import { usePrivateNotes } from "../personal-workspace/usePrivateNotes";
 import type { ContributionAttempt } from "../personal-workspace/ContributePrivateNoteDialog";
 import { SettingsDialog } from "../settings";
+import { NotificationProvider } from "../notifications/NotificationProvider";
 import { DiscardChangesDialog } from "../shared/DiscardChangesDialog";
 import { ErrorBoundary } from "../shared/ErrorBoundary";
 import { WorkspaceNavigationContext } from "../shared/WorkspaceNavigationContext";
 import { StatusIslandContext, type StatusIslandConfirm, type StatusIslandToast } from "../shared/StatusIslandContext";
-import { createPreviewOrganization, type OrganizationPreview } from "../organization/previewModel";
-import { membershipReadiness } from "../organization/organizationWorkflow";
-import type { PaneContent, Platform, PrivateNote, WorkspaceView } from "../shared/types";
-import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership } from "../shared/api-client";
+import type { Platform, WorkspaceView } from "../shared/types";
+import { IslandConfirm } from "../shared/IslandConfirm";
+import { createOrganization as apiCreateOrganization, currentSession, restoreSession, signOut as apiSignOut, type CreatedKnowledgeDraft, type CurrentSession, type OrganizationMembership, type NotificationTarget } from "../shared/api-client";
 import { needsDepartmentAssignment } from "../shared/membershipAssignment";
+import { emptyKnowledgeRoute, sameKnowledgeLocation, type KnowledgeRoute, type KnowledgeRouteRequest } from "../knowledge/knowledgeRoute";
+import { allowedRoute, forgetLastOrganization, homeRoute, parseWorkspacePath, readLastOrganization, rememberLastOrganization, rememberReturnPath, routeForView, signInPath, takeReturnPath, workspacePath, workspacesPath, type PrivateLocation, type WorkspaceRoute } from "./workspaceRoute";
+import { AuthLayout } from "../sign-in/AuthLayout";
 
 type ArdenShellProps = { platform: Platform };
 
-const initialNotes: PrivateNote[] = [
-  {
-    id: "architecture-review",
-    title: "Discovery notes — private workflow",
-    body:
-      "Observations\nMembers need a place to capture incomplete thoughts before they are ready for a governed shared item.\n\nAssumptions to validate\n• Privacy must be explicit at every entry point.\n• Save acknowledgement must reflect the server response.\n• Publication creates a separate immutable snapshot.",
-    updatedLabel: "Updated 2m ago · Sample",
-  },
-  {
-    id: "handover-observations",
-    title: "Weekly reflection",
-    body:
-      "A private summary of what worked, what changed, and what to revisit.",
-    updatedLabel: "Updated yesterday · Sample",
-  },
-  {
-    id: "incident-follow-up",
-    title: "API questions",
-    body:
-      "Open questions about note save acknowledgement and version conflicts.",
-    updatedLabel: "Updated 3d ago · Sample",
-  },
-];
-
-const paneContent: Record<WorkspaceView, PaneContent> = {
-  "my-work": {
-    eyebrow: "ACTIVE CONTEXT",
-    title: "Today’s priorities",
-    description:
-      "3 sample tasks need action, 5 reviews are waiting and one handover is at risk.",
-    suggestions: [
-      "Prioritize overdue tasks",
-      "Summarize pending handovers",
-      "Explain today’s access alerts",
-    ],
-    boundaryTitle: "Authorized review scope",
-    boundaryBody:
-      "When the APIs are connected, this view must be limited to assigned review content and company-wide published knowledge. Private documents remain excluded.",
-  },
-  "ask-arden": {
-    eyebrow: "ASK ARDEN CONTEXT",
-    title: "Published knowledge only",
-    description: "The interface preview shows how permission-aware answers and exact-version citations will appear.",
-    suggestions: ["Ask a focused question", "Inspect cited versions", "Verify the audience scope"],
-    boundaryTitle: "Retrieval is not connected",
-    boundaryBody: "No live knowledge is searched in this preview. The production service must authorize the member before retrieval and cite only active published versions they can read.",
-  },
-  "personal-workspace": {
-    eyebrow: "ACTIVE CONTEXT",
-    title: "Private notes",
-    description:
-      "A personal drafting space. The current content is sample data held only in this running preview.",
-    suggestions: ["Organize private notes", "Find an earlier thought", "Prepare a shareable draft"],
-    boundaryTitle: "Only the owner",
-    boundaryBody:
-      "Private notes must never appear in department search, shared AI answers, counts or suggestions. Server-side authorization remains required before release.",
-  },
-  "organization-access": {
-    eyebrow: "ADMINISTRATION CONTEXT",
-    title: "Organization boundaries",
-    description: "Members, departments and readers",
-    suggestions: ["Review membership", "Inspect access changes", "Verify department scope"],
-    boundaryTitle: "Organization access",
-    boundaryBody: "Demo · Temporary changes",
-  },
-  "knowledge": {
-    eyebrow: "KNOWLEDGE CONTEXT", title: "Your shared library",
-    description: "Explore clearly labeled sample records and any draft created in this session.",
-    suggestions: ["Inspect the source version", "Review the intended audience"],
-    boundaryTitle: "Shared knowledge", boundaryBody: "Sample records only. Real results must be selected by server-authorized scope.",
-  },
-  "review-queue": {
-    eyebrow: "REVIEW CONTEXT", title: "A snapshot to review",
-    description: "In the sample, approval moves the reviewed snapshot into publication preparation.",
-    suggestions: ["Check the intended audience", "Approve or reject the snapshot"],
-    boundaryTitle: "Immutable review snapshot", boundaryBody: "Review applies to the submitted version. Private originals remain excluded.",
-  },
-  "knowledge-handover": {
-    eyebrow: "HANDOVER CONTEXT", title: "Clear ownership",
-    description: "Review a sample transfer of responsibilities and shared knowledge.",
-    suggestions: ["Check receiving owner", "Review readiness"],
-    boundaryTitle: "Shared items only", boundaryBody: "Handover does not grant access to personal notes. Server checks remain required.",
-  },
-};
-
-type EntryView = "sign-in" | "password-setup" | "workspace-select" | "workspace" | "setup" | "invitation" | "access" | "invite-link";
+type EntryView = "restoring" | "sign-in" | "password-setup" | "workspace-select" | "system-feedback" | "workspace" | "invite-link";
 
 /**
  * Extracts a 43-character invitation token from the URL path `/invite/:token`.
@@ -186,54 +103,182 @@ export function ArdenShell({ platform }: ArdenShellProps) {
 /**
  * ArdenShell internal state container and workspace routing dispatcher.
  *
- * Manages view transitions between sign-in, invitation preview, workspace selection,
+ * Manages view transitions between sign-in, invitation links, workspace selection,
  * and authenticated workspace surfaces while enforcing password recovery precedence.
  *
  * @param props Platform configuration props
  * @returns Arden shell workspace content
  */
 function ArdenShellContent({ platform }: ArdenShellProps) {
-  const [previewRole, setPreviewRole] = useState<"member" | "admin" | null>(null);
   const [invitationToken, setInvitationToken] = useState<string | null>(() => {
     if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return null;
     return typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
   });
   const [recoveryTokens, setRecoveryTokens] = useState<{ accessToken: string; refreshToken: string } | null>(() => {
     if (typeof window === "undefined") return null;
-    const parsed = parseRecoveryHash(window.location);
-    if (parsed) {
+    const fromUrl = parseRecoveryHash(window.location);
+    if (fromUrl) {
+      storeRecoveryTokens(fromUrl);
+      try { window.history.replaceState(null, "", "/reset-password"); } catch {}
+      return fromUrl;
+    }
+    const stored = readRecoveryTokens();
+    if (stored && window.location.pathname !== "/reset-password") {
       try { window.history.replaceState(null, "", "/reset-password"); } catch {}
     }
-    return parsed;
+    return stored;
   });
   const [entryView, setEntryView] = useState<EntryView>(() => {
     if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return "sign-in";
-    return invitationToken ? "invite-link" : "sign-in";
+    // Until the saved session is checked, show the entry background rather than a sign-in form that may vanish.
+    return invitationToken ? "invite-link" : "restoring";
   });
-  const [previewMemberId, setPreviewMemberId] = useState("sample-employee");
-  const [invitationId, setInvitationId] = useState("");
-  const [accessMemberId, setAccessMemberId] = useState("");
-  const [pendingMemberEntry, setPendingMemberEntry] = useState<string | null>(null);
-  const [organization, setOrganization] = useState<OrganizationPreview | null>(null);
   const [organizationDirty, setOrganizationDirty] = useState(false);
-  const [activeView, setActiveView] = useState<WorkspaceView>("my-work");
-  const privateNotes = usePrivateNotes(initialNotes);
+  const [knowledgeDirty, setKnowledgeDirty] = useState(false);
+  const [invitationBatchSending, setInvitationBatchSending] = useState(false);
+  const [activeView, setActiveView] = useState<WorkspaceView>("knowledge");
+  const privateNotes = usePrivateNotes([], []);
   const [contextOpen, setContextOpen] = useState(false);
+  const contextOpener = useRef<HTMLElement | null>(null);
+  const returnContextFocus = useRef(false);
   const [navOpen, setNavOpen] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const [islandToast, setIslandToast] = useState<StatusIslandToast | null>(null);
   const [islandConfirm, setIslandConfirm] = useState<StatusIslandConfirm | null>(null);
   const [contextOverlay, setContextOverlay] = useState(false);
+  // Spec F13-RESIZE: the docked panel's chosen width (null = stylesheet default) and the widest it may be now.
+  const [askPanelWidth, setAskPanelWidth] = useState<number | null>(readAskPanelWidth);
+  const [askPanelMax, setAskPanelMax] = useState(ASK_PANEL_MAX);
   const [assignedReviewCount, setAssignedReviewCount] = useState<number | undefined>();
   const shellRef = useRef<HTMLDivElement>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "setup" | null>(null);
+  const [pendingAction, setPendingAction] = useState<WorkspaceView | "exit" | "workspace-select" | null>(null);
   const [serverSession, setServerSession] = useState<CurrentSession | null>(null);
   const [serverOrganizationId, setServerOrganizationId] = useState<string | null>(null);
   const [createdKnowledgeDraft, setCreatedKnowledgeDraft] = useState<CreatedKnowledgeDraft | null>(null);
   const [contributionAttempt, setContributionAttempt] = useState<ContributionAttempt | null>(null);
-  const [knowledgeCitationTarget, setKnowledgeCitationTarget] = useState<KnowledgeNavigationTarget | null>(null);
+  const [knowledgeCitationTarget, setKnowledgeCitationTarget] = useState<KnowledgeReaderTarget | null>(null);
+  const [requestedReviewId, setRequestedReviewId] = useState<string | null>(null);
+  const [requestedContributionId, setRequestedContributionId] = useState<string | null>(null);
   const restoreStarted = useRef(false);
+  const serverActorId = useRef<string | null>(null);
+  // The web address mirrors the open workspace screen so browser Back/Forward and reload work. The desktop app has
+  // no address bar and loads from a file URL, so it keeps navigation in memory only.
+  const routing = platform === "web" && typeof window !== "undefined";
+  const [knowledgeRoute, setKnowledgeRoute] = useState<KnowledgeRoute>(emptyKnowledgeRoute);
+  const [knowledgeRouteRequest, setKnowledgeRouteRequest] = useState<KnowledgeRouteRequest | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [askRouteRequest, setAskRouteRequest] = useState<{ conversationId: string | null; navigationId: string } | null>(null);
+  const [routeSync, setRouteSync] = useState(0);
+  /** Address the browser moved to that the screens are still catching up with (a document or chat loading). */
+  const historyTarget = useRef<string | null>(null);
+  const replaceNextRoute = useRef(false);
+  const deferredRoute = useRef<WorkspaceRoute | null>(null);
+  /** A Private location from the address that waits for the notes to load. */
+  const waitingPrivateRoute = useRef<PrivateLocation | null>(null);
+  /** A Back/Forward held behind the Administration discard dialog. */
+  const routeAfterDiscard = useRef<WorkspaceRoute | null>(null);
+  const handleHistoryNavigation = useRef<(() => void) | null>(null);
+  handleHistoryNavigation.current = null;
+  /** A feature reported a new location after this render: the address waits for the render that includes it. */
+  const reportedSinceRender = useRef(false);
+  reportedSinceRender.current = false;
+
+  const focus = privateNotes.focus;
+  /** Private shows a note but none is chosen yet; it picks one as soon as the notes are on screen. */
+  const privateUnselected = focus.kind === "note" && !privateNotes.selectedNote;
+  const wasPrivateUnselected = useRef(false);
+  const privateLocation: PrivateLocation = focus.kind === "note"
+    ? privateNotes.selectedNote ? { kind: "note", id: privateNotes.selectedNote.id } : { kind: "root" }
+    : focus.kind === "collection" ? { kind: "collection", id: focus.id } : { kind: focus.kind };
+
+  /** A screen finished handling an address (shown, refused or failed): record what it now shows in place. */
+  const settleRoute = useCallback(() => {
+    // Often called while the screen's own update is still to render; the address follows that render.
+    reportedSinceRender.current = true;
+    historyTarget.current = null;
+    replaceNextRoute.current = true;
+    setRouteSync((tick) => tick + 1);
+  }, []);
+  const replaceWhenReported = (replace: boolean) => {
+    reportedSinceRender.current = true;
+    if (replace && historyTarget.current === null) replaceNextRoute.current = true;
+    setRouteSync((tick) => tick + 1);
+  };
+  const onKnowledgeRouteChange = useCallback((route: KnowledgeRoute, options: { replace: boolean }) => {
+    setKnowledgeRoute((current) => sameKnowledgeLocation(current.home, route.home) && sameKnowledgeLocation(current.reviews, route.reviews) ? current : route);
+    replaceWhenReported(options.replace);
+  }, []);
+  const onConversationChange = useCallback((id: string | null, options: { replace: boolean }) => {
+    setConversationId(id);
+    replaceWhenReported(options.replace);
+  }, []);
+
+  /** Shows a Private location now; a missing note or collection opens the Private root. */
+  const showPrivateLocation = (at: PrivateLocation) => {
+    if (at.kind === "note" && privateNotes.state.notes.some((note) => note.id === at.id)) privateNotes.openNote(at.id);
+    else if (at.kind === "collection" && privateNotes.collections.some((collection) => collection.id === at.id)) privateNotes.openCollection(at.id);
+    else if (at.kind === "trash") privateNotes.openTrash();
+    else if (at.kind === "archive") privateNotes.openArchive();
+    else privateNotes.openRoot();
+  };
+  useEffect(() => {
+    const at = waitingPrivateRoute.current;
+    if (!at || privateNotes.loading) return;
+    waitingPrivateRoute.current = null;
+    showPrivateLocation(at);
+    settleRoute();
+  }, [privateNotes.loading, routeSync]);
+
+  /** Asks the screens of a route to show its location; the view itself is set by the caller. */
+  const requestRouteLocation = (route: WorkspaceRoute) => {
+    const navigationId = crypto.randomUUID();
+    if (route.view === "knowledge" && !sameKnowledgeLocation(route.at, knowledgeRoute.home)) {
+      setKnowledgeRouteRequest({ location: route.at, navigationId });
+    } else if (route.view === "review-queue" && !sameKnowledgeLocation(route.at, knowledgeRoute.reviews)) {
+      setKnowledgeRouteRequest({ location: route.at, navigationId });
+    } else if (route.view === "ask-arden" && route.conversationId !== conversationId) {
+      setAskRouteRequest({ conversationId: route.conversationId, navigationId });
+    } else if (route.view === "personal-workspace" && JSON.stringify(route.at) !== JSON.stringify(privateLocation)) {
+      waitingPrivateRoute.current = route.at;
+      setRouteSync((tick) => tick + 1);
+    }
+  };
+
+  useEffect(() => { setRequestedReviewId(null); }, [serverOrganizationId, serverSession?.actor.id]);
+  // Declared after the reset above so a location from the address survives entering the organization.
+  useEffect(() => {
+    const route = deferredRoute.current;
+    deferredRoute.current = null;
+    if (route) requestRouteLocation(route);
+  }, [serverOrganizationId, serverSession?.actor.id]);
+
+  useEffect(() => {
+    if (!routing) return;
+    const onPopState = () => handleHistoryNavigation.current?.();
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [routing]);
+
+  const currentRoutePath = entryView === "workspace"
+    ? workspacePath(routeForView(activeView, { knowledge: knowledgeRoute, conversationId, private: privateLocation })) : null;
+  useEffect(() => {
+    if (reportedSinceRender.current) return;
+    // Private choosing its first note is part of opening Private, not a page of its own.
+    const replace = replaceNextRoute.current || (activeView === "personal-workspace" && wasPrivateUnselected.current && !privateUnselected);
+    replaceNextRoute.current = false;
+    wasPrivateUnselected.current = activeView === "personal-workspace" && privateUnselected;
+    if (!routing || currentRoutePath === null || waitingPrivateRoute.current) return;
+    if (historyTarget.current !== null) {
+      if (historyTarget.current === currentRoutePath) historyTarget.current = null;
+      return;
+    }
+    if (window.location.pathname === currentRoutePath) return;
+    try {
+      if (replace) window.history.replaceState(null, "", currentRoutePath);
+      else window.history.pushState(null, "", currentRoutePath);
+    } catch {}
+  }, [routing, currentRoutePath, routeSync]);
 
   /**
    * Activates the selected organization workspace for the signed-in member.
@@ -246,14 +291,35 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       try { window.history.replaceState(null, "", "/"); } catch {}
     }
     setServerOrganizationId(membership.organization.id);
+    if (serverActorId.current) rememberLastOrganization(serverActorId.current, membership.organization.id);
+    setRequestedReviewId(null);
     setCreatedKnowledgeDraft(null);
     setAssignedReviewCount(undefined);
     setContributionAttempt(null);
     setKnowledgeCitationTarget(null);
-    setOrganization(null);
-    setPreviewRole(null);
-    const isUnassigned = !membership.departmentId && !membership.canUsePrivateWorkspace;
-    setActiveView(isUnassigned ? "my-work" : "personal-workspace");
+    setKnowledgeRoute(emptyKnowledgeRoute);
+    setKnowledgeRouteRequest(null);
+    setConversationId(null);
+    setAskRouteRequest(null);
+    waitingPrivateRoute.current = null;
+    // Open the screen the address names (a reload, a shared link, or the page kept across Google sign-in),
+    // falling back to Home when this member cannot open it.
+    const returnPath = routing ? takeReturnPath() : null;
+    const here = routing ? window.location.pathname : "/";
+    const currentPath = here !== "/" && parseWorkspacePath(here) ? here : returnPath ?? "/";
+    const requested = parseWorkspacePath(currentPath) ?? homeRoute;
+    const route = allowedRoute(requested, {
+      admin: membership.roleCodes.includes("ORG_ADMIN"),
+      privateNotes: membership.canUsePrivateWorkspace && !needsDepartmentAssignment(membership),
+      reviews: (membership.canReview ?? true) && !needsDepartmentAssignment(membership),
+    });
+    if (routing) {
+      const path = workspacePath(route);
+      if (window.location.pathname !== path) { try { window.history.replaceState(null, "", path); } catch {} }
+      historyTarget.current = path;
+    }
+    deferredRoute.current = route;
+    setActiveView(route.view);
     setEntryView("workspace");
     if (membership.canUsePrivateWorkspace) {
       void privateNotes.connectServer(platform, membership.organization.id);
@@ -266,11 +332,12 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
    *
    * @param current The authenticated server session
    */
-  const acceptServerSession = async (current: CurrentSession) => {
+  const acceptServerSession = async (current: CurrentSession, options: { resume?: boolean } = {}) => {
     if (new URLSearchParams(window.location.search).has("auth") || (typeof window !== "undefined" && window.location.pathname === "/reset-password")) {
       try { window.history.replaceState(null, "", "/"); } catch {}
     }
     setServerSession(current);
+    serverActorId.current = current.actor.id;
     if (current.account?.passwordSetupRequired === true) {
       setEntryView("password-setup");
       return;
@@ -281,12 +348,27 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       }
       setInvitationToken(null);
     }
+    clearRecoveryTokens();
     if (recoveryTokens) {
       setRecoveryTokens(null);
     }
-    const allowed = current.memberships.filter((membership) => membership.status === "active");
-    if (allowed.length === 1) enterServerOrganization(allowed[0]);
-    else setEntryView("workspace-select");
+    const resume = options.resume ? resumableMembership(current) : null;
+    if (resume) {
+      enterServerOrganization(resume);
+      return;
+    }
+    setEntryView("workspace-select");
+  };
+
+  /**
+   * Picks the organization a reload returns to: the one this account last opened, or its only active one.
+   * An explicit visit to the chooser's address keeps the chooser.
+   */
+  const resumableMembership = (current: CurrentSession) => {
+    if (routing && window.location.pathname === workspacesPath) return null;
+    const active = current.memberships.filter((membership) => membership.status === "active");
+    const last = readLastOrganization(current.actor.id);
+    return active.find((membership) => membership.organization.id === last) ?? (active.length === 1 ? active[0] : null);
   };
 
   useEffect(() => {
@@ -294,15 +376,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     restoreStarted.current = true;
     void restoreSession(platform).then((current) => {
       if (current) {
+        if (recoveryTokens) return undefined;
+        if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) return undefined;
         if (current.account?.passwordSetupRequired === true) return acceptServerSession(current);
-        if (typeof window !== "undefined" && isPasswordRecoveryTarget(window.location)) {
-          return acceptServerSession(current);
-        }
         const pathToken = typeof window !== "undefined" ? tokenFromInvitationPath(window.location.pathname) : null;
         const activeMemberships = current.memberships.filter((membership) => membership.status === "active");
         if (!pathToken && activeMemberships.length > 0) {
           setInvitationToken(null);
-          return acceptServerSession(current);
+          return acceptServerSession(current, { resume: true });
         }
         if (pathToken) {
           setServerSession(current);
@@ -320,8 +401,17 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
         return acceptServerSession(current);
       }
       return undefined;
-    }).catch(() => undefined);
+    }).catch(() => undefined).finally(() => {
+      setEntryView((view) => view === "restoring" ? "sign-in" : view);
+    });
   }, [platform]);
+
+  useEffect(() => {
+    if (!invitationBatchSending) return;
+    const warnOnLeave = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warnOnLeave);
+    return () => window.removeEventListener("beforeunload", warnOnLeave);
+  }, [invitationBatchSending]);
 
   useEffect(() => {
     const shell = shellRef.current;
@@ -329,18 +419,39 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     if (!shell || !sidebar) return;
     const measure = () => {
       const sidebarWidth = getComputedStyle(sidebar).position === "fixed" ? 0 : sidebar.getBoundingClientRect().width;
-      setContextOverlay(shell.getBoundingClientRect().width - sidebarWidth < 1100);
+      // Dock Ask Arden beside the page (the page narrows, as in Notion) while the page keeps a readable width; float it otherwise.
+      const pageWidth = shell.getBoundingClientRect().width - sidebarWidth;
+      setContextOverlay(window.innerWidth < 900 || pageWidth - 360 < 520);
+      setAskPanelMax(askPanelMaxFor(pageWidth));
     };
     const observer = new ResizeObserver(measure);
     observer.observe(shell); observer.observe(sidebar); measure();
     return () => observer.disconnect();
   }, [entryView]);
 
+  // Runs after the close renders: a docked panel hides the top-bar opener, which must be visible again before it takes focus.
+  useLayoutEffect(() => {
+    if (contextOpen || !returnContextFocus.current) return;
+    returnContextFocus.current = false;
+    const opener = contextOpener.current;
+    (opener?.isConnected && opener.offsetParent !== null ? opener : document.getElementById("arden-main"))?.focus();
+  }, [contextOpen]);
+
+  // While the floating panel or phone sheet covers the workspace, keep keyboard focus out of what it covers.
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell || !contextOpen || !contextOverlay) return;
+    const covered = [...shell.children].filter((child) => !child.hasAttribute("inert")
+      && !child.matches("#arden-agent-panel, .shell-context-scrim, .skip-link, dialog"));
+    covered.forEach((child) => { child.setAttribute("inert", ""); child.setAttribute("data-context-covered", ""); });
+    return () => covered.forEach((child) => { child.removeAttribute("inert"); child.removeAttribute("data-context-covered"); });
+  }, [contextOpen, contextOverlay]);
+
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || document.querySelector("dialog[open]")) return;
       if (navOpen) setNavOpen(false);
-      else if (contextOpen) { setContextOpen(false); document.querySelector<HTMLButtonElement>(".context-toggle")?.focus(); }
+      else if (contextOpen) closeContext();
     };
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
@@ -349,7 +460,7 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: "instant" });
     setNavOpen(false);
-  }, [activeView, previewRole, entryView]);
+  }, [activeView, entryView]);
 
   useLayoutEffect(() => {
     if (entryView !== "workspace") return;
@@ -360,76 +471,78 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     page.classList.add("is-page-enter");
   }, [activeView, entryView]);
 
-  /**
-   * Transitions preview mode into a specific member workspace if readiness checks pass.
-   *
-   * @param memberId Target member identifier
-   */
-  const enterMemberWorkspace = (memberId: string) => {
-    if (!organization || membershipReadiness(organization, memberId).state !== "ready") return;
-    const member = organization.members.find(item => item.id === memberId);
-    setPreviewRole(member?.role === "Organization Admin" ? "admin" : "member");
-    setPreviewMemberId(memberId);
-    if (memberId !== previewMemberId) privateNotes.reset([]);
-    setActiveView("my-work");
+  /** Clears protected workspace state when the user signs out or the session expires. */
+  const finishSignOut = () => {
+    setSettingsOpen(false);
+    setNavOpen(false);
+    if (serverSession) void apiSignOut(platform).catch(() => undefined);
+    forgetLastOrganization();
+    serverActorId.current = null;
+    // Leave the workspace address now so the next person to sign in here does not reopen it.
+    if (routing && window.location.pathname !== signInPath) { try { window.history.replaceState(null, "", signInPath); } catch {} }
+    setServerSession(null);
+    setServerOrganizationId(null);
+    setRequestedReviewId(null);
+    setCreatedKnowledgeDraft(null);
+    setAssignedReviewCount(undefined);
+    setContributionAttempt(null);
     setKnowledgeCitationTarget(null);
-    setEntryView("workspace");
-    setPendingMemberEntry(null);
+    setEntryView("sign-in");
+    setOrganizationDirty(false);
+    setActiveView("knowledge");
+    setKnowledgeDirty(false);
+    privateNotes.reset();
   };
 
-  if (entryView === "setup") {
-    return (
-      <OrganizationSetupPage
-        initialOrganization={organization ?? undefined}
-        onSaveDraft={setOrganization}
-        onCancel={() => setEntryView(previewRole ? "workspace" : "sign-in")}
-        onComplete={(configuredOrganization) => {
-          setOrganization(configuredOrganization);
-          if (previewMemberId !== "sample-admin") privateNotes.reset([]);
-          setEntryView("workspace");
-          setPreviewRole("admin");
-          setPreviewMemberId("sample-admin");
-          setActiveView("organization-access");
-        }}
-      />
-    );
+  useEffect(() => {
+    if (!serverSession?.sessionExpiresAt) return;
+    const expiresAt = Date.parse(serverSession.sessionExpiresAt);
+    const expire = () => {
+      if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) finishSignOut();
+    };
+    const delay = Number.isFinite(expiresAt) ? Math.max(0, expiresAt - Date.now()) : 0;
+    const timer = window.setTimeout(expire, delay);
+    window.addEventListener("focus", expire);
+    document.addEventListener("visibilitychange", expire);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", expire);
+      document.removeEventListener("visibilitychange", expire);
+    };
+  }, [serverSession?.sessionExpiresAt]);
+
+  // Sign-in and the workspace chooser have their own addresses. The workspace address the person came for is kept
+  // so choosing an organization returns to it.
+  const entryPath = entryView === "sign-in" ? signInPath
+    : entryView === "workspace-select" && serverSession ? workspacesPath : null;
+  useEffect(() => {
+    if (!routing || !entryPath || recoveryTokens) return;
+    const here = window.location.pathname;
+    if (here === entryPath || here === "/reset-password" || tokenFromInvitationPath(here)
+      || isPasswordRecoveryTarget(window.location)) return;
+    rememberReturnPath(here);
+    try { window.history.replaceState(null, "", entryPath); } catch {}
+  }, [routing, entryPath, recoveryTokens]);
+
+  if (entryView === "restoring") {
+    return <AuthLayout><p className="sr-only" role="status">Loading Arden…</p></AuthLayout>;
   }
 
   if (entryView === "password-setup" && serverSession) {
     return <SetPasswordPage platform={platform} email={serverSession.actor.email} onComplete={acceptServerSession} />;
   }
 
-  if (entryView === "sign-in") {
+  if (entryView === "sign-in" || (!serverSession && entryView !== "invite-link")) {
     return (
       <SignInPage
         platform={platform}
         initialMode={recoveryTokens || (typeof window !== "undefined" && window.location.pathname === "/reset-password") ? "reset-password" : "sign-in"}
         recoveryTokens={recoveryTokens}
+        onRecoveryComplete={() => {
+          clearRecoveryTokens();
+          setRecoveryTokens(null);
+        }}
         onAuthenticated={acceptServerSession}
-        onEnterPreview={() => {
-          setServerSession(null);
-          setServerOrganizationId(null);
-          setCreatedKnowledgeDraft(null);
-          setContributionAttempt(null);
-          setOrganization(createPreviewOrganization());
-          setPreviewRole("member");
-          setPreviewMemberId("sample-employee");
-          privateNotes.reset();
-          setEntryView("workspace-select");
-        }}
-        onEnterAdminPreview={() => {
-          setServerSession(null);
-          setServerOrganizationId(null);
-          setCreatedKnowledgeDraft(null);
-          setContributionAttempt(null);
-          setOrganization(createPreviewOrganization());
-          setPreviewRole("admin");
-          setPreviewMemberId("sample-admin");
-          privateNotes.reset([]);
-          setActiveView("organization-access");
-          setEntryView("workspace");
-        }}
-        onOpenSetup={() => setEntryView("setup")}
       />
     );
   }
@@ -447,52 +560,29 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     );
   }
 
+  if (entryView === "system-feedback" && serverSession?.systemAdmin) {
+    return <SystemFeedbackPage platform={platform} onBack={() => setEntryView("workspace-select")} />;
+  }
   if (entryView === "workspace-select") {
     if (serverSession) {
       return <WorkspaceSelectPage
         organizationName="organization"
         memberships={serverSession.memberships}
         testMode={serverSession.testMode}
+        onOpenSystemFeedback={serverSession.systemAdmin ? () => setEntryView("system-feedback") : undefined}
         onCreateOrganization={async (name, departmentName) => {
           await apiCreateOrganization(platform, name, departmentName);
           await acceptServerSession(await currentSession(platform));
         }}
-        onBack={() => {
-          void apiSignOut(platform).catch(() => undefined);
-          setServerSession(null);
-          privateNotes.reset();
-          setEntryView("sign-in");
-        }}
+        onBack={finishSignOut}
         onContinue={(organizationId) => {
           const membership = serverSession.memberships.find((item) => item.organization.id === organizationId);
           if (membership) enterServerOrganization(membership);
         }}
       />;
     }
-    return <WorkspaceSelectPage organizationName={organization?.name ?? "FPT Digital"} onBack={() => { setPreviewRole(null); setOrganization(null); privateNotes.reset(); setEntryView("sign-in"); }} onContinue={() => { setActiveView("my-work"); setEntryView("workspace"); }} />;
   }
 
-  /**
-   * Navigates the workspace preview back to the administrative access view.
-   */
-  const returnToAdmin = () => {
-    setPreviewRole("admin");
-    setPreviewMemberId("sample-admin");
-    setActiveView("organization-access");
-    setEntryView("workspace");
-  };
-
-  if (entryView === "invitation" && organization) {
-    return <InvitationAcceptPage organization={organization} invitationId={invitationId} onChange={setOrganization} onBack={returnToAdmin} onContinue={(memberId) => { setAccessMemberId(memberId); setEntryView("access"); }} />;
-  }
-
-  if (entryView === "access" && organization) {
-    return <><MembershipAccessPage organization={organization} memberId={accessMemberId} onBack={returnToAdmin} onContinue={(memberId) => {
-      if (membershipReadiness(organization, memberId).state !== "ready") return;
-      if (memberId !== previewMemberId && privateNotes.hasUnsavedDrafts) setPendingMemberEntry(memberId);
-      else enterMemberWorkspace(memberId);
-    }} />{pendingMemberEntry && <DiscardChangesDialog exiting={false} switchingMember onCancel={() => setPendingMemberEntry(null)} onDiscard={() => enterMemberWorkspace(pendingMemberEntry)} />}</>;
-  }
 
   /**
    * Navigates to a specific workspace view, handling unsaved draft confirmation.
@@ -500,7 +590,14 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
    * @param view Target workspace view
    */
   const navigate = (view: WorkspaceView) => {
+    historyTarget.current = null;
     setNavOpen(false);
+    // Links to Reviews (for example from Home) do nothing for members without review authority.
+    if (view === "review-queue" && !canUseReviews) return;
+    if (invitationBatchSending && activeView === "organization-access" && view !== activeView) {
+      setIslandToast({ message: "Wait for invitations to finish before leaving Administration.", onDismiss: () => setIslandToast(null) });
+      return;
+    }
     if (view !== "knowledge") setKnowledgeCitationTarget(null);
     if (view === "ask-arden") setContextOpen(false);
     if (organizationDirty && activeView === "organization-access" && view !== activeView) {
@@ -509,6 +606,69 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     }
     setOrganizationDirty(false);
     setActiveView(view);
+  };
+
+  /** Restores the address of the screen still shown after a Back or Forward that was refused. */
+  const keepCurrentRoute = () => {
+    historyTarget.current = null;
+    setRouteSync((tick) => tick + 1);
+  };
+
+  /** Shows a route that came from the address bar, as browser Back/Forward does. */
+  const showRoute = (route: WorkspaceRoute) => {
+    historyTarget.current = workspacePath(route);
+    requestRouteLocation(route);
+    if (route.view !== activeView) {
+      if (route.view !== "knowledge") setKnowledgeCitationTarget(null);
+      if (route.view === "ask-arden") setContextOpen(false);
+      setOrganizationDirty(false);
+      setActiveView(route.view);
+    }
+  };
+
+  handleHistoryNavigation.current = () => {
+    if (!currentRoutePath || window.location.pathname === currentRoutePath) return;
+    const requested = parseWorkspacePath(window.location.pathname) ?? homeRoute;
+    const route = allowedRoute(requested, { admin: liveAdmin, privateNotes: canUsePrivateNotes, reviews: canUseReviews });
+    const path = workspacePath(route);
+    if (path !== window.location.pathname) { try { window.history.replaceState(null, "", path); } catch {} }
+    if (path === currentRoutePath) return;
+    const leavingAdministration = activeView === "organization-access" && route.view !== activeView;
+    if (invitationBatchSending && leavingAdministration) {
+      setIslandToast({ message: "Wait for invitations to finish before leaving Administration.", onDismiss: () => setIslandToast(null) });
+      keepCurrentRoute();
+      return;
+    }
+    if (organizationDirty && leavingAdministration) {
+      routeAfterDiscard.current = route;
+      setPendingAction(route.view);
+      keepCurrentRoute();
+      return;
+    }
+    showRoute(route);
+  };
+
+  const openNotificationTarget = (target: NotificationTarget) => {
+    if (target.view === "review-queue") {
+      setRequestedReviewId(target.id);
+      navigate("review-queue");
+    } else if (target.view === "shared-item") {
+      setRequestedReviewId(null);
+      setKnowledgeCitationTarget(null);
+      setKnowledgeRouteRequest({ location: { kind: "shared", id: target.itemId }, navigationId: crypto.randomUUID() });
+      navigate("knowledge");
+    } else if (target.view === "contribution") {
+      setRequestedReviewId(null);
+      setKnowledgeCitationTarget(null);
+      setRequestedContributionId(target.documentId);
+      navigate("knowledge");
+    } else {
+      setRequestedReviewId(null);
+      setKnowledgeCitationTarget(target.publicationId ? {
+        kind: "publication", versionId: target.publicationId, navigationId: crypto.randomUUID(),
+      } : null);
+      navigate("knowledge");
+    }
   };
 
   /**
@@ -522,108 +682,134 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
   };
 
   /**
-   * Completes local session teardown and resets all workspace state to sign-in.
-   */
-  const finishSignOut = () => {
-    setSettingsOpen(false);
-    setNavOpen(false);
-    if (serverSession) void apiSignOut(platform).catch(() => undefined);
-    setServerSession(null);
-    setServerOrganizationId(null);
-    setCreatedKnowledgeDraft(null);
-    setAssignedReviewCount(undefined);
-    setContributionAttempt(null);
-    setKnowledgeCitationTarget(null);
-    setPreviewRole(null);
-    setEntryView("sign-in");
-    setOrganization(null);
-    setOrganizationDirty(false);
-    setActiveView("my-work");
-    privateNotes.reset();
-    setInvitationId("");
-    setAccessMemberId("");
-    setPendingMemberEntry(null);
-  };
-
-  /**
    * Initiates member sign-out, checking for unsaved changes before exiting.
    */
   const signOut = () => {
-    if (organizationDirty || privateNotes.hasUnsavedDrafts) {
+    if (invitationBatchSending) {
+      setIslandToast({ message: "Wait for invitations to finish before signing out.", onDismiss: () => setIslandToast(null) });
+      return;
+    }
+    if (organizationDirty || knowledgeDirty || privateNotes.hasUnsavedDrafts) {
       setPendingAction("exit");
       return;
     }
     finishSignOut();
   };
 
-  const contextControl = { contextOpen, onToggleContext: () => { setNavOpen(false); setContextOpen((open) => !open); } };
-  const previewMember = organization?.members.find(member => member.id === previewMemberId);
+  const showWorkspaceSelector = () => {
+    historyTarget.current = null;
+    if (routing && window.location.pathname !== workspacesPath) { try { window.history.replaceState(null, "", workspacesPath); } catch {} }
+    setKnowledgeDirty(false);
+    setServerOrganizationId(null);
+    setContributionAttempt(null);
+    privateNotes.reset();
+    setNavOpen(false);
+    setContextOpen(false);
+    setEntryView("workspace-select");
+  };
+
+  const openWorkspaceSelector = () => {
+    if (invitationBatchSending) {
+      setIslandToast({ message: "Wait for invitations to finish before switching workspaces.", onDismiss: () => setIslandToast(null) });
+      return;
+    }
+    if (organizationDirty || knowledgeDirty || privateNotes.hasUnsavedDrafts) {
+      setPendingAction("workspace-select");
+      return;
+    }
+    showWorkspaceSelector();
+  };
+
+  // Focus returns to whatever opened the panel, or to the page when that control is gone or hidden.
+  const closeContext = () => {
+    setContextOpen(false);
+    shellRef.current?.querySelectorAll("[data-context-covered]").forEach((element) => {
+      element.removeAttribute("inert");
+      element.removeAttribute("data-context-covered");
+    });
+    returnContextFocus.current = true;
+  };
+  const contextControl = { contextOpen, onToggleContext: () => {
+    setNavOpen(false);
+    if (contextOpen) return closeContext();
+    contextOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setContextOpen(true);
+  } };
   const activeMembership = serverSession?.memberships.find((membership) => membership.organization.id === serverOrganizationId);
-  const memberName = serverSession ? serverSession.actor.fullName?.trim() || "Signed-in member" : previewMember?.name;
+  const memberName = serverSession?.actor.fullName?.trim() || "Signed-in member";
   const liveAdmin = activeMembership?.roleCodes.includes("ORG_ADMIN") ?? false;
   const isUnassignedMember = Boolean(serverSession && activeMembership && needsDepartmentAssignment(activeMembership));
-  const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue" || activeView === "knowledge-handover";
+  const isKnowledgeView = activeView === "knowledge" || activeView === "review-queue";
   const knowledgeView = isKnowledgeView ? activeView : "knowledge";
-  const activeContext = activeView === "personal-workspace"
-    ? {
-      ...paneContent[activeView],
-      title: privateNotes.selectedNote ? privateNotes.draft.title.trim() || "Untitled private note" : "Private notes",
-      description: privateNotes.serverBacked ? "Private notes" : "Demo · Temporary notes",
-      boundaryBody: privateNotes.serverBacked ? "Only you" : "Demo · Cleared on refresh",
-    }
-    : serverOrganizationId && activeView === "knowledge"
-      ? { ...paneContent.knowledge, description: "Documents and drafts",
-        boundaryBody: "Documents you can access" }
-      : serverOrganizationId && activeView === "review-queue"
-        ? { ...paneContent[activeView], description: "Pending submissions",
-          boundaryBody: "Submissions you can review" }
-        : serverOrganizationId && activeView === "organization-access"
-          ? { ...paneContent[activeView], boundaryBody: "Organization Admin" }
-          : paneContent[activeView];
+  // Members need a private workspace in this organization.
+  const canUsePrivateNotes = !isUnassignedMember && Boolean(activeMembership?.canUsePrivateWorkspace);
+  // Older servers omit the field and still enforce reviewer access at the API.
+  const canUseReviews = !isUnassignedMember && Boolean(activeMembership && (activeMembership.canReview ?? true));
+  const memberRole = liveAdmin ? "Organization Admin" : "Member";
+  const memberDepartment = activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : liveAdmin ? "All organization" : "Member");
+  const privateNote = privateNotes.focus.kind === "note" ? privateNotes.selectedNote : null;
+  const privateVersion = privateNotes.selectedVersion;
+  const chatSource: ChatSource = activeView !== "personal-workspace" ? { kind: "company" }
+    // Decision 0034: a PDF without text has nothing the side panel can read.
+    : privateNote?.kind === "pdf" && !privateNote.textAvailable
+      ? { kind: "private-empty", hint: "This PDF has no text, so AI is unavailable for it." }
+    : canUsePrivateNotes && privateNotes.serverBacked && privateNote?.sourceVersionId && privateVersion
+      && !privateNotes.isDirty && !privateNotes.autosaving
+      ? { kind: "private-note", id: privateNote.id, title: privateNote.title, version: privateVersion }
+      : { kind: "private-empty", hint: privateNote && (privateNotes.isDirty || privateNotes.autosaving)
+        ? "Save this note before asking Arden." : "Open a saved note in Private to ask Arden." };
+  const trashConfirm = privateNotes.trashConfirm;
 
   return (
+    <NotificationProvider platform={platform} organizationId={serverSession ? serverOrganizationId : null}
+      onOpenTarget={openNotificationTarget}>
     <WorkspaceNavigationContext.Provider value={{ open: navOpen, setOpen: setNavOpen }}>
     <StatusIslandContext.Provider value={{ toast: islandToast, setToast: setIslandToast, confirm: islandConfirm, setConfirm: setIslandConfirm }}>
-    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${navCollapsed ? " is-nav-collapsed" : ""}${activeView === "my-work" ? " is-my-work" : ""}`}>
+    <div ref={shellRef} className={`arden-app-shell${contextOpen ? "" : " is-context-collapsed"}${contextOverlay ? " is-context-overlay" : ""}${navOpen ? " is-nav-open" : ""}${navCollapsed ? " is-nav-collapsed" : ""}`}
+      style={askPanelWidth === null ? undefined : { "--arden-context-width": `${clampAskPanelWidth(askPanelWidth, askPanelMax)}px` } as CSSProperties}>
       <a className="skip-link" href="#arden-main">Skip to content</a>
       <AppSidebar
         activeView={activeView}
         platform={platform}
-        previewRole={previewRole ?? "member"}
-        organization={organization}
         organizationLabel={serverOrganizationId ? serverSession?.memberships.find((item) => item.organization.id === serverOrganizationId)?.organization.name : undefined}
         authenticated={Boolean(serverSession)}
         showAdmin={liveAdmin}
+        showReviews={canUseReviews}
         isUnassigned={isUnassignedMember}
         memberName={memberName}
-        memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
-        memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+        memberRole={memberRole}
         environmentLabel={serverSession?.testMode ? "KIET LOCAL TEST" : undefined}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined}
-        canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
+        canSwitchWorkspace={Boolean(serverSession)}
         collapsed={navCollapsed}
         onToggleCollapsed={() => setNavCollapsed((collapsed) => !collapsed)}
-        onSwitchWorkspace={() => { setNavOpen(false); setContextOpen(false); setEntryView("workspace-select"); }}
+        onSwitchWorkspace={openWorkspaceSelector}
         onCloseNavigation={() => setNavOpen(false)}
         onNavigate={navigate}
         onSignOut={signOut}
         onOpenSettings={() => setSettingsOpen(true)}
+        privateNotes={canUsePrivateNotes ? { controller: privateNotes, pageVisible: activeView === "personal-workspace", onOpen: () => navigate("personal-workspace") } : undefined}
+        trashCount={canUsePrivateNotes ? privateNotes.trash.length : undefined}
+        onOpenTrash={canUsePrivateNotes ? () => { privateNotes.openTrash(); navigate("personal-workspace"); } : undefined}
+        onOpenArchive={canUsePrivateNotes ? () => { privateNotes.openArchive(); navigate("personal-workspace"); } : undefined}
       />
       {navOpen && <button type="button" className="shell-nav-scrim" aria-label="Close navigation" onClick={() => setNavOpen(false)} />}
-      <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={(previewRole === "admin" && !serverSession) || liveAdmin}
+      <MobileTabIsland activeView={activeView} authenticated={Boolean(serverSession)} showAdmin={liveAdmin}
+        showReviews={canUseReviews}
         assignedReviewCount={serverOrganizationId ? assignedReviewCount : undefined} onNavigate={navigate} />
 
       <ErrorBoundary>
         <div className="workspace-feature-slot" hidden={activeView !== "ask-arden"}>
           <AskArdenPage key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`}
-            active={activeView === "ask-arden"} platform={platform} organizationId={serverOrganizationId} onOpenCitation={openKnowledgeCitation} />
+            active={activeView === "ask-arden"} platform={platform} organizationId={serverOrganizationId} onOpenCitation={openKnowledgeCitation}
+            routeRequest={askRouteRequest} onConversationChange={onConversationChange} onRouteSettled={settleRoute} />
         </div>
         {isUnassignedMember && !isKnowledgeView && activeView !== "ask-arden" ? (
           <WaitingRoomPage
             organizationName={activeMembership?.organization.name ?? "Organization"}
             memberEmail={serverSession?.actor.email ?? ""}
-            canSwitchWorkspace={Boolean(serverSession && serverSession.memberships.filter((item) => item.status === "active").length > 1)}
-            onSwitchWorkspace={() => { setNavOpen(false); setContextOpen(false); setEntryView("workspace-select"); }}
+            canSwitchWorkspace={Boolean(serverSession)}
+            onSwitchWorkspace={openWorkspaceSelector}
             onRefresh={() => {
               void restoreSession(platform).then((current) => {
                 if (current) acceptServerSession(current);
@@ -633,39 +819,58 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
             onSignOut={signOut}
             {...contextControl}
           />
-        ) : activeView === "my-work" ? (
-          <MyWorkPage memberName={previewMember?.name} onOpenPrivateNotes={() => navigate("personal-workspace")} onOpenKnowledge={() => navigate("knowledge")} onOpenReview={() => navigate("review-queue")} onOpenHandover={() => navigate("knowledge-handover")} {...contextControl} />
         ) : activeView === "organization-access" && serverOrganizationId && activeMembership && liveAdmin ? (
-          <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} {...contextControl} />
-        ) : activeView === "organization-access" && organization && previewRole === "admin" ? (
-          <OrganizationAccessPage organization={organization} onChange={setOrganization} onDirtyChange={setOrganizationDirty} onOpenSetup={() => { if (organizationDirty) setPendingAction("setup"); else setEntryView("setup"); }} onPreviewInvitation={(id) => { setInvitationId(id); setEntryView("invitation"); }} onPreviewAccess={(id) => { setAccessMemberId(id); setEntryView("access"); }} {...contextControl} />
+          <OrganizationAdminPage key={serverOrganizationId} platform={platform} organizationId={serverOrganizationId} organizationName={activeMembership.organization.name} onDirtyChange={setOrganizationDirty} onSendingInvitationsChange={(sending) => { setInvitationBatchSending(sending); if (!sending) setIslandToast(null); }} {...contextControl} />
         ) : activeView === "personal-workspace" ? (
-          <PersonalWorkspacePage key={serverOrganizationId ?? previewMemberId} controller={privateNotes} platform={platform} organizationId={serverOrganizationId ?? ""} contributionAttempt={contributionAttempt} onContributionAttemptChange={setContributionAttempt} onKnowledgeDraftCreated={(draft) => { setCreatedKnowledgeDraft(draft); navigate("knowledge"); }} {...contextControl} />
+          <PersonalWorkspacePage key={serverOrganizationId ?? "none"} controller={privateNotes} platform={platform} organizationId={serverOrganizationId ?? ""} contributionAttempt={contributionAttempt} onContributionAttemptChange={setContributionAttempt} onKnowledgeDraftCreated={(draft) => { setCreatedKnowledgeDraft(draft); navigate("knowledge"); }} {...contextControl} />
         ) : null}
 
       <div className="knowledge-feature-slot" hidden={!isKnowledgeView}>
-        <KnowledgeFeaturePage key={serverOrganizationId ?? "sample"} view={knowledgeView} active={isKnowledgeView}
+        <KnowledgeFeaturePage key={`${serverSession?.actor.id ?? "none"}:${serverOrganizationId ?? "none"}`} view={knowledgeView} active={isKnowledgeView}
           platform={platform} organizationId={serverOrganizationId}
-          organizationName={activeMembership?.organization.name ?? organization?.name}
-          departmentName={activeMembership ? "Personal contribution" : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+          organizationName={activeMembership?.organization.name}
+          departmentName="Personal contribution"
           createdDraft={createdKnowledgeDraft?.organizationId === serverOrganizationId ? createdKnowledgeDraft : null}
           citationTarget={knowledgeCitationTarget}
-          onAssignedReviewCount={setAssignedReviewCount}
+          requestedReviewId={requestedReviewId} onReviewTargetHandled={() => setRequestedReviewId(null)}
+          requestedContributionId={requestedContributionId} onContributionTargetHandled={() => setRequestedContributionId(null)}
+          onAssignedReviewCount={setAssignedReviewCount} awaitingAssignment={isUnassignedMember}
+          canUsePrivateWorkspace={activeMembership?.canUsePrivateWorkspace ?? false}
+          onOpenPrivateNotes={() => navigate("personal-workspace")}
+          onDirtyChange={setKnowledgeDirty}
+          routeRequest={knowledgeRouteRequest} onRouteChange={onKnowledgeRouteChange} onRouteSettled={settleRoute}
           onNavigate={navigate} {...contextControl} />
       </div>
       </ErrorBoundary>
 
-      {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close context" onClick={contextControl.onToggleContext} />}
-      <KnowledgePane content={activeContext} open={contextOpen} onToggle={contextControl.onToggleContext} />
+      {contextOpen && contextOverlay && <button type="button" className="shell-context-scrim" aria-label="Close Ask Arden" onClick={contextControl.onToggleContext} />}
+      <AgentPanel key={`${serverSession?.actor.id ?? "preview"}:${serverOrganizationId ?? "none"}`} open={contextOpen}
+        platform={platform} organizationId={serverOrganizationId} onClose={closeContext} source={chatSource}
+        onOpenAskArden={() => navigate("ask-arden")}
+        onOpenCitation={(citation) => { if (contextOverlay) setContextOpen(false); openKnowledgeCitation(citation); }}
+        resize={contextOverlay ? undefined : {
+          width: clampAskPanelWidth(askPanelWidth ?? defaultAskPanelWidth(window.innerWidth), askPanelMax),
+          max: askPanelMax,
+          onChange: setAskPanelWidth,
+          onCommit: writeAskPanelWidth,
+          onReset: () => { setAskPanelWidth(null); writeAskPanelWidth(null); },
+        }} />
+      {trashConfirm && <IslandConfirm
+        title={trashConfirm.kind === "collection" ? "Move collection to trash?" : "Move note to trash?"}
+        description="Unsaved changes will be lost."
+        actionLabel="Move to trash"
+        busy={false}
+        error=""
+        onCancel={privateNotes.cancelTrash}
+        onConfirm={privateNotes.confirmTrash} />}
       {settingsOpen && (
         <SettingsDialog
           platform={platform}
           session={serverSession}
-          organization={organization}
           organizationName={activeMembership?.organization.name}
           memberName={memberName}
-          memberRole={serverSession ? liveAdmin ? "Organization Admin" : "Member" : previewMember?.role || "Awaiting assignment"}
-          memberDepartment={serverSession ? activeMembership?.departmentName ?? (isUnassignedMember ? "Awaiting assignment" : (liveAdmin ? "All organization" : "Member")) : organization?.departments.find(department => department.id === previewMember?.departmentId)?.name}
+          memberRole={memberRole}
+          memberDepartment={memberDepartment}
           onClose={() => setSettingsOpen(false)}
           onRefreshSession={async () => {
             const refreshed = await restoreSession(platform);
@@ -677,14 +882,27 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
       {pendingAction && (
         <DiscardChangesDialog
           exiting={pendingAction === "exit"}
-          onCancel={() => setPendingAction(null)}
+          onCancel={() => {
+            routeAfterDiscard.current = null;
+            setPendingAction(null);
+          }}
           onDiscard={() => {
             if (pendingAction === "exit") finishSignOut();
-            else if (pendingAction === "setup") { setOrganizationDirty(false); setEntryView("setup"); }
+            else if (pendingAction === "workspace-select") {
+              setOrganizationDirty(false);
+              showWorkspaceSelector();
+            }
+            else if (routeAfterDiscard.current) {
+              historyTarget.current = null;
+              requestRouteLocation(routeAfterDiscard.current);
+              setOrganizationDirty(false);
+              setActiveView(routeAfterDiscard.current.view);
+            }
             else {
               setOrganizationDirty(false);
               setActiveView(pendingAction);
             }
+            routeAfterDiscard.current = null;
             setPendingAction(null);
           }}
         />
@@ -692,5 +910,6 @@ function ArdenShellContent({ platform }: ArdenShellProps) {
     </div>
     </StatusIslandContext.Provider>
     </WorkspaceNavigationContext.Provider>
+    </NotificationProvider>
   );
 }

@@ -34,5 +34,8 @@ build/
 
 .cache/
 
+# Local document corpus; source PDFs are stored outside Git.
+/data/
+
 # Private per-developer setup packets; shared templates live under deploy/hosted.
 /*-local/

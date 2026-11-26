@@ -24,6 +24,7 @@ Paths: author/edit → persist a version → select exact snapshot → derive pr
 | --- | --- | --- |
 | F08-AC1 | The selected canonical format validates at runtime, preserves stable version/source identities and rejects unsupported or unsafe content. | Main and branch formats differ; Semantic Document v1/ADR 0011 are branch-only in the inspected core baseline. |
 | F08-AC2 | Editing never mutates immutable submitted/published content; optimistic conflicts and failed saves preserve the last valid version. | Draft mutability while reviewing is a G1 decision, not an implementation convenience. |
+| F08-AC4 | The author can open every saved shared-draft content version from My Contributions or the draft editor as read-only text/PDF; another member cannot list or read those versions. Submission status is shown beside the matching saved version when available. | Requested by the maintainer on 12 November 2026. Version content is immutable; the draft's mutable title/classification are not presented as historical metadata. Browser/desktop and actual-role checks remain distinct. |
 | F08-AC3 | Accepted import types, size/error handling, source provenance and deterministic source mapping are specified and checked; extraction/PDF support does not imply OCR or arbitrary-file support. | Broad ingestion scope is not certified; define the accepted slice before implementation. |
 
 ## F09 Submission and review
@@ -45,6 +46,7 @@ Paths: final approved immutable snapshot → consistent publication preparation/
 | F10-AC1 | Current effective publication references exactly the approved content/policy and has separate review/publication audit evidence; no partial or unapproved version becomes visible. | G1: main publishes in the approval transaction; branch prepares/indexes before atomic activation. Resolve before dependent changes. |
 | F10-AC2 | Storage/index/provider failure, duplicate event, worker restart and competing generations preserve consistent state and idempotent retries. The old active version remains usable where the selected contract requires it. | Index/worker integration is not established by main's publication endpoint. |
 | F10-AC3 | Published reading, search, RAG and history apply the same current-access/version policy; unpublish/revoke/re-publish and historical citation behavior match the accepted contract. | Branch removal of temporal validity and republish authority require explicit integration reconciliation. |
+| F10-AC4 | Direct withdrawal requires current same-organization Admin authority, reason and audit. Reviewer grants alone are refused without side effects. Existing author-request review remains separate. | [ADR 0024 GWD-01–04](../decisions/0024-admin-only-direct-withdrawal.md); forward operator 0038, API/UI and real post-ownership database verification. PR #52 only, not deployment. |
 
 ## Completion boundary
 

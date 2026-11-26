@@ -4,6 +4,15 @@ export function pdfFileName(title: string): string {
   return `${title.replace(/\.pdf$/i, "").replace(/[\\/:*?"<>|]/g, "-")}.pdf`;
 }
 
+/** Decoded size of a base64 PDF, e.g. "412 KB". */
+export function pdfSizeLabel(base64: string): string {
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  const bytes = Math.max(0, Math.floor(base64.length * 3 / 4) - padding);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 /** Object URL for a base64 PDF; revoked when the PDF changes or the caller unmounts. */
 export function usePdfObjectUrl(base64: string | null | undefined): string | null {
   const [url, setUrl] = useState<string | null>(null);
@@ -20,8 +29,13 @@ export function usePdfObjectUrl(base64: string | null | undefined): string | nul
 }
 
 /** The embedded browser PDF viewer only, for layouts that show the title and download elsewhere. */
-export function PdfViewer({ url, title, page }: { url: string; title: string; page?: number }) {
-  return <object key={`${url}:${page ?? 1}`} data={page ? `${url}#page=${page}` : url} type="application/pdf" aria-label={`PDF preview: ${title}${page ? `, page ${page}` : ""}`}>
+/**
+ * `readerChrome` hides the browser viewer's own toolbar (its duplicate download, print and annotation tools)
+ * in the governed reader, which offers a single Download action. Zoom and scrolling still work.
+ */
+export function PdfViewer({ url, title, page, readerChrome = false }: { url: string; title: string; page?: number; readerChrome?: boolean }) {
+  const fragment = [page ? `page=${page}` : "", readerChrome ? "toolbar=0&navpanes=0&view=FitH" : ""].filter(Boolean).join("&");
+  return <object key={`${url}:${page ?? 1}:${readerChrome}`} data={fragment ? `${url}#${fragment}` : url} type="application/pdf" aria-label={`PDF preview: ${title}${page ? `, page ${page}` : ""}`}>
     <p>PDF preview is unavailable here. Use Download PDF to open the original file.</p>
   </object>;
 }

@@ -1,4 +1,34 @@
 import type { Platform } from "./types";
+import { rememberReturnPath } from "../app/workspaceRoute";
+import type { KnowledgeMetadata, PublicationScope, KnowledgeType } from "@arden/domain";
+
+export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
+  departmentId: string | null; memberIds: string[] };
+export type NotificationTarget = { view: "review-queue"; id: string } | { view: "knowledge"; publicationId?: string }
+  /** Decision 0032: My Contributions with this document selected (e.g. to decide an on-behalf renewal). */
+  | { view: "contribution"; documentId: string }
+  /** Decision 0034: a private item shared directly with this member. */
+  | { view: "shared-item"; itemId: string };
+export type NotificationItem = {
+  id: string;
+  type: "REVIEW_REQUESTED" | "REVIEW_APPROVED" | "REVIEW_REJECTED" | "PUBLICATION_ACTIVE"
+    | "PUBLICATION_FAILED" | "DOCUMENT_SHARED_PERSONAL" | "DOCUMENT_SHARED_GROUP"
+    | "PRIMARY_DEPARTMENT_CHANGED" | "REVIEWER_GRANT_CREATED" | "REVIEWER_GRANT_REVOKED" | "DOCUMENT_SHARED_DIRECT";
+  message: string;
+  createdAt: string;
+  readAt: string | null;
+  target?: NotificationTarget;
+};
+export type NotificationPage = { items: NotificationItem[]; unreadCount: number; nextCursor: string | null };
+export type NotificationRealtimeCredential = {
+  endpoint: string; apiKey: string; accessToken: string; topic: string; expiresAt: string;
+};
+export type KnowledgeCatalogEntry = { id: string; name: string; description: string; status: "ACTIVE" | "INACTIVE"; version: number };
+export type KnowledgeCollection = KnowledgeCatalogEntry & { cover: "handbook" | "production"; documentIds: string[]; allowedTypes?: KnowledgeType[] | null };
+export type KnowledgeCatalog = { canManage: boolean; collections: KnowledgeCollection[] };
+export type KnowledgeCatalogWrite = { name: string; description: string; status: "ACTIVE" | "INACTIVE";
+  cover?: "handbook" | "production"; documentIds?: string[]; allowedTypes?: KnowledgeType[] };
+export type CollectionPlacement = { documentId: string; collectionId: string | null; revision: number };
 import { parseAudienceGroup, parseAudienceGroupList, type AudienceGroupRecord,
   type AudienceGroupWrite } from "./audience-group-contracts";
 import type {} from "./desktop-session";
@@ -11,13 +41,17 @@ export type OrganizationMembership = {
   departmentName?: string | null;
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
+  /** Organization Admin or an active reviewer grant. Older servers omit it; the UI then keeps Reviews visible. */
+  canReview?: boolean;
 };
 export type CurrentSession = {
   actor: { id: string; email?: string; fullName?: string | null };
   account: { passwordSetupRequired: boolean };
+  sessionExpiresAt?: string;
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
   testMode?: boolean;
+  systemAdmin?: boolean;
 };
 export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
@@ -48,6 +82,9 @@ export type KnowledgeOptions = {
     kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>;
 };
 export type KnowledgeDraftRecord = {
+  management?: KnowledgeMetadata | null;
+  hasPublishedVersion?: boolean;
+  targetReaders?: TargetReaders | null;
   id: string;
   organizationId: string;
   title: string;
@@ -65,7 +102,17 @@ export type KnowledgeDraftRecord = {
   createdAt: string;
   updatedAt: string;
 };
+export type KnowledgeDraftVersionSummary = {
+  id: string;
+  version: number;
+  mimeType: "text/plain" | "application/pdf";
+  createdAt: string;
+};
+export type KnowledgeDraftVersionRecord = KnowledgeDraftVersionSummary & { body: string; pdfBase64?: string };
 export type KnowledgeDraftSummary = {
+  management?: KnowledgeMetadata | null;
+  hasPublishedVersion?: boolean;
+  targetReaders?: TargetReaders | null;
   id: string;
   organizationId: string;
   title: string;
@@ -84,6 +131,9 @@ export type KnowledgeDraftSummary = {
   updatedAt: string;
 };
 export type KnowledgeSubmission = {
+  management?: (KnowledgeMetadata & { releaseKind?: "NEW" | "UPDATED" }) | null;
+  proposedTargetReaders?: TargetReaders | null;
+  approvedTargetReaders?: TargetReaders | null;
   id: string;
   draftId: string;
   snapshotVersionId: string;
@@ -95,10 +145,19 @@ export type KnowledgeSubmission = {
   audienceIds: string[];
   contentHash: string;
   status: "PENDING_REVIEW" | "APPROVED" | "REJECTED" | "WITHDRAWN";
-  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED";
+  publicationState: "NONE" | "PREPARING" | "ACTIVE" | "FAILED" | "SUPERSEDED" | "WITHDRAWN";
   submittedAt: string;
   publishedVersionId: string | null;
   decisionComment: string | null;
+  /** T6.1/T6.2: CONTENT, or a READER_CHANGE / WITHDRAWAL request about the current publication. */
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
+  requestReason?: string | null;
+  /** T6.3: why preparation failed, only while publicationState is FAILED. Only TEMPORARY can be retried. */
+  publicationFailure?: "TEMPORARY" | "CONTENT" | "SYSTEM" | null;
+  /** Historical provenance; new direct withdrawals require Organization Admin authority (0024). */
+  withdrawal?: { by: "REVIEWER" | "ORGANIZATION_ADMIN"; reason: string; at: string } | null;
+  /** RENEWAL only (decision 0032): the requested Valid until (null = no expiry). */
+  renewal?: { expirationDate: string | null; onBehalfOfAuthor: boolean } | null;
 };
 export type AssignedKnowledgeReview = {
   submissionId: string;
@@ -108,8 +167,35 @@ export type AssignedKnowledgeReview = {
   classification: KnowledgeClassification;
   submittedAt: string;
   approvalBlocked: boolean;
+  /** Snapshot draft version (v1, v2…); absent from older servers. */
+  versionNo?: number;
+  /** Submitter's display name, visible to reviewers; absent or null when unavailable. */
+  authorName?: string | null;
+  /** T6.1: what the request asks for; absent from older servers means CONTENT. */
+  requestType?: "CONTENT" | "READER_CHANGE" | "WITHDRAWAL" | "RENEWAL";
+};
+/** A submission the signed-in reviewer already decided (REV-02 history). */
+export type DecidedKnowledgeReview = {
+  submissionId: string;
+  title: string;
+  departmentId: string;
+  classification: KnowledgeClassification;
+  versionNo: number;
+  decision: "APPROVED" | "REJECTED";
+  decidedAt: string;
+  submittedAt: string;
+  publicationState: KnowledgeSubmission["publicationState"];
+  authorName: string | null;
+};
+/** Proposed readers resolved for the reviewer (T2.1/T2.2); members are listed only for a selected-member proposal. */
+export type ProposedReadersDetail = {
+  mode: TargetReaders["mode"];
+  department: { id: string; name: string } | null;
+  members: Array<{ membershipId: string; displayName: string | null }>;
 };
 export type KnowledgeReviewDetail = KnowledgeSubmission & {
+  /** Absent from older servers and null for a legacy audience submission. */
+  proposedReaders?: ProposedReadersDetail | null;
   body: string;
   mimeType: "text/plain" | "application/pdf";
   pdfBase64?: string;
@@ -123,14 +209,21 @@ export type PublishedKnowledge = {
   title: string;
   classification: KnowledgeClassification;
   responsibleDepartmentId: string;
-  documentCode?: string;
+  /** Display metadata, independent of the author's permitted department choices. */
+  responsibleDepartmentName?: string | null;
+  management?: (KnowledgeMetadata & { releaseKind?: "NEW" | "UPDATED" }) | null;
   versionLabel?: string;
   summary?: string;
   audienceIds: string[];
+  /** Approved readers without member identities; null for publications from before Target Readers. */
+  targetReaders?: { mode: TargetReaders["mode"]; departmentId: string | null } | null;
   contentHash: string;
+  /** Published date of the current version (Home UPDATED column). */
   publishedAt: string;
   validFrom: string;
   validUntil: string | null;
+  /** Home AUTHOR column: the active author's display name; null shows "—" (decision 0032). */
+  authorName?: string | null;
   body?: string;
   mimeType?: "text/plain" | "application/pdf";
   pdfBase64?: string;
@@ -148,7 +241,14 @@ export type ReviewerGrant = {
   validUntil: string | null;
   status: "ACTIVE" | "INACTIVE";
 };
+export type AnswerFeedback = "GOOD" | "BAD" | null;
 export type AskArdenAnswer = {
+  conversationId?: string;
+  revision?: number;
+  turnId?: string;
+  feedback?: AnswerFeedback;
+  feedbackToken?: string;
+  noteCoverage?: "FULL" | "PARTIAL";
   status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
   answer: string;
   citations: Array<{
@@ -161,8 +261,17 @@ export type AskArdenAnswer = {
     version: string;
     scope: string;
     classification: KnowledgeClassification;
+    startOffset?: number;
+    endOffset?: number;
   }>;
 };
+export type AiConversationSummary = { id: string; title: string; revision: number; updatedAt: string };
+export type AiConversation = AiConversationSummary & { turns: Array<{
+  id: string; requestId: string; question: string; sequence: number; answer: string;
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE";
+  citations: AskArdenAnswer["citations"];
+  feedback?: AnswerFeedback;
+}> };
 
 function knowledgePath(organizationId: string): string {
   return `/api/v1/organizations/${organizationId}/knowledge`;
@@ -173,15 +282,26 @@ export function loadKnowledgeOptions(platform: Platform, organizationId: string)
 }
 
 export async function listKnowledgeDrafts(platform: Platform, organizationId: string): Promise<KnowledgeDraftSummary[]> {
-  // The list route returns the repository shape (`audienceRoleIds`), unlike the detail route (`audienceIds`).
-  // Normalize here so screens never receive an undefined audience list.
-  const result = await request<{ items: (Omit<KnowledgeDraftSummary, "audienceIds"> & { audienceIds?: string[] | null; audienceRoleIds?: string[] | null })[] }>(
+  const result = await request<{ items: (Omit<KnowledgeDraftSummary, "audienceIds"> & { audienceIds?: string[] | null })[] }>(
     platform, `${knowledgePath(organizationId)}/drafts`);
-  return result.items.map(({ audienceRoleIds, audienceIds, ...item }) => ({ ...item, audienceIds: audienceIds ?? audienceRoleIds ?? [] }));
+  // The server sends `audienceIds` (an empty array when unset); keep screens safe from a missing value.
+  return result.items.map(({ audienceIds, ...item }) => ({ ...item, audienceIds: audienceIds ?? [] }));
 }
 
 export function loadKnowledgeDraft(platform: Platform, organizationId: string, draftId: string): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`);
+}
+
+export async function listKnowledgeDraftVersions(platform: Platform, organizationId: string,
+  draftId: string): Promise<KnowledgeDraftVersionSummary[]> {
+  const response = await request<{ items: KnowledgeDraftVersionSummary[] }>(platform,
+    `${knowledgePath(organizationId)}/drafts/${draftId}/versions`);
+  return response.items;
+}
+
+export function loadKnowledgeDraftVersion(platform: Platform, organizationId: string,
+  draftId: string, versionId: string): Promise<KnowledgeDraftVersionRecord> {
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}/versions/${versionId}`);
 }
 
 export function createNewKnowledgeDraft(platform: Platform, organizationId: string,
@@ -194,25 +314,76 @@ export function createNewKnowledgeDraft(platform: Platform, organizationId: stri
 
 export async function createPdfKnowledgeDraft(platform: Platform, organizationId: string,
   input: { title: string; file: File; classification?: KnowledgeClassification }, idempotencyKey: string): Promise<KnowledgeDraftRecord> {
-  if (!/\.pdf$/i.test(input.file.name) || input.file.size === 0 || input.file.size > 5 * 1024 * 1024) {
+  const pdfBase64 = await encodeKnowledgePdf(input.file);
+  return request(platform, `${knowledgePath(organizationId)}/drafts/pdf`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ title: input.title, classification: input.classification, pdfBase64 }),
+  });
+}
+
+async function encodeKnowledgePdf(file: File): Promise<string> {
+  if (!/\.pdf$/i.test(file.name) || file.size === 0 || file.size > 5 * 1024 * 1024) {
     throw new ApiError(0, "Choose a PDF file up to 5 MB.");
   }
-  const bytes = new Uint8Array(await input.file.arrayBuffer());
+  const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
   }
-  return request(platform, `${knowledgePath(organizationId)}/drafts/pdf`, {
-    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
-    body: JSON.stringify({ title: input.title, classification: input.classification, pdfBase64: btoa(binary) }),
+  return btoa(binary);
+}
+
+export async function replaceKnowledgePdf(platform: Platform, organizationId: string, draftId: string, version: number,
+  file: File, patch: Parameters<typeof saveKnowledgeDraft>[4]): Promise<KnowledgeDraftRecord> {
+  const pdfBase64 = await encodeKnowledgePdf(file);
+  return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`, {
+    method: "PATCH", headers: { "If-Match": `"${version}"` }, body: JSON.stringify({ ...patch, pdfBase64 }),
   });
 }
 
 export function saveKnowledgeDraft(platform: Platform, organizationId: string, draftId: string, version: number,
-  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">>): Promise<KnowledgeDraftRecord> {
+  patch: Partial<Pick<KnowledgeDraftRecord, "title" | "body" | "classification" | "responsibleDepartmentId" | "targetScopeType" | "teamTag" | "projectTag" | "audienceIds">> & {
+    management?: KnowledgeMetadata; targetReaders?: TargetReaders }): Promise<KnowledgeDraftRecord> {
   return request(platform, `${knowledgePath(organizationId)}/drafts/${draftId}`, {
     method: "PATCH", headers: { "If-Match": `"${version}"` }, body: JSON.stringify(patch),
   });
+}
+
+export function loadKnowledgeCatalog(platform: Platform, organizationId: string): Promise<KnowledgeCatalog> {
+  return request(platform, `${knowledgePath(organizationId)}/catalog`);
+}
+function parseCollectionPlacement(value: unknown): CollectionPlacement {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid document placement response.");
+  const row = value as Record<string, unknown>;
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  if (typeof row.documentId !== "string" || !uuid.test(row.documentId)
+    || !(row.collectionId === null || (typeof row.collectionId === "string" && uuid.test(row.collectionId)))
+    || typeof row.revision !== "number" || !Number.isSafeInteger(row.revision) || row.revision < 0) throw new Error("Invalid document placement response.");
+  return { documentId: row.documentId, collectionId: row.collectionId, revision: row.revision };
+}
+export async function loadCollectionPlacement(platform: Platform, organizationId: string, documentId: string): Promise<CollectionPlacement> {
+  return parseCollectionPlacement(await request(platform, `${knowledgePath(organizationId)}/catalog/placements/${documentId}`));
+}
+export async function saveCollectionPlacement(platform: Platform, organizationId: string, current: CollectionPlacement,
+  collectionId: string | null): Promise<CollectionPlacement> {
+  return parseCollectionPlacement(await request(platform, `${knowledgePath(organizationId)}/catalog/placements/${current.documentId}`, {
+    method: "PATCH", headers: { "If-Match": `"placement-${current.revision}"` }, body: JSON.stringify({ collectionId }),
+  }));
+}
+// Catalog configuration no longer changes document placement. Older picker payloads
+// receive CATALOG_UPGRADE_REQUIRED until the management UI adopts this contract.
+export function saveKnowledgeCatalogEntry(platform: Platform, organizationId: string, kind: "collections",
+  entry: KnowledgeCatalogEntry | null, input: KnowledgeCatalogWrite): Promise<KnowledgeCatalogEntry> {
+  return request(platform, `${knowledgePath(organizationId)}/catalog/${kind}${entry ? `/${entry.id}` : ""}`, {
+    method: entry ? "PATCH" : "POST", body: JSON.stringify(input),
+    headers: entry ? { "If-Match": `"catalog-${entry.version}"` } : {},
+  });
+}
+/** Decision 0021: a member of the organization found by name or email (Google Drive style). */
+export type KnowledgeReaderMatch = { id: string; name: string; email?: string; department?: string | null };
+export async function findKnowledgeReaders(platform: Platform, organizationId: string, query: string, ids: string[] = []) {
+  return (await request<{ items: KnowledgeReaderMatch[] }>(platform,
+    `${knowledgePath(organizationId)}/catalog/readers?q=${encodeURIComponent(query)}&ids=${encodeURIComponent(ids.join(","))}`)).items;
 }
 
 export function submitKnowledgeDraft(platform: Platform, organizationId: string, draftId: string,
@@ -222,31 +393,167 @@ export function submitKnowledgeDraft(platform: Platform, organizationId: string,
   });
 }
 
+/** T5.1: the author withdraws their own pending submission; it leaves the review queue. */
+/** T6.3: prepare an approved snapshot again after a temporary failure. Idempotent by state; no new review. */
+export function retryKnowledgePublication(platform: Platform, organizationId: string,
+  submissionId: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/submissions/${submissionId}/publication-retry`, { method: "POST" });
+}
+
+export function withdrawKnowledgeSubmission(platform: Platform, organizationId: string,
+  submissionId: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/submissions/${submissionId}/withdraw`, { method: "POST" });
+}
+
 export async function listKnowledgeSubmissions(platform: Platform, organizationId: string): Promise<KnowledgeSubmission[]> {
   const result = await request<{ items: KnowledgeSubmission[] }>(platform, `${knowledgePath(organizationId)}/submissions`);
   return result.items;
 }
 
-export async function listAssignedKnowledgeReviews(platform: Platform, organizationId: string): Promise<AssignedKnowledgeReview[]> {
-  const result = await request<{ items: AssignedKnowledgeReview[] }>(platform, `${knowledgePath(organizationId)}/reviews`);
-  return result.items;
+/** Pending queue plus the reviewer's decided submissions; servers before REV-02 return no history. */
+export async function listKnowledgeReviewBoard(platform: Platform, organizationId: string):
+  Promise<{ items: AssignedKnowledgeReview[]; decided: DecidedKnowledgeReview[] }> {
+  const result = await request<{ items: AssignedKnowledgeReview[]; decided?: DecidedKnowledgeReview[] }>(
+    platform, `${knowledgePath(organizationId)}/reviews`);
+  return { items: result.items, decided: Array.isArray(result.decided) ? result.decided : [] };
 }
 
 export function loadKnowledgeReview(platform: Platform, organizationId: string, submissionId: string): Promise<KnowledgeReviewDetail> {
   return request(platform, `${knowledgePath(organizationId)}/reviews/${submissionId}`);
 }
 
+/**
+ * `approvedReaders` (T2.1) keeps or narrows the proposed readers on approval; omit it to approve them as proposed.
+ * The server rejects widening (409 READERS_WIDENED) and invalid selections (400 INVALID_READERS).
+ */
 export function decideKnowledgeReview(platform: Platform, organizationId: string, detail: KnowledgeReviewDetail,
-  action: "APPROVE" | "REJECT", comment: string | null, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  action: "APPROVE" | "REJECT", comment: string | null, idempotencyKey: string,
+  approvedReaders?: TargetReaders): Promise<KnowledgeSubmission> {
   return request(platform, `${knowledgePath(organizationId)}/reviews/${detail.id}/decisions`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey },
     body: JSON.stringify({ action, expectedSnapshotVersionId: detail.snapshotVersionId,
-      expectedContentHash: detail.contentHash, comment }),
+      expectedContentHash: detail.contentHash, comment, ...(approvedReaders ? { approvedReaders } : {}) }),
   });
 }
 
-export async function listPublishedKnowledge(platform: Platform, organizationId: string): Promise<PublishedKnowledge[]> {
-  const result = await request<{ items: PublishedKnowledge[] }>(platform, `${knowledgePath(organizationId)}/published`);
+export type GovernanceReaderMode = "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
+/** Decision 0023 catalog row: metadata only. */
+export type GovernancePublication = {
+  documentId: string; publishedVersionId: string; title: string; responsibleDepartmentId: string | null;
+  readerMode: GovernanceReaderMode; readerDepartmentId: string | null; versionLabel: string | null;
+  snapshotVersionNo: number | null; publishedAt: string; openReports: number;
+  /** The Admin already reads it in the Library, so no inspection is needed. */
+  readable: boolean;
+};
+export type GovernanceDocument = {
+  documentId: string; publishedVersionId: string; title: string; mimeType: string; contentHash: string;
+  body: string; pdfBase64?: string; responsibleDepartmentId: string | null;
+  readers: { mode: GovernanceReaderMode; departmentId: string | null; names?: string[] };
+};
+export type GovernanceInspection = GovernanceDocument & { inspectionId: string; reason: string; expiresAt: string };
+export type PublicationReport = {
+  id: string; documentId: string; publishedVersionId: string; title: string; message: string; reporterName: string;
+  createdAt: string; stillCurrent: boolean;
+  /** The actor is the responsible reviewer and can open the responsible view. */
+  canView: boolean;
+  resolution?: "DISMISSED" | "WITHDRAWN" | null;
+};
+
+export async function listGovernancePublications(platform: Platform, organizationId: string): Promise<GovernancePublication[]> {
+  return (await request<{ items: GovernancePublication[] }>(platform, `${knowledgePath(organizationId)}/governance/publications`)).items;
+}
+
+/** Opens an audited inspection; the reason is recorded before any content is served. */
+export async function openGovernanceInspection(platform: Platform, organizationId: string, documentId: string,
+  reason: string): Promise<string> {
+  return (await request<{ inspectionId: string }>(platform,
+    `${knowledgePath(organizationId)}/governance/publications/${documentId}/inspections`,
+    { method: "POST", body: JSON.stringify({ reason }) })).inspectionId;
+}
+
+export function loadGovernanceInspection(platform: Platform, organizationId: string, inspectionId: string): Promise<GovernanceInspection> {
+  return request(platform, `${knowledgePath(organizationId)}/governance/inspections/${inspectionId}`);
+}
+
+export function loadResponsiblePublication(platform: Platform, organizationId: string, documentId: string): Promise<GovernanceDocument> {
+  return request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/responsible-view`);
+}
+
+/** Decision 0024: direct withdrawal only by a current Organization Admin. */
+export async function withdrawPublication(platform: Platform, organizationId: string, documentId: string, reason: string): Promise<void> {
+  await request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/withdrawal`,
+    { method: "POST", body: JSON.stringify({ reason }) });
+}
+
+export async function listPublicationReports(platform: Platform, organizationId: string): Promise<PublicationReport[]> {
+  return (await request<{ items: PublicationReport[] }>(platform, `${knowledgePath(organizationId)}/reports`)).items;
+}
+
+export async function listClosedPublicationReports(platform: Platform, organizationId: string, cursor?: string): Promise<{
+  items: PublicationReport[]; nextCursor: string | null;
+}> {
+  const query = new URLSearchParams({ disposition: "closed" });
+  if (cursor) query.set("cursor", cursor);
+  return request(platform, `${knowledgePath(organizationId)}/reports?${query}`);
+}
+
+export async function dismissPublicationReport(platform: Platform, organizationId: string, reportId: string): Promise<void> {
+  await request(platform, `${knowledgePath(organizationId)}/reports/${reportId}/dismiss`, { method: "POST" });
+}
+
+export type PublicationChangeRequest =
+  | { type: "READER_CHANGE"; reason: string; targetReaders: TargetReaders }
+  | { type: "WITHDRAWAL"; reason: string };
+
+/** T6.1: the author asks a reviewer to replace the readers of a published document, or to withdraw it. */
+export function requestPublicationChange(platform: Platform, organizationId: string, documentId: string,
+  input: PublicationChangeRequest, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/change-requests`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
+  });
+}
+
+/** Decision 0032: validity of current publications the caller is responsible for (author, reviewer, Admin). */
+export type PublicationRenewalState = {
+  documentId: string; publishedVersionId: string; title: string; responsibleDepartmentId: string | null;
+  /** Effective Valid until (YYYY-MM-DD); null means no expiry. */
+  expirationDate: string | null; renewalPending: boolean; authorActive: boolean; isAuthor: boolean; canRenew: boolean;
+  /** Active author's display name; null when the author is no longer active. */
+  authorName?: string | null;
+  /** The renewal waiting for review. `canDecide`: you are the author of a request made on your behalf (0032). */
+  pending?: { submissionId: string; snapshotVersionId: string; contentHash: string; onBehalfOfAuthor: boolean;
+    requestedByName: string | null; reason: string; expirationDate: string | null; requestedAt: string;
+    authorWindowUntil: string | null; canDecide: boolean } | null;
+};
+
+/** Decision 0032: the author approves or rejects a renewal asked on their behalf (same decision endpoint). */
+export function decidePublicationRenewal(platform: Platform, organizationId: string,
+  pending: NonNullable<PublicationRenewalState["pending"]>, action: "APPROVE" | "REJECT", comment: string | null,
+  idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/reviews/${pending.submissionId}/decisions`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey },
+    body: JSON.stringify({ action, expectedSnapshotVersionId: pending.snapshotVersionId,
+      expectedContentHash: pending.contentHash, comment }),
+  });
+}
+
+export async function listPublicationRenewals(platform: Platform, organizationId: string): Promise<PublicationRenewalState[]> {
+  const result = await request<{ items: PublicationRenewalState[] }>(platform, `${knowledgePath(organizationId)}/renewals`);
+  return result.items;
+}
+
+/** Decision 0032 B: asks a reviewer to renew the Valid until of the current publication (null = no expiry). */
+export function requestPublicationRenewal(platform: Platform, organizationId: string, documentId: string,
+  input: { expirationDate: string | null; reason: string }, idempotencyKey: string): Promise<KnowledgeSubmission> {
+  return request(platform, `${knowledgePath(organizationId)}/documents/${documentId}/renewal`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey }, body: JSON.stringify(input),
+  });
+}
+
+export async function listPublishedKnowledge(platform: Platform, organizationId: string,
+  scope?: PublicationScope): Promise<PublishedKnowledge[]> {
+  const path = `${knowledgePath(organizationId)}/published${scope ? `?scope=${encodeURIComponent(scope)}` : ""}`;
+  const result = await request<{ items: PublishedKnowledge[] }>(platform, path);
   return result.items;
 }
 
@@ -254,10 +561,32 @@ export function loadPublishedKnowledge(platform: Platform, organizationId: strin
   return request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}`);
 }
 
-export function askArden(platform: Platform, organizationId: string, query: string): Promise<AskArdenAnswer> {
+export function askArden(platform: Platform, organizationId: string, query: string, conversation?: {
+  conversationId: string; requestId: string; expectedRevision: number;
+}): Promise<AskArdenAnswer> {
   return request(platform, `/api/v1/organizations/${organizationId}/ai/answers`, {
-    method: "POST", body: JSON.stringify({ query }),
+    method: "POST", body: JSON.stringify({ query, ...conversation }),
   });
+}
+export async function listAiConversations(platform: Platform, organizationId: string): Promise<AiConversationSummary[]> {
+  const result = await request<{ items: AiConversationSummary[] }>(platform,
+    `/api/v1/organizations/${organizationId}/ai/conversations`);
+  return result.items;
+}
+export function loadAiConversation(platform: Platform, organizationId: string, id: string): Promise<AiConversation> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${id}`);
+}
+
+export function rateAiAnswer(platform: Platform, organizationId: string, conversationId: string, turnId: string,
+  feedback: AnswerFeedback): Promise<{ feedback: AnswerFeedback }> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${conversationId}/turns/${turnId}/feedback`, {
+    method: "PUT", body: JSON.stringify({ feedback }),
+  });
+}
+
+export type PrivateFeedbackWeek = { weekStart: string; good: number; bad: number };
+export function loadPrivateFeedbackAnalytics(platform: Platform): Promise<{ weeks: PrivateFeedbackWeek[] }> {
+  return request(platform, "/api/v1/system/analytics/private-feedback");
 }
 
 export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {
@@ -282,10 +611,12 @@ const userErrorMessages: Record<string, string> = {
   SOURCE_NOT_SUPPORTED: "Couldn’t copy this note.",
   IDEMPOTENCY_CONFLICT: "Request changed. Reopen to try again.",
   INVALID_EMAIL: "Enter a valid email address.",
+  COLLECTION_CYCLE: "A collection can’t move into itself or a collection inside it.",
 };
 
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string, readonly code: string | null = null) {
+  constructor(readonly status: number, message: string, readonly code: string | null = null,
+    readonly retryAfterSeconds?: number, readonly retryable?: boolean) {
     super(code && Object.hasOwn(userErrorMessages, code) ? userErrorMessages[code] : message);
     this.name = "ApiError";
   }
@@ -300,6 +631,8 @@ export async function signIn(platform: Platform, email: string, password: string
 
 export async function beginGoogleSignIn(platform: Platform): Promise<CurrentSession | null> {
   if (platform === "web") {
+    // Google returns to `/`; keep the workspace page the member was opening so sign-in lands there.
+    rememberReturnPath(window.location.pathname);
     window.location.assign("/api/v1/auth/google/start?client=web");
     return null;
   }
@@ -320,9 +653,9 @@ export async function requestPasswordReset(platform: Platform, email: string): P
   });
 }
 
-export async function resetPasswordWithToken(
+export async function resetPasswordFromLink(
   platform: Platform,
-  params: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string }
+  params: { accessToken: string; refreshToken: string; newPassword: string }
 ): Promise<void> {
   await request(platform, "/api/v1/auth/reset-password", {
     method: "POST", body: JSON.stringify(params),
@@ -460,7 +793,7 @@ export async function inviteOrganizationMember(platform: Platform, organizationI
   return request(platform, `/api/v1/organizations/${organizationId}/invitations`, {
     method: "POST",
     body: JSON.stringify({ email, ...(departmentId ? { departmentId } : {}) }),
-  });
+  }, 30_000);
 }
 
 export async function resendOrganizationInvitation(platform: Platform, organizationId: string, invitationId: string): Promise<{ deliveryMode: "email" | "local-test-no-email" }> {
@@ -511,11 +844,34 @@ export async function apiRequest<T>(platform: Platform, path: string, init: Requ
   return request<T>(platform, path, init);
 }
 
+export async function listNotifications(platform: Platform, organizationId: string, input: {
+  cursor?: string | null; unreadOnly?: boolean; limit?: number;
+} = {}): Promise<NotificationPage> {
+  const query = new URLSearchParams();
+  if (input.cursor) query.set("cursor", input.cursor);
+  if (input.unreadOnly) query.set("unreadOnly", "true");
+  if (input.limit !== undefined) query.set("limit", String(input.limit));
+  const suffix = query.size ? `?${query}` : "";
+  return apiRequest<NotificationPage>(platform, `/api/v1/organizations/${organizationId}/notifications${suffix}`);
+}
+
+export async function markNotificationRead(platform: Platform, organizationId: string, notificationId: string): Promise<void> {
+  await apiRequest<void>(platform, `/api/v1/organizations/${organizationId}/notifications/${notificationId}/read`, { method: "PATCH" });
+}
+
+export async function markAllNotificationsRead(platform: Platform, organizationId: string): Promise<{ updated: number }> {
+  return apiRequest<{ updated: number }>(platform, `/api/v1/organizations/${organizationId}/notifications/read-all`, { method: "POST" });
+}
+
+export async function getNotificationRealtimeCredential(platform: Platform, organizationId: string): Promise<NotificationRealtimeCredential> {
+  return apiRequest<NotificationRealtimeCredential>(platform, `/api/v1/organizations/${organizationId}/notifications/realtime-credential`);
+}
+
 type ApiResponse = { status: number; body: string; etag?: string; location?: string };
 
-async function request<T>(platform: Platform, path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(platform: Platform, path: string, init: RequestInit = {}, timeoutMs?: number): Promise<T> {
   const rawMethod = init.method ?? "GET";
-  if (rawMethod !== "GET" && rawMethod !== "POST" && rawMethod !== "PATCH") {
+  if (rawMethod !== "GET" && rawMethod !== "POST" && rawMethod !== "PATCH" && rawMethod !== "PUT") {
     throw new ApiError(0, "This request method is not available in the Arden client.");
   }
   const method = rawMethod;
@@ -536,23 +892,37 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
         body: typeof init.body === "string" ? init.body : undefined,
         ifMatch: headers.get("if-match") ?? undefined,
         ...(headers.has("idempotency-key") ? { idempotencyKey: headers.get("idempotency-key")! } : {}),
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
       });
     } else {
       const requestHeaders: Record<string, string> = { ...Object.fromEntries(headers.entries()) };
       if (init.body !== undefined) {
         requestHeaders["Content-Type"] = "application/json";
       }
-      const webResponse = await fetch(`${window.location.origin}${path}`, {
-        ...init,
-        credentials: "include",
-        headers: requestHeaders,
-      });
-      response = {
-        status: webResponse.status,
-        body: await webResponse.text(),
-        etag: webResponse.headers.get("etag") ?? undefined,
-        location: webResponse.headers.get("location") ?? undefined,
-      };
+      const controller = timeoutMs === undefined ? undefined : new AbortController();
+      const abortFromCaller = () => controller?.abort(init.signal?.reason);
+      if (controller && init.signal) {
+        if (init.signal.aborted) abortFromCaller();
+        else init.signal.addEventListener("abort", abortFromCaller, { once: true });
+      }
+      const timeout = timeoutMs === undefined ? undefined : setTimeout(() => controller?.abort(), timeoutMs);
+      try {
+        const webResponse = await fetch(`${window.location.origin}${path}`, {
+          ...init,
+          ...(controller ? { signal: controller.signal } : {}),
+          credentials: "include",
+          headers: requestHeaders,
+        });
+        response = {
+          status: webResponse.status,
+          body: await webResponse.text(),
+          etag: webResponse.headers.get("etag") ?? undefined,
+          location: webResponse.headers.get("location") ?? undefined,
+        };
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        if (controller && init.signal) init.signal.removeEventListener("abort", abortFromCaller);
+      }
     }
   } catch (cause) {
     if (cause instanceof ApiError) throw cause;
@@ -561,6 +931,7 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
 
   if (response.status < 200 || response.status >= 300) {
     let code: string | null = null;
+    let retryAfterSeconds: number | undefined, retryable: boolean | undefined;
     let message = response.status === 401 ? "Sign in to continue." : "The request could not be completed.";
     try {
       const data: unknown = JSON.parse(response.body);
@@ -570,13 +941,17 @@ async function request<T>(platform: Platform, path: string, init: RequestInit = 
           if (typeof error === "object" && error !== null) {
             if ("code" in error && typeof error.code === "string") code = error.code;
             if ("message" in error && typeof error.message === "string") message = error.message;
+            if ("retryAfterSeconds" in error && Number.isSafeInteger(error.retryAfterSeconds)
+              && typeof error.retryAfterSeconds === "number" && error.retryAfterSeconds > 0 && error.retryAfterSeconds <= 300)
+              retryAfterSeconds = error.retryAfterSeconds;
+            if ("retryable" in error && typeof error.retryable === "boolean") retryable = error.retryable;
           }
         } else if ("message" in data && typeof data.message === "string") {
           message = data.message;
         }
       }
     } catch { /* Keep the stable generic message when the server body is not JSON. */ }
-    throw new ApiError(response.status, message, code);
+    throw new ApiError(response.status, message, code, retryAfterSeconds, retryable);
   }
   if (response.status === 204 || response.body.length === 0) return undefined as T;
   try { return JSON.parse(response.body) as T; }

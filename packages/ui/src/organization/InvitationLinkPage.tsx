@@ -1,5 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements } from "@arden/domain";
 import { AuthLayout } from "../sign-in/AuthLayout";
+import { NewPasswordField, accountPasswordRequirementMessage } from "../sign-in/NewPasswordField";
+import { UnconfirmedEmailDialog } from "../sign-in/UnconfirmedEmailDialog";
+import { VisiblePasswordField } from "../sign-in/VisiblePasswordField";
 import {
   acceptInvitation,
   ApiError,
@@ -22,43 +26,6 @@ type InvitationLinkPageProps = {
   onSessionChange?: (session: CurrentSession | null) => void;
   onAccepted: (session: CurrentSession) => void;
 };
-
-/**
- * Renders an informational dialog alerting the user to check their email for an unconfirmed account link.
- */
-function UnconfirmedEmailDialog({ email, onClose }: { email: string; onClose: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const previous = document.activeElement;
-    dialog.current?.showModal();
-    return () => {
-      dialog.current?.close();
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
-    };
-  }, []);
-  return (
-    <dialog
-      ref={dialog}
-      className="organization-dialog admin-confirm"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="unconfirmed-email-title"
-      onCancel={(event) => { event.preventDefault(); onClose(); }}
-    >
-      <div className="organization-dialog-heading">
-        <h2 id="unconfirmed-email-title">Verify your email</h2>
-      </div>
-      <p className="organization-dialog-description">
-        Check <strong>{email}</strong> for a verification link.
-      </p>
-      <div className="organization-dialog-actions">
-        <button type="button" className="auth-primary" autoFocus onClick={onClose}>
-          OK
-        </button>
-      </div>
-    </dialog>
-  );
-}
 
 /**
  * Renders the organization invitation acceptance and account registration page.
@@ -118,6 +85,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
 
   const handleSignIn = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    setEmail(email.trim());
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setError("Enter a valid email address.");
       setBusy(false);
@@ -161,6 +129,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
 
   const handleSignUp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
+    setEmail(email.trim());
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       setError("Enter a valid email address.");
       setBusy(false);
@@ -176,8 +145,13 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
       setBusy(false);
       return;
     }
-    if ([...password].length < 8) {
-      setError("Password must be at least 8 characters long.");
+    if (password.length > accountPasswordMaximumLength) {
+      setError(accountPasswordMaximumLengthMessage);
+      setBusy(false);
+      return;
+    }
+    if (!meetsAccountPasswordRequirements(password)) {
+      setError(accountPasswordRequirementMessage);
       setBusy(false);
       return;
     }
@@ -186,12 +160,16 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
         ? `${window.location.origin}/invite/${encodeURIComponent(token)}`
         : undefined;
       await signUp(platform, email.trim(), password, fullName.trim(), redirectTo);
-      setMessage("Check your email to continue.");
+      setMessage("If email confirmation is required, check your inbox. Otherwise, sign in to accept the invitation.");
       setMode("sign-in");
+      setPassword("");
     } catch (cause) {
       if (cause instanceof ApiError && (cause.code === "ACCOUNT_ALREADY_EXISTS" || cause.status === 409)) {
         setError("Account already exists. Sign in.");
         setMode("sign-in");
+        setPassword("");
+      } else if (cause instanceof ApiError && cause.code === "ACCOUNT_SETUP_UNAVAILABLE") {
+        setError("Your password meets the listed requirements, but account setup could not be completed. Try a different password or sign in.");
       } else if (cause instanceof ApiError && cause.message) {
         setError(cause.message);
       } else {
@@ -371,14 +349,14 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                 {mode === "sign-in" ? (
                   <>
                     Need an account?{" "}
-                    <button type="button" onClick={() => { setMode("create-account"); setError(""); setMessage(""); }}>
+                    <button type="button" onClick={() => { setMode("create-account"); setPassword(""); setError(""); setMessage(""); }}>
                       Create account
                     </button>
                   </>
                 ) : (
                   <>
                     Already have an account?{" "}
-                    <button type="button" onClick={() => { setMode("sign-in"); setError(""); setMessage(""); }}>
+                    <button type="button" onClick={() => { setMode("sign-in"); setPassword(""); setError(""); setMessage(""); }}>
                       Sign in
                     </button>
                   </>
@@ -397,6 +375,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       placeholder="name@company.com"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
+                      onBlur={(event) => setEmail(event.target.value.trim())}
                     />
                     {invitation && email.trim() && email.trim().toLowerCase() !== invitation.email.toLowerCase() && (
                       <span style={{ color: "#f0b0a5", fontSize: "11px", marginTop: "4px" }}>
@@ -404,18 +383,8 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       </span>
                     )}
                   </label>
-                  <label>
-                    <span>Password</span>
-                    <input
-                      autoComplete="current-password"
-                      type="password"
-                      required
-                      maxLength={1024}
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                    />
-                  </label>
+                  <VisiblePasswordField label="Password" value={password} onChange={setPassword}
+                    autoComplete="current-password" placeholder="Enter your password" />
                   <button type="submit" className="auth-primary" disabled={busy}>
                     {busy ? "Signing in and accepting…" : "Sign in and accept invitation"}
                   </button>
@@ -444,6 +413,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       placeholder="name@company.com"
                       value={email}
                       onChange={(event) => setEmail(event.target.value)}
+                      onBlur={(event) => setEmail(event.target.value.trim())}
                     />
                     {invitation && email.trim() && email.trim().toLowerCase() !== invitation.email.toLowerCase() && (
                       <span style={{ color: "#f0b0a5", fontSize: "11px", marginTop: "4px" }}>
@@ -451,19 +421,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       </span>
                     )}
                   </label>
-                  <label>
-                    <span>Password</span>
-                    <input
-                      autoComplete="new-password"
-                      type="password"
-                      required
-                      minLength={8}
-                      maxLength={1024}
-                      placeholder="Create a secure password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                    />
-                  </label>
+                  <NewPasswordField value={password} onChange={setPassword} />
                   <button type="submit" className="auth-primary" disabled={busy}>
                     {busy ? "Creating account…" : "Create account and accept"}
                   </button>

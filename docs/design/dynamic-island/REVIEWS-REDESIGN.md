@@ -7,6 +7,30 @@ and `packages/ui/src/styles/island-knowledge.css` (`.review-*`, ~lines 48–73).
 Layout and visual change only. Keep `decide("APPROVE" | "REJECT")`, the reason-required rule,
 `approvalBlocked`, `KnowledgeDialog` semantics, the API calls and the status-island messages.
 
+## Landing list (REV-02 "Reviews · Linear list", Figma node 334:1213)
+The Reviews destination opens on one island listing submissions in collapsible groups: **Needs review**
+(the pending queue), **Approved** and **Rejected** (the signed-in reviewer's own decisions, read-only).
+Group header 36px: chevron · status icon (amber half circle / sage check circle / muted cross circle) ·
+label · count. Row 44px: mono code 92px · status icon · title with `vN` chip (and the blocked dot) ·
+department chip · author avatar + name 128px · short date 56px right. Toolbar: Refresh, Filter (text
+filter over title, code, department, author) and Display options (show/hide the decided groups).
+Opening a Needs review row shows the review detail (next section); the breadcrumb "Reviews" returns to
+the list.
+
+## Review detail (REV-03 note/draft, Figma 340:1419; REV-04 PDF, Figma 340:1642)
+One island: a 52px breadcrumb bar ("Reviews" > mono code + title; position "n / m"; next/previous
+round 28px buttons) above a two-column body: the document (left, scrolls by itself) and a 340px side
+panel. Notes/drafts render the title (26px) and the Semantic Document in a 680px reading column (padding
+36px 56px). PDFs show a 44px toolbar (PDF icon, file name, size, Download, Open in a new tab) above the
+browser PDF viewer on a dark canvas; page count and zoom are the browser viewer's own controls (a custom
+page/zoom bar would need pdf.js). Side panel: Properties (version "Version n · replaces vn-1", author
+avatar + name, submitted date), SUBMITTED DETAILS, note to the author ("Optional to approve", turning
+danger "Required to reject"), pinned footer with Reject / Approve and the in-place confirmation. Below
+820px of island width the side panel stacks under the document with a sticky footer. The three-pane
+layout below is superseded by this detail; its decision rules still apply. Below 760px of list width the department and author columns hide; below 520px
+the code hides. Author names come from `review_submission_authors` (migration 0026), which only
+returns names to an Org Admin, a current reviewer of a pending submission or the reviewer who decided it.
+
 ## Problem
 The decision bar sits under the document, so reviewers scroll to the end to act, and the
 frozen-details grid plus the title compete with the document body.
@@ -18,7 +42,7 @@ frozen-details grid plus the title compete with the document body.
 ```
 Each pane: `display:flex; flex-direction:column; min-height:0; overflow:hidden; border-radius:14px`.
 Only the inner list, document body and decision middle scroll — never the page.
-Below 1180px: queue collapses to a select/drawer above the document; under 860px stack document
+Below a 1020px page width (container `knowledge-page`; a 1440px window gives 1148px) the queue moves above the document; under 860px stack document
 then decision, with the decision footer `position: sticky; bottom: 0`.
 
 ### 1. Queue (left, `--arden-bg-sidebar`)

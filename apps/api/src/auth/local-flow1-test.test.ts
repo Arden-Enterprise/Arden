@@ -38,7 +38,7 @@ describe("isolated local Mainflow 1 test auth", () => {
     ]))).toThrow(/example\.test/);
     expect(() => parseLocalTestAccounts(JSON.stringify([
       { userId: "11111111-1111-4111-8111-111111111111", email: "admin@example.test", fullName: "Test", password: "short" },
-    ]))).toThrow(/16-character/);
+    ]))).toThrow(/16 to 100/);
   });
 
   it("issues revocable in-memory sessions only for configured test accounts", async () => {

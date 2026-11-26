@@ -1,29 +1,57 @@
-import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument } from "@arden/domain";
+import Fastify, { LogController, type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText, matchesPublicationScope, publicationScopes, type PublicationScope } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
-import type { ArdenDataRepository, DraftCursor, DraftPatch, DraftWrite, PrivateDraft, ReviewerGrantInput, SharedDraftPatch, SharedKnowledgeDraft, SharedKnowledgeSubmission } from "./db/repository.js";
+import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
+  type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
+  type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type GovernanceDocumentView, type StoredContentFields } from "./db/repository.js";
+import { newSessionExpiry, readSessionExpiry, sealSession } from "./auth/session-timebox.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
 import { allKnowledgeClassifications, defaultKnowledgeClassification, type KnowledgeClassification } from "./knowledge/policy.js";
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
 import type { AskArdenClient } from "./answers/ai-client.js";
-import { citationPage } from "./answers/citation-page.js";
-import { citationMatchesManifest } from "./answers/contracts.js";
+import { registerAnswerRoutes } from "./answers/routes.js";
+import { registerReaderSummaryRoutes } from "./reader-ai/routes.js";
+import { registerReaderQuestionRoutes } from "./reader-ai/question-routes.js";
+import { registerPrivateNoteQuestion } from "./private-notes/question.js";
+import { privateFeedbackTickets, registerPrivateFeedbackRoute } from "./private-notes/feedback.js";
+import { registerWritingRoutes } from "./writing/routes.js";
+import type { ReaderAiClient } from "./reader-ai/summary.js";
+import { canRead, readerModes, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
+import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
+import { registerNotificationRoutes } from "./notifications/routes.js";
+import type { NotificationRealtimeConfiguration } from "./notifications/realtime.js";
+import { controlledAnalysisAdapter, httpAnalysisAdapter } from "./maintenance/analysis.js";
+import { MaintenanceCaseService } from "./maintenance/case-service.js";
+import { MaintenanceError } from "./maintenance/contracts.js";
+import { registerMaintenanceRoutes } from "./maintenance/routes.js";
+import { registerPrivateOrganizationRoutes, representNoteSummary, representPrivateNote } from "./private-notes/organization-routes.js";
+import { registerDirectShareRoutes } from "./private-notes/direct-share-routes.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
 const maxPdfBase64Length = Math.ceil(maxPdfBytes / 3) * 4;
 const maxTitleCodePoints = 200;
 const defaultListLimit = 50;
+const accountPasswordRequirementsMessage = "Password must have at least 8 characters, one uppercase letter, and one special character.";
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+// Decision 0013: legacy classification is optional input and no longer routes review.
+const classificationSchema = { type: "string", enum: [...allKnowledgeClassifications] } as const;
+/** Request shape for Target Readers (draft save) and approved readers (review decision). */
+const targetReadersSchema = { type: "object", additionalProperties: false, required: ["mode"], properties: {
+  mode: { type: "string", enum: [...readerModes] },
+  departmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
+  memberIds: { type: "array", maxItems: 500, items: { type: "string", pattern: uuidPattern } },
+} } as const;
 
 type AppDependencies = {
   checkDatabase: () => Promise<void>;
   auth: AuthProvider | null;
   authTrustedOrigins: string[];
   secureCookies: boolean;
+  sessionSigningKey?: Buffer;
   repository: ArdenDataRepository;
   storage: PrivateContentStorage;
   invitationMailer?: InvitationMailer | null;
@@ -31,16 +59,34 @@ type AppDependencies = {
   publicApiOrigin?: string | null;
   invitationDeliveryMode?: "email" | "local-test-no-email";
   askArden?: AskArdenClient | null;
+  privateNoteAiOrganizations?: ReadonlySet<string>;
+  readerAi?: ReaderAiClient | null;
+  notificationRealtime?: NotificationRealtimeConfiguration | null;
   testActor?: SessionContext;
 };
 
-type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean; passwordSetupRequired?: boolean };
+type SessionContext = { userId: string; email: string; fullName: string | null; emailVerified: boolean;
+  passwordSetupRequired?: boolean; sessionExpiresAt?: number };
 // Decision 0013: classification is optional and defaults to INTERNAL; review strictness comes from audience breadth.
 type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification?: KnowledgeClassification };
 
 export function buildApp(dependencies: AppDependencies) {
+  const sessionKey = dependencies.sessionSigningKey ?? randomBytes(32);
   const app = Fastify({
+    // Explicit metadata-only operation events replace URL/IP-bearing automatic access logs.
+    logController: new LogController({ disableRequestLogging: true }),
     logger: {
+      // Recovery verification URLs can contain one-time credentials in the query string.
+      serializers: {
+        req(request) {
+          return {
+            method: request.method,
+            url: request.url.split("?", 1)[0],
+            host: request.headers.host,
+            remoteAddress: request.ip,
+          };
+        },
+      },
       redact: {
         paths: ["req.headers.authorization", "req.headers.cookie", "req.body.password", "req.body.currentPassword", "req.body.newPassword",
           "req.body.token", "req.body.accessToken", "req.body.refreshToken", "res.headers.set-cookie"],
@@ -62,9 +108,41 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
   const requestActor = (request: FastifyRequest, reply: FastifyReply) =>
-    requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, dependencies.testActor);
+    requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, sessionKey, dependencies.testActor);
   registerAudienceGroupRoutes(app, dependencies.repository.audienceGroups, requestActor, uuidPattern);
+  registerKnowledgeCatalogRoutes(app, dependencies.repository.knowledgeCatalog, requestActor, uuidPattern);
+  registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern);
+  registerReaderSummaryRoutes(app, dependencies.repository, dependencies.storage, dependencies.readerAi ?? null, requestActor, uuidPattern);
+  registerReaderQuestionRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null, requestActor, uuidPattern);
+  const privateAiOrganizations = dependencies.privateNoteAiOrganizations ?? new Set<string>();
+  const feedbackTickets = privateFeedbackTickets(sessionKey);
+  const ratePrivateAnswer = dependencies.repository.ratePrivateAnswer?.bind(dependencies.repository);
+  registerPrivateNoteQuestion(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null,
+    requestActor, uuidPattern, privateAiOrganizations, ratePrivateAnswer ? feedbackTickets.issue : undefined);
+  registerPrivateFeedbackRoute(app, ratePrivateAnswer,
+    requestActor, uuidPattern, privateAiOrganizations, feedbackTickets);
+  registerWritingRoutes(app, dependencies.repository, dependencies.askArden ?? null,
+    requestActor, uuidPattern, privateAiOrganizations);
   registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
+  registerNotificationRoutes(app, { repository: dependencies.repository,
+    store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
+  registerPrivateOrganizationRoutes(app, { store: dependencies.repository.privateOrganization,
+    storage: dependencies.storage, requestActor, uuidPattern });
+  if (dependencies.repository.directShares) {
+    registerDirectShareRoutes(app, { store: dependencies.repository.directShares, storage: dependencies.storage, requestActor, uuidPattern });
+  }
+  const maintenanceMode = process.env.ARDEN_MAINTENANCE_ANALYSIS_ADAPTER;
+  const maintenanceAdapter = maintenanceMode === "http" || maintenanceMode === "http-provider"
+    ? httpAnalysisAdapter(process.env.ARDEN_AI_URL ?? "", process.env.ARDEN_AI_SERVICE_TOKEN ?? "",
+      maintenanceMode === "http-provider" ? "provider" : "controlled")
+    : process.env.ARDEN_MAINTENANCE_ANALYSIS_ADAPTER === "controlled"
+    ? async (request: Parameters<typeof controlledAnalysisAdapter>[0]) => {
+      const delay = Number(process.env.ARDEN_MAINTENANCE_ANALYSIS_DELAY_MS ?? 0);
+      if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
+      return controlledAnalysisAdapter(request);
+    } : null;
+  registerMaintenanceRoutes(app, dependencies.repository.maintenance
+    ? new MaintenanceCaseService(dependencies.repository.maintenance, maintenanceAdapter) : undefined, requestActor, uuidPattern);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
       const isEmailError = error.validation.some((v) =>
@@ -76,14 +154,17 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
       }
       const route = request.routeOptions.url;
-      const passwordField = route === "/api/v1/auth/sign-up" || route === "/api/v1/auth/password"
-        ? "/password"
-        : route === "/api/v1/auth/reset-password" || route === "/api/v1/auth/change-password" ? "/newPassword" : undefined;
-      const isPasswordError = passwordField && error.validation.some((v) =>
-        v.instancePath === passwordField && v.keyword === "minLength"
+      const passwordIssue = error.validation.find((issue) =>
+        (issue.instancePath === "/password" || issue.instancePath === "/newPassword" || issue.instancePath === "/currentPassword")
+        && (issue.keyword === "minLength" || issue.keyword === "maxLength")
       );
-      if (isPasswordError) {
-        return reply.code(400).send(safeError("INVALID_PASSWORD", "Password must be at least 8 characters long.", request.id));
+      if (passwordIssue?.keyword === "maxLength") {
+        return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordMaximumLengthMessage, request.id));
+      }
+      if (passwordIssue?.keyword === "minLength" && route !== "/api/v1/auth/sign-in" && passwordIssue.instancePath !== "/currentPassword") {
+        const message = route === "/api/v1/auth/sign-up" || route === "/api/v1/auth/password"
+          ? accountPasswordRequirementsMessage : "Password must be at least 8 characters long.";
+        return reply.code(400).send(safeError("INVALID_PASSWORD", message, request.id));
       }
       return reply.code(400).send(safeError("INVALID_REQUEST", "The request is invalid.", request.id));
     }
@@ -121,8 +202,8 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["email", "password"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
-          password: { type: "string", minLength: 1, maxLength: 1024 },
+          email: { type: "string", minLength: 3, maxLength: 320 },
+          password: { type: "string", minLength: 1, maxLength: accountPasswordMaximumLength },
         },
       },
     },
@@ -134,7 +215,7 @@ export function buildApp(dependencies: AppDependencies) {
     }
     try {
       const result = await dependencies.auth.signIn({ email: normalizedEmail, password: request.body.password });
-      setAuthCookies(reply, result.tokens, dependencies.secureCookies);
+      setAuthCookies(reply, result.tokens, dependencies.secureCookies, sessionKey);
       return { authenticated: true };
     } catch (error) {
       if (error instanceof Error && error.message === "EMAIL_NOT_CONFIRMED") {
@@ -181,7 +262,8 @@ export function buildApp(dependencies: AppDependencies) {
       }
       try {
         const result = await dependencies.auth.completeGoogleSignIn(request.query.code, state.flowId, state.verifier);
-        setAuthCookies(reply, result.tokens, dependencies.secureCookies, [clearOAuthStateCookie(dependencies.secureCookies)]);
+        setAuthCookies(reply, result.tokens, dependencies.secureCookies, sessionKey,
+          newSessionExpiry(), [clearOAuthStateCookie(dependencies.secureCookies)]);
         const suffix = `status=success${result.passwordSetupRequired ? "&setup=password" : ""}`;
         return reply.redirect(`${completeUrl}${completeUrl.includes("?") ? "&" : "?"}${suffix}`);
       } catch (error) {
@@ -199,18 +281,30 @@ export function buildApp(dependencies: AppDependencies) {
   app.post<{ Body: { password: string } }>("/api/v1/auth/password", {
     schema: {
       body: { type: "object", additionalProperties: false, required: ["password"], properties: {
-        password: { type: "string", minLength: 8, maxLength: 1024 },
+        password: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
       } },
     },
   }, async (request, reply) => {
     if (!dependencies.auth?.setInitialPassword) return authUnavailable(reply, request);
-    const tokens = readAuthCookies(request.headers.cookie, dependencies.secureCookies);
-    if (!tokens) return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+    const session = readBoundSession(request.headers.cookie, dependencies.secureCookies, sessionKey);
+    if (!session) {
+      clearAuthCookies(reply, dependencies.secureCookies);
+      return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+    }
     try {
-      const resolution = await dependencies.auth.resolveSession(tokens);
+      const resolution = await dependencies.auth.resolveSession(session.tokens);
       if (resolution.kind !== "authenticated") return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+      if (Date.now() >= session.expiresAt * 1000) {
+        clearAuthCookies(reply, dependencies.secureCookies);
+        return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+      }
+      if (resolution.rotatedSession) setAuthCookies(reply, resolution.rotatedSession, dependencies.secureCookies,
+        sessionKey, session.expiresAt);
       if (!resolution.passwordSetupRequired) return reply.code(409).send(safeError("PASSWORD_ALREADY_INITIALIZED", "This account already has a password.", request.id));
-      await dependencies.auth.setInitialPassword(tokens, request.body.password);
+      if (!meetsAccountPasswordRequirements(request.body.password)) {
+        return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordRequirementsMessage, request.id));
+      }
+      await dependencies.auth.setInitialPassword(resolution.rotatedSession ?? session.tokens, request.body.password);
       return reply.code(204).send();
     } catch (error) {
       if (error instanceof Error && error.message === "PASSWORD_REJECTED") {
@@ -226,8 +320,8 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["email", "password", "fullName"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
-          password: { type: "string", minLength: 8, maxLength: 1024 },
+          email: { type: "string", minLength: 3, maxLength: 320 },
+          password: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
           fullName: { type: "string", minLength: 1, maxLength: 200 },
           redirectTo: { type: "string", minLength: 1, maxLength: 2048 },
         },
@@ -264,11 +358,20 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
       }
 
+      const normalizedFullName = request.body.fullName.trim();
+      if (!normalizedFullName) {
+        return reply.code(400).send(safeError("INVALID_FULL_NAME", "Enter your name.", request.id));
+      }
+
+      if (!meetsAccountPasswordRequirements(request.body.password)) {
+        return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordRequirementsMessage, request.id));
+      }
+
       try {
         await dependencies.auth.signUp({
           email: normalizedEmail,
           password: request.body.password,
-          fullName: request.body.fullName.trim(),
+          fullName: normalizedFullName,
           redirectTo: validatedRedirectTo,
         });
       } catch (error) {
@@ -284,7 +387,7 @@ export function buildApp(dependencies: AppDependencies) {
       });
     } catch (error) {
       if (error instanceof Error && error.message === "SIGNUP_REJECTED") {
-        return reply.code(400).send(safeError("ACCOUNT_SETUP_UNAVAILABLE", "Account setup could not be completed. Check the password requirements or sign in.", request.id));
+        return reply.code(400).send(safeError("ACCOUNT_SETUP_UNAVAILABLE", "Account setup could not be completed. Try a different password or sign in.", request.id));
       }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Supabase sign-up failed");
       return authUnavailable(reply, request);
@@ -296,34 +399,38 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["email"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
         },
       },
     },
   }, async (request, reply) => {
-    if (!dependencies.auth) return authUnavailable(reply, request);
+    if (!dependencies.auth?.resetPasswordForEmail) return authUnavailable(reply, request);
     const normalizedEmail = request.body.email.trim().toLowerCase();
     if (!isNormalizedEmail(normalizedEmail)) {
       return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
     }
+    const checkEmailResponse = {
+      status: "recovery_sent",
+      message: "If an account with this email exists, check your inbox for a reset link. Another link may take time.",
+    };
     try {
-      if (dependencies.auth.resetPasswordForEmail) {
-        const origin = request.headers.origin || dependencies.publicWebOrigin || "http://127.0.0.1:5180";
-        await dependencies.auth.resetPasswordForEmail(normalizedEmail, `${origin}/reset-password`);
-      }
-      return reply.code(202).send({
-        status: "recovery_sent",
-        message: "If an account with this email exists, a password reset email has been sent.",
-      });
+      const origin = request.headers.origin || dependencies.publicWebOrigin || "http://127.0.0.1:5180";
+      await dependencies.auth.resetPasswordForEmail(normalizedEmail, `${origin}/reset-password`);
+      return reply.code(202).send(checkEmailResponse);
     } catch (error) {
+      if (error instanceof Error && (error.message === "RESET_RATE_LIMITED" || error.message === "RESET_REQUEST_REJECTED")) {
+        // Provider client rejections can depend on account existence, so keep this response identical to success.
+        request.log.warn({ providerRejection: error.message, requestId: request.id }, "Password reset provider request rejected");
+        return reply.code(202).send(checkEmailResponse);
+      }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Password reset request failed");
-      return authUnavailable(reply, request);
+      return reply.code(503).send(safeError("RESET_UNAVAILABLE", "A reset link could not be requested right now. Try again later.", request.id));
     }
   });
 
   // Only a provider-verified recovery link can authorize an access/refresh-token reset.
   // The short-lived proof stays in the browser that opened the verification link.
-  const recoveryProofKey = randomBytes(32);
+  const recoveryProofKey = createHmac("sha256", sessionKey).update("arden:recovery-proof:v1").digest();
   const recoveryProofSeconds = 600;
   const recoveryCookieName = dependencies.secureCookies ? "__Host-arden_recovery" : "arden_recovery";
   const recoveryCookie = (value: string, maxAge: number) =>
@@ -344,14 +451,16 @@ export function buildApp(dependencies: AppDependencies) {
   };
 
   const handleVerify = async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!dependencies.auth || !dependencies.auth.verifyLink) {
-      return reply.redirect("/?error=verify_unavailable", 303);
-    }
     const query = new URL(request.url, "http://localhost").search.slice(1);
+    const isRecovery = new URLSearchParams(query).get("type") === "recovery";
+    const failureUrl = isRecovery ? "/reset-password?error=verification_failed" : "/?error=verification_failed";
+    if (!dependencies.auth || !dependencies.auth.verifyLink) {
+      return reply.redirect(isRecovery ? "/reset-password?error=verify_unavailable" : "/?error=verify_unavailable", 303);
+    }
     try {
       const location = await dependencies.auth.verifyLink(query);
       if (location) {
-        if (new URLSearchParams(query).get("type") === "recovery") {
+        if (isRecovery) {
           const target = new URL(location);
           const fragment = new URLSearchParams(target.hash.slice(1));
           const access = fragment.get("access_token");
@@ -367,10 +476,10 @@ export function buildApp(dependencies: AppDependencies) {
         }
         return reply.redirect(location, 303);
       }
-      return reply.redirect("/?error=verification_failed", 303);
+      return reply.redirect(failureUrl, 303);
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Auth verification failed");
-      return reply.redirect("/?error=verification_failed", 303);
+      return reply.redirect(failureUrl, 303);
     }
   };
 
@@ -378,6 +487,8 @@ export function buildApp(dependencies: AppDependencies) {
   app.get("/api/v1/auth/verify", handleVerify);
   app.get("/verify", handleVerify);
 
+  // Same-process replay guard. Another replica fails after the provider rotates the
+  // refresh token inside the password update. A simultaneous cross-replica race remains.
   const consumedResetTokens = new Map<string, number>();
   const RESET_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -403,68 +514,43 @@ export function buildApp(dependencies: AppDependencies) {
     consumedResetTokens.set(tokenKey, Date.now());
   };
 
-  app.post<{ Body: { email?: string; token?: string; accessToken?: string; refreshToken?: string; newPassword: string } }>("/api/v1/auth/reset-password", {
+  app.post<{ Body: { accessToken?: string; refreshToken?: string; newPassword: string } }>("/api/v1/auth/reset-password", {
     schema: {
       body: {
         type: "object", additionalProperties: false, required: ["newPassword"],
         properties: {
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
-          token: { type: "string", minLength: 1, maxLength: 100 },
           accessToken: { type: "string", minLength: 10 },
           refreshToken: { type: "string", minLength: 10 },
-          newPassword: { type: "string", minLength: 8, maxLength: 1024 },
+          newPassword: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
         },
       },
     },
   }, async (request, reply) => {
     if (!dependencies.auth || !dependencies.auth.updateUserPassword) return authUnavailable(reply, request);
     try {
-      const email = request.body.email ? request.body.email.trim().toLowerCase() : undefined;
-      const token = request.body.token ? request.body.token.trim() : undefined;
-      const accessToken = request.body.accessToken ? request.body.accessToken.trim() : undefined;
-      const tokenKey = email && token ? `otp:${email}:${token}` : (accessToken ? `access:${accessToken}` : null);
-
-      if (tokenKey && isResetTokenConsumed(tokenKey)) {
-        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
+      const accessToken = request.body.accessToken?.trim();
+      const refreshToken = request.body.refreshToken?.trim();
+      if (!accessToken || !refreshToken) {
+        return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid password reset link is required.", request.id));
       }
-
-      let tokens: AuthSessionTokens | null = null;
-      if (accessToken && request.body.refreshToken && !email && !token) {
-        if (!hasRecoveryProof(request.headers.cookie, accessToken, request.body.refreshToken)) {
-          return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link or code is invalid or has expired.", request.id));
-        }
-        tokens = { accessToken, refreshToken: request.body.refreshToken, expiresIn: 3600 };
-      } else if (email && token && !accessToken && !request.body.refreshToken && dependencies.auth.verifyOtp) {
-        const verified = await dependencies.auth.verifyOtp({
-          email,
-          token,
-          type: "recovery",
-        });
-        tokens = verified.tokens;
+      if (isResetTokenConsumed(`access:${accessToken}`)) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link has already been used.", request.id));
       }
-
-      if (!tokens) {
-        return reply.code(401).send(safeError("UNAUTHENTICATED", "A valid password reset link or code is required.", request.id));
+      if (!hasRecoveryProof(request.headers.cookie, accessToken, refreshToken)) {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link is invalid or has expired.", request.id));
       }
-
-      if (tokens.accessToken && isResetTokenConsumed(`access:${tokens.accessToken}`)) {
-        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset code has already been used.", request.id));
-      }
+      const tokens: AuthSessionTokens = { accessToken, refreshToken, expiresIn: 3600 };
 
       await dependencies.auth.updateUserPassword(tokens, request.body.newPassword);
 
-      if (tokenKey) {
-        markResetTokenConsumed(tokenKey);
-      }
-      if (tokens.accessToken) {
-        markResetTokenConsumed(`access:${tokens.accessToken}`);
-      }
+      markResetTokenConsumed(`access:${accessToken}`);
 
-      setAuthCookies(reply, tokens, dependencies.secureCookies, [recoveryCookie("", 0)]);
+      setAuthCookies(reply, tokens, dependencies.secureCookies, sessionKey,
+        newSessionExpiry(), [recoveryCookie("", 0)]);
       return reply.code(200).send({ status: "password_updated" });
     } catch (error) {
-      if (error instanceof Error && (error.message === "INVALID_OTP" || error.message === "INVALID_SESSION")) {
-        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link or code is invalid or has expired.", request.id));
+      if (error instanceof Error && error.message === "INVALID_SESSION") {
+        return reply.code(401).send(safeError("INVALID_TOKEN", "The reset link is invalid or has expired.", request.id));
       }
       if (error instanceof Error && error.message === "PASSWORD_UPDATE_REJECTED") {
         return passwordRejected(reply, request);
@@ -479,23 +565,24 @@ export function buildApp(dependencies: AppDependencies) {
       body: {
         type: "object", additionalProperties: false, required: ["currentPassword", "newPassword"],
         properties: {
-          currentPassword: { type: "string", minLength: 1, maxLength: 1024 },
-          newPassword: { type: "string", minLength: 8, maxLength: 1024 },
+          currentPassword: { type: "string", minLength: 1, maxLength: accountPasswordMaximumLength },
+          newPassword: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
         },
       },
     },
   }, async (request, reply) => {
     const auth = dependencies.auth;
     if (!auth?.updateUserPassword) return authUnavailable(reply, request);
-    const context = await requireAuthenticatedActor(request, reply, auth, dependencies.secureCookies);
+    const context = await requireAuthenticatedActor(request, reply, auth, dependencies.secureCookies, sessionKey);
     if (!context) return;
+    if (!context.sessionExpiresAt) return reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
     try {
       const confirmed = await auth.signIn({ email: context.email, password: request.body.currentPassword });
       if (confirmed.userId !== context.userId) {
         return reply.code(401).send(safeError("INVALID_CURRENT_PASSWORD", "Enter your correct current password.", request.id));
       }
       await auth.updateUserPassword(confirmed.tokens, request.body.newPassword);
-      setAuthCookies(reply, confirmed.tokens, dependencies.secureCookies);
+      setAuthCookies(reply, confirmed.tokens, dependencies.secureCookies, sessionKey, context.sessionExpiresAt);
       return reply.code(200).send({ status: "password_updated" });
     } catch (error) {
       if (error instanceof Error && ["INVALID_CREDENTIALS", "EMAIL_NOT_CONFIRMED"].includes(error.message)) {
@@ -526,11 +613,16 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     try {
-      const memberships = await dependencies.repository.listMemberships(context.userId);
+      const [memberships, systemAdmin] = await Promise.all([
+        dependencies.repository.listMemberships(context.userId),
+        dependencies.repository.systemAdministration?.canAccess(context.userId),
+      ]);
       const pendingInvitationToken = readPendingInvitationCookie(request.headers.cookie, dependencies.secureCookies);
       return {
         actor: { id: context.userId, email: context.email, fullName: context.fullName },
         account: { passwordSetupRequired: Boolean(context.passwordSetupRequired) },
+        ...(systemAdmin ? { systemAdmin: true } : {}),
+        ...(context.sessionExpiresAt ? { sessionExpiresAt: new Date(context.sessionExpiresAt * 1000).toISOString() } : {}),
         ...(dependencies.testActor ? { testMode: true } : {}),
         ...(pendingInvitationToken ? { pendingInvitationToken } : {}),
         memberships: memberships.map((membership) => ({
@@ -540,6 +632,7 @@ export function buildApp(dependencies: AppDependencies) {
           departmentName: membership.departmentName ?? null,
           roleCodes: membership.roleCodes,
           canUsePrivateWorkspace: membership.canUsePrivateWorkspace,
+          canReview: membership.canReview ?? false,
         })),
       };
     } catch (error) {
@@ -632,6 +725,12 @@ export function buildApp(dependencies: AppDependencies) {
         if (result.errorReason === "BASE_DEPARTMENT") {
           return reply.code(409).send(safeError("CANNOT_DELETE_BASE_DEPARTMENT", "The base department of the organization cannot be deleted.", request.id));
         }
+        if (result.errorReason === "OWNS_PUBLICATIONS") {
+          const count = result.publicationCount;
+          return reply.code(409).send({ error: { code: "DEPARTMENT_OWNS_PUBLICATIONS", requestId: request.id,
+            message: `This department owns ${count} published ${count === 1 ? "document" : "documents"}. Withdraw them before deleting it.`,
+            publicationCount: count } });
+        }
         return reply.code(404).send(resourceNotAvailable(request.id));
       }
       return reply.code(200).send({ departmentId: request.params.departmentId, status: "archived", unassignedCount: result.unassignedCount ?? 0, reassignedCount: result.reassignedCount ?? 0 });
@@ -669,7 +768,7 @@ export function buildApp(dependencies: AppDependencies) {
         type: "object", additionalProperties: false, required: ["email"],
         properties: {
           departmentId: { type: "string", pattern: uuidPattern },
-          email: { type: "string", minLength: 3, maxLength: 320, format: "email" },
+          email: { type: "string", minLength: 3, maxLength: 320 },
         },
       },
     },
@@ -700,7 +799,7 @@ export function buildApp(dependencies: AppDependencies) {
         });
       } catch (error) {
         request.log.error({ errorType: safeErrorType(error), invitationId: invitation.invitationId, requestId: request.id }, "Invitation email delivery failed");
-        return reply.code(502).send({ ...safeError("INVITATION_DELIVERY_FAILED", "The invitation was saved but its email was not delivered. Retry sending it from organization administration.", request.id), invitationId: invitation.invitationId });
+        return reply.code(502).send({ ...safeError("INVITATION_DELIVERY_FAILED", "The invitation was saved, but mail server acceptance was not confirmed. Check provider status before resending it.", request.id), invitationId: invitation.invitationId });
       }
       return reply.code(202).send({
         invitationId: invitation.invitationId,
@@ -750,7 +849,7 @@ export function buildApp(dependencies: AppDependencies) {
       });
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), invitationId: request.params.invitationId, requestId: request.id }, "Invitation resend failed");
-      return reply.code(502).send(safeError("INVITATION_DELIVERY_FAILED", "The invitation could not be delivered. Retry sending it from organization administration.", request.id));
+      return reply.code(502).send(safeError("INVITATION_DELIVERY_FAILED", "Mail server acceptance was not confirmed. Check provider status before resending the invitation.", request.id));
     }
   });
 
@@ -831,7 +930,7 @@ export function buildApp(dependencies: AppDependencies) {
       } },
       body: { type: "object", additionalProperties: false, required: ["sourcePrivateVersionId"], properties: {
         sourcePrivateVersionId: { type: "string", pattern: uuidPattern },
-        classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+        classification: classificationSchema,
       } },
     },
   }, async (request, reply) => {
@@ -848,18 +947,26 @@ export function buildApp(dependencies: AppDependencies) {
         context.userId, organizationId, request.body.sourcePrivateVersionId,
       );
       if (!source) return reply.code(404).send(resourceNotAvailable(request.id));
-      if (source.mimeType !== "text/plain" || !isValidText(source.title, 800, maxTitleCodePoints)) {
+      const isPdf = source.mimeType === "application/pdf";
+      if ((source.mimeType !== "text/plain" && !isPdf) || !isValidText(source.title, 800, maxTitleCodePoints)) {
         return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note version cannot be copied.", request.id));
       }
-      const body = await dependencies.storage.read(source.sourceUri, source.contentHash);
-      if (!isValidText(body, maxBodyBytes, maxBodyBytes)) {
-        return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note version cannot be copied.", request.id));
+      // Decision 0034: a private PDF item is contributed as a shared PDF draft holding a copy of the same file.
+      let semanticBody = "";
+      if (isPdf) {
+        copied = await dependencies.storage.writePdf(await dependencies.storage.readPdf(source.sourceUri, source.contentHash));
+      } else {
+        const body = await dependencies.storage.read(source.sourceUri, source.contentHash);
+        if (!isValidText(body, maxBodyBytes, maxBodyBytes)) {
+          return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note version cannot be copied.", request.id));
+        }
+        const normalized = normalizeSharedDraftBody(body);
+        if (!normalized) {
+          return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note uses an unsupported Arden document envelope.", request.id));
+        }
+        semanticBody = normalized;
+        copied = await dependencies.storage.write(semanticBody);
       }
-      const semanticBody = normalizeSharedDraftBody(body);
-      if (!semanticBody) {
-        return reply.code(409).send(safeError("SOURCE_NOT_SUPPORTED", "This note uses an unsupported Arden document envelope.", request.id));
-      }
-      copied = await dependencies.storage.write(semanticBody);
       creationAttempted = true;
       const result = await dependencies.repository.createKnowledgeDraft(context.userId, organizationId, {
         actorMembershipId: actor.membershipId,
@@ -882,26 +989,16 @@ export function buildApp(dependencies: AppDependencies) {
         await dependencies.storage.remove(copied.sourceUri);
         copied = null;
       }
-      const responseBody = result.kind === "created" ? semanticBody
-        : await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
       reply.header("Cache-Control", "no-store");
       reply.header("ETag", etag(result.draft.currentVersion));
-      return reply.code(result.kind === "created" ? 201 : 200).send({
-        id: result.draft.id,
-        organizationId,
-        title: result.draft.title,
-        classification: result.draft.classification,
-        status: "ACTIVE",
-        body: responseBody,
-        currentVersion: {
-          id: result.draft.versionId,
-          version: result.draft.currentVersion,
-          mimeType: result.draft.mimeType,
-          contentHash: result.draft.contentHash,
-        },
-        createdAt: result.draft.createdAt.toISOString(),
-        updatedAt: result.draft.updatedAt.toISOString(),
-      });
+      if (result.draft.mimeType === "application/pdf") {
+        const pdfBase64 = (await dependencies.storage.readPdf(result.draft.sourceUri, result.draft.contentHash)).toString("base64");
+        return reply.code(result.kind === "created" ? 201 : 200).send({ ...representSharedDraft(result.draft, ""), pdfBase64 });
+      }
+      const responseBody = result.kind === "created" ? semanticBody
+        : await dependencies.storage.read(result.draft.sourceUri, result.draft.contentHash);
+      // Same representation as the other draft-creation routes and the draft detail.
+      return reply.code(result.kind === "created" ? 201 : 200).send(representSharedDraft(result.draft, responseBody));
     } catch (error) {
       // A failed COMMIT acknowledgement is ambiguous: the database may already
       // reference this copy. Keep it until a reconciler can prove it is orphaned.
@@ -926,7 +1023,7 @@ export function buildApp(dependencies: AppDependencies) {
         body: { type: "object", additionalProperties: false, required: ["title", "body"], properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           body: { type: "string", maxLength: maxBodyBytes },
-          classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+          classification: classificationSchema,
         } },
       },
     }, async (request, reply) => {
@@ -986,7 +1083,7 @@ export function buildApp(dependencies: AppDependencies) {
         body: { type: "object", additionalProperties: false, required: ["title", "pdfBase64"], properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
-          classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+          classification: classificationSchema,
         } },
       },
     }, async (request, reply) => {
@@ -997,12 +1094,8 @@ export function buildApp(dependencies: AppDependencies) {
       if (!title || !isValidText(title, 800, maxTitleCodePoints) || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
         return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file.", request.id));
       }
-      const bytes = Buffer.from(encoded, "base64");
-      if (bytes.length === 0 || bytes.length > maxPdfBytes || bytes.toString("base64") !== encoded
-        || !bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))
-        || !bytes.subarray(-1024).toString("latin1").includes("%%EOF")) {
-        return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
-      }
+      const bytes = decodePdfBase64(encoded);
+      if (!bytes) return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
       let stored: Awaited<ReturnType<PrivateContentStorage["writePdf"]>> | null = null;
       let creationAttempted = false;
       try {
@@ -1095,8 +1188,63 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.patch<{ Params: { organizationId: string; draftId: string }; Body: Omit<SharedDraftPatch, "audienceRoleIds"> & { audienceIds?: string[] } }>(
+  app.get<{ Params: { organizationId: string; draftId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId/versions", {
+      schema: { params: { type: "object", required: ["organizationId", "draftId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const versions = await dependencies.repository.listKnowledgeDraftVersions(context.userId,
+          request.params.organizationId, request.params.draftId);
+        if (!versions) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { items: versions.map(({ id, version, mimeType, createdAt }) => ({
+          id, version, mimeType, createdAt: createdAt.toISOString(),
+        })) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft version list failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string; draftId: string; versionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId/versions/:versionId", {
+      schema: { params: { type: "object", required: ["organizationId", "draftId", "versionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern },
+        versionId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, draftId, versionId } = request.params;
+        const version = await dependencies.repository.getKnowledgeDraftVersion(context.userId,
+          organizationId, draftId, versionId);
+        if (!version) return reply.code(404).send(resourceNotAvailable(request.id));
+        const content = await readKnowledgeContent(dependencies.storage, version.sourceUri,
+          version.contentHash, version.mimeType);
+        const stillAuthorized = await dependencies.repository.getKnowledgeDraftVersion(context.userId,
+          organizationId, draftId, versionId);
+        if (!stillAuthorized || stillAuthorized.contentHash !== version.contentHash
+          || stillAuthorized.sourceUri !== version.sourceUri) {
+          return reply.code(404).send(resourceNotAvailable(request.id));
+        }
+        reply.header("Cache-Control", "no-store");
+        return { id: version.id, version: version.version, mimeType: version.mimeType,
+          createdAt: version.createdAt.toISOString(), body: content.body,
+          ...(content.pdfBase64 ? { pdfBase64: content.pdfBase64 } : {}) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Shared draft version read failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.patch<{ Params: { organizationId: string; draftId: string }; Body: Omit<SharedDraftPatch, "audienceRoleIds"> & { audienceIds?: string[]; pdfBase64?: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/drafts/:draftId", {
+      bodyLimit: maxPdfBase64Length + maxBodyBytes,
       schema: {
         params: { type: "object", required: ["organizationId", "draftId"], properties: {
           organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern },
@@ -1105,12 +1253,16 @@ export function buildApp(dependencies: AppDependencies) {
         body: { type: "object", additionalProperties: false, minProperties: 1, properties: {
           title: { type: "string", minLength: 1, maxLength: 800 },
           body: { type: "string", maxLength: maxBodyBytes },
-          classification: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] },
+          pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
+          classification: classificationSchema,
           responsibleDepartmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
           targetScopeType: { enum: ["ORGANIZATION", "DEPARTMENT", null] },
           teamTag: { type: ["string", "null"], maxLength: 100 },
           projectTag: { type: ["string", "null"], maxLength: 100 },
           audienceIds: { type: "array", maxItems: 100, uniqueItems: true, items: { type: "string", pattern: uuidPattern } },
+          // Shape only; counts, duplicates and membership/department state are TargetReaderPolicy field errors.
+          targetReaders: targetReadersSchema,
+          management: managementSchema,
         } },
       },
     }, async (request, reply) => {
@@ -1119,7 +1271,7 @@ export function buildApp(dependencies: AppDependencies) {
       const expectedVersion = parseEtag(request.headers["if-match"]);
       if (expectedVersion === "missing") return reply.code(428).send(safeError("PRECONDITION_REQUIRED", "Reload the draft before saving.", request.id));
       if (expectedVersion === null) return reply.code(400).send(safeError("INVALID_REQUEST", "The version precondition is invalid.", request.id));
-      const { audienceIds, ...patch } = request.body;
+      const { audienceIds, pdfBase64, ...patch } = request.body;
       if ((patch.title !== undefined && (!patch.title.trim() || !isValidText(patch.title, 800, maxTitleCodePoints)))
         || (patch.body !== undefined && !isValidText(patch.body, maxBodyBytes, maxBodyBytes))
         || (patch.teamTag !== undefined && patch.teamTag !== null && !patch.teamTag.trim())
@@ -1138,6 +1290,14 @@ export function buildApp(dependencies: AppDependencies) {
         if (existing.mimeType === "application/pdf" && patch.body !== undefined) {
           return reply.code(400).send(safeError("INVALID_REQUEST", "Uploaded PDFs cannot be edited as text.", request.id));
         }
+        if (pdfBase64 !== undefined && (existing.mimeType !== "application/pdf" || patch.body !== undefined)) {
+          return reply.code(400).send(safeError("INVALID_REQUEST", "Replace a PDF with another PDF.", request.id));
+        }
+        if (pdfBase64 !== undefined) {
+          const bytes = decodePdfBase64(pdfBase64);
+          if (!bytes) return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
+          stored = await dependencies.storage.writePdf(bytes);
+        }
         const semanticBody = patch.body === undefined ? undefined : normalizeSharedDraftBody(patch.body);
         if (semanticBody === null) {
           return reply.code(400).send(safeError("INVALID_DOCUMENT", "The Semantic Document is invalid.", request.id));
@@ -1153,6 +1313,10 @@ export function buildApp(dependencies: AppDependencies) {
           if (stored) await dependencies.storage.remove(stored.sourceUri);
           if (result.kind === "conflict") return reply.code(412).send(safeError("VERSION_CONFLICT", "This draft changed. Reload it before saving again.", request.id));
           if (result.kind === "invalid-metadata") return reply.code(400).send(safeError("INVALID_METADATA", "The draft metadata is invalid.", request.id));
+          if (result.kind === "invalid-target-readers") {
+            return reply.code(400).send({ error: { code: "INVALID_TARGET_READERS", message: result.reason,
+              requestId: request.id, field: result.field } });
+          }
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
         const content: { body: string; pdfBase64?: string } = typeof semanticBody === "string" ? { body: semanticBody }
@@ -1193,14 +1357,20 @@ export function buildApp(dependencies: AppDependencies) {
         const currentDraft = await dependencies.repository.getKnowledgeDraft(context.userId,
           request.params.organizationId, request.params.draftId);
         if (currentDraft && currentDraft.currentVersion === expectedVersion) {
-          await readKnowledgeContent(dependencies.storage, currentDraft.sourceUri, currentDraft.contentHash, currentDraft.mimeType);
+          const content = await readKnowledgeContent(dependencies.storage, currentDraft.sourceUri, currentDraft.contentHash, currentDraft.mimeType);
+          if (currentDraft.mimeType === "text/plain") {
+            const parsed = parseSemanticDocument(content.body);
+            if (parsed.ok ? !semanticDocumentHasText(parsed.document) : !content.body.trim()) {
+              return reply.code(409).send(safeError("DRAFT_NOT_READY", "Add document content before submitting.", request.id));
+            }
+          }
         }
         const result = await dependencies.repository.submitKnowledgeDraft(context.userId,
           request.params.organizationId, request.params.draftId, expectedVersion,
           request.headers["idempotency-key"] as string, request.id);
         if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
         if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT", "Reload this draft and its review status.", request.id));
-        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Choose who can read this draft and save it before submitting. You need an active primary department; ask an Org Admin if you have none.", request.id));
+        if (result.kind === "not-ready") return reply.code(409).send(safeError("DRAFT_NOT_READY", "Complete document details and readers, then save before submitting.", request.id));
         reply.header("Cache-Control", "no-store");
         return reply.code(result.kind === "submitted" ? 201 : 200).send(representSubmission(result.submission));
       } catch (error) {
@@ -1208,6 +1378,389 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
       }
     });
+
+  // T5.1 (FR-DOC-06): the author withdraws their own pending submission; it leaves the review queue.
+  app.post<{ Params: { organizationId: string; submissionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/submissions/:submissionId/withdraw", {
+      schema: { params: { type: "object", required: ["organizationId", "submissionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, submissionId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.withdrawKnowledgeSubmission(context.userId,
+          request.params.organizationId, request.params.submissionId, request.id);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_NOT_PENDING",
+          "Only a submission that is still waiting for review can be withdrawn.", request.id));
+        reply.header("Cache-Control", "no-store");
+        return representSubmission(result.submission);
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge submission withdrawal failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0023: the Organization Admin governance catalog. Metadata only; `readable` marks documents the
+  // Admin already reads, which open in the Library instead of an inspection.
+  app.get<{ Params: { organizationId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/governance/publications", {
+      schema: { params: { type: "object", required: ["organizationId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId } = request.params;
+        const items = await dependencies.repository.listGovernancePublications(context.userId, organizationId);
+        if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+        const readable = new Set((await dependencies.repository.listPublishedKnowledge(context.userId, organizationId) ?? [])
+          .map((item) => item.draftId));
+        reply.header("Cache-Control", "no-store");
+        return { items: items.map((item) => ({ ...item, publishedAt: item.publishedAt.toISOString(),
+          readable: readable.has(item.documentId) })) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Governance catalog failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.post<{ Params: { organizationId: string; documentId: string }; Body: { reason: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/governance/publications/:documentId/inspections", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false, required: ["reason"],
+          properties: { reason: { type: "string", maxLength: 4000 } } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, documentId } = request.params;
+        const readable = (await dependencies.repository.listPublishedKnowledge(context.userId, organizationId) ?? [])
+          .some((item) => item.draftId === documentId);
+        if (readable) return reply.code(409).send(safeError("ALREADY_A_READER",
+          "You can already read this document in the Library.", request.id));
+        const result = await dependencies.repository.openGovernanceInspection(context.userId, organizationId, documentId,
+          request.body.reason);
+        if (result.kind === "invalid-reason") return reply.code(400).send(safeError("INVALID_REASON",
+          "Give a reason of 1 to 1000 characters.", request.id));
+        if (result.kind !== "opened") return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(201).send({ inspectionId: result.inspectionId });
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Governance inspection open failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string; inspectionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/governance/inspections/:inspectionId", {
+      schema: { params: { type: "object", required: ["organizationId", "inspectionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, inspectionId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, inspectionId } = request.params;
+        const ended = () => reply.code(404).send(safeError("INSPECTION_ENDED",
+          "This inspection has ended. Open the document again with a reason.", request.id));
+        const view = await dependencies.repository.useGovernanceInspection(context.userId, organizationId, inspectionId);
+        if (!view) return ended();
+        const content = await readKnowledgeContent(dependencies.storage, view.sourceUri, view.contentHash, view.mimeType);
+        const still = await dependencies.repository.useGovernanceInspection(context.userId, organizationId, inspectionId);
+        if (!still || still.contentHash !== view.contentHash) return ended();
+        reply.header("Cache-Control", "no-store");
+        return { ...representGovernanceView(view, content), inspectionId,
+          readers: { mode: view.readerMode, departmentId: view.readerDepartmentId, names: view.readerNames },
+          reason: view.reason, expiresAt: still.expiresAt.toISOString() };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Governance inspection read failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0023: the responsible reviewer's read-only view of a current publication (not a reader source).
+  app.get<{ Params: { organizationId: string; documentId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/responsible-view", {
+      schema: { params: { type: "object", required: ["organizationId", "documentId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, documentId } = request.params;
+        const view = await dependencies.repository.getResponsiblePublicationView(context.userId, organizationId, documentId);
+        if (!view) return reply.code(404).send(resourceNotAvailable(request.id));
+        const content = await readKnowledgeContent(dependencies.storage, view.sourceUri, view.contentHash, view.mimeType);
+        const still = await dependencies.repository.getResponsiblePublicationView(context.userId, organizationId, documentId);
+        if (!still || still.contentHash !== view.contentHash) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return representGovernanceView(view, content);
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Responsible publication view failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0024: direct withdrawal only by a current Organization Admin, with a reason.
+  app.post<{ Params: { organizationId: string; documentId: string }; Body: { reason: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/withdrawal", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false, required: ["reason"],
+          properties: { reason: { type: "string", maxLength: 4000 } } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.withdrawPublicationDirectly(context.userId,
+          request.params.organizationId, request.params.documentId, request.body.reason);
+        if (result.kind === "invalid-reason") return reply.code(400).send(safeError("INVALID_REASON",
+          "Give a reason of 1 to 1000 characters.", request.id));
+        if (result.kind === "preparing") return reply.code(409).send(safeError("NEWER_VERSION_PREPARING",
+          "A newer version is being prepared. Withdraw it after it finishes.", request.id));
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { status: "WITHDRAWN" };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Direct withdrawal failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0023: a reader reports a problem with the current publication they can read.
+  app.post<{ Params: { organizationId: string; publishedVersionId: string }; Body: { message: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/published/:publishedVersionId/reports", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "publishedVersionId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, publishedVersionId: { type: "string", pattern: uuidPattern } } },
+        body: { type: "object", additionalProperties: false, required: ["message"],
+          properties: { message: { type: "string", maxLength: 4000 } } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const { organizationId, publishedVersionId } = request.params;
+        const message = request.body.message.trim();
+        if (!message || [...message].length > 1000) return reply.code(400).send(safeError("INVALID_MESSAGE",
+          "Describe the problem in 1 to 1000 characters.", request.id));
+        const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
+        const publication = actor ? await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId) : null;
+        if (!actor || !publication || publication.expired
+          || !canRead(actor, { organizationId, readers: publication.targetReaders })) {
+          return reply.code(404).send(resourceNotAvailable(request.id));
+        }
+        if (dependencies.repository.maintenance) {
+          try {
+            const created = await new MaintenanceCaseService(dependencies.repository.maintenance)
+              .acceptLegacyReport(context.userId, organizationId, {
+                documentId: publication.draftId, publishedVersionId, message,
+              });
+            reply.header("Cache-Control", "no-store");
+            return reply.code(201).send({ id: created.caseId });
+          } catch (error) {
+            if (error instanceof MaintenanceError && error.code === "CONFLICT") {
+              return reply.code(409).send(safeError("ALREADY_REPORTED",
+                "You already reported this document. The responsible reviewers can see it.", request.id));
+            }
+            if (error instanceof MaintenanceError) return reply.code(404).send(resourceNotAvailable(request.id));
+            throw error;
+          }
+        }
+        const result = await dependencies.repository.reportPublicationProblem(context.userId, organizationId,
+          publication.draftId, publishedVersionId, message);
+        if (result.kind === "duplicate") return reply.code(409).send(safeError("ALREADY_REPORTED",
+          "You already reported this document. The responsible reviewers can see it.", request.id));
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(201).send({ id: result.reportId });
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.get<{ Params: { organizationId: string }; Querystring: { disposition?: "closed"; cursor?: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/reports", {
+      schema: { params: { type: "object", required: ["organizationId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern } } },
+        querystring: { type: "object", additionalProperties: false, properties: {
+          disposition: { type: "string", enum: ["closed"] },
+          cursor: { type: "string", pattern: uuidPattern },
+        }, dependencies: { cursor: ["disposition"] } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = request.query.disposition === "closed"
+          ? await dependencies.repository.listClosedPublicationReports(context.userId, request.params.organizationId,
+            request.query.cursor ?? null)
+          : { items: await dependencies.repository.listPublicationReports(context.userId, request.params.organizationId) };
+        if (!result?.items) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { ...result, items: result.items.map((item) => ({ ...item, createdAt: item.createdAt.toISOString() })) };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report list failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  app.post<{ Params: { organizationId: string; reportId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/reports/:reportId/dismiss", {
+      schema: { params: { type: "object", required: ["organizationId", "reportId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, reportId: { type: "string", pattern: uuidPattern } } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const closed = await dependencies.repository.dismissPublicationReport(context.userId,
+          request.params.organizationId, request.params.reportId);
+        if (!closed) return reply.code(404).send(resourceNotAvailable(request.id));
+        reply.header("Cache-Control", "no-store");
+        return { status: "CLOSED" };
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication report dismiss failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // T6.3 retry (decision 0011, FAILED -> PREPARING): the author prepares their approved snapshot again after a
+  // temporary failure. Idempotent by state, so it takes no Idempotency-Key; a repeat returns the same result.
+  app.post<{ Params: { organizationId: string; submissionId: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/submissions/:submissionId/publication-retry", {
+      schema: { params: { type: "object", required: ["organizationId", "submissionId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern }, submissionId: { type: "string", pattern: uuidPattern },
+      } } },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.retryKnowledgePublication(context.userId,
+          request.params.organizationId, request.params.submissionId);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "not-failed") return reply.code(409).send(safeError("PUBLICATION_NOT_FAILED",
+          "Only a publication that failed to prepare can be tried again.", request.id));
+        if (result.kind === "not-retryable") return reply.code(409).send(safeError("PUBLICATION_NOT_RETRYABLE",
+          "This failure cannot be fixed by trying again.", request.id));
+        if (result.kind === "superseded") return reply.code(409).send(safeError("PUBLICATION_SUPERSEDED",
+          "A newer version of this document is already published.", request.id));
+        reply.header("Cache-Control", "no-store");
+        return representSubmission(result.submission);
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge publication retry failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // T6.1 (SDD S-16): the author asks to change the readers of a published document or to withdraw it.
+  app.post<{ Params: { organizationId: string; documentId: string };
+    Body: { type: "READER_CHANGE" | "WITHDRAWAL"; reason: string; targetReaders?: TargetReadersInput } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/change-requests", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern },
+        } },
+        headers: { type: "object", required: ["idempotency-key"], properties: {
+          "idempotency-key": { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", additionalProperties: false, required: ["type", "reason"], properties: {
+          type: { type: "string", enum: ["READER_CHANGE", "WITHDRAWAL"] },
+          reason: { type: "string", minLength: 1, maxLength: 4000 },
+          targetReaders: targetReadersSchema,
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.requestPublicationChange(context.userId,
+          request.params.organizationId, request.params.documentId, {
+            type: request.body.type, reason: request.body.reason, targetReaders: request.body.targetReaders,
+            idempotencyKey: request.headers["idempotency-key"] as string,
+          }, request.id);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "not-published") return reply.code(409).send(safeError("DOCUMENT_NOT_PUBLISHED",
+          "Only a published document can have its readers changed or be withdrawn.", request.id));
+        if (result.kind === "conflict") return reply.code(409).send(safeError("SUBMISSION_CONFLICT",
+          "This document already has a request waiting for review.", request.id));
+        if (result.kind === "invalid-request") return reply.code(400).send(safeError("INVALID_REQUEST", result.reason, request.id));
+        if (result.kind === "invalid-target-readers") {
+          return reply.code(400).send({ error: { code: "INVALID_TARGET_READERS", message: result.reason,
+            requestId: request.id, field: result.field } });
+        }
+        reply.header("Cache-Control", "no-store");
+        return reply.code(result.kind === "requested" ? 201 : 200).send(representSubmission(result.submission));
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Knowledge change request failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0032 B: a reviewed renewal of the current publication's Valid until (no content, reader or owner change).
+  app.post<{ Params: { organizationId: string; documentId: string }; Body: { expirationDate: string | null; reason: string } }>(
+    "/api/v1/organizations/:organizationId/knowledge/documents/:documentId/renewal", {
+      schema: {
+        params: { type: "object", required: ["organizationId", "documentId"], properties: {
+          organizationId: { type: "string", pattern: uuidPattern }, documentId: { type: "string", pattern: uuidPattern },
+        } },
+        headers: { type: "object", required: ["idempotency-key"], properties: {
+          "idempotency-key": { type: "string", pattern: uuidPattern },
+        } },
+        body: { type: "object", additionalProperties: false, required: ["expirationDate", "reason"], properties: {
+          expirationDate: { type: ["string", "null"], maxLength: 10 },
+          reason: { type: "string", minLength: 1, maxLength: 4000 },
+        } },
+      },
+    }, async (request, reply) => {
+      const context = await requestActor(request, reply);
+      if (!context) return;
+      try {
+        const result = await dependencies.repository.requestPublicationRenewal(context.userId,
+          request.params.organizationId, request.params.documentId, { expirationDate: request.body.expirationDate,
+            reason: request.body.reason, idempotencyKey: request.headers["idempotency-key"] as string }, request.id);
+        if (result.kind === "not-found") return reply.code(404).send(resourceNotAvailable(request.id));
+        if (result.kind === "invalid-reason") return reply.code(400).send(safeError("INVALID_REASON",
+          "Give a reason of 1 to 1000 characters.", request.id));
+        if (result.kind === "invalid-date") return reply.code(400).send(safeError("INVALID_EXPIRATION_DATE",
+          "Choose a Valid until date after today, or no expiry.", request.id));
+        if (result.kind === "not-renewable") return reply.code(409).send(safeError("NOT_RENEWABLE",
+          "This document has no expiry to renew.", request.id));
+        if (result.kind === "not-yet") return reply.code(409).send(safeError("RENEWAL_NOT_YET_AVAILABLE",
+          "You can renew on the author's behalf from 7 days before the document expires.", request.id));
+        if (result.kind === "pending") return reply.code(409).send(safeError("RENEWAL_PENDING",
+          "A renewal is already waiting for review.", request.id));
+        reply.header("Cache-Control", "no-store");
+        return reply.code(result.kind === "requested" ? 201 : 200).send(representSubmission(result.submission));
+      } catch (error) {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication renewal request failed");
+        return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+      }
+    });
+
+  // Decision 0032 A4: validity of the current publications the caller is responsible for (metadata only).
+  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/renewals", {
+    schema: { params: { type: "object", required: ["organizationId"], properties: {
+      organizationId: { type: "string", pattern: uuidPattern },
+    } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const items = await dependencies.repository.listPublicationRenewalState(context.userId, request.params.organizationId);
+      if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+      reply.header("Cache-Control", "no-store");
+      return { items };
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Publication renewal state failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
 
   app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/submissions", {
     schema: { params: { type: "object", required: ["organizationId"], properties: {
@@ -1260,7 +1813,7 @@ export function buildApp(dependencies: AppDependencies) {
             scope: { type: "string", enum: ["DEPARTMENT", "ORGANIZATION"], default: "DEPARTMENT" },
             departmentId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
             classifications: { type: "array", minItems: 1, maxItems: 3, uniqueItems: true,
-              items: { type: "string", enum: ["INTERNAL", "CONFIDENTIAL", "RESTRICTED"] } },
+              items: classificationSchema },
             level: { type: "string", enum: ["STANDARD", "SPECIALIST", "SENIOR"] },
             teamTag: { anyOf: [{ type: "string", minLength: 1, maxLength: 100 }, { type: "null" }] },
             projectTag: { anyOf: [{ type: "string", minLength: 1, maxLength: 100 }, { type: "null" }] },
@@ -1294,6 +1847,10 @@ export function buildApp(dependencies: AppDependencies) {
         return reply.code(201).send({ ...grant, validFrom: grant.validFrom.toISOString(),
           validUntil: grant.validUntil?.toISOString() ?? null });
       } catch (error) {
+        if (error instanceof ReviewerGrantConflictError) {
+          return reply.code(409).send(safeError("REVIEWER_GRANT_EXISTS",
+            "Review permission already assigned for this scope and tags.", request.id));
+        }
         request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Reviewer grant creation failed");
         return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
       }
@@ -1326,9 +1883,13 @@ export function buildApp(dependencies: AppDependencies) {
     if (!context) return;
     try {
       const assigned = await dependencies.repository.listAssignedReviews(context.userId, request.params.organizationId);
-      if (!assigned) return reply.code(404).send(resourceNotAvailable(request.id));
+      const decided = assigned ? await dependencies.repository.listDecidedReviews(context.userId, request.params.organizationId) : null;
+      if (!assigned || !decided) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
-      return { items: assigned.map((item) => ({ ...item, submittedAt: item.submittedAt.toISOString() })) };
+      // REV-02: the pending queue plus the caller's own decided submissions.
+      return { items: assigned.map((item) => ({ ...item, submittedAt: item.submittedAt.toISOString() })),
+        decided: decided.map((item) => ({ ...item, submittedAt: item.submittedAt.toISOString(),
+          decidedAt: item.decidedAt.toISOString() })) };
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Review queue failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
@@ -1356,7 +1917,7 @@ export function buildApp(dependencies: AppDependencies) {
         reply.header("Cache-Control", "no-store");
         return { ...representSubmission(detail.submission), ...content, mimeType: detail.mimeType,
           submittedByMembershipId: detail.submittedByMembershipId,
-          teamTag: detail.teamTag, projectTag: detail.projectTag };
+          teamTag: detail.teamTag, projectTag: detail.projectTag, proposedReaders: detail.proposedReaders };
       } catch (error) {
         request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Review detail failed");
         return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
@@ -1366,6 +1927,7 @@ export function buildApp(dependencies: AppDependencies) {
   app.post<{ Params: { organizationId: string; submissionId: string }; Body: {
     action: "APPROVE" | "REJECT";
     expectedSnapshotVersionId: string; expectedContentHash: string; comment?: string | null;
+    approvedReaders?: TargetReadersInput;
   } }>("/api/v1/organizations/:organizationId/knowledge/reviews/:submissionId/decisions", {
     schema: {
       params: { type: "object", required: ["organizationId", "submissionId"], properties: {
@@ -1380,6 +1942,8 @@ export function buildApp(dependencies: AppDependencies) {
           expectedSnapshotVersionId: { type: "string", pattern: uuidPattern },
           expectedContentHash: { type: "string", pattern: "^[0-9a-f]{64}$" },
           comment: { anyOf: [{ type: "string", maxLength: 2000 }, { type: "null" }] },
+          // Shape only; validity and narrowing are decided after authorization (T2.1).
+          approvedReaders: targetReadersSchema,
         } },
     },
   }, async (request, reply) => {
@@ -1398,12 +1962,35 @@ export function buildApp(dependencies: AppDependencies) {
       const result = await dependencies.repository.decideReview(context.userId, request.params.organizationId,
         request.params.submissionId, request.body.action, request.body.expectedSnapshotVersionId,
         request.body.expectedContentHash, request.body.comment ?? null,
-        request.headers["idempotency-key"] as string, request.id);
+        request.headers["idempotency-key"] as string, request.id, request.body.approvedReaders);
       if (result.kind === "not-found" || (result.kind === "denied" && result.reason === "NOT_AUTHORIZED")) {
         return reply.code(404).send(resourceNotAvailable(request.id));
       }
       if (result.kind === "conflict") return reply.code(409).send(safeError("REVIEW_CONFLICT", "This submission changed. Reload it before deciding.", request.id));
       if (result.kind === "denied") {
+        if (result.reason === "INVALID_READERS") {
+          return reply.code(400).send({ error: { code: "INVALID_READERS",
+            message: result.message ?? "The approved readers are invalid.", requestId: request.id, field: result.field } });
+        }
+        if (result.reason === "INVALID_REQUEST") {
+          return reply.code(400).send(safeError("INVALID_REQUEST", "Approved readers apply only to an approval.", request.id));
+        }
+        if (result.reason === "READERS_NOT_SUPPORTED") {
+          return reply.code(400).send(safeError("READERS_NOT_SUPPORTED",
+            "This submission uses audiences; approve it without approved readers.", request.id));
+        }
+        if (result.reason === "AUTHOR_DECISION_WINDOW") {
+          return reply.code(409).send(safeError("AUTHOR_DECISION_WINDOW",
+            "The author decides this renewal first. Reviewers can decide it after 3 days or once the document expires.", request.id));
+        }
+        if (result.reason === "PUBLICATION_CHANGED") {
+          return reply.code(409).send(safeError("PUBLICATION_CHANGED",
+            "This document changed since the request was made, or a newer version is still being prepared.", request.id));
+        }
+        if (result.reason === "READERS_WIDENED") {
+          return reply.code(409).send(safeError("READERS_WIDENED",
+            "Approved readers can keep or narrow the proposed readers, never widen them.", request.id));
+        }
         return reply.code(result.reason === "COMMENT_REQUIRED" ? 400 : 409)
           .send(safeError(result.reason, "This review decision cannot be applied.", request.id));
       }
@@ -1415,19 +2002,27 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/published", {
+  app.get<{ Params: { organizationId: string }; Querystring: { scope?: PublicationScope } }>("/api/v1/organizations/:organizationId/knowledge/published", {
     schema: { params: { type: "object", required: ["organizationId"], properties: {
       organizationId: { type: "string", pattern: uuidPattern },
+    } }, querystring: { type: "object", additionalProperties: false, properties: {
+      scope: { type: "string", enum: [...publicationScopes] },
     } } },
   }, async (request, reply) => {
     const context = await requestActor(request, reply);
     if (!context) return;
     try {
-      const items = await dependencies.repository.listPublishedKnowledge(context.userId, request.params.organizationId);
-      if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
+      const { organizationId } = request.params;
+      const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
+      const items = actor ? await dependencies.repository.listPublishedKnowledge(context.userId, organizationId) : null;
+      if (!actor || !items) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
-      return { items: items.map(({ sourceUri: _sourceUri, audienceRoleIds, ...item }) => ({ ...item,
-        audienceIds: audienceRoleIds ?? [],
+      // T1.3: the API applies TargetReaderPolicy itself; publication RLS is defence in depth.
+      const scope = request.query.scope ?? "ALL_READABLE";
+      const readable = items.filter((item) => canRead(actor, { organizationId, readers: item.targetReaders })
+        && matchesPublicationScope(item.targetReaders?.mode, scope));
+      return { items: readable.map(({ sourceUri: _sourceUri, audienceRoleIds, targetReaders, ...item }) => ({ ...item,
+        audienceIds: audienceRoleIds ?? [], targetReaders: representReaderMode(targetReaders),
         publishedAt: item.publishedAt.toISOString(), validFrom: item.validFrom.toISOString(),
         validUntil: item.validUntil?.toISOString() ?? null })) };
     } catch (error) {
@@ -1436,86 +2031,6 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
-  app.post<{ Params: { organizationId: string }; Body: { query: string } }>(
-    "/api/v1/organizations/:organizationId/ai/answers", {
-      schema: {
-        params: { type: "object", required: ["organizationId"], additionalProperties: false, properties: {
-          organizationId: { type: "string", pattern: uuidPattern },
-        } },
-        body: { type: "object", required: ["query"], additionalProperties: false, properties: {
-          query: { type: "string", minLength: 1, maxLength: 4_000 },
-        } },
-      },
-    }, async (request, reply) => {
-      const context = await requestActor(request, reply);
-      if (!context) return;
-      const query = request.body.query.trim();
-      if (!query) return reply.code(400).send(safeError("INVALID_REQUEST", "The question is empty.", request.id));
-      if (!dependencies.askArden) {
-        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
-      }
-      try {
-        const { organizationId } = request.params;
-        const before = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId);
-        if (!before) return reply.code(404).send(resourceNotAvailable(request.id));
-        if (before.length === 0) {
-          reply.header("Cache-Control", "no-store");
-          return { status: "INSUFFICIENT_EVIDENCE", answer: "I could not find any indexed published knowledge you are allowed to read.", citations: [] };
-        }
-        const requestId = randomUUID();
-        const aiResponse = await dependencies.askArden.answer({
-          contractVersion: 1,
-          requestId,
-          organizationId,
-          query,
-          allowedGenerationIds: before.map((source) => source.generationId),
-        });
-        const after = await dependencies.repository.listAuthorizedAiSources(context.userId, organizationId,
-          [...new Set(aiResponse.citations.map((citation) => citation.generationId))],
-          [...new Set(aiResponse.citations.map((citation) => citation.chunkId))]);
-        if (!after) return reply.code(404).send(resourceNotAvailable(request.id));
-        const beforeByGeneration = new Map(before.map((source) => [source.generationId, source]));
-        const afterByGeneration = new Map(after.map((source) => [source.generationId, source]));
-        const citations = aiResponse.citations.map((citation) => {
-          const initial = beforeByGeneration.get(citation.generationId);
-          const current = afterByGeneration.get(citation.generationId);
-          if (!initial || !current || initial.publishedVersionId !== current.publishedVersionId
-            || current.snapshotVersionId !== citation.snapshotVersionId
-            || current.snapshotContentHash !== citation.snapshotContentHash
-            || !citationMatchesManifest(citation, current.chunks)) {
-            return null;
-          }
-          return {
-            documentId: current.draftId,
-            versionId: current.publishedVersionId,
-            blockId: citation.sourceBlockIds[0] ?? citation.parentSectionBlockId ?? undefined,
-            page: citationPage(citation.sourceBlockIds, citation.parentSectionBlockId),
-            excerpt: citation.excerpt,
-            title: current.title,
-            version: `v${current.versionNo}`,
-            scope: current.targetScopeType === "ORGANIZATION" ? "Company-wide" : "Department",
-            classification: current.classification,
-          };
-        });
-        if (citations.some((citation) => citation === null)) {
-          return reply.code(409).send(safeError("KNOWLEDGE_ACCESS_CHANGED",
-            "Knowledge access changed while the answer was being prepared. Please ask again.", request.id));
-        }
-        const authorizedCitations = citations.filter((citation): citation is NonNullable<typeof citation> => citation !== null);
-        const uniqueCitations = authorizedCitations.filter((citation, index, all) => {
-          const location = citation.page === undefined ? citation.blockId ?? "source" : `page-${citation.page}`;
-          return all.findIndex((candidate) => {
-            const candidateLocation = candidate.page === undefined ? candidate.blockId ?? "source" : `page-${candidate.page}`;
-            return candidate.versionId === citation.versionId && candidateLocation === location;
-          }) === index;
-        });
-        reply.header("Cache-Control", "no-store");
-        return { status: aiResponse.status, answer: aiResponse.answer, citations: uniqueCitations };
-      } catch (error) {
-        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Ask Arden answer failed");
-        return reply.code(503).send(safeError("AI_UNAVAILABLE", "Ask Arden is temporarily unavailable.", request.id));
-      }
-    });
 
   app.get<{ Params: { organizationId: string; publishedVersionId: string } }>(
     "/api/v1/organizations/:organizationId/knowledge/published/:publishedVersionId", {
@@ -1527,20 +2042,41 @@ export function buildApp(dependencies: AppDependencies) {
       if (!context) return;
       try {
         const { organizationId, publishedVersionId } = request.params;
-        const publication = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
+        // T1.3: unreadable and missing publications return the same 404 RESOURCE_NOT_AVAILABLE.
+        const readablePublication = async () => {
+          const actor = await dependencies.repository.getTargetReaderActor(context.userId, organizationId);
+          if (!actor) return null;
+          const found = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
+          return found && canRead(actor, { organizationId, readers: found.targetReaders }) ? found : null;
+        };
+        const publication = await readablePublication();
         if (!publication) return reply.code(404).send(resourceNotAvailable(request.id));
+        // Decision 0032 A3: an old link to an expired publication explains instead of showing the content.
+        if (publication.expired) {
+          reply.header("Cache-Control", "no-store");
+          const expiredOn = publication.management?.expirationDate ?? null;
+          const owner = publication.responsibleDepartmentName;
+          const shown = expiredOn ? new Date(`${expiredOn}T00:00:00Z`).toLocaleDateString("en-US",
+            { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : null;
+          return reply.code(410).send({ error: { code: "DOCUMENT_EXPIRED", requestId: request.id,
+            message: `This document expired${shown ? ` on ${shown}` : ""}. Contact ${owner ?? "the owner department"}.`,
+            expiredOn, ownerDepartmentName: owner, title: publication.title } });
+        }
         const mimeType = publication.sourceUri.endsWith(".pdf") ? "application/pdf" : "text/plain";
         const content = await readKnowledgeContent(dependencies.storage, publication.sourceUri, publication.contentHash, mimeType);
-        const stillAuthorized = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
+        const stillAuthorized = await readablePublication();
         if (!stillAuthorized || stillAuthorized.contentHash !== publication.contentHash) {
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
+          management: publication.management,
           classification: publication.classification,
           responsibleDepartmentId: publication.responsibleDepartmentId,
+          responsibleDepartmentName: publication.responsibleDepartmentName,
           ...content, mimeType, contentHash: publication.contentHash,
           audienceIds: publication.audienceRoleIds,
+          targetReaders: representReaderMode(publication.targetReaders),
           publishedAt: publication.publishedAt.toISOString(), validFrom: publication.validFrom.toISOString(),
           validUntil: publication.validUntil?.toISOString() ?? null };
       } catch (error) {
@@ -1602,7 +2138,7 @@ export function buildApp(dependencies: AppDependencies) {
       const result = await dependencies.repository.listDrafts(context.userId, request.params.organizationId, limit, cursor);
       if (!result) return reply.code(404).send(resourceNotAvailable(request.id));
       return {
-        items: result.items.map((item) => ({ ...item, createdAt: item.createdAt.toISOString(), updatedAt: item.updatedAt.toISOString() })),
+        items: result.items.map(representNoteSummary),
         nextCursor: result.nextCursor ? encodeCursor(result.nextCursor) : null,
       };
     } catch (error) {
@@ -1672,6 +2208,11 @@ export function buildApp(dependencies: AppDependencies) {
         if (stored) await dependencies.storage.remove(stored.sourceUri);
         return reply.code(412).send(safeError("VERSION_CONFLICT", "This note changed. Reload it before saving again.", request.id));
       }
+      if (result.kind === "wrong-kind") {
+        if (stored) await dependencies.storage.remove(stored.sourceUri);
+        return reply.code(409).send(safeError("PDF_ITEM_NOT_EDITABLE", "A PDF can't be edited as text. Rename it or replace the file.", request.id));
+      }
+      await eraseReplaced(result.replacedSourceUris, request);
       const representation = await representDraft(result.draft, dependencies.storage);
       reply.header("ETag", etag(result.draft.currentVersion));
       return representation;
@@ -1681,30 +2222,173 @@ export function buildApp(dependencies: AppDependencies) {
     }
   });
 
+  /** Decision 0031: content objects an overwrite made unreachable; failures are logged, not reported to the caller. */
+  async function eraseReplaced(sourceUris: string[], request: FastifyRequest) {
+    for (const sourceUri of sourceUris) {
+      try { await dependencies.storage.remove(sourceUri); }
+      catch (error) { request.log.warn({ errorType: safeErrorType(error), requestId: request.id }, "Replaced private content could not be erased"); }
+    }
+  }
+
+  // Decision 0034 (spec F03-FILE): an original PDF kept in Private next to notes.
+  const pdfItemBody = {
+    type: "object", additionalProperties: false, required: ["pdfBase64"],
+    properties: {
+      title: { type: "string", maxLength: 800 },
+      pdfBase64: { type: "string", minLength: 8, maxLength: maxPdfBase64Length },
+      // Text the browser extracted for the owner's private AI; empty for a PDF without a text layer.
+      text: { type: "string", maxLength: maxBodyBytes },
+      collectionId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
+    },
+  } as const;
+  const pdfItemBodyLimit = maxPdfBase64Length + maxBodyBytes * 6 + 4096;
+  type PdfItemBody = { title?: string; pdfBase64: string; text?: string; collectionId?: string | null };
+  /** Validates the upload and stores the file and its text; returns null for an invalid request. */
+  const storePdfItem = async (body: PdfItemBody): Promise<StoredContentFields | "invalid"> => {
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(body.pdfBase64)) return "invalid";
+    const bytes = decodePdfBase64(body.pdfBase64);
+    const text = body.text?.trim() ? body.text : null;
+    if (!bytes || (text !== null && !isValidText(text, maxBodyBytes, maxBodyBytes))) return "invalid";
+    const file = await dependencies.storage.writePdf(bytes);
+    if (text === null) return file;
+    try {
+      const stored = await dependencies.storage.write(text);
+      return { ...file, text: { sourceUri: stored.sourceUri, contentHash: stored.contentHash } };
+    } catch (error) {
+      await dependencies.storage.remove(file.sourceUri);
+      throw error;
+    }
+  };
+  const removeStored = async (stored: StoredContentFields) => {
+    await dependencies.storage.remove(stored.sourceUri);
+    if (stored.text) await dependencies.storage.remove(stored.text.sourceUri);
+  };
+  const draftParams = {
+    type: "object", required: ["organizationId", "draftId"],
+    properties: { organizationId: { type: "string", pattern: uuidPattern }, draftId: { type: "string", pattern: uuidPattern } },
+  } as const;
+
+  app.post<{ Params: { organizationId: string }; Body: PdfItemBody }>("/api/v1/organizations/:organizationId/private-workspace/drafts/pdf", {
+    bodyLimit: pdfItemBodyLimit,
+    schema: { params: { type: "object", required: ["organizationId"], properties: { organizationId: { type: "string", pattern: uuidPattern } } },
+      body: { ...pdfItemBody, required: ["title", "pdfBase64"] } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    const { organizationId } = request.params;
+    const title = request.body.title ?? "";
+    if (!isValidText(title, 800, maxTitleCodePoints)) return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
+    let stored: StoredContentFields | null = null;
+    try {
+      if (!await dependencies.repository.canCreateDraft(context.userId, organizationId)) {
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      const result = await storePdfItem(request.body);
+      if (result === "invalid") return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
+      stored = result;
+      const draft = await dependencies.repository.createDraft(context.userId, organizationId,
+        { title: title.trim() || "Untitled PDF", body: "", collectionId: request.body.collectionId ?? null }, stored, request.id);
+      if (!draft) {
+        await removeStored(stored);
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      reply.header("Location", `/api/v1/organizations/${organizationId}/private-workspace/drafts/${draft.id}`);
+      reply.header("ETag", etag(draft.currentVersion));
+      return reply.code(201).send(representPrivateNote(draft, ""));
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Private PDF creation failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.get<{ Params: { organizationId: string; draftId: string } }>("/api/v1/organizations/:organizationId/private-workspace/drafts/:draftId/pdf", {
+    schema: { params: draftParams },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    try {
+      const draft = await dependencies.repository.getDraft(context.userId, request.params.organizationId, request.params.draftId);
+      if (!draft || draft.mimeType !== "application/pdf") return reply.code(404).send(resourceNotAvailable(request.id));
+      const bytes = await dependencies.storage.readPdf(draft.sourceUri, draft.contentHash);
+      reply.header("Cache-Control", "no-store");
+      reply.header("ETag", etag(draft.currentVersion));
+      return { id: draft.id, version: draft.currentVersion, contentHash: draft.contentHash, pdfBase64: bytes.toString("base64") };
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Private PDF read failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.put<{ Params: { organizationId: string; draftId: string }; Body: PdfItemBody }>("/api/v1/organizations/:organizationId/private-workspace/drafts/:draftId/pdf", {
+    bodyLimit: pdfItemBodyLimit,
+    schema: { params: draftParams, body: pdfItemBody,
+      headers: { type: "object", properties: { "if-match": { type: "string", maxLength: 64 } } } },
+  }, async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    const expectedVersion = parseEtag(request.headers["if-match"]);
+    if (expectedVersion === "missing") return reply.code(428).send(safeError("PRECONDITION_REQUIRED", "Reload the file before replacing it.", request.id));
+    if (expectedVersion === null) return reply.code(400).send(safeError("INVALID_REQUEST", "The version precondition is invalid.", request.id));
+    const { organizationId, draftId } = request.params;
+    let stored: StoredContentFields | null = null;
+    try {
+      if (!await dependencies.repository.canUpdateDraft(context.userId, organizationId, draftId)) {
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      const result = await storePdfItem(request.body);
+      if (result === "invalid") return reply.code(400).send(safeError("INVALID_PDF", "Choose a valid PDF file up to 5 MB.", request.id));
+      stored = result;
+      const title = request.body.title?.trim();
+      const update = await dependencies.repository.updateDraft(context.userId, organizationId, draftId, expectedVersion,
+        title ? { title } : {}, stored, request.id);
+      if (update.kind !== "updated") {
+        await removeStored(stored);
+        if (update.kind === "conflict") return reply.code(412).send(safeError("VERSION_CONFLICT", "This file changed. Reload it before replacing it.", request.id));
+        if (update.kind === "wrong-kind") return reply.code(409).send(safeError("NOT_A_PDF_ITEM", "Only a PDF item can take a PDF file.", request.id));
+        return reply.code(404).send(resourceNotAvailable(request.id));
+      }
+      await eraseReplaced(update.replacedSourceUris, request);
+      reply.header("ETag", etag(update.draft.currentVersion));
+      return representPrivateNote(update.draft, "");
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Private PDF replacement failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
   return app;
 }
 
-async function requireAuthenticatedActor(request: FastifyRequest, reply: FastifyReply, auth: AuthProvider | null, secureCookies: boolean, testActor?: SessionContext): Promise<SessionContext | null> {
+async function requireAuthenticatedActor(request: FastifyRequest, reply: FastifyReply, auth: AuthProvider | null,
+  secureCookies: boolean, sessionKey: Buffer, testActor?: SessionContext): Promise<SessionContext | null> {
   if (testActor) return testActor;
   if (!auth) {
     authUnavailable(reply, request);
     return null;
   }
-  const tokens = readAuthCookies(request.headers.cookie, secureCookies);
-  if (!tokens) {
+  const session = readBoundSession(request.headers.cookie, secureCookies, sessionKey);
+  if (!session) {
+    clearAuthCookies(reply, secureCookies);
     reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
     return null;
   }
   try {
-    const resolution = await auth.resolveSession(tokens);
+    const resolution = await auth.resolveSession(session.tokens);
     if (resolution.kind === "authenticated") {
-      if (resolution.rotatedSession) setAuthCookies(reply, resolution.rotatedSession, secureCookies);
+      if (Date.now() >= session.expiresAt * 1000) {
+        clearAuthCookies(reply, secureCookies);
+        reply.code(401).send(safeError("UNAUTHENTICATED", "Sign in to continue.", request.id));
+        return null;
+      }
+      if (resolution.rotatedSession) setAuthCookies(reply, resolution.rotatedSession, secureCookies,
+        sessionKey, session.expiresAt);
       return {
         userId: resolution.userId,
         email: resolution.email,
         fullName: resolution.fullName,
         emailVerified: resolution.emailVerified,
         passwordSetupRequired: resolution.passwordSetupRequired,
+        sessionExpiresAt: session.expiresAt,
       };
     }
     if (resolution.kind === "unavailable") {
@@ -1726,10 +2410,21 @@ function passwordRejected(reply: FastifyReply, request: FastifyRequest) {
     "Password does not meet requirements. Use at least 8 characters with a mix of letters and numbers.", request.id));
 }
 
-function cookieNames(secure: boolean): { access: string; refresh: string } {
+function cookieNames(secure: boolean): { access: string; refresh: string; session: string } {
   return secure
-    ? { access: "__Host-arden_access", refresh: "__Host-arden_refresh" }
-    : { access: "arden_access", refresh: "arden_refresh" };
+    ? { access: "__Host-arden_access", refresh: "__Host-arden_refresh", session: "__Host-arden_session" }
+    : { access: "arden_access", refresh: "arden_refresh", session: "arden_session" };
+}
+
+function readBoundSession(header: string | undefined, secure: boolean, key: Buffer):
+  { tokens: AuthSessionTokens; expiresAt: number } | null {
+  const tokens = readAuthCookies(header, secure);
+  if (!tokens || !header) return null;
+  const name = cookieNames(secure).session;
+  const value = header.split(";").map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1);
+  const expiresAt = readSessionExpiry(value, tokens, key);
+  return expiresAt === null ? null : { tokens, expiresAt };
 }
 
 function readAuthCookies(header: string | undefined, secure: boolean): AuthSessionTokens | null {
@@ -1748,12 +2443,15 @@ function readAuthCookies(header: string | undefined, secure: boolean): AuthSessi
   return { accessToken, refreshToken, expiresIn: 3600 };
 }
 
-function setAuthCookies(reply: FastifyReply, tokens: AuthSessionTokens, secure: boolean, additional: string[] = []): void {
+function setAuthCookies(reply: FastifyReply, tokens: AuthSessionTokens, secure: boolean, key: Buffer,
+  expiresAt = newSessionExpiry(), additional: string[] = []): void {
   const names = cookieNames(secure);
-  const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
+  const maxAge = Math.max(0, expiresAt - Math.floor(Date.now() / 1000));
+  const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}; Max-Age=${maxAge}`;
   reply.header("set-cookie", [
     `${names.access}=${tokens.accessToken}; ${attributes}`,
     `${names.refresh}=${tokens.refreshToken}; ${attributes}`,
+    `${names.session}=${sealSession(tokens, expiresAt, key)}; ${attributes}`,
     ...additional,
   ]);
 }
@@ -1819,7 +2517,8 @@ function readPendingInvitationCookie(header: string | undefined, secure: boolean
 function clearAuthCookies(reply: FastifyReply, secure: boolean, additional: string[] = []): void {
   const names = cookieNames(secure);
   const attributes = `Path=/; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}; Max-Age=0`;
-  reply.header("set-cookie", [`${names.access}=; ${attributes}`, `${names.refresh}=; ${attributes}`, ...additional]);
+  reply.header("set-cookie", [`${names.access}=; ${attributes}`, `${names.refresh}=; ${attributes}`,
+    `${names.session}=; ${attributes}`, ...additional]);
 }
 
 function hasTrustedOrigin(request: FastifyRequest, trustedOrigins: string[]): boolean {
@@ -1828,22 +2527,9 @@ function hasTrustedOrigin(request: FastifyRequest, trustedOrigins: string[]): bo
 }
 
 async function representDraft(draft: PrivateDraft, storage: PrivateContentStorage) {
-  const body = await storage.read(draft.sourceUri, draft.contentHash);
-  return {
-    id: draft.id,
-    organizationId: draft.organizationId,
-    title: draft.title,
-    body,
-    currentVersion: {
-      id: draft.versionId,
-      version: draft.currentVersion,
-      mimeType: draft.mimeType,
-      contentHash: draft.contentHash,
-    },
-    version: draft.currentVersion,
-    createdAt: draft.createdAt.toISOString(),
-    updatedAt: draft.updatedAt.toISOString(),
-  };
+  // Decision 0034: a PDF item's file is read separately (GET …/pdf) so lists and saves stay small.
+  if (draft.mimeType === "application/pdf") return representPrivateNote(draft, "");
+  return representPrivateNote(draft, await storage.read(draft.sourceUri, draft.contentHash));
 }
 
 const draftBodySchema = {
@@ -1853,12 +2539,14 @@ const draftBodySchema = {
   properties: {
     title: { type: "string", maxLength: 800 },
     body: { type: "string", maxLength: maxBodyBytes },
+    // Decision 0029: an optional active collection of the caller; otherwise 404.
+    collectionId: { anyOf: [{ type: "string", pattern: uuidPattern }, { type: "null" }] },
   },
 };
 
 function normalizeWrite(value: DraftWrite): DraftWrite | null {
   if (!isValidText(value.title, 800, maxTitleCodePoints) || !isValidText(value.body, maxBodyBytes, maxBodyBytes)) return null;
-  return { title: value.title.trim() || "Untitled private note", body: value.body };
+  return { title: value.title.trim() || "Untitled private note", body: value.body, collectionId: value.collectionId ?? null };
 }
 
 function normalizePatch(value: DraftPatch): DraftPatch | null {
@@ -1866,6 +2554,14 @@ function normalizePatch(value: DraftPatch): DraftPatch | null {
   if (value.title !== undefined && !isValidText(value.title, 800, maxTitleCodePoints)) return null;
   if (value.body !== undefined && !isValidText(value.body, maxBodyBytes, maxBodyBytes)) return null;
   return { ...value, title: value.title === undefined ? undefined : value.title.trim() || "Untitled private note" };
+}
+
+/** Canonical base64 of a non-empty PDF within the size limit (header and trailer present), or null. */
+function decodePdfBase64(encoded: string): Buffer | null {
+  const bytes = Buffer.from(encoded, "base64");
+  return bytes.length === 0 || bytes.length > maxPdfBytes || bytes.toString("base64") !== encoded
+    || !bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))
+    || !bytes.subarray(-1024).toString("latin1").includes("%%EOF") ? null : bytes;
 }
 
 function isValidText(value: string, maxBytes: number, maxCodePoints: number): boolean {
@@ -1882,6 +2578,7 @@ async function readKnowledgeContent(storage: PrivateContentStorage, sourceUri: s
 
 function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
   return {
+    management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
     id: draft.id,
     organizationId: draft.organizationId,
     title: draft.title,
@@ -1894,6 +2591,7 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
     teamTag: draft.teamTag,
     projectTag: draft.projectTag,
     audienceIds: draft.audienceRoleIds,
+    targetReaders: representTargetReaders(draft.targetReaders),
     currentVersion: {
       id: draft.versionId,
       version: draft.currentVersion,
@@ -1907,6 +2605,7 @@ function representSharedDraft(draft: SharedKnowledgeDraft, body: string) {
 
 function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
   return {
+    management: draft.management, hasPublishedVersion: draft.hasPublishedVersion,
     id: draft.id,
     organizationId: draft.organizationId,
     title: draft.title,
@@ -1922,6 +2621,7 @@ function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
     contentHash: draft.contentHash,
     currentVersion: draft.currentVersion,
     audienceIds: draft.audienceRoleIds ?? [],
+    targetReaders: representTargetReaders(draft.targetReaders),
     createdAt: draft.createdAt.toISOString(),
     updatedAt: draft.updatedAt.toISOString(),
   };
@@ -1929,6 +2629,7 @@ function representSharedDraftSummary(draft: SharedKnowledgeDraft) {
 
 function representSubmission(submission: SharedKnowledgeSubmission) {
   return {
+    management: submission.management,
     id: submission.id,
     draftId: submission.draftId,
     snapshotVersionId: submission.snapshotVersionId,
@@ -1938,13 +2639,39 @@ function representSubmission(submission: SharedKnowledgeSubmission) {
     targetScopeType: submission.targetScopeType,
     targetDepartmentId: submission.targetDepartmentId,
     audienceIds: submission.audienceRoleIds,
+    proposedTargetReaders: representTargetReaders(submission.proposedTargetReaders),
+    approvedTargetReaders: representTargetReaders(submission.approvedTargetReaders),
     contentHash: submission.contentHash,
     status: submission.status,
     publicationState: submission.publicationState,
     decisionComment: submission.decisionComment,
     submittedAt: submission.submittedAt.toISOString(),
     publishedVersionId: submission.publishedVersionId,
+    requestType: submission.requestType,
+    requestReason: submission.requestReason,
+    publicationFailure: submission.publicationFailure,
+    withdrawal: submission.withdrawal ? { by: submission.withdrawal.by, reason: submission.withdrawal.reason,
+      at: submission.withdrawal.at.toISOString() } : null,
+
+    ...(submission.renewal ? { renewal: submission.renewal } : {}),
   };
+}
+
+function representGovernanceView(view: GovernanceDocumentView, content: { body: string; pdfBase64?: string }) {
+  return { documentId: view.documentId, publishedVersionId: view.publishedVersionId, title: view.title,
+    mimeType: view.mimeType, contentHash: view.contentHash, ...content,
+    responsibleDepartmentId: view.responsibleDepartmentId,
+    readers: { mode: view.readerMode, departmentId: view.readerDepartmentId } };
+}
+
+/** Full selection for the author and reviewers of a draft or submission. */
+function representTargetReaders(readers: ReaderSelection | null) {
+  return readers ? { mode: readers.mode, departmentId: readers.departmentId, memberIds: [...readers.memberIds] } : null;
+}
+
+/** Library readers see the mode only, never who else was selected. */
+function representReaderMode(readers: ReaderSelection | null) {
+  return readers ? { mode: readers.mode, departmentId: readers.departmentId } : null;
 }
 
 function parseEtag(value: string | undefined): number | "missing" | null {
@@ -1995,7 +2722,10 @@ function safeErrorType(error: unknown): string {
 }
 
 function isNormalizedEmail(email: string): boolean {
-  return email.length <= 320 && email === email.trim().toLowerCase() && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  if (email.length > 320 || email !== email.trim().toLowerCase() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
+  const domain = email.slice(email.lastIndexOf("@") + 1);
+  return domain.length <= 253 && domain.split(".").every((label) =>
+    label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
 }
 
 function isValidLabel(value: string, maxLength: number): boolean {

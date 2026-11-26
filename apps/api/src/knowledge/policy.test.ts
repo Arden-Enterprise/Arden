@@ -160,13 +160,29 @@ describe("audience and review policy", () => {
         grant: { ...grant, level: "SPECIALIST" } })).toBe(true);
     });
 
-    it("rechecks expiry, tags and ordinary self-review for an organization grant", () => {
+    it("rechecks expiry and tags for an organization grant", () => {
       expect(canRespondToSubmission({ ...input, submission: organizationWide,
         grant: { ...organizationGrant, validUntil: now } })).toBe(false);
       expect(canRespondToSubmission({ ...input, submission: organizationWide,
         grant: { ...organizationGrant, teamTag: "other" } })).toBe(false);
-      expect(canRespondToSubmission({ ...input, actor: { ...actor, membershipId: "author" },
-        submission: organizationWide, grant: { ...organizationGrant, membershipId: "author" } })).toBe(false);
+    });
+
+    it("lets a reviewer decide their own submission only with a matching current grant (decision 0033)", () => {
+      const self = { ...actor, membershipId: "author" };
+      expect(canRespondToSubmission({ ...input, actor: self, submission: organizationWide,
+        grant: { ...organizationGrant, membershipId: "author" } })).toBe(true);
+      expect(canRespondToSubmission({ ...input, actor: self, submission,
+        grant: { ...grant, membershipId: "author" } })).toBe(true);
+      // The wrong scope is still refused for one's own submission: a Department grant for an organization-wide
+      // snapshot, an Organization grant for a department-only one, another department, or an expired grant.
+      expect(canRespondToSubmission({ ...input, actor: self, submission: organizationWide,
+        grant: { ...grant, membershipId: "author" } })).toBe(false);
+      expect(canRespondToSubmission({ ...input, actor: self, submission,
+        grant: { ...organizationGrant, membershipId: "author" } })).toBe(false);
+      expect(canRespondToSubmission({ ...input, actor: self, submission,
+        grant: { ...grant, membershipId: "author", departmentId: "other-dept" } })).toBe(false);
+      expect(canRespondToSubmission({ ...input, actor: self, submission,
+        grant: { ...grant, membershipId: "author", validUntil: now } })).toBe(false);
     });
 
     it("keeps Organization Admin final authority from decision 0011", () => {

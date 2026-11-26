@@ -24,6 +24,7 @@ Manual local Mainflow 1 testing may use the dedicated local adapter in `apps/api
 - Published Arden content may use `ORGANIZATION_ALL`, a matching `DEPARTMENT_ALL`, or an explicit `GROUP`. A verified active member with any one matching audience may view, search, and submit a separate contribution copy. Org Admin, ReviewerGrant, and System Admin are not implicit content grants.
 - Test grants, membership removal, role changes, revoked/expired sessions, multiple organization memberships, and attempted cross-organization references. Unknown policy/source audience fails closed.
 - Privileged workers/migration accounts do not replace end-user authorization. Use narrow service capabilities and explicitly trace the initiating actor where a task acts for someone.
+- The notification dispatcher uses a separate non-bypass login that can `SET ROLE arden_notification_worker`; that role sees only notification envelopes and can update only outbox delivery-state columns. It has no grants on submissions, drafts, user content, or API session tables. Inbox reads and mark-read operations use `arden_runtime` with the current actor and organization context. Keep this boundary in the real-database worker test.
 - RLS is defense in depth, not the sole policy layer. Test real runtime roles and pooled tenant context; development DB superuser success proves neither production denial nor RLS correctness.
 - Cross-actor `SECURITY INVOKER` triggers and write policies must derive tenant ownership from an explicit organization column on the protected resource or from the currently authorized actor. Do not validate a reviewer action by joining the submitter's RLS-hidden membership, and do not create circular policy dependencies such as current-publication write -> published-version read -> current-publication read. Exercise the complete write under `arden_runtime`, including deferred constraints, because isolated statement or owner-role checks miss these failures.
 - An Org Admin directory or reviewer-target lookup that joins `organization_membership` to `user_account` needs a separately scoped profile-read policy: the self-read policy alone silently drops other members. Migration 0015 allows profile reads only while the API's verified Org Admin transaction context is active and only for profiles with a membership in that transaction's organization. Keep ordinary member reads self-only, and test both tenant isolation and the actual reviewer-grant path under `arden_runtime`; do not disable RLS or expose a cross-organization directory.
@@ -36,12 +37,29 @@ The organization, session-context, and owner-private note contract for the first
 
 ### Database ownership is an execution contract
 
+Local operator migration 0040 adds the trigger-only trusted
+`validate_collection_placement` routine, bringing the reviewed inventory to 34
+after migration0039's notification executor.
+It locks Collection/current-pointer eligibility without runtime UPDATE grants on
+publication tables. Preserve its postgres owner and lack of runtime/PUBLIC EXECUTE;
+the pure eligibility helper and reconciliation remain invoker-context. Real
+post-handoff tests cover this split; API/UI and live rollout are still pending.
+See [0026](../decisions/0026-flat-organization-collection-placement.md).
+
 The release migration login owns Arden DDL and its migration ledger; it is not the
 internal executor of reviewed `SECURITY DEFINER` functions. Preserve those functions'
 existing trusted `postgres` execution identity. Moving them to a non-bypass owner
 while their input tables use FORCE RLS and runtime-only policies silently changes
 validation and worker behavior. Never bulk-transfer routines as ordinary ownership
 housekeeping. The migration-role probe must reject that broken ownership split.
+
+Views have their own execution context: retaining a trusted function owner does
+not make an owner-context view read as that function. The private
+`governance_current_publication` view uses `security_invoker` so its guarded
+SECURITY DEFINER callers retain the intended execution identity after view
+ownership transfer. The runtime has no direct view privilege. `security_barrier`
+alone does not provide this property; keep table RLS and existing entry-point
+authorization intact.
 
 Do not change FORCE RLS, actor/organization transaction settings, internal function
 owners, reviewer/audience gates or indexing execution privileges independently.
@@ -71,6 +89,23 @@ contributor and agent, not to one named tool.
 - Final approval moves the exact approved snapshot to publication preparation. It does not change the current pointer. Only complete indexing followed by atomic activation makes that version visible to search/RAG. There is no manual publisher role. Keep review, preparation and activation separately auditable; a mutable draft cannot become visible through a generic update endpoint.
 - Enforce transitions transactionally and reject stale version/conflicting approvals. Archival, unpublishing, and revocation must have explicit visibility semantics and audit evidence.
 - Who may recover private content remains a separate decision; do not create an undocumented bypass while implementing convenience tools.
+- Organization Admin content access is governed by [decision 0023](../decisions/0023-organization-admin-governance-access.md):
+  - The catalog shows metadata only.
+  - Content outside the Admin's readership opens only through an audited inspection: a required reason, one published version, 15 minutes idle or 2 hours maximum, and the role rechecked on every request.
+  - Authority comes from the current role and grant tables inside the reviewed routines of migration 0037, never from the app's `arden.org_admin` setting.
+  - Record the audit event before serving content; if recording fails, refuse access.
+  - Inspection and the responsible-reviewer view are never Library, search, Ask Arden or citation sources.
+  - Under [decision 0024](../decisions/0024-admin-only-direct-withdrawal.md) and forward operator 0038, only a current Organization Admin may withdraw directly; a matching reviewer grant or client Admin setting is insufficient. Reason/audit and author-visible Admin provenance remain mandatory. Responsible-reviewer read/report handling and approval of author withdrawal requests are unchanged.
+  - This release explicitly defers inspection notifications. Audit records are not automatic alerts; the deferral does not permanently remove the notification requirement.
+
+## In-app notification boundary (decision 0025)
+
+- PostgreSQL is the inbox/read-state source of truth. Trigger-written notifications and outbox rows commit with the corresponding submission, decision, activation/failure, approved reader change, primary-department or reviewer-grant event. The dispatcher can read only notification routing columns and sends `{ notificationId }` over private Realtime Broadcast; share names/titles and other message data stay Core-only.
+- `DOCUMENT_SHARED_PERSONAL` or `DOCUMENT_SHARED_GROUP` is created only after an approved `READER_CHANGE` updates an existing publication's reader selection; publication activation is a separate `PUBLICATION_ACTIVE` event. `SELECTED_MEMBERS` maps to personal; `DEPARTMENT` and `ORGANIZATION` map to group. Fan-out includes only active recipients allowed by both the publication's frozen audience and approved Target Readers, excluding the requester. The message may contain the sharer's display name and publication title, but no body/excerpt. Core rechecks the current publication through the caller's RLS context before returning those details or a target; a notification never grants or preserves readership.
+- Review-request fan-out follows current Organization Admin, disjoint Department/Organization grant, classification/tag/level, active membership and frozen legacy rules. A notification does not preserve reviewer access. Core checks current authorization when listing and opening the item; inaccessible items have no title/body/target disclosure.
+- Reader credentials are Core-issued, kept in memory, scoped to an exact environment/organization/membership topic and expire after 120 seconds. The notification reader role has Realtime SELECT for Broadcast only; it cannot insert, read `arden` tables or use another topic. The separate outbox sender role can insert Broadcast only and cannot select. Neither role receives direct Arden database grants.
+- Realtime authorization may be cached on an already connected socket until its short JWT expires. Such messages contain only opaque IDs; Core denies subsequent inbox data and target reads after permission loss. On organization change, sign-out, expired session or desktop window shutdown, close the channel and clear scoped UI state.
+- Notification rows cascade with hard deletion of the organization or recipient membership. Preserve notification/outbox consistency in backups and restore, then enforce current membership state; an older backup must not recreate active access. No inspection alert is added, consistent with decision 0024.
 
 ## 4. Derived data, search, graph, and revocation
 
@@ -111,6 +146,7 @@ contributor and agent, not to one named tool.
 
 - The gateway builds context from authorized current versions, selected excerpts, and necessary metadata only. A model has no direct database access, connector token, broad filesystem capability, or general network tool authority.
 - User context selection is inspectable, but selected items still require server authorization. Do not feed inaccessible attachments/history because they are indirectly referenced by an allowed node.
+- F22 writing actions accept client-supplied selected text without server retrieval. Core cannot attest whether that text came from a private note, so it requires active organization membership and the existing organization AI opt-in for every request, rechecks membership after inference, validates the bounded result, and logs no text. The editor applies suggestions only after an explicit user action; Explain has no edit path. See [F22](../product/writing-actions.md).
 - Distinguish official/shared/external/personal evidence, preserve exact-version citations, and show missing/conflicting/stale evidence and uncertainty. The model cannot certify an answer as official.
 - Resolve and validate citations server-side against the retrieved evidence set. Reject invented IDs/URLs and revoked versions; do not make clickable unauthorized links because the model emitted them.
 - Retrieved text is data, even when it says "ignore previous instructions", requests secrets, or appears to be a tool/system message. Never promote it to system instructions or authority.
@@ -124,6 +160,7 @@ contributor and agent, not to one named tool.
 
 - Keep renderer/browser unprivileged and use a narrow typed IPC/native boundary. Validate sender and inputs; native adapters are not a substitute for server policy.
 - Do not store long-lived auth secrets in renderer localStorage or unencrypted files. Choose protected OS storage for desktop and secure session/cookie behavior for web; document the threat model and recovery behavior.
+- Arden's API checks a signed, token-bound absolute 24-hour deadline on every protected request for both password and Google sign-in. A refresh keeps the original deadline; missing or invalid timebox markers fail closed. The key stays in API runtime secrets and is identical across replicas. Browser/desktop UI expiry clears in-memory private context, while the API remains authoritative even if a client clock or timer is altered.
 - Validate configurable Core URLs and sign-in callbacks. Do not accept arbitrary redirects, open external schemes blindly, disable certificate validation, or grant wildcard origins for convenience.
 - Offline support is future limited personal-draft/cache behavior, not complete shared sync. Distinguish saved-to-server, saved-locally, pending, failed, and conflict states without silent loss/overwrites.
 - Cache protection, expiration, shared-content reauthorization, revocation when offline, device compromise, logout cleanup, and key lifecycle require accepted decisions before shipping caching. Do not claim immediate remote wipe on an offline device.
@@ -135,7 +172,7 @@ contributor and agent, not to one named tool.
 - Secrets include DB/auth/model/connector credentials, signing keys, backup encryption keys, session cookies, authorization headers, and credentialed URLs. Keep them out of Git, bundles, screenshots, fixtures, PR text, ordinary logs, and model inputs.
 - Store server secrets in environment/approved secret management; validate required production config and fail closed. Development defaults must never silently become production credentials.
 - Redact application/request logging and crash diagnostics before adding sensitive routes. Default Fastify logging is not proof that a future payload/header configuration is safe.
-- Audit metadata should record actor, organization, action, target/version, decision, timestamp, and correlation/idempotency reference, not full document/prompt content by default.
+- Audit only consequential actions ([decision 0035](../decisions/0035-audit-only-consequential-actions.md)): access, official knowledge, organization structure, exceptional privileges and actions that cannot be undone; not routine owner-only private-note edits. Audit metadata should record actor, organization, action, target/version, decision, timestamp, and correlation/idempotency reference, not full document/prompt content by default.
 - Restrict audit access, define retention and integrity controls, and avoid editable ordinary-user audit records. Document stronger tamper-evidence requirements if adopted; do not claim them before implementation.
 - Use synthetic test fixtures and sanitized, approved diagnostics. Suspected leaks require containment and a regression rule/test; do not copy exposed secrets into an issue or rotate customer credentials without authorized coordination.
 

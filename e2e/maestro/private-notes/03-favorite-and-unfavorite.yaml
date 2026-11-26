@@ -1,0 +1,54 @@
+# F03-ORG-AC3: favorite a note from the row menu, see it in Favorites and the
+# header star, then remove it with the header star.
+url: http://127.0.0.1:5180/
+name: Private Notes - favorite then unfavorite a note
+tags:
+  - private-notes
+  - f03-org
+---
+- runFlow: subflows/login.yaml
+
+- runFlow:
+    file: subflows/create-root-note.yaml
+    env:
+      NAME: QA Starred note
+# No Favorites section while nothing is favorited.
+# (?i): the section label may be rendered uppercase with CSS text-transform.
+- assertNotVisible: "(?i)favorites"
+
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Starred note
+- tapOn: "Add to favorites"
+
+# Favorites section appears at the top, listing the note.
+# (The note title also appears in the main content heading, so "below" is a
+# weak positional check; a testid on the Favorites group would make it exact.)
+- assertVisible: "(?i)favorites"
+- assertVisible:
+    text: "QA Starred note"
+    below: "(?i)favorites"
+# The note header star (icon-only, aria-label -> `id:`) is now pressed.
+- assertVisible:
+    id: "Remove from favorites"
+- takeScreenshot: 03-favorited
+
+# The row menu item (visible text) now offers the opposite action.
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Starred note
+- assertVisible:
+    text: "Remove from favorites"
+- tapOn:
+    point: "60%,92%"  # close the menu by clicking outside (Escape key is not supported by Maestro web)
+
+# Unfavorite with the header star.
+- tapOn:
+    id: "Remove from favorites"
+- assertNotVisible: "(?i)favorites"
+- assertVisible:
+    id: "Add to favorites"
+- assertVisible: "QA Starred note"
+- takeScreenshot: 03-unfavorited

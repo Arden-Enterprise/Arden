@@ -1,5 +1,10 @@
 # Lasting decisions and rules maintenance
 
+[0027: Remove knowledge Topics](0027-remove-knowledge-topics.md) retires Topic schema,
+authoring/API fields and source context after the flat Collection contract in0026.
+Frozen historical JSON remains untouched. Source integration and live operator
+approval/rehearsal are separate gates.
+
 Durable product, architecture, security, technology, and operational decisions belong in the repository, not only in chat. Read [AGENTS.md](../../AGENTS.md), especially its rules-maintenance section.
 
 ## What needs a decision record
@@ -63,6 +68,31 @@ Version-matched official docs, repository code/tests, and authorized decisions.
 
 ## Status and synchronization
 
+[0026: Flat Organization Collection placement](0026-flat-organization-collection-placement.md)
+records the accepted one-folder/Admin/Allowed types/version/Archive rules.
+P3B.1 is a local schema checkpoint only; new API/UI and legacy mapping remain.
+
+[0024: Admin-only direct withdrawal](0024-admin-only-direct-withdrawal.md) refines
+0023: reviewers keep scoped view/report handling but cannot withdraw directly.
+Inspection notifications are explicitly deferred for this release; audit remains.
+Implementation is on PR #52 only until actual integration/release is verified.
+
+[0025: Durable in-app notifications with Realtime hints](0025-in-app-notifications.md)
+accepts the F21 implementation scope while retaining 0024's inspection-notification
+deferral. Code and migration are branch-only until full PostgreSQL, Realtime and
+staging evidence is obtained; no rollout is implied.
+
+The Flow 4 owner approved the [Maintenance report intake decision](0028-maintenance-report-intake.md) on 18 November 2026. It covers intake cutover, transition of open reports and preservation of closed report history.
+
+The Home start page and reader validity rules are [0022: Home start page and reader
+validity](0022-home-start-page-and-reader-validity.md), accepted on 15 November 2026;
+implementation is on branch `feat/home-reader-information` only.
+
+The governed-answering refinement is [0021: hybrid answering and applicable-version
+sources](0021-governed-hybrid-answering.md), accepted implementation scope with
+paired local verification. Publication/deployment and real-provider acceptance
+remain separate; consult its GA-v2 contract rather than inferring release status.
+
 The current release migration policy is [0016: run approved expand migrations through the release receiver](0016-github-hosted-server-side-migrations.md). It is accepted, but implementation evidence and rollout are tracked separately from the decision.
 
 - Follow [current main context](../engineering/rules/main-context.md) at task start. Check each relevant decision's status and superseding record on fetched main before relying on older chats or branch documents. A later accepted replacement governs the default intended architecture; verify its actual implementation separately.
@@ -76,3 +106,13 @@ The current release migration policy is [0016: run approved expand migrations th
 - Keep examples, ports, commands, versions, package paths, implementation status, tests, and configuration accurate. If an old document disagrees with source, identify the discrepancy and resolve it explicitly.
 - Capture reusable constraints and rationale, not secrets, customer content, transient logs, or an unfiltered transcript. Review privacy of referenced screenshots/output too.
 - When documentation gaps remain, name them in the handoff/PR and obtain a decision where necessary; do not quietly promote an assumption into policy.
+
+Current Company AI version selection: [0030 — Published-date AI sources](0030-published-date-ai-sources.md) supersedes the temporal parts of 0021.
+
+Expired documents and Home columns: [0032 — Expired documents, reviewed renewal and the Home document columns](0032-expired-documents-renewal-and-home-columns.md) (accepted 24 November 2026) supersedes 0022 item 4 and its Home column list and extends 0024/0025. Implementation is on branch `feat/expired-document-visibility` only.
+
+Reviewer self-approval: [0033 — Reviewers with a matching grant may decide their own submissions](0033-reviewer-self-approval.md) (accepted 24 November 2026) supersedes the reviewer self-review ban in 0011/0015 and amends the 0032 renewal decision order. Branch `feat/expired-document-visibility` only.
+
+Share button and direct sharing: [0034 — One Share button, unreviewed direct sharing with individuals and private PDF items](0034-share-button-direct-share-and-private-pdf.md) (accepted 26 November 2026) allows explicitly selected members to read a private item and lets Private store PDF files.
+
+Audit policy: [0035 — Audit only consequential actions](0035-audit-only-consequential-actions.md) (accepted 26 November 2026) supersedes the audit line of 0002. Permanent deletion and changes to share access are audited.

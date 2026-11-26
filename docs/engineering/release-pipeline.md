@@ -4,6 +4,14 @@ This guide owns the branch-based application release procedure. Read the [approv
 
 ## Daily flow
 
+The built-image smoke exercises the actual hashed PDF module worker over HTTP.
+It must return200 with a JavaScript MIME type and `nosniff`; a missing worker must
+return404, not the application shell. Nginx's stock MIME table omits `.mjs`, so
+`web.conf` explicitly extends the mapping without changing the default for binary
+files or removing security headers. A200/healthy app alone does not prove PDF
+preview works. After a web-proxy change, check a signed-in PDF as well as headers.
+See Nginx's [types directive](https://nginx.org/en/docs/http/ngx_http_core_module.html#types).
+
 1. Fetch and safely update your local checkout. Preserve unfinished work before switching branches.
 2. Make a meaningful feature branch from current `staging`, such as `feat/knowledge-search`.
 3. Develop and test locally using the [teammate setup guide](teammate-setup.md). Hosted development slots are independent of staging and production.
@@ -72,7 +80,7 @@ the separate synthetic privilege probe is not a substitute for that workflow tes
 
 For the known ownership regression, an authorized operator may use
 `deploy/release/security-definer-owner-repair.sql` only after reviewing the exact
-database, fixed environment role, 12-function inventory, protected backup and
+database, fixed environment role, and current 48-function inventory through migrations 0001–0064 (35 baseline/share routines and 13 exact Flow 4 signatures, including overloaded routines), protected backup and
 disposable rehearsal. It only restores function owners and is idempotent. Do not
 replay migration SQL, edit ledger checksums or disable RLS to recover. Existing
 restricted migration logins cannot replace these trusted functions; future body or

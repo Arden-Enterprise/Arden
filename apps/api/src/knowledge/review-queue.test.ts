@@ -11,7 +11,7 @@ const grant = {
   teamTag: null, projectTag: null, validFrom: new Date("2026-10-01T00:00:00Z"), validUntil: null,
 };
 const candidate: ReviewQueueCandidate = {
-  submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide",
+  submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide", versionNo: 3,
   submittedAt: new Date("2026-10-10T12:00:00Z"),
   submission: {
     organizationId: "org", submittedByMembershipId: "author", departmentId: "engineering",
@@ -33,11 +33,12 @@ describe("listAssignedReviews", () => {
       { ...candidate, submissionId: "revoked", reviewerGrants: [{ ...grant, status: "INACTIVE" }] },
       { ...candidate, submissionId: "expired", reviewerGrants: [{ ...grant, validUntil: now }] },
     ] });
-    expect(result.map((item) => item.submissionId)).toEqual(["submission-1"]);
-    expect(result[0]).toEqual({
+    // Decision 0033: the reviewer's own submission is listed like any other when the grant matches.
+    expect(result.map((item) => item.submissionId)).toEqual(["self", "submission-1"]);
+    expect(result.find((item) => item.submissionId === "submission-1")).toEqual({
       submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide",
       departmentId: "engineering", classification: "INTERNAL", submittedAt: candidate.submittedAt,
-      approvalBlocked: false,
+      approvalBlocked: false, versionNo: 3, requestType: "CONTENT", authorName: null,
     });
   });
 
@@ -45,7 +46,7 @@ describe("listAssignedReviews", () => {
     expect(listAssignedReviews({ actor: reviewer, now, candidates: [{ ...candidate, audienceEnforceable: false }] }))
       .toEqual([{ submissionId: "submission-1", snapshotId: "snapshot-1", title: "Recovery guide",
         departmentId: "engineering", classification: "INTERNAL", submittedAt: candidate.submittedAt,
-        approvalBlocked: true }]);
+        approvalBlocked: true, versionNo: 3, requestType: "CONTENT", authorName: null }]);
   });
 
   it("shows Organization Admin their own pending submission without a reviewer grant", () => {

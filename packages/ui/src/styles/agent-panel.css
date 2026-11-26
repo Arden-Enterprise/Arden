@@ -1,0 +1,103 @@
+/* Ask Arden agent panel behind the top-right Arden mark: docked on wide workspaces, floating below that, a sheet on phones. */
+.arden-app-shell .agent-panel {
+  position: sticky; top: var(--arden-shell-gap); z-index: 8; display: flex; flex-direction: column; min-width: 0; height: var(--arden-shell-height);
+  overflow: hidden; border: 1px solid var(--arden-border); border-radius: var(--arden-radius-panel); background: var(--arden-surface-base);
+  box-shadow: var(--arden-shadow-island);
+  transition: opacity var(--arden-motion-calm) ease, transform 320ms var(--arden-morph);
+}
+.arden-app-shell .agent-panel[data-state="closed"] {
+  position: fixed; top: 0; right: 0; visibility: hidden; opacity: 0; transform: translateX(16px); pointer-events: none; transition: none;
+}
+/* Docked, as in Notion: the panel runs the full window height flush to the top and right edges; the page narrows beside it. */
+.arden-app-shell:not(.is-context-overlay) .agent-panel[data-state="open"] {
+  top: 0; height: 100dvh; margin: calc(-1 * var(--arden-shell-gap)) 0 0 calc(-1 * var(--arden-shell-gap));
+  border-width: 0 0 0 1px; border-radius: 0; box-shadow: none;
+}
+.arden-app-shell.is-context-overlay .agent-panel {
+  position: fixed; top: var(--arden-shell-gap); right: var(--arden-shell-gap); bottom: var(--arden-shell-gap);
+  width: min(400px, calc(100vw - 2 * var(--arden-shell-gap))); height: auto; box-shadow: var(--arden-shadow-float);
+}
+
+.agent-panel-header {
+  display: flex; flex: none; align-items: center; gap: 10px; min-height: 56px; padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--arden-border);
+}
+.agent-panel-mark { flex: none; width: 22px; height: 22px; object-fit: contain; }
+.agent-panel-title { display: grid; flex: 1; min-width: 0; line-height: 1.25; }
+.agent-panel-title strong { color: var(--arden-text-primary); font-family: var(--arden-font-heading); font-size: 14px; font-weight: 600; letter-spacing: -.01em; }
+.agent-panel-title span { overflow: hidden; color: var(--arden-text-muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-panel-action {
+  display: grid; flex: none; place-items: center; width: var(--arden-control-md); height: var(--arden-control-md); padding: 0; border: 0;
+  border-radius: 8px; color: var(--arden-text-secondary); background: transparent; cursor: pointer;
+  transition: color var(--arden-motion-quick) ease, background-color var(--arden-motion-quick) ease, transform var(--arden-motion-quick) var(--arden-motion-ease);
+}
+.agent-panel-action:disabled { color: var(--arden-text-disabled); cursor: default; }
+.agent-panel-action:active:not(:disabled) { transform: scale(.94); }
+
+.agent-panel-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.agent-panel-empty { display: grid; justify-items: center; gap: 8px; padding: 48px 20px 24px; text-align: center; }
+.agent-panel-empty-mark {
+  width: 44px; height: 44px; margin-bottom: 8px; padding: 11px; border-radius: var(--arden-radius-md); object-fit: contain;
+  background: var(--arden-surface-raised); box-shadow: inset 0 0 0 1px var(--arden-border), 0 10px 28px -18px rgb(139 130 246 / 55%);
+}
+.arden-app-shell .agent-panel-empty h2 { margin: 0; color: var(--arden-text-primary); font-size: 16px; font-weight: 600; letter-spacing: -.02em; }
+.agent-panel-empty p { max-width: 32ch; margin: 0; color: var(--arden-text-secondary); font-size: 13px; line-height: 1.5; text-wrap: balance; }
+.agent-panel-starters { display: grid; gap: 6px; width: 100%; margin-top: 18px; }
+.agent-panel-starters > button {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--arden-border);
+  border-radius: var(--arden-radius-sm); color: var(--arden-text-secondary); background: transparent; font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+  transition: color var(--arden-motion-quick) ease, border-color var(--arden-motion-quick) ease, background-color var(--arden-motion-quick) ease,
+    transform var(--arden-motion-quick) var(--arden-motion-ease);
+}
+.agent-panel-starters > button svg { color: var(--arden-text-muted); }
+.agent-panel-starters > button:active { transform: scale(.98); }
+
+.agent-panel .ask-conversation { width: auto; margin: 0; padding: 18px 16px 24px; }
+.agent-panel .ask-message { gap: 6px; margin-bottom: 22px; }
+.agent-panel .ask-message-body { max-width: none; font-size: 13.5px; line-height: 1.65; }
+.agent-panel .ask-message.is-member .ask-message-body { max-width: 88%; padding: 9px 12px; }
+.agent-panel .ask-thread-notice { margin-bottom: 18px; }
+.agent-panel .ask-composer.is-panel { flex: none; width: auto; margin: 0 12px 12px; }
+.agent-panel .ask-composer.is-panel textarea { min-height: 44px; }
+
+@media (hover: hover) and (pointer: fine) {
+  .agent-panel-action:hover:not(:disabled) { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+  .agent-panel-starters > button:hover { color: var(--arden-text-primary); border-color: var(--arden-border-strong); background: var(--arden-surface-hover); }
+}
+@media (max-width: 639px) {
+  .arden-app-shell .agent-panel, .arden-app-shell.is-context-overlay .agent-panel {
+    position: fixed; inset: 0; z-index: 40; width: 100%; height: 100dvh; border: 0; border-radius: 0;
+  }
+  .agent-panel-action { width: var(--arden-control-touch); height: var(--arden-control-touch); }
+  .agent-panel .ask-composer.is-panel { margin-bottom: max(12px, env(safe-area-inset-bottom)); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .agent-panel .ask-message { animation: agent-message-in 240ms var(--arden-motion-ease) both; }
+  .agent-panel-starters > button { animation: agent-message-in 260ms var(--arden-motion-ease) both; animation-delay: calc(60ms + var(--i, 0) * 40ms); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arden-app-shell .agent-panel { transform: none; transition: opacity var(--arden-motion-quick) ease; }
+}
+@keyframes agent-message-in { from { opacity: 0; transform: translateY(6px); } }
+
+/* Sources view inside the narrow Ask Arden panel: covers the chat until Close or Escape. */
+.arden-app-shell .agent-panel .ask-sources-panel {
+  position: absolute; inset: 0; z-index: 6; grid-column: auto; grid-row: auto; width: auto;
+  border-left: 0; background: var(--arden-surface-base); box-shadow: none;
+}
+
+/* Spec F13-RESIZE: the docked panel's left edge is a splitter. A thin line shows on hover, focus and while dragging. */
+.arden-app-shell .agent-panel-resize {
+  position: absolute; top: 0; bottom: 0; left: 0; z-index: 7; width: 8px; cursor: col-resize; touch-action: none;
+}
+.arden-app-shell .agent-panel-resize::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: transparent;
+  transition: background-color var(--arden-motion-quick) ease;
+}
+.arden-app-shell .agent-panel-resize:hover::after,
+.arden-app-shell .agent-panel-resize.is-dragging::after { background: var(--arden-border-strong); }
+.arden-app-shell .agent-panel-resize:focus-visible { outline: none; }
+.arden-app-shell .agent-panel-resize:focus-visible::after { width: 3px; background: var(--arden-focus-ring); }
+.arden-app-shell:has(.agent-panel-resize.is-dragging) { cursor: col-resize; user-select: none; }
+
+/* With the panel docked, the bell is the last top-bar control: keep it off the panel's edge. */
+.arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) .workspace-topbar:not(.is-reader) { padding-right: 20px; }

@@ -1,0 +1,11 @@
+# Open Trash from the account menu at the bottom-left of the sidebar.
+# The account button is matched by its accessible name.
+url: http://127.0.0.1:5180/
+name: Subflow - open Trash from the account menu
+---
+- tapOn:
+    id: "Account menu"
+- tapOn: "Trash"
+- extendedWaitUntil:
+    visible: ".*Items in trash are permanently deleted after 30 days\\..*"
+    timeout: 5000

@@ -29,7 +29,6 @@ describe("Settings Framework & Dialog", () => {
       createElement(SettingsDialog, {
         platform: "web",
         session: null,
-        organization: null,
         memberName: "Lan Nguyen",
         memberRole: "Member",
         onClose: vi.fn(),
@@ -38,6 +37,8 @@ describe("Settings Framework & Dialog", () => {
 
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(screen.getByRole("button", { name: /account/i })).toBeTruthy();
+    // Opening starts on the dialog, not the active section, so no section shows a focus ring on open.
+    expect(document.activeElement).toBe(screen.getByRole("dialog"));
     expect(screen.getByRole("heading", { name: /account settings/i })).toBeTruthy();
     expect(screen.getByText("Lan Nguyen")).toBeTruthy();
   });
@@ -61,7 +62,6 @@ describe("Settings Framework & Dialog", () => {
         createElement(SettingsDialog, {
           platform: "desktop",
           session: null,
-          organization: null,
           onClose: vi.fn(),
         })
       );
@@ -94,7 +94,6 @@ describe("Settings Framework & Dialog", () => {
       createElement(SettingsDialog, {
         platform: "desktop",
         session: null,
-        organization: null,
         onClose: vi.fn(),
         extraSections: [{
           id: "registrar",
@@ -113,7 +112,6 @@ describe("Settings Framework & Dialog", () => {
       createElement(SettingsDialog, {
         platform: "desktop",
         session: null,
-        organization: null,
         onClose: vi.fn(),
       })
     );
@@ -137,7 +135,6 @@ describe("Settings Framework & Dialog", () => {
       createElement(SettingsDialog, {
         platform: "web",
         session: null,
-        organization: null,
         onClose,
       })
     );
@@ -149,25 +146,6 @@ describe("Settings Framework & Dialog", () => {
 });
 
 describe("AccountSettingsSection", () => {
-  it("displays preview notice when in sample preview mode (session is null)", () => {
-    render(
-      createElement(AccountSettingsSection, {
-        platform: "web",
-        session: null,
-        organization: { name: "Sample Org", templateId: "test", departments: [], members: [] },
-        memberName: "Alex Preview",
-        memberRole: "Member",
-        memberDepartment: "Engineering",
-        onClose: vi.fn(),
-      })
-    );
-
-    expect(screen.getByText(/Sample Preview Session/i)).toBeTruthy();
-    expect(screen.getByText("Alex Preview")).toBeTruthy();
-    expect(screen.getByText("Engineering")).toBeTruthy();
-    expect(screen.getByText("Sample Org")).toBeTruthy();
-  });
-
   it("validates password length and matching confirmation when authenticated", async () => {
     const mockSession: apiClient.CurrentSession = {
       actor: { id: "user-123", email: "user@example.com" },
@@ -179,7 +157,6 @@ describe("AccountSettingsSection", () => {
       createElement(AccountSettingsSection, {
         platform: "web",
         session: mockSession,
-        organization: null,
         memberName: "Alice Developer",
         memberRole: "Organization Admin",
         onClose: vi.fn(),
@@ -220,7 +197,6 @@ describe("AccountSettingsSection", () => {
       createElement(AccountSettingsSection, {
         platform: "web",
         session: mockSession,
-        organization: null,
         memberName: "Alice Developer",
         onClose: vi.fn(),
       })
@@ -256,7 +232,6 @@ describe("AccountSettingsSection", () => {
       createElement(AccountSettingsSection, {
         platform: "web",
         session: mockSession,
-        organization: null,
         onRefreshSession,
         onClose: vi.fn(),
       })

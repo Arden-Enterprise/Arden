@@ -37,7 +37,6 @@
 .shell-nav-scrim, .shell-context-scrim { position: fixed; inset: 0; z-index: 7; border: 0; background: rgb(0 0 0 / 54%); cursor: default; }
 .shell-context-scrim { z-index: 6; }
 @media (min-width: 640px) { .shell-nav-scrim { display: none; } }
-.arden-app-shell.is-context-overlay .knowledge-pane-redesign:not(.is-collapsed) { position: fixed; top: 0; right: 0; bottom: 0; z-index: 8; width: min(320px, 100vw); height: 100dvh; box-shadow: -12px 0 36px rgb(0 0 0 / 20%); }
 @media (min-width: 900px) and (max-width: 1199px) {
   .arden-app-shell, .arden-app-shell.is-context-collapsed, .arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 224px minmax(0, 1fr); }
 }
@@ -56,7 +55,6 @@
   .arden-app-shell .workspace-page { height: 100dvh; }
   .workspace-topbar { top: 0; flex-wrap: nowrap; }
   .topbar-actions { width: auto; }
-  .knowledge-pane-redesign:not(.is-collapsed) { position: fixed; top: 0; right: 0; bottom: 0; z-index: 8; width: min(320px, calc(100vw - 64px)); height: 100dvh; }
 }
 @media (max-width: 639px) {
   .arden-app-shell, .arden-app-shell.is-context-collapsed, .arden-app-shell:not(.is-context-collapsed):not(.is-context-overlay) { display: block; }
@@ -88,9 +86,8 @@
   .topbar-breadcrumb li + li::before { content: none; }
   .topbar-menu-button { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border: 1px solid var(--arden-line); border-radius: 5px; color: var(--arden-text-primary); background: transparent; font-size: 20px; }
   .topbar-actions { width: auto; gap: 8px; }
-  .topbar-search, .arden-app-shell .preview-state { display: none; }
+  .arden-app-shell .preview-state { display: none; }
   .context-toggle { width: 36px; min-height: 36px; padding: 0; justify-content: center; }
   .context-toggle span { display: none; }
-  .knowledge-pane-redesign:not(.is-collapsed), .arden-app-shell.is-context-overlay .knowledge-pane-redesign:not(.is-collapsed) { position: fixed; top: 0; right: 0; bottom: 0; z-index: 8; width: min(360px, 100vw); height: 100dvh; border-left: 1px solid var(--arden-line); }
 }
 @container workspace (max-width: 760px) { .arden-app-shell .preview-state { display: none; } }

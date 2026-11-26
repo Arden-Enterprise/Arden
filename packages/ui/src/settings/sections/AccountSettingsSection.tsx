@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from "react";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage } from "@arden/domain";
 import { setAccountPassword, updateAccountPassword } from "../../shared/api-client";
 import { initialsOf } from "../../app/AppSidebar";
 import { Icon } from "../../shared/Icon";
@@ -7,8 +8,7 @@ import type { SettingsSectionProps } from "../types";
 export function AccountSettingsSection({
   platform,
   session,
-  organization,
-  organizationName = organization?.name,
+  organizationName,
   memberName = "Member",
   memberRole = "Member",
   memberDepartment,
@@ -31,6 +31,10 @@ export function AccountSettingsSection({
     setError(null);
     setSuccess(null);
 
+    if (currentPassword.length > accountPasswordMaximumLength || newPassword.length > accountPasswordMaximumLength) {
+      setError(accountPasswordMaximumLengthMessage);
+      return;
+    }
     if (newPassword.length < 8) {
       setError("Password must be at least 8 characters long.");
       return;
@@ -114,8 +118,8 @@ export function AccountSettingsSection({
           <div className="settings-banner settings-banner-info">
             <Icon name="warning" size={16} />
             <div>
-              <strong>Sample Preview Session</strong>
-              <p>Password updates and credential management are available when connected to an authenticated organization workspace.</p>
+              <strong>Not signed in</strong>
+              <p>Sign in to change your password.</p>
             </div>
           </div>
         ) : (
@@ -157,7 +161,7 @@ export function AccountSettingsSection({
                     value={currentPassword}
                     onChange={(event) => { setCurrentPassword(event.target.value); setError(null); }}
                     autoComplete="current-password"
-                    maxLength={1024}
+                    maxLength={accountPasswordMaximumLength}
                     required
                     disabled={busy}
                   />
@@ -172,7 +176,7 @@ export function AccountSettingsSection({
                   autoComplete="new-password"
                   placeholder="At least 8 characters"
                   minLength={8}
-                  maxLength={1024}
+                  maxLength={accountPasswordMaximumLength}
                   required
                   disabled={busy}
                 />
@@ -187,7 +191,7 @@ export function AccountSettingsSection({
                   autoComplete="new-password"
                   placeholder="Re-enter password"
                   minLength={8}
-                  maxLength={1024}
+                  maxLength={accountPasswordMaximumLength}
                   required
                   disabled={busy}
                 />
@@ -217,7 +221,7 @@ export function AccountSettingsSection({
           </div>
           <div>
             <dt>Session State</dt>
-            <dd>{session ? "Authenticated" : "Sample Preview"}</dd>
+            <dd>{session ? "Authenticated" : "Signed out"}</dd>
           </div>
           {session?.testMode && (
             <div>
@@ -241,7 +245,7 @@ export function AccountSettingsSection({
               onClick={onSignOut}
             >
               <Icon name="logout" size={16} />
-              <span>{session ? "Log out" : "Exit preview"}</span>
+              <span>Log out</span>
             </button>
           </div>
         )}

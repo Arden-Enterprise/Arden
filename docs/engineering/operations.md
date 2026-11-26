@@ -1,6 +1,26 @@
 # Development, deployment, and operations rules
 
+Local Collection transition tooling and the separate live cutover/backup/mapping
+gates are owned by [the P3B.2 runbook](collection-legacy-transition.md). Its CLI
+refuses non-loopback/non-disposable targets; passing rehearsal does not authorize
+staging cleanup or a physical legacy-schema drop.
+
 Read [AGENTS.md](../../AGENTS.md), [the technology guide](technology-guide.md), and [security/data rules](security-and-data.md). This is the operational policy for the intended product. The repository includes reviewed SQL migration/local database tooling and the [branch-based app release implementation](release-pipeline.md). Its [approved design and delivery status](release-pipeline-design.md) distinguish implementation from live activation. Worker, installer and backup automation remain separate work.
+
+### Reader AI diagnostic retention
+
+The Summary reliability follow-up emits operation/HTTP request IDs, stage, safe
+failure code and elapsed time, never evidence, prompts, tokens or raw exceptions.
+Core disables automatic request URL/IP logs via Fastify's `LogController`; the AI
+image disables Uvicorn access logs. Keep container logging bounded (the app bootstrap
+template uses json-file, max-size `1m`, max-file `2`). Do not restore raw request or
+provider-body logging to diagnose failures. See [the owning Reader AI contract](reader-ai.md#summary-reliability-refinement--accepted-14-november-2026).
+
+Changing that template does not reconcile an existing Coolify stack. An authorized
+staging rollout must separately preserve its compose/environment, apply the bounded
+logging setting to Core and the isolated AI service, and verify safe events/rotation.
+Do not re-bootstrap an existing environment or change production/shared services
+merely to enable logs. Logging retention remains unverified until actual rollout.
 
 ## 1. Supported baseline and current commands
 
@@ -35,15 +55,29 @@ The migrations create Arden's `arden` schema, enable and force row-level securit
 
 Supabase Auth owns passwords and email confirmation. Invitation account setup is non-enumerating; after verification, the invite link must be reopened and accepted by a matching session. Arden stores the verified Supabase UUID and profile, not password hashes or rows in Supabase's internal `auth` schema. Organization creation provisions the creator as first Org Admin and assigns the initial department/default role in one transaction. Configure Supabase Auth email confirmation/SMTP separately from Arden's invitation SMTP. Invitation delivery uses the all-or-nothing server settings `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`; keep credentials in Coolify runtime secrets. `secure=true` uses implicit TLS (normally port 465); `secure=false` requires STARTTLS (normally port 587), and the API fails the send if the server cannot negotiate encryption. Connection, greeting, and socket timeouts are bounded. In authenticated deployments, including all four current hosted slots, `ARDEN_PUBLIC_WEB_ORIGIN` must also be configured to the recipient-accessible web origin. The historical dev-2 no-login test mode described in section 3 can send test invitations only with all six SMTP settings; otherwise it uses a mail sink. Its links target the developer's local frontend, and its behavior does not establish the current slots' email configuration. SMTP behavior is request-tested but real provider delivery is not verified until a message is received.
 
+When a new invited address receives no invitation, inspect the administrator's per-address invitation result first. `delivery-failed` means mail-server acceptance was not confirmed, so check provider status before resending; `saved-locally` means a test mail sink was used. An `email`/sent result means Nodemailer finished the SMTP handoff, not that the recipient mailbox received the message. Check the invitation sender's provider delivery/bounce records and the recipient's spam or quarantine using a synthetic address. This is separate from Supabase Auth confirmation mail, which happens only after account registration through the invitation link. Keep recipient addresses and full links out of public diagnostics.
+
 Google sign-in uses Supabase Auth PKCE through Arden's backend. Keep `SUPABASE_URL` pointed at the private Auth gateway for API requests and code exchange. Set `SUPABASE_AUTH_PUBLIC_URL` in the API runtime to the environment's exact HTTPS Auth origin before enabling Google sign-in. It is used only to construct the browser's `/auth/v1/authorize` URL. If it is missing, the API remains available but the Google start endpoint fails closed; it never redirects a browser to the private Auth address. An explicitly malformed value still prevents startup. The Cloudflare Tunnel should expose only `/auth/v1/authorize` and `/auth/v1/callback` on that host; do not route `/auth/v1/token`, user, settings, or admin endpoints publicly. Keep the provider disabled until Google client credentials are configured separately in each environment's Coolify Auth secrets. Set GoTrue's `GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI` and Google's authorized redirect URI to the environment's exact Auth callback, for example `https://auth.example.test/auth/v1/callback` in production or `https://auth-staging.example.test/auth/v1/callback` in staging. Keep `API_EXTERNAL_URL`, `GOTRUE_SITE_URL`, and allowed Arden redirect URLs on their existing environment-specific values. The callback back to Arden must also remain exact: `${ARDEN_PUBLIC_WEB_ORIGIN}/api/v1/auth/google/callback`; desktop additionally requires `${ARDEN_PUBLIC_API_ORIGIN}/api/v1/auth/google/callback`. `ARDEN_PUBLIC_API_ORIGIN` must match the origin reachable through desktop `ARDEN_CORE_URL`. A first-time Google-only account is routed to Arden's password-creation screen; the API calls Supabase `updateUser` and marks that setup complete, so subsequent sign-in can use either Google or the same verified email and password. Access and refresh tokens remain in HttpOnly cookies on web and OS-encrypted desktop storage. Do not expose the Google secret, service-role key, or Supabase session tokens to the renderer.
 
 Before enabling Google sign-in, add `SUPABASE_AUTH_PUBLIC_URL` to every API running `NODE_ENV=production`, including hosted development slots that run the production image. Ensure the API Compose environment mapping passes it through from protected runtime settings. An unset value leaves the API available while Google sign-in stays disabled; an invalid explicit value prevents startup. Build-time values do not configure the runtime. Configure and verify staging before promoting the same code to production.
+
+### Arden API session signing key
+
+Both password and Google sign-in require an Arden session signing key for the new absolute 24-hour timebox. Before running this API revision in production mode, generate 32 random bytes, encode them as 64 hexadecimal characters, and set `ARDEN_SESSION_SIGNING_KEY` in protected API runtime secrets on every replica. Keep one stable value across replicas and restarts; the API rejects missing or malformed production keys. Do not place the value in the client, repository, public build arguments, or logs. Existing browser/desktop sessions without the new signed marker must sign in again after rollout. Rotating the key invalidates existing Arden sessions and outstanding recovery proofs. Verify sign-in, Google callback, refresh near the deadline, and the expired-session path in an isolated environment before rollout. Arden's BFF enforces this limit for Arden API access; Supabase Auth's own session settings are managed separately.
+
+For self-hosted Supabase Auth, configure `GOTRUE_SESSIONS_TIMEBOX=24h` in the Auth/GoTrue service's Coolify Composer environment and redeploy that service separately. If the value is stored as a Coolify environment variable, the Composer environment must reference it. This provider timebox applies to password and Google sessions but is checked when a session refreshes; an already issued JWT may remain valid until its own expiry. Keep Arden's API deadline for the exact 24-hour access boundary. The maintainer reported adding the Composer value on 13 November 2026; its deployed state and live refresh behavior have not been verified here. See [Supabase session limits](https://supabase.com/docs/guides/auth/sessions) and [self-hosted Auth configuration](https://github.com/supabase/supabase/blob/master/docker/CONFIG.md#sessions).
 
 ### Password recovery email links
 
 Set GoTrue's `API_EXTERNAL_URL` to the environment's Arden web origin and `GOTRUE_MAILER_URLPATHS_RECOVERY` to `/auth/v1/verify`. Use the generated confirmation URL in the recovery email. Keep the exact Arden `/reset-password` destination in GoTrue's allowed redirects. The web proxy forwards the verification path to Arden's API, which verifies the link against private Supabase Auth and sets a short-lived recovery cookie before redirecting to the reset page.
 
+After a reset request, the shared web/desktop UI shows a non-enumerating check-email screen with an option to request another link. The new-password form appears when recovery tokens are present; updating the password requires the verified proof cookie in the browser that opened the link. A missing or invalid link offers a fresh request. The API does not accept a manually entered recovery code.
+
+The proof signing key is domain-separated from the API session key. Production replicas sharing `ARDEN_SESSION_SIGNING_KEY` can verify the same proof, including after a process restart, until its ten-minute expiry. Rotating the key invalidates outstanding proofs. The first deployment of this derivation also invalidates proofs created by the former process-random implementation; affected users can request a fresh link. Local development without an explicitly configured key uses a random per-process fallback, so a proof created before a local API restart cannot be completed afterward.
+
 After changing mailer or proxy settings, request a reset for a dedicated test account. Open the email link in a browser, confirm it first reaches the Arden web origin's verification path, and complete the reset in the same browser. Confirm the new password signs in. Keep the full link, cookies, and tokens out of logs and review artifacts.
+
+Some enterprise mail gateways may open a one-time link before the recipient does. Arden's current direct verification path has no intermediate confirmation step; if links expire before users open them, add a user-click confirmation page before consuming the link. See [Supabase's email prefetch guidance](https://supabase.com/docs/guides/auth/auth-email-templates#email-prefetching).
 
 The API uses Nodemailer as its SMTP client; no provider SDK is needed for Gmail or Mailjet. Its current SMTP authentication supports username/password, not Gmail OAuth2. Example Coolify API environment values for Gmail are `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`, `SMTP_SECURE=true`, `SMTP_USER=<sender Gmail address>`, `SMTP_PASS=<Google App Password>`, and `SMTP_FROM=Arden <sender Gmail address>`. Google's App Password option requires 2-Step Verification and may not be available for some managed accounts; Google recommends Sign in with Google where supported. For Mailjet SMTP relay use `SMTP_HOST=in-v3.mailjet.com`, `SMTP_PORT=587`, `SMTP_SECURE=false`, the account's SMTP API key as `SMTP_USER`, its secret as `SMTP_PASS`, and a sender address/domain verified by the provider as `SMTP_FROM`. Store `SMTP_PASS` in Coolify's runtime secrets, never commit it or expose it as a client variable. If Coolify shares these variables across resources, all API resources that consume them can send invitations when their auth path is enabled; Supabase Auth confirmation mail has separate SMTP settings. These examples are configuration recipes, not evidence that provider credentials, sender authorization, DNS, or real delivery have been tested.
 
@@ -80,7 +114,12 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `ARDEN_MIGRATION_DATABASE_URL` | Unset | Optional locally; production migration connection when the API `DATABASE_URL` is restricted. Never expose it to the running API or client |
 | `SUPABASE_URL` | Unset locally | Supabase project Auth/API URL reachable from the API container |
 | `SUPABASE_PUBLISHABLE_KEY` | Unset locally | Project publishable/anon key used by the server-side Supabase Auth adapter; never substitute a service-role key |
+| `SUPABASE_REALTIME_PUBLIC_URL` | Unset | Public HTTPS Realtime endpoint ending in `/realtime/v1`; loopback HTTP is local-only |
+| `ARDEN_NOTIFICATION_JWT_SECRET` | Unset | API-only 64-character HS256 signing value; must exactly match the target Realtime verifier's accepted key. Never place it in client configuration |
+| `ARDEN_NOTIFICATION_CHANNEL_NAMESPACE` | Unset | Required with the Realtime endpoint/key; unique for each environment and development slot |
+| `ARDEN_NOTIFICATION_DATABASE_URL` | Unset | Dedicated API-side login that may `SET ROLE arden_notification_worker`; required with complete Realtime configuration and never given application-content grants |
 | `ARDEN_AUTH_TRUSTED_ORIGINS` | Local Vite origins | Comma-separated exact client origins allowed to use Arden's cookie-authenticated API; production requires HTTPS |
+| `ARDEN_SESSION_SIGNING_KEY` | Random per process for local development; required in production | API-only 32-byte key encoded as 64 hex characters; share across API replicas and preserve through restarts. Rotation invalidates existing Arden sessions and outstanding recovery proofs |
 | `ARDEN_PUBLIC_WEB_ORIGIN` | Unset | Exact public web origin for invitation links; required to send invitations |
 | `ARDEN_PUBLIC_API_ORIGIN` | Unset | Exact public API origin used by the desktop Google OAuth callback; HTTPS is required in production |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Unset | Configure all six together for organization invitation email; runtime secrets stay API-side |
@@ -88,6 +127,7 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `ARDEN_CORE_URL` | `http://127.0.0.1:3001` for local desktop | Public HTTPS Core origin for the Windows desktop process; loopback HTTP is allowed only for local development |
 | `ARDEN_AI_URL` | Unset | Private HTTP(S) origin of Arden-AI, with no path or credentials; configure together with the service token |
 | `ARDEN_AI_SERVICE_TOKEN` | Unset | Server-only shared credential for Core/worker to call Arden-AI; never expose it to web/desktop clients |
+| `ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS` | Unset | Comma-separated organization UUIDs that have opted in to the configured provider handling Private questions, note excerpts and client-supplied AI writing text; writing actions for shared drafts are also gated because Core cannot verify text provenance |
 | `ARDEN_TEST_DATABASE_URL` | Unset | Optional real-PostgreSQL integration target; must be a disposable, pre-migrated database named `arden_test_*` |
 | `ARDEN_LOCAL_FLOW1_TEST_MODE` | Unset | Manual local browser-test auth; only `true` with loopback API/PostgreSQL, database `arden_test_*`, no Supabase config, and non-production mode |
 | `ARDEN_LOCAL_TEST_USERS` | Unset | JSON list of synthetic `@example.test` accounts, required only in fenced local Mainflow 1 test mode; keep the passwords in the launching shell, not files/Git |
@@ -97,7 +137,58 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 - Keep secret values out of tracked env/config files. Track sanitized examples with descriptions, defaults, required status, consumer, and restart/build implications. Treat `.env.production` as sensitive even if the current ignore patterns do not cover it.
 - Vite client env values are build-time public values. Future runtime public config must remain distinct from server secrets and support the same immutable artifact in staging/production.
 - Production startup must fail closed on missing/invalid critical configuration. No dev password, default administrator, disabled auth/TLS, or cloud fallback may become an implicit production setting.
-- Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice; connector credentials, model profiles, resource limits, and retention remain future configuration surfaces. Keep actual values out of tracked files.
+- Supabase Auth URL/publishable key, exact cookie origins, protected storage root, desktop Core URL, migration connection, and gated PostgreSQL/Supabase test connections are implemented for the first slice. Realtime notification configuration is all-or-none: if any of its endpoint, signing key or namespace is set, all must be valid. The API also uses the existing publishable key. Keep actual values in private API runtime configuration, not `VITE_*`, Electron renderer env, build arguments, URLs or logs.
+
+### In-app notifications and Supabase Realtime
+
+Migrations `0039_in_app_notifications.sql` and `0061_document_share_notifications.sql` are operator-class. Rehearse the full 0001–0061 chain and owner handoff on a disposable PostgreSQL database first. For a shared target, use the separately authorized migration procedure, verify a protected backup/recovery plan, and run the exact `security-definer-owner-repair.sql` inventory after migration. Migration 0039 adds a notification trigger executor; 0061 adds a narrowly scoped executor for personal/group recipients after approved `READER_CHANGE` requests and limits the Realtime worker to notification routing columns. `SELECTED_MEMBERS` emits the personal type; `DEPARTMENT` or `ORGANIZATION` emits the group type. Do not bulk-transfer other function owners or relax RLS. Organization/member hard deletion cascades inbox and outbox rows.
+
+Migration `0062_private_notes_organization_and_trash.sql` (decision 0029) is operator-class: it replaces the `draft_document` status check, adds owner-only `private_collection` rows and retention-only RLS policies, and introduces no new `SECURITY DEFINER` routine or DELETE grant. The API then runs an hourly in-process purge (`arden.private_trash_retention` transaction context) that tombstones private trash older than 30 days and erases its content objects; an erasure failure is logged and retried on the next run. Rehearse 0001–0062 on a disposable database before any shared target.
+
+Migration `0064_private_notes_order_and_archive.sql` (spec F03-ARR) is operator-class: it adds nullable `draft_document.sort_position` and `archived_at` with check constraints and an index, and recreates `trg_draft_document_updated_at` with a `WHEN` clause so placement and archive changes keep `updated_at`. It adds no grant, policy or `SECURITY DEFINER` routine and needs no backfill (existing notes keep a null position and sort newest first). Rehearse 0001–0064 on a disposable database before any shared target.
+
+Migration `0068_expired_document_renewal.sql` (decision 0032) is operator-class: it adds the `RENEWAL` change-request type with `renewal_expiration_date`/`on_behalf_of_author`, a one-pending-renewal unique index, the `publication_validity_renewal` record (RLS: runtime reads a row only with a publication it can already read), the `PUBLICATION_EXPIRING` and `PUBLICATION_RENEWAL_ON_BEHALF` notice types, replaces `validate_shared_submission`, `validate_review_decision`, `apply_publication_change`, `eligible_ai_publications`, `review_submission_authors` and `submission_proposed_reader_directory` in place (owners kept) and adds six reviewed `SECURITY DEFINER` routines (`request_publication_renewal`, `list_publication_renewal_state`, `enqueue_publication_expiry_reminders`, `list_publication_author_names`, `decide_on_behalf_renewal`, `publication_change_target_state`; 53 in the owner inventory). `publication_change_target_state` answers only whether a change request still names the current publication, so a reviewer whose grant covers the request can decide it without being a reader. For decision 0033 it replaces the review-decision insert policy without the submitter exclusion (a matching grant or Organization Admin is still required) and adds `renewal_author_read` so an active author reads renewal requests made on their behalf. It rewrites no frozen snapshot and withdraws nothing. After deployment Core runs the reminder routine hourly as `arden_runtime`; it is idempotent. Old Core keeps working on the expanded schema but cannot request renewals. Back up and rehearse 0001–0068 on a disposable database before any shared target.
+
+Migration `0065_private_note_live_version.sql` (decision 0031) is operator-class: it adds `draft_version.sealed_at`, seals all existing private-note history except each live note's uncontributed current version, replaces the `draft_version` immutability trigger with a `SECURITY INVOKER` guard that only lets an unsealed, unreferenced version be overwritten, and grants `arden_runtime` column-level `UPDATE` on the version number, content reference and `sealed_at`. It deletes nothing and adds no `SECURITY DEFINER` routine. After deployment the API erases a replaced content object after each save; an erasure failure is logged and leaves an unreferenced object. Rehearse 0001–0064 on a disposable database before any shared target.
+
+Migration 0039 creates the `arden_notification_worker` role as `NOLOGIN`, with only notification-envelope reads and the outbox state columns needed for leasing/retry/delivery. Provision a separate `LOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS` database role for the API dispatcher, grant it membership in `arden_notification_worker`, and put that login's secret only in `ARDEN_NOTIFICATION_DATABASE_URL` through the environment's secret manager. The dispatcher uses `SET LOCAL ROLE` inside each transaction; the login itself must fail direct reads, and after role switch it must still fail reads from submissions, drafts, and other Arden content. Never reuse `DATABASE_URL`, the migration login, or the indexing-worker login. If Realtime is absent, leave both the dispatcher URL and Realtime settings unset.
+
+The API checks this dedicated connection at startup and refuses complete Realtime configuration if the role/schema is unavailable. This connection is used only by the outbox dispatcher; authenticated inbox reads and read-state changes continue through the normal API pool under `arden_runtime` and actor/organization RLS context.
+
+Install [the scoped Realtime roles and policies](../../deploy/supabase/realtime-notifications.sql) against the exact database serving Realtime. Review existing `realtime.messages` grants and policies; the script changes only its named notification policies. Confirm Realtime uses private channels and public access is disabled, then verify reader SELECT for one exact Broadcast topic, rejection of another namespace/organization/membership, rejection of reader INSERT, sender Broadcast-only INSERT and sender SELECT denial. Neither role may query Arden tables. Test two-minute expiry and rejection after expiry.
+
+Core signs notification JWTs with HS256. `ARDEN_NOTIFICATION_JWT_SECRET` must be exactly the key that the configured Realtime service accepts. Check the deployed Realtime version's JWT verifier and role mapping rather than assuming its API-management secret is also the client JWT verifier. If the target uses asymmetric-only signing or does not accept Core-minted role claims, leave Realtime unconfigured and the feature disabled; do not replace a shared Supabase key set to make the test pass. Inbox list/read still use Core while Realtime is absent.
+
+Give each hosted development slot, staging, production and local instance its own `ARDEN_NOTIFICATION_CHANNEL_NAMESPACE`. The endpoint must be the public HTTPS `/realtime/v1` URL; configure the reverse proxy for WebSocket Upgrade on that path and TLS/WSS. On web, set the hosting proxy's CSP `connect-src` to the exact Realtime `wss://` origin in addition to Arden's own origins. Do not use a wildcard WSS source. Electron's renderer must not connect to Realtime; its main process owns the socket, and narrow IPC sends only validated notification IDs.
+
+The API starts the outbox dispatcher only when complete Realtime configuration is present. The PostgreSQL inbox remains canonical during an outage. Inspect queue health using aggregate state only:
+
+```sql
+SELECT status, count(*) AS rows, min(created_at) AS oldest_created_at,
+       min(available_at) FILTER (WHERE status = 'PENDING') AS next_pending_at,
+       count(*) FILTER (WHERE last_error_code IS NOT NULL) AS rows_with_errors
+  FROM arden.arden_notification_outbox
+ GROUP BY status
+ ORDER BY status;
+```
+
+Monitor pending age, leased rows past expiry, retry counts and terminal `FAILED` rows; keep alerts/logs free of notification content, JWTs and credentialed URLs. The dispatcher retries transient failures with bounded delay and stops after eight attempts, preserving the inbox row. After correcting the Realtime outage and validating one exact record, an authorized database operator may requeue only named terminal outbox rows; do not reset all attempts or edit/delete notification content. A repeated signal is safe because clients refetch by ID and source notifications are unique per recipient/event.
+
+During backup restore, preserve notification/outbox consistency and reconcile current membership and source permissions before opening access. A restored notification never grants access. No target environment has been configured, migrated, policy-probed or deployed by this code change; feature activation requires separate environment-specific evidence.
+
+### Knowledge Maintenance (Flow 4) rollout
+
+Migrations `0043`–`0060` are operator-class. Once they are merged, every release to an environment stops at `REQUIRES_OPERATOR` until they are applied there. The environment keeps running its current image, and later merges cannot deploy to it either, so schedule the migration together with the merge. Ship the server and the screens together: the API alone routes new reader reports into cases that the previous screens cannot open.
+
+1. Review the SQL with the API and UI heads together. Do not edit `0043`–`0060` once they are applied to a shared environment; correct forward with a new migration, as `0060` does for `0043`–`0059`.
+2. Take a protected backup of the selected environment's database, including the migration ledger, plus files and configuration, and write down the restore steps. Rehearse `0043`–`0060` in one transaction on a restored disposable copy first.
+3. Apply `0043`–`0060` once, in one transaction, with the reviewed trusted-executor identity. The restricted release migration login cannot run them: `0060` replaces trusted routines (`list_publication_reports`, `close_publication_report` and earlier Flow 4 routines), and the new reviewed `SECURITY DEFINER` routines must belong to the trusted owner. Confirm the ledger then lists all 60 migrations with the checksums in `apps/api/migrations/release-policy.json`.
+4. Keep the ownership split with the normal ownership template: the migration role owns the schema, tables, sequences and invoker routines, and reviewed `SECURITY DEFINER` routines keep the trusted owner. Compare them with the reviewed inventory in `tools/verification/migration-owner.py`. Do not bulk-transfer function owners, relax RLS or add BYPASSRLS. `deploy/release/security-definer-owner-repair.sql` lists the `0001`–`0041` inventory and refuses this schema; do not adapt it without review.
+5. Deploy through the release pipeline; its plan must return `NO_PENDING`. Then verify under the real runtime and worker roles: a reader report on an exact version, claim, comparison, a decision, Org Admin reassignment and **Import open reports**, imported reports leaving governance triage, and Flow 2 approval, activation and withdrawal (migration `0050` adds a trigger to every new published version).
+6. Each organization that uses Maintenance needs a Department or Organization reviewer grant held by someone other than the document's author. An Org Admin alone can only reassign.
+7. Leave `ARDEN_MAINTENANCE_ANALYSIS_ADAPTER` unset on shared environments until the paired Arden-AI change is published. Analysis then stays off and reviewers work manually.
+
+Recovery: there are no down migrations. A failed transaction applies nothing. After a committed migration, stop the rollout, keep the previous image and use a reviewed forward fix or the verified backup; a restore loses cases written since and returns imported reports to open governance triage. A hosted development slot needs the same chain before it runs this code (`pnpm dev:remote` never applies SQL); a slot that already has `0043`–`0059` needs only `0060`.
 
 ## 3. Isolated local development for every developer
 
@@ -221,3 +312,18 @@ unordered function is no longer executable by the worker. Existing publications 
 republished or repaired; review any pre-existing stale pointer separately. Core and web must be
 released together for the expanded state contract. A live schema upgrade still requires a separate
 reviewed backup, compatibility/recovery plan and explicit authorization; this guide is not consent.
+
+## Published-date AI contraction (0063)
+
+Migration0063 is operator-only under [ADR0030](../decisions/0030-published-date-ai-sources.md).
+It removes the chat scope column and obsolete temporal lineage, replaces the
+eligibility policies/helper and maintenance publication proof, and clears retired
+Effective Date keys from mutable drafts. Frozen metadata, publications, chat turns,
+evidence, files and generation IDs remain. The trusted routine inventory becomes47.
+Rehearse a full backup restore, rollback and upgrade with old chat/publication data,
+then test real runtime workflows after the ownership handoff. Do not edit applied
+SQL or transfer trusted executors. Core/web/desktop must roll out together: older
+clients send a retired field, and older Core expects the removed column/helper.
+No reindex or AI service contract change is needed. Recovery uses matching reviewed
+code/schema or the protected pre-upgrade backup. This local implementation is not
+approval or evidence of applying0063 on a shared environment.

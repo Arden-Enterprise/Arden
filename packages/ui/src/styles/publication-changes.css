@@ -1,0 +1,107 @@
+/* Flow 2 T2.2 (reviewer approves fewer readers), T6.4 (author requests a reader change or withdrawal)
+   and T6.3 (author sees why an approved version did not publish and may retry a temporary failure). */
+
+.review-approved-readers { display: grid; gap: 8px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.review-approved-readers > legend { padding: 0; }
+.review-approved-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: start; font-size: 13px; line-height: 1.4; cursor: pointer; }
+.review-approved-choice input { margin: 2px 0 0; accent-color: var(--arden-accent); }
+.review-approved-choice strong { display: block; color: var(--arden-text-primary); font-weight: 600; }
+.review-approved-choice small { display: block; overflow: hidden; color: var(--arden-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.review-approved-members { display: grid; gap: 4px; max-height: 220px; margin: 0 0 0 24px; padding: 0; overflow-y: auto; list-style: none; }
+.review-approved-members label { display: flex; gap: 8px; align-items: center; min-height: 28px; color: var(--arden-text-primary); font-size: 13px; cursor: pointer; }
+.review-approved-members input { margin: 0; accent-color: var(--arden-accent); }
+.review-approved-members span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.review-approved-readers .km-readers { margin-left: 24px; }
+.review-approved-readers > small { color: var(--arden-text-secondary); font-size: 11px; }
+
+.publication-failure { display: grid; gap: 6px; justify-items: start; border-color: var(--arden-danger); }
+.publication-failure strong { color: var(--arden-danger); font-size: 13px; }
+.publication-failure p { margin: 0; color: var(--arden-text-secondary); font-size: 13px; line-height: 1.5; }
+
+/* Decision 0023 governance: Administration → Documents, reported problems, inspection view. */
+.governance-documents { display: grid; gap: 14px; }
+.governance-search { max-width: 360px; }
+.governance-row-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.governance-danger-text, .arden-app-shell .secondary-button.governance-danger-text { color: var(--arden-danger); }
+.primary-button.governance-danger { background: var(--arden-danger); border-color: var(--arden-danger); }
+.arden-app-shell .governance-reports { display: grid; gap: 12px; padding: 16px 18px 18px; }
+.governance-section-head { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.arden-app-shell .governance-section-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.governance-report-filters { margin-left: 6px; }
+.governance-import { margin-left: auto; }
+.governance-report-message { margin: 0; }
+.governance-report-list { display: grid; margin: 0; padding: 0; list-style: none; }
+.governance-report { display: flex; flex-wrap: wrap; gap: 10px 16px; justify-content: space-between; align-items: center; padding: 14px 0; }
+.governance-report + .governance-report { border-top: 1px solid var(--arden-border); }
+.governance-report-copy { display: grid; gap: 4px; min-width: 0; flex: 1 1 260px; }
+.governance-report-copy strong { color: var(--arden-text-primary); font-size: 14px; font-weight: 600; overflow-wrap: anywhere; }
+.governance-report-copy p { margin: 0; color: var(--arden-text-primary); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.governance-report-copy small { color: var(--arden-text-muted); font-size: 12px; }
+.governance-report-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.governance-view { display: grid; gap: 12px; min-width: 0; }
+.governance-view-meta { color: var(--arden-text-secondary); font-size: 13px; }
+
+/* Compact dialog island for a required reason (Report a problem, Inspect, Withdraw, publication change requests). */
+.arden-app-shell .knowledge-dialog.is-compact {
+  width: min(480px, calc(100% - 32px)); padding: 0; overflow: hidden auto; background: var(--arden-surface-base);
+  box-shadow: 0 24px 56px -16px rgb(0 0 0 / 70%);
+}
+.arden-app-shell .knowledge-dialog.is-compact > * + * { margin-top: 0; }
+.knowledge-dialog-titles { display: grid; flex: 1 1 auto; gap: 2px; min-width: 0; }
+.arden-app-shell .knowledge-dialog.is-compact .knowledge-dialog-heading { gap: 12px; padding: 18px 16px 0 20px; }
+.arden-app-shell .knowledge-dialog.is-compact h2 { font-size: 17px; line-height: 1.3; letter-spacing: -.01em; }
+.arden-app-shell .knowledge-dialog.is-compact .knowledge-dialog-subtitle {
+  overflow: hidden; color: var(--arden-text-muted); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap;
+}
+.knowledge-dialog-icon {
+  display: grid; flex: none; place-items: center; width: 32px; height: 32px; border: 1px solid var(--arden-border); border-radius: 8px;
+  color: var(--arden-text-secondary); background: var(--arden-surface-raised);
+}
+.knowledge-dialog.is-danger .knowledge-dialog-icon { border-color: var(--arden-danger-border); color: var(--arden-danger); background: var(--arden-danger-subtle); }
+.arden-app-shell .knowledge-dialog.is-compact .knowledge-icon-button {
+  width: var(--arden-control-sm); height: var(--arden-control-sm); border: 0; border-radius: 8px; color: var(--arden-text-muted); background: transparent;
+}
+.arden-app-shell .knowledge-dialog.is-compact .knowledge-icon-button:hover:not(:disabled) { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+
+.reason-dialog-form { display: grid; }
+.reason-dialog-body { display: grid; gap: 12px; padding: 18px 20px 20px; }
+.reason-dialog-footer {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 16px;
+  border-top: 1px solid var(--arden-border); background: var(--arden-bg-sidebar);
+}
+.arden-app-shell .reason-dialog-footer .primary-button { min-height: var(--arden-control-md); }
+.arden-app-shell .reason-dialog-footer .secondary-button { border-color: transparent; color: var(--arden-text-secondary); background: transparent; }
+.arden-app-shell .reason-dialog-footer .secondary-button:hover:not(:disabled) { border-color: transparent; color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+
+.reason-field { display: grid; gap: 8px; }
+.reason-field > label { color: var(--arden-text-primary); font-size: 13px; font-weight: 500; }
+.reason-field-box {
+  position: relative; border: 1px solid var(--arden-border-strong); border-radius: 8px; background: var(--arden-bg-sidebar);
+  transition: border-color .15s, box-shadow .15s;
+}
+.reason-field-box:focus-within { border-color: var(--arden-violet-hover); box-shadow: 0 0 0 3px var(--arden-accent-subtle); }
+.reason-field-box.is-invalid { border-color: var(--arden-danger); box-shadow: 0 0 0 3px var(--arden-danger-subtle); }
+.arden-app-shell .reason-field-box textarea {
+  display: block; width: 100%; min-height: 116px; padding: 10px 12px 28px; border: 0; outline: none; resize: vertical;
+  color: var(--arden-text-primary); background: transparent; font: inherit; font-size: 14px; line-height: 1.55;
+}
+.reason-field-box textarea::placeholder { color: var(--arden-text-muted); }
+.reason-field-count {
+  position: absolute; right: 10px; bottom: 8px; color: var(--arden-text-muted); font-size: 11px; font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.reason-field > .field-error { color: var(--arden-danger); font-size: 12px; }
+
+.reason-notice {
+  display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid transparent; border-radius: 8px;
+  color: var(--arden-text-secondary); background: var(--arden-bg-sidebar); font-size: 12px; line-height: 1.5;
+}
+.reason-notice > .arden-icon { flex: none; margin-top: 1px; }
+.arden-app-shell .reason-notice p { margin: 0; color: inherit; font-size: inherit; }
+.reason-notice.is-danger { border-color: var(--arden-danger-border); color: var(--arden-text-primary); background: var(--arden-danger-subtle); }
+.reason-notice.is-danger > .arden-icon { color: var(--arden-danger); }
+.reason-dialog-body > .field-error { margin-top: -6px; color: var(--arden-danger); font-size: 12px; }
+@media (max-width: 639px) {
+  .arden-app-shell .reason-dialog-footer button { flex: 1 1 0; min-height: var(--arden-control-touch); }
+}
+.arden-app-shell .reason-dialog-body .km-readers > legend { margin-bottom: 8px; padding: 0; color: var(--arden-text-primary); font-size: 13px; font-weight: 500; }

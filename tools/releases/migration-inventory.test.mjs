@@ -36,7 +36,8 @@ function withFixture(files, policyFactory, run) {
 
 function migrationChecksum(content) {
   const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8");
-  return createHash("sha256").update(bytes).digest("hex");
+  const canonical = bytes.toString("utf8").replace(/\r\n/g, "\n");
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
 function git(root, args) {
@@ -61,7 +62,7 @@ test("migration inventory implementation is present", () => {
 });
 
 if (inventory && releaseMigrations) {
-  test("loader returns exact ordered entries and hashes the exact SQL bytes", () => {
+  test("loader returns exact ordered entries and hashes canonical SQL text", () => {
     withFixture({
       "0002_second.sql": "-- second\r\nSELECT 2;\n",
       "0001_first.sql": "-- first\nSELECT 1;\n",
@@ -85,19 +86,17 @@ if (inventory && releaseMigrations) {
     });
   });
 
-  test("policy refresh records exact SQL bytes and detects an unreviewed line-ending change", () => {
+  test("policy refresh uses platform-independent line endings and still detects SQL edits", () => {
     withFixture({ "0001_first.sql": "SELECT 1;\r\n" }, null, ({ migrationDirectory, policyPath }) => {
       writeFileSync(join(migrationDirectory, "0001_first.sql"), "SELECT 2;\r\n");
       releaseMigrations.refreshMigrationPolicy(migrationDirectory, policyPath);
       const policy = JSON.parse(readFileSync(policyPath, "utf8"));
-      assert.equal(policy.migrations[0].sha256, migrationChecksum("SELECT 2;\r\n"));
+      assert.equal(policy.migrations[0].sha256, migrationChecksum("SELECT 2;\n"));
       assert.equal(inventory.loadMigrationInventory(migrationDirectory, policyPath)[0].sha256, policy.migrations[0].sha256);
       writeFileSync(join(migrationDirectory, "0001_first.sql"), "SELECT 2;\n");
+      assert.equal(inventory.loadMigrationInventory(migrationDirectory, policyPath)[0].sha256, policy.migrations[0].sha256);
+      writeFileSync(join(migrationDirectory, "0001_first.sql"), "SELECT 3;\n");
       assert.throws(() => inventory.loadMigrationInventory(migrationDirectory, policyPath), /checksum|hash|digest/i);
-      releaseMigrations.refreshMigrationPolicy(migrationDirectory, policyPath);
-      const lfPolicy = JSON.parse(readFileSync(policyPath, "utf8"));
-      assert.equal(lfPolicy.migrations[0].sha256, migrationChecksum("SELECT 2;\n"));
-      assert.notEqual(lfPolicy.migrations[0].sha256, policy.migrations[0].sha256);
     });
   });
 
@@ -153,7 +152,7 @@ if (inventory && releaseMigrations) {
   test("checked-in policy keeps pending operator migrations blocked without banning future expand reviews", () => {
     const rows = inventory.loadMigrationInventory("apps/api/migrations");
     assert.ok(rows.length >= 23);
-    const operatorOnlyIds = new Set(["0018", "0019", "0020", "0021", "0022", "0023"]);
+    const operatorOnlyIds = new Set(["0018", "0019", "0020", "0021", "0022", "0023", "0024", "0025", "0026", "0027", "0028", "0029", "0030", "0031", "0032", "0033", "0034", "0035", "0036", "0037", "0038", "0039", "0040", "0041", "0042", "0043", "0061", "0062", "0063", "0064", "0065", "0066", "0067", "0068"]);
     for (const id of operatorOnlyIds) {
       assert.equal(rows.find(row => row.id === id)?.rollout, "operator", `Migration ${id} must remain operator-class`);
     }

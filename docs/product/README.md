@@ -1,10 +1,12 @@
 # Feature and flow index
 
-Owner: product/engineering maintainers; issue-level people remain in Linear. Prepared 2026-10-26 from Arden main `6d06292be349924fa84f3bfa84af802692ab7ad5`, Arden-AI main `405023927b0256122989da3339e89027934086e5` and the explicitly identified Arden branch snapshot `5e0def733da37a70268e340f879aff7379f19165`.
+Owner: product/engineering maintainers; issue-level people remain in Linear. Initial map prepared 2026-10-26 from Arden main `6d06292be349924fa84f3bfa84af802692ab7ad5`, Arden-AI main `405023927b0256122989da3339e89027934086e5` and the explicitly identified Arden branch snapshot `5e0def733da37a70268e340f879aff7379f19165`. F22 was added on 2026-11-24.
 
-This is an initial evidence-backed map of **20 feature groups**, not a claim that the product has only 20 individual features, that every historical conversation was imported, or that every path is finished. Its acceptance cases expose work to verify; they are not claims that new product decisions were approved. Add missing accepted scope using stable IDs and the [specification rule](../engineering/rules/specifications.md). Keep [PRODUCT.md](../../PRODUCT.md), the [blueprint](../../ARDEN_BLUEPRINT.md), [design](../../DESIGN.md), accepted ADRs and source as the owning contracts.
+This is an evidence-backed map of **22 feature groups**, not a claim that the product has only 22 individual features, that every historical conversation was imported, or that every path is finished. Its acceptance cases expose work to verify; they are not claims that new product decisions were approved. Add missing accepted scope using stable IDs and the [specification rule](../engineering/rules/specifications.md). Keep [PRODUCT.md](../../PRODUCT.md), the [blueprint](../../ARDEN_BLUEPRINT.md), [design](../../DESIGN.md), accepted ADRs and source as the owning contracts.
 
 ## Read and update a feature
+
+Use the [product flow diagrams](flows/README.md) to trace the current flow numbering and stable sequence steps. Flow 4 in the November product plan is [AI-assisted Knowledge Maintenance](flows/flow-4-maintenance.md).
 
 Find its group below, read the linked owning sources and actual applicable source/tests, then select the required acceptance IDs. Record the brainstorm originator and decision owner from real evidence; the owner responsible for delivery need not be either person. Historical attribution is incomplete here: public ADRs often identify only the project lead/task owner, and no more precise identity is inferred. Resolve unknown attribution privately with the team before relying on it for a conflicting decision.
 
@@ -12,9 +14,9 @@ Each group document distinguishes current main, branch-only alternatives, observ
 
 | ID | Feature group and paths | Specification / coverage map | Known boundary at this inspection |
 | --- | --- | --- | --- |
-| F01 | Account registration, sign-in, recovery and sessions | [Identity and access](identity-and-access.md#f01-accounts-and-sessions) | API/UI slices exist; complete live identity acceptance not established here |
-| F02 | Organization setup, invitations and membership | [Identity and access](identity-and-access.md#f02-organizations-and-membership) | Implemented slices; lifecycle and integration evidence remain |
-| F03 | Owner-private notes | [Identity and access](identity-and-access.md#f03-private-notes) | API/UI slices exist; privacy/conflict/platform acceptance required |
+| F01 | Account registration, sign-in, recovery and sessions | [Identity and access](identity-and-access.md#f01-accounts-and-sessions) | Local integration branch includes password guidance and link-based recovery; live provider/native acceptance remains open |
+| F02 | Organization setup, invitations and membership | [Identity and access](identity-and-access.md#f02-organizations-and-membership) | Local integration branch includes batch invitations and email branding; invitation lifecycle and live mail evidence remain |
+| F03 | Owner-private notes | [Identity and access](identity-and-access.md#f03-private-notes) | API/UI slices exist; privacy/conflict/platform acceptance required. Share button, direct sharing with individuals (F03-SHR) and private PDF items (F03-FILE) are accepted in ADR 0034 and implemented on local branches (migrations 0069–0070); not merged or deployed |
 | F04 | Published audiences and reader access | [Identity and access](identity-and-access.md#f04-published-audiences) | Decision 0010/code/migration foundation; database rehearsal boundary |
 | F05 | Reviewer authority and organization administration | [Identity and access](identity-and-access.md#f05-reviewer-and-organization-authority) | Main/branch review-authority conflict; see G1/G3 below |
 | F06 | Installation System Admin | [Identity and access](identity-and-access.md#f06-installation-administration) | API foundation; System Admin UI/rehearsal pending in main inventory |
@@ -22,7 +24,7 @@ Each group document distinguishes current main, branch-only alternatives, observ
 | F08 | Canonical document versions and import | [Knowledge lifecycle](knowledge-lifecycle.md#f08-content-versions-and-import) | Semantic Document contract is branch-only; import breadth not certified |
 | F09 | Immutable submission and review decisions | [Knowledge lifecycle](knowledge-lifecycle.md#f09-submission-and-review) | Material main/branch contract conflict G1/G3 |
 | F10 | Publication, activation and withdrawal | [Knowledge lifecycle](knowledge-lifecycle.md#f10-publication-and-activation) | Main/branch activation contract conflict G1 |
-| F11 | Published library and search | [Graph, AI and work](graph-ai-and-work.md#f11-library-and-search) | Published list/detail exist; full search/index acceptance not established |
+| F11 | Published library and search | [Graph, AI and work](graph-ai-and-work.md#f11-library-and-search) | KM2 supersedes Topic/mixed-reader Collections for the new flow; local P1 scope/P2 Topic-free contribution tested, Home/Collection/data rollout remains separate in owning spec |
 | F12 | Graph navigation, selected-item details and context | [Graph, AI and work](graph-ai-and-work.md#f12-graph-and-context) | Planned; ARD-50 records requested UI and acceptance |
 | F13 | Permission-aware retrieval, answers and citations | [Graph, AI and work](graph-ai-and-work.md#f13-grounded-agent) | Separate AI source exists; core contract/integration conflict G1/G2 |
 | F14 | Permission-aware conversation history | [Graph, AI and work](graph-ai-and-work.md#f14-conversation-history) | Planned in ARD-59; no integrated completion established |
@@ -32,6 +34,8 @@ Each group document distinguishes current main, branch-only alternatives, observ
 | F18 | Shared web/Windows behavior and offline boundaries | [Platform and delivery](platform-and-delivery.md#f18-web-and-desktop) | Shared source exists; installer/native/offline guarantees separate |
 | F19 | Developer environments and release promotion | [Platform and delivery](platform-and-delivery.md#f19-development-and-release-flow) | Tooling/runbooks exist; each target/version needs evidence |
 | F20 | Customer installation, recovery and support | [Platform and delivery](platform-and-delivery.md#f20-installation-and-recovery) | Release gates remain; no general production-readiness claim |
+| F21 | In-app notifications | [In-app notifications](in-app-notifications.md#f21-in-app-notifications) | Inbox is in current staging source; personal/group share notices after approval are in this local follow-up; Share button integration, Realtime policy, PostgreSQL rehearsal, staging environment and deployment remain unverified |
+| F22 | AI writing actions in editable text | [Writing actions](writing-actions.md) | Local Arden UI/Core integration; paired and native acceptance remain open |
 
 ## Known reconciliation gaps
 

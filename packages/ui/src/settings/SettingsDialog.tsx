@@ -46,6 +46,9 @@ export function SettingsDialog({
     const previousFocus = document.activeElement;
     if (open && !dialog.open) {
       dialog.showModal();
+      // showModal() would focus the first button (the active section) and draw its focus ring on open.
+      // Start on the dialog itself; Tab still reaches the sections with a visible ring.
+      dialog.focus({ preventScroll: true });
     } else if (!open && dialog.open) {
       dialog.close();
     }
@@ -75,6 +78,7 @@ export function SettingsDialog({
     <dialog
       ref={dialogRef}
       className="settings-dialog"
+      tabIndex={-1}
       aria-labelledby={titleId}
       aria-modal="true"
       onCancel={(event) => {
@@ -133,7 +137,6 @@ export function SettingsDialog({
               className="settings-close-button"
               onClick={onClose}
               aria-label="Close settings"
-              autoFocus
             >
               <Icon name="close" size={18} />
             </button>

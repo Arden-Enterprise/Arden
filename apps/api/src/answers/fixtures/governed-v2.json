@@ -1,0 +1,82 @@
+{
+  "retrievalRequest": {
+    "contractVersion": 2,
+    "purpose": "PUBLISHED_CHAT",
+    "requestId": "10000000-0000-4000-8000-000000000004",
+    "organizationId": "10000000-0000-4000-8000-000000000001",
+    "query": "hello",
+    "allowedGenerationIds": [
+      "10000000-0000-4000-8000-000000000002"
+    ],
+    "history": [],
+    "sourceHints": [
+      {
+        "generationId": "10000000-0000-4000-8000-000000000002",
+        "label": "Guide"
+      }
+    ]
+  },
+  "retrievalResponse": {
+    "contractVersion": 2,
+    "requestId": "10000000-0000-4000-8000-000000000004",
+    "standaloneQuery": "hello",
+    "retrievalMode": "HYBRID",
+    "evidence": [
+      {
+        "generationId": "10000000-0000-4000-8000-000000000002",
+        "snapshotVersionId": "10000000-0000-4000-8000-000000000003",
+        "snapshotContentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "chunkId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "contentHash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        "content": "hello",
+        "startOffset": 0,
+        "endOffset": 5,
+        "sourceBlockIds": [
+          "pdf-page-2"
+        ],
+        "parentSectionBlockId": null,
+        "label": "Guide"
+      }
+    ]
+  },
+  "generationRequest": {
+    "contractVersion": 2,
+    "purpose": "PUBLISHED_CHAT",
+    "requestId": "10000000-0000-4000-8000-000000000004",
+    "organizationId": "10000000-0000-4000-8000-000000000001",
+    "query": "hello",
+    "history": [],
+    "evidence": [
+      {
+        "generationId": "10000000-0000-4000-8000-000000000002",
+        "snapshotVersionId": "10000000-0000-4000-8000-000000000003",
+        "snapshotContentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "chunkId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "contentHash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+        "content": "hello",
+        "startOffset": 0,
+        "endOffset": 5,
+        "sourceBlockIds": [
+          "pdf-page-2"
+        ],
+        "parentSectionBlockId": null,
+        "label": "Guide"
+      }
+    ]
+  },
+  "generationResponse": {
+    "contractVersion": 2,
+    "requestId": "10000000-0000-4000-8000-000000000004",
+    "status": "ANSWERED",
+    "answer": "hello",
+    "citations": [
+      {
+        "chunkId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "quote": "hello"
+      }
+    ],
+    "usedEvidence": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ]
+  }
+}

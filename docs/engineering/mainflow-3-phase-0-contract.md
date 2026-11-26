@@ -23,6 +23,10 @@ APPROVED/PREPARING --pipeline fails--> APPROVED/FAILED --retry--> APPROVED/PREPA
 
 Only atomic activation may replace `knowledge_current_publication`. Search and RAG read that same active pointer under the same current AccessPolicy. `PREPARING`, `FAILED`, rejected and withdrawn snapshots are unavailable to both. Mainflow 3 has no human Publisher role and no request-revision decision.
 
+### Published owner display metadata
+
+Published list/detail responses include `responsibleDepartmentName` (nullable) alongside the responsible department ID, resolved within the publication's organization after existing publication authorization. Library rows, owner-name search and reader details use this display metadata rather than the author's permitted department-picker options. A reader can see a permitted document's owner without being able to author in that department. This additive field does not change ownership, Target Readers, RLS or selectable departments, and requires no schema migration. Older responses may use the existing picker lookup as a compatibility fallback.
+
 ## Error taxonomy
 
 | Condition | Stable API meaning |
@@ -45,7 +49,7 @@ Existing endpoints may still map some stable meanings through the common safe-er
 | --- | --- |
 | Author edits while review is pending | New working version; submitted snapshot/hash unchanged |
 | Concurrent second submit | Exactly one pending candidate; loser receives conflict |
-| Ordinary reviewer self-review | Denied and not present in queue |
+| Ordinary reviewer self-review | Allowed with a matching current grant since [decision 0033](../decisions/0033-reviewer-self-approval.md) (previously denied and not present in queue) |
 | Organization Admin self-approval | Allowed; `selfApproved: true` audit evidence |
 | Reject | Candidate closes; no publication/index activation |
 | Approve | Candidate is `PREPARING`; no current pointer change |

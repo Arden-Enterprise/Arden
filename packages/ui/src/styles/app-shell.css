@@ -250,11 +250,6 @@
   gap: 12px;
 }
 
-.topbar-search { width: min(370px, 28vw); min-width: 180px; }
-.topbar-search .workspace-search { height: 38px; border-color: transparent; }
-.topbar-search .workspace-search input { font-size: 13px; }
-.topbar-actions:has(.topbar-search) .preview-state { display: none; }
-
 .preview-state {
   color: var(--arden-text-muted);
   font-size: 10px;

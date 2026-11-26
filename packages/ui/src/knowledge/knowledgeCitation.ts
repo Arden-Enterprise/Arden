@@ -4,8 +4,14 @@ export type KnowledgeCitationReference = {
   blockId?: string;
   page?: number;
   excerpt: string;
+  startOffset?: number;
+  endOffset?: number;
 };
 
-export type KnowledgeNavigationTarget = KnowledgeCitationReference & {
+export type KnowledgeNavigationTarget = KnowledgeCitationReference & { navigationId: string };
+
+export type KnowledgeReaderTarget = KnowledgeNavigationTarget | {
+  kind: "publication";
+  versionId: string;
   navigationId: string;
 };

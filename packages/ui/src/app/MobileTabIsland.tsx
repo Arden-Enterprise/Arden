@@ -3,16 +3,18 @@ import type { WorkspaceView } from "../shared/types";
 import { knowledgeNavigation, navigationDisabled, workNavigation, type NavigationItem } from "./AppSidebar";
 
 /** Phone-width primary destinations. The menu drawer keeps every other destination. */
-export function MobileTabIsland({ activeView, authenticated, assignedReviewCount, onNavigate }: {
+export function MobileTabIsland({ activeView, authenticated, showReviews = true, assignedReviewCount, onNavigate }: {
   activeView: WorkspaceView;
   authenticated: boolean;
   showAdmin: boolean;
+  /** False for members without review authority: the Reviews tab is not shown. */
+  showReviews?: boolean;
   assignedReviewCount?: number;
   onNavigate: (view: WorkspaceView) => void;
 }) {
   const items: NavigationItem[] = [
-    ...workNavigation.filter((item) => item.view === "my-work" || item.view === "ask-arden" || item.view === "personal-workspace"),
-    ...knowledgeNavigation.filter((item) => item.view === "knowledge" || item.view === "review-queue"),
+    ...workNavigation,
+    ...(showReviews ? knowledgeNavigation.filter((item) => item.view === "review-queue") : []),
   ];
   return <nav className="mobile-tab-island" aria-label="Primary">
     {items.map((item) => {

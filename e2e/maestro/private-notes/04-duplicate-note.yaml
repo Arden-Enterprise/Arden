@@ -1,0 +1,34 @@
+# F03-ORG-AC4: duplicate a note; the copy is titled "<title> (copy)" and the
+# original remains.
+url: http://127.0.0.1:5180/
+name: Private Notes - duplicate a note
+tags:
+  - private-notes
+  - f03-org
+---
+- runFlow: subflows/login.yaml
+
+- runFlow:
+    file: subflows/create-root-note.yaml
+    env:
+      NAME: QA Weekly report
+- assertNotVisible: "QA Weekly report \\(copy\\)"
+
+- runFlow:
+    file: subflows/open-row-menu.yaml
+    env:
+      TITLE: QA Weekly report
+- tapOn: "Duplicate"
+
+- extendedWaitUntil:
+    visible: "QA Weekly report \\(copy\\)"
+    timeout: 5000
+- assertVisible: "QA Weekly report"
+# The copy is its own item with its own row menu.
+- assertVisible:
+    id: "More actions for QA Weekly report \\(copy\\)"
+    index: 0
+- assertVisible:
+    id: "More actions for QA Weekly report"
+    index: 0
+- takeScreenshot: 04-duplicated

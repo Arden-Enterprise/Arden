@@ -1,0 +1,15 @@
+# After "New collection", "New note", "Add a note to <title>" or "Rename",
+# the row shows an autofocused inline title input. Replace its text with
+# ${NAME} and commit with Enter.
+# The input may start with "Untitled" / "Untitled collection" / the old title,
+# so clear it first. eraseText sends backspaces; 60 covers the default titles
+# and every title used by these flows.
+url: http://127.0.0.1:5180/
+name: Subflow - type a title into the focused inline title input
+---
+- eraseText: 60
+- inputText: ${NAME}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: ${NAME}
+    timeout: 5000
