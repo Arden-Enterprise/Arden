@@ -318,7 +318,6 @@
 .reader-ai-tab:hover:not(:disabled) { color: var(--arden-text-primary); }
 .reader-ai-tab[aria-selected="true"] { color: var(--arden-text-primary); background: var(--arden-surface-raised); box-shadow: 0 0 0 1px var(--arden-border); }
 .reader-ai-tab:disabled { color: var(--arden-text-disabled); cursor: default; }
-.reader-ai-soon { padding: 0 5px; border: 1px solid var(--arden-info-border); border-radius: 5px; color: var(--arden-info); background: var(--arden-info-subtle); font-size: 10px; }
 .reader-ai-launcher { display: grid; gap: 8px; padding: 6px 12px 14px; overflow: auto; }
 .reader-ai-launcher > p { margin: 0 2px 4px; color: var(--arden-text-secondary); font-size: 13px; }
 .reader-ai-task {

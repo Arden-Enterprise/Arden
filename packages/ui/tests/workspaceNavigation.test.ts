@@ -47,10 +47,10 @@ describe("server-backed navigation availability", () => {
     expect(enabled).toEqual(["knowledge", "ask-arden", "personal-workspace", "review-queue", "organization-access"]);
   });
 
-  it("enables every sample destination except planned integrations", () => {
-    const disabled = [...workNavigation, ...knowledgeNavigation, adminNavigation]
-      .filter((item) => navigationDisabled(item, false)).map((item) => item.label);
-    expect(disabled).toEqual(["Integrations"]);
+  it("shows no unavailable Integrations destination", () => {
+    const items = [...workNavigation, ...knowledgeNavigation, adminNavigation];
+    expect(items.map((item) => item.label)).not.toContain("Integrations");
+    expect(items.filter((item) => navigationDisabled(item, false))).toEqual([]);
   });
 });
 
