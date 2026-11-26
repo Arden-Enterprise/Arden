@@ -398,6 +398,8 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
   });
 
   describe("P3B.2 explicit legacy conversion and cleanup", () => {
+    // Publishes several real snapshots through review and activation; like the other publication
+    // paths in repository.integration.test.ts it needs more than the 5 s default on shared runners.
     it("maps ambiguous legacy folders explicitly, removes only legacy links and preserves content/readers/history/Topics", async () => {
       const common = await publishCollectionFixture({ mode: "ORGANIZATION" });
       const restricted = await publishCollectionFixture({ mode: "DEPARTMENT", departmentId: department });
@@ -432,7 +434,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         expect(await repository!.getPublishedKnowledge(member, org, restricted.id)).toBeNull();
         expect(await repository!.getPublishedKnowledge(owner, org, restricted.id)).not.toBeNull();
       } finally { client.release(); }
-    });
+    }, 30_000);
 
     it("refuses missing mappings and rolls back configuration, links and placements if the migration audit fails", async () => {
       const common = await publishCollectionFixture({ mode: "ORGANIZATION" });
@@ -552,6 +554,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
       }
     });
 
+    // Activates three successive versions; see the timeout note above.
     it("follows eligible activated versions and detaches an incompatible replacement without rewriting history", async () => {
       const repo = repository!, source = await publishCollectionFixture({ mode: "ORGANIZATION" });
       const folder = await collectionFolder("Versions");
@@ -574,7 +577,7 @@ describe.skipIf(!pool)("KM catalog and immutable metadata with real runtime RLS"
         expect(placement.collection_id).toBe(type === "Guide" ? folder.id : null);
       }
       expect((await pool!.query("SELECT count(*) FROM arden.published_knowledge_version WHERE shared_draft_id = $1", [source.draftId])).rows[0].count).toBe("3");
-    });
+    }, 30_000);
   });
 });
 }
