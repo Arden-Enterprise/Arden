@@ -578,3 +578,6 @@ button.review-row:disabled { cursor: progress; }
 .direct-share-copy span { color: var(--arden-text-secondary); font-size: 12px; }
 .shared-item-label { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--arden-warning); font-size: 13px; }
 .shared-item-text { max-width: 760px; color: var(--arden-text-primary); font-size: 15px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Paged Home register: the table and its pager move together; scroll-margin keeps the first row clear of the topbar. */
+.library-register-frame { display: grid; gap: 10px; min-width: 0; scroll-margin-top: 96px; }

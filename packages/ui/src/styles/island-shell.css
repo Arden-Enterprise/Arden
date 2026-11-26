@@ -734,3 +734,23 @@
 .admin-sharing-form .admin-sharing-toggle { display: flex; align-items: center; gap: 8px; }
 .admin-sharing-form input[type="number"] { width: 120px; }
 .admin-sharing-form small { color: var(--arden-text-secondary); font-size: 12px; }
+
+/* Numbered pager under an island table: page size, position summary, first/previous/pages/next/last. */
+.island-pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 2px 4px; color: var(--arden-text-secondary); font-size: 12px; }
+.island-pagination-size { display: inline-flex; align-items: center; gap: 8px; }
+.island-pagination-size select { min-height: var(--arden-control-sm); padding: 0 8px; border: 1px solid var(--arden-border-strong); border-radius: 8px;
+  background: var(--arden-surface-raised); color: var(--arden-text-primary); font-size: 12px; }
+.island-pagination-summary { margin-left: auto; font-variant-numeric: tabular-nums; }
+.island-pagination-pages { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.island-pagination-pages > button { min-width: var(--arden-control-sm); min-height: var(--arden-control-sm); padding: 0 8px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--arden-text-secondary); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
+.island-pagination-pages > button:hover:not(:disabled) { color: var(--arden-text-primary); background: var(--arden-surface-hover); }
+.island-pagination-pages > button[aria-current="page"] { color: var(--arden-text-primary); background: var(--arden-accent-subtle); box-shadow: inset 0 0 0 1px var(--arden-accent-border); }
+.island-pagination-pages > button:disabled { color: var(--arden-text-muted); cursor: default; opacity: .5; }
+.island-pagination-pages > button:focus-visible, .island-pagination-size select:focus-visible { outline: 2px solid var(--arden-focus-ring); outline-offset: 2px; }
+.island-pagination-gap { min-width: 20px; color: var(--arden-text-muted); text-align: center; }
+@container workspace (max-width: 640px) {
+  /* Page 1 and the last page stay in the numbers, so the first/last jumps are dropped to keep one row. */
+  .island-pagination-pages > .is-edge { display: none; }
+  .island-pagination-pages { flex-wrap: nowrap; }
+}
