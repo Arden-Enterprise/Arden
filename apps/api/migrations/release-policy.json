@@ -436,7 +436,7 @@
     {
       "id": "0073",
       "filename": "0073_grant_draft_version_size_update.sql",
-      "sha256": "ea8e30aa3fe0ac1413c5e25fdef9446eb2c259a81205d357d4473ce90e0a0bb1",
+      "sha256": "9c9cd8c187652b592e90cdb8e431b6f1a9bb7641c8fb9674d72e7af3cd3fcda5",
       "rollout": "operator"
     }
   ]
