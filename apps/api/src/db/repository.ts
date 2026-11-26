@@ -2846,7 +2846,7 @@ export class ArdenRepository implements ArdenDataRepository {
       Boolean(await this.findMembership(userId, organizationId, "PRIVATE_WORKSPACE_WRITE", client)));
   }
 
-  async createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, requestId: string): Promise<PrivateDraft | null> {
+  async createDraft(userId: string, organizationId: string, write: DraftWrite, content: StoredContentFields, _requestId: string): Promise<PrivateDraft | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       const membershipId = await this.findMembership(userId, organizationId, "PRIVATE_WORKSPACE_WRITE", client);
       if (!membershipId) return null;
@@ -2879,7 +2879,6 @@ export class ArdenRepository implements ArdenDataRepository {
         RETURNING draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash, membershipId]);
       const versionId = versionResult.rows[0]?.draft_version_id;
       if (!versionId) throw new Error("Draft version insert returned no row");
-      await this.appendAudit(client, organizationId, membershipId, "PRIVATE_DRAFT_CREATED", created.draft_id, 1, requestId);
       return {
         id: created.draft_id,
         organizationId,
@@ -2911,7 +2910,7 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, requestId: string): Promise<DraftUpdateResult> {
+  async updateDraft(userId: string, organizationId: string, draftId: string, expectedVersion: number, patch: DraftPatch, content: StoredContentFields | null, _requestId: string): Promise<DraftUpdateResult> {
     return this.withActorContext(userId, organizationId, async (client) => {
       // Lock the mutable document before reading its version join. Under READ
       // COMMITTED, a waiter otherwise rechecks the new document against an old
@@ -2988,7 +2987,6 @@ export class ArdenRepository implements ArdenDataRepository {
         if (!inserted) throw new Error("Draft version insert returned no row");
         versionId = inserted;
       }
-      await this.appendAudit(client, organizationId, current.membership_id, "PRIVATE_DRAFT_UPDATED", draftId, version, requestId);
       const updated = await client.query<{ created_at: Date; updated_at: Date }>(`
         SELECT created_at, updated_at FROM draft_document WHERE draft_id = $1`, [draftId]);
       const timestamps = updated.rows[0];
