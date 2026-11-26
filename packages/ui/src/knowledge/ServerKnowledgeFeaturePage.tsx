@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { emptyKnowledgeMetadata, metadataSubmissionErrors, validityStatus, plainTextToSemanticDocument, serializeSemanticDocument, parseSemanticDocument, semanticDocumentHasText,
-  type KnowledgeMetadata } from "@arden/domain";
+  type KnowledgeMetadata, type SubmissionReviewPoint } from "@arden/domain";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { SearchField } from "../shared/SearchField";
 import { KnowledgeHeading, KnowledgeNotice } from "./KnowledgePrimitives";
@@ -18,8 +18,9 @@ import {
   type KnowledgeDraftVersionRecord, type KnowledgeDraftVersionSummary,
 } from "../shared/api-client";
 import type { Platform } from "../shared/types";
-import { PdfDocument, PdfViewer, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
-import { PdfReader } from "./PdfReader";
+import { PdfDocument, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
+import { PdfReader, type PdfReaderFocus } from "./PdfReader";
+import { clearHighlight, paintHighlight, quoteRanges } from "./citationHighlight";
 import { ReviewList, initialsOf } from "./ReviewList";
 import { SubmissionReviewAi } from "./SubmissionReviewAi";
 import { reviewRequestPresentation } from "./reviewRequest";
@@ -253,6 +254,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const chooseFileButton = useRef<HTMLButtonElement>(null);
   const decisionReason = useRef<HTMLTextAreaElement>(null);
   const reviewBodyRef = useRef<HTMLDivElement>(null);
+  const [reviewSource, setReviewSource] = useState<{
+    key: string; citation: SubmissionReviewPoint["citation"]; focus: PdfReaderFocus;
+  } | null>(null);
+  const [missingReviewSource, setMissingReviewSource] = useState<PdfReaderFocus | null>(null);
   const pendingNextReview = useRef<string | null>(null);
   const readerReturnId = useRef<string | null>(null);
   const replaceRoute = useRef(false);
@@ -924,6 +929,50 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const openCreate = (mode: "text" | "pdf") => { resetCreation(); setCreateMode(mode); setScreen("create"); };
   const readerPdfUrl = usePdfObjectUrl(screen === "document" && document?.mimeType === "application/pdf" ? document.pdfBase64 : null);
   const reviewPdfUrl = usePdfObjectUrl(view === "review-queue" && review?.mimeType === "application/pdf" ? review.pdfBase64 : null);
+  const reviewKey = review && view === "review-queue" ? `${organizationId}:${review.id}:${review.snapshotVersionId}` : null;
+  const activeReviewSource = reviewSource?.key === reviewKey ? reviewSource : null;
+  const reviewTextFocus = review?.mimeType === "text/plain" ? activeReviewSource?.focus : null;
+  useEffect(() => {
+    setReviewSource(null);
+    setMissingReviewSource(null);
+  }, [reviewKey]);
+  useEffect(() => {
+    const body = reviewBodyRef.current;
+    if (!reviewTextFocus || !body) return;
+    const highlightName = "arden-review-source";
+    let fallback: HTMLElement | null = null;
+    const reveal = () => {
+      const content = body.querySelector<HTMLElement>(".arden-blocknote-document");
+      if (!content?.textContent?.trim()) return false;
+      const ranges = quoteRanges(content, reviewTextFocus.excerpt);
+      const anchor = ranges[0]?.startContainer.parentElement;
+      if (!anchor) { setMissingReviewSource(reviewTextFocus); return true; }
+      if (!paintHighlight(highlightName, ranges)) {
+        fallback = anchor;
+        fallback.classList.add("is-review-source");
+      }
+      anchor.scrollIntoView?.({ block: "center", behavior: "instant" });
+      return true;
+    };
+    const clear = () => { clearHighlight(highlightName); fallback?.classList.remove("is-review-source"); };
+    if (reveal()) return clear;
+    const timeout = window.setTimeout(() => {
+      observer.disconnect();
+      setMissingReviewSource(reviewTextFocus);
+    }, 5_000);
+    const observer = new MutationObserver(() => {
+      if (reveal()) { observer.disconnect(); window.clearTimeout(timeout); }
+    });
+    observer.observe(body, { childList: true, subtree: true, characterData: true });
+    return () => { observer.disconnect(); window.clearTimeout(timeout); clear(); };
+  }, [reviewTextFocus]);
+  const openReviewSource = (citation: SubmissionReviewPoint["citation"]) => {
+    if (!reviewKey) return;
+    setReviewSource({ key: reviewKey, citation, focus: {
+      page: citation.page ?? undefined, excerpt: citation.excerpt, samePage: review?.mimeType === "application/pdf",
+    } });
+    if (review?.mimeType === "application/pdf") reviewBodyRef.current?.scrollIntoView?.({ block: "nearest", behavior: "instant" });
+  };
   /** REV-03/04 breadcrumb "Reviews": back to the REV-02 list, keeping an unsent note behind the discard guard. */
   const backToAllReviews = () => guardDiscard(Boolean(comment.trim()), () => {
     setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
@@ -1203,7 +1252,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                 </>}
               </div>
               <div className="review-pdf-canvas">
-                {reviewPdfUrl ? <PdfViewer url={reviewPdfUrl} title={review.title} /> : <p role="status">Preparing PDF preview…</p>}
+                <PdfReader key={reviewKey} base64={review.pdfBase64} title={review.title} focus={activeReviewSource?.focus} />
               </div>
             </div>
             : <div ref={reviewBodyRef} className="review-detail-document" tabIndex={0} aria-label={`Submitted document: ${review.title}`}>
@@ -1248,8 +1297,11 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                   </>}
                 </dl>
               </section>
-              {review.reviewAiAvailable && <SubmissionReviewAi key={`${organizationId}:${review.id}:${review.snapshotVersionId}`}
-                review={review} platform={platform} organizationId={organizationId} disabled={busy} />}
+              {review.reviewAiAvailable && <SubmissionReviewAi key={reviewKey}
+                review={review} platform={platform} organizationId={organizationId} disabled={busy}
+                activeSource={activeReviewSource?.citation} onOpenSource={openReviewSource}
+                sourceMessage={reviewTextFocus && missingReviewSource === reviewTextFocus
+                  ? "The cited passage could not be highlighted in this preview." : ""} />}
               <ApprovedReadersField review={review} value={approvedReaders} departments={options?.departments ?? []}
                 departmentName={departmentName} busy={busy} platform={platform} organizationId={organizationId}
                 onChange={value => { setApprovedReaders(value); setDecisionToConfirm(null); }} />

@@ -11,15 +11,13 @@ const categoryLabels = {
   SENSITIVE_CONTENT: "Sensitive content",
 } as const;
 
-function SourceExcerpt({ citation }: { citation: SubmissionReviewPoint["citation"] }) {
-  return <details>
-    <summary>{citation.page === null ? "Source excerpt" : `Source excerpt · page ${citation.page}`}</summary>
-    <blockquote>{citation.excerpt}</blockquote>
-  </details>;
-}
+type SourceCitation = SubmissionReviewPoint["citation"];
 
-export function SubmissionReviewAi({ platform, organizationId, review, disabled }: {
+export function SubmissionReviewAi({ platform, organizationId, review, disabled, activeSource, onOpenSource, sourceMessage }: {
   platform: Platform; organizationId: string; review: KnowledgeReviewDetail; disabled: boolean;
+  activeSource?: SourceCitation;
+  onOpenSource: (source: SourceCitation) => void;
+  sourceMessage: string;
 }) {
   const title = useId();
   const current = useRef<AbortController | null>(null);
@@ -49,19 +47,30 @@ export function SubmissionReviewAi({ platform, organizationId, review, disabled 
     }
   };
 
+  const sourceButton = (source: SourceCitation, label: string) => {
+    const pageLabel = source.page === null ? "Source" : `Page ${source.page}`;
+    return <button type="button" className="review-ai-source" title="Jump to the cited passage"
+      aria-label={`Open ${label} source${source.page === null ? "" : ` on page ${source.page}`}`}
+      aria-current={activeSource === source ? "location" : undefined}
+      disabled={disabled} onClick={() => onOpenSource(source)}>
+      <Icon name="arrow" size={12} /><span>{pageLabel}</span>
+    </button>;
+  };
+
   return <section className="review-ai" aria-labelledby={title}>
-    <h3 id={title} className="review-section-label">AI REVIEW</h3>
+    <h3 id={title} className="review-ai-title"><span><Icon name="review" size={15} /></span>AI review</h3>
     {result ? <div role="region" aria-label="AI review results">
-      <p className="review-ai-hint">AI-generated. Verify against the submission before deciding.</p>
+      <p className="review-ai-hint">Verify AI findings against the submission.</p>
       <h4>Summary</h4>
       <ul>{result.summary.map((point, i) => <li key={i}>
-        <p>{point.text}</p><SourceExcerpt citation={point.citation} />
+        <p>{point.text}</p>{sourceButton(point.citation, `summary ${i + 1}`)}
       </li>)}</ul>
       <h4>Checks to consider</h4>
-      {result.checks.length ? <ul>{result.checks.map((check, i) => <li key={i}>
-        <p><strong>{categoryLabels[check.category]}</strong> · {check.text}</p>
-        <SourceExcerpt citation={check.citation} />
+      {result.checks.length ? <ul className="review-ai-checks">{result.checks.map((check, i) => <li key={i}>
+        <strong>{categoryLabels[check.category]}</strong>
+        <p>{check.text}</p>{sourceButton(check.citation, `check ${i + 1}`)}
       </li>)}</ul> : <p className="review-ai-hint">AI found no specific checks to flag.</p>}
+      {sourceMessage && <p className="review-ai-hint review-ai-source-message" role="status">{sourceMessage}</p>}
     </div> : <>
       {!unavailable && <button type="button" className="secondary-button" disabled={disabled || pending}
         onClick={() => void run()}><Icon name="review" size={14} />
