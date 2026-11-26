@@ -237,6 +237,16 @@ describe("Private tree in demo mode", () => {
     expect(controllerRef.state.drafts.n1?.body).toBe("Unsaved");
   });
 
+  it("relies on autosave instead of a Save button in the note toolbar", async () => {
+    render(createElement(Workspace));
+    fireEvent.click(within(tree()).getByRole("button", { name: "Loose idea" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Note content" }), { target: { value: "Edited" } });
+    const toolbar = screen.getByRole("toolbar", { name: "Note actions" });
+    expect(within(toolbar).getByText("Unsaved changes")).toBeTruthy();
+    expect(within(toolbar).queryByRole("button", { name: "Save" })).toBeNull();
+    expect(within(toolbar).queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
   it("opens a collection page listing its children with a New note in this collection action", async () => {
     render(createElement(Workspace));
     fireEvent.click(within(tree()).getByRole("button", { name: "Capstone" }));
