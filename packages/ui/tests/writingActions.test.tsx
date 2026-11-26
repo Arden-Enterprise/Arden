@@ -61,6 +61,14 @@ it("offers Replace page for a whole-page rewrite", async () => {
   expect(onApply).toHaveBeenCalledWith("**Rewritten** note", "IMPROVE");
 });
 
+it("keeps Explain available when page formatting prevents a safe replacement", () => {
+  panel({ scope: "PAGE", canApply: false });
+  expect((screen.getByRole("button", { name: "Improve Writing" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Reformat" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole("button", { name: "Explain" }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByRole("status").textContent).toContain("select plain text");
+});
+
 it("shows the formatting row with its active state, also without AI writing", () => {
   const onToggle = vi.fn<(format: InlineFormat) => void>();
   panel({ aiEnabled: false, formatting: { active: { bold: true, italic: false, strike: false, code: false }, onToggle } });

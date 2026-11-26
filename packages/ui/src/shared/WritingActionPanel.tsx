@@ -167,6 +167,8 @@ export function WritingActionPanel({
       <button type="button" disabled={Boolean(pending) || clipboardPending || !editable("REFORMAT")} onClick={() => void run("REFORMAT")}><AiIcon action="REFORMAT" />Reformat</button>
       <button type="button" disabled={Boolean(pending) || clipboardPending} onClick={() => void run("EXPLAIN")}><AiIcon action="EXPLAIN" />Explain</button>
     </div>}
+    {canWrite && scope === "PAGE" && !editable("IMPROVE") && !editable("REFORMAT")
+      && <p role="status">To edit with AI, select plain text in one paragraph.</p>}
     {aiEnabled && text.length > 12_000 && <p role="status">Select up to 12,000 characters to use AI writing.</p>}
     {pending && <p role="status">{pending === "EXPLAIN" ? "Explaining…" : "Preparing suggestion…"}</p>}
     {error && <p role="alert">{error}</p>}

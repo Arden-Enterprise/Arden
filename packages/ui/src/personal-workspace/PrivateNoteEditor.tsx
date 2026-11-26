@@ -30,10 +30,12 @@ type PrivateNoteEditorProps = {
  * (Discard, a PDF import, a newer saved version) opens a fresh editor with that body.
  */
 function useEditorInstance(noteId: string, body: string) {
-  const state = useRef<{ emitted: string; revision: number; editorBody: string } | null>(null);
-  if (!state.current) state.current = { emitted: body, revision: 0, editorBody: noteEditorBody(body) };
+  const state = useRef<{ noteId: string; emitted: string; revision: number; editorBody: string | null } | null>(null);
+  if (!state.current || state.current.noteId !== noteId) state.current = {
+    noteId, emitted: body, revision: 0, editorBody: noteEditorBody(body, NOTE_BODY_MAX_BYTES),
+  };
   else if (body !== state.current.emitted) {
-    state.current = { emitted: body, revision: state.current.revision + 1, editorBody: noteEditorBody(body) };
+    state.current = { noteId, emitted: body, revision: state.current.revision + 1, editorBody: noteEditorBody(body, NOTE_BODY_MAX_BYTES) };
   }
   const current = state.current;
   return {
@@ -82,18 +84,27 @@ export function PrivateNoteEditor({
               {isDirty ? "Unsaved changes" : selectedNote.updatedLabel}
             </span>
             <div className="editor-body-label note-rich-body" aria-label="Note content" role="group">
-              <Suspense fallback={<p className="island-meta" role="status">Loading editor…</p>}>
-                <ArdenRichTextEditor key={instance.key} instanceKey={instance.key} body={instance.editorBody} selectionFormatting
-                  maxLength={NOTE_BODY_MAX_BYTES} measure={utf8Bytes} pageWriting
-                  platform={assistantEnabled ? platform : undefined} organizationId={assistantEnabled ? organizationId : undefined}
-                  onChange={(next) => { instance.accept(next); onBodyChange(next); }} />
-              </Suspense>
+              {instance.editorBody === null ? <>
+                <p className="island-meta">This note exceeds the rich editor’s limits. You can still edit its text.</p>
+                <textarea aria-label="Note content" value={draftBody}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    if (utf8Bytes(next) > NOTE_BODY_MAX_BYTES) return;
+                    instance.accept(next);
+                    onBodyChange(next);
+                  }} />
+              </> : <Suspense fallback={<p className="island-meta" role="status">Loading editor…</p>}>
+                  <ArdenRichTextEditor key={instance.key} instanceKey={instance.key} body={instance.editorBody} selectionFormatting
+                    maxLength={NOTE_BODY_MAX_BYTES} measure={utf8Bytes} pageWriting
+                    platform={assistantEnabled ? platform : undefined} organizationId={assistantEnabled ? organizationId : undefined}
+                    onChange={(next) => { instance.accept(next); onBodyChange(next); }} />
+                </Suspense>}
             </div>
           </div>
           <footer className="editor-footer" aria-live="polite">
             {savedMessage && <span>{savedMessage}</span>}
             {/* A legacy Markdown note counts the text it opens as, not its markers. */}
-            <span>{noteText(isRichNoteBody(draftBody) ? draftBody : instance.editorBody).length} characters</span>
+            <span>{(instance.editorBody === null ? draftBody : noteText(isRichNoteBody(draftBody) ? draftBody : instance.editorBody)).length} characters</span>
           </footer>
         </>
       ) : (

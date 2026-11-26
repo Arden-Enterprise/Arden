@@ -257,7 +257,10 @@ function capturePage(editor: ArdenEditor): WritingSelection | null {
   const body = serializeArdenDocument(editor.document);
   const text = semanticBodyText(body) ?? "";
   if (!text.trim() || text.length > writingLimit) return null;
-  return { text, from: 0, to: editor._tiptapEditor.state.doc.content.size, body, plain: false, wholeBlock: false, page: true };
+  // A page rewrite starts from plain text, so it cannot preserve blocks, links, or inline formatting.
+  const plain = editor.document.every(block => block.type === "paragraph" && !block.children.length
+    && block.content.every(part => part.type === "text" && !Object.keys(part.styles).length));
+  return { text, from: 0, to: editor._tiptapEditor.state.doc.content.size, body, plain, wholeBlock: false, page: true };
 }
 
 function writingTarget(editor: ArdenEditor, pageWriting: boolean): WritingSelection | null {
@@ -381,17 +384,15 @@ export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLe
           setWritingSelection(captureWritingSelection(editor));
         },
       } : undefined}
-      canApply={action => Boolean(writingSelection && writingSelection.body === serializeArdenDocument(editor.document)
-        && (writingSelection.page || (writingSelection.plain && (action !== "REFORMAT" || writingSelection.wholeBlock))))}
+      canApply={action => Boolean(writingSelection?.plain && writingSelection.body === serializeArdenDocument(editor.document)
+        && (writingSelection.page || action !== "REFORMAT" || writingSelection.wholeBlock))}
       onClose={closePopup} onApply={(replacement, action) => {
-        if (!writingSelection || writingSelection.body !== serializeArdenDocument(editor.document)) return;
+        if (!writingSelection?.plain || writingSelection.body !== serializeArdenDocument(editor.document)) return;
         if (writingSelection.page) {
           // A whole-page result is Markdown; it replaces every block with the supported Arden blocks.
           const parsed = parseArdenDocument(serializeSemanticDocument(markdownToSemanticDocument(replacement, () => crypto.randomUUID())));
           if (parsed.status !== "ok") return;
           editor.replaceBlocks(editor.document, parsed.blocks);
-        } else if (!writingSelection.plain) {
-          return;
         } else if (action === "REFORMAT") {
           if (!writingSelection.wholeBlock) return;
           editor._tiptapEditor.commands.setTextSelection({ from: writingSelection.from, to: writingSelection.to });

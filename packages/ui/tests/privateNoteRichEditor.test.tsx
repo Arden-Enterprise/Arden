@@ -54,6 +54,16 @@ describe("Private note rich editor", () => {
     await screen.findByRole("textbox", { name: "Note content" });
     expect(screen.getByText("5 characters")).toBeTruthy();
   });
+
+  it("leaves legacy notes beyond the rich document limits editable as text", () => {
+    const original = "Line\n".repeat(2_001);
+    render(<Note initialBody={original} />);
+    const editor = screen.getByRole("textbox", { name: "Note content" }) as HTMLTextAreaElement;
+    expect(editor.value).toBe(original);
+    fireEvent.change(editor, { target: { value: `${original}Added text` } });
+    expect(screen.getByLabelText("Saved body").textContent).toBe(`${original}Added text`);
+    expect(screen.getByRole("textbox", { name: "Note content" })).toBe(editor);
+  });
 });
 
 describe("note document helpers", () => {
