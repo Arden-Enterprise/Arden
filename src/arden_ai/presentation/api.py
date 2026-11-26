@@ -6,7 +6,10 @@ import time
 from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import SecretStr
 
 from arden_ai import __version__
@@ -15,6 +18,11 @@ from arden_ai.application.governed import GovernedAnswerer
 from arden_ai.application.reader_question import UnsupportedReaderQuestion
 from arden_ai.application.reader_sources import prepare_reader_source
 from arden_ai.application.reader_summary import ReaderSummarizer, UnsupportedSummary
+from arden_ai.application.submission_review import (
+    InvalidSubmissionReview,
+    SubmissionReviewer,
+    UnsupportedSubmission,
+)
 from arden_ai.application.writing import InvalidWritingOutput, Writer
 from arden_ai.contracts import (
     AnswerRequest,
@@ -30,6 +38,7 @@ from arden_ai.contracts.governed import (
 )
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
+from arden_ai.contracts.submission_review import SubmissionReviewRequest, SubmissionReviewResponse
 from arden_ai.contracts.writing import WritingRequest, WritingResponse
 from arden_ai.presentation.summary_failures import summary_failure
 
@@ -49,6 +58,8 @@ def create_api(
     summaries_factory: Callable[[], ReaderSummarizer] | None = None,
     writer: Writer | None = None,
     writer_factory: Callable[[], Writer] | None = None,
+    submission_reviewer: SubmissionReviewer | None = None,
+    submission_reviewer_factory: Callable[[], SubmissionReviewer] | None = None,
 ) -> FastAPI:
     application = FastAPI(
         title="Arden AI",
@@ -60,6 +71,21 @@ def create_api(
     application.state.governed_answerer = governed
     application.state.reader_summarizer = summaries
     application.state.writer = writer
+    application.state.submission_reviewer = submission_reviewer
+
+    def runtime_submission_reviewer() -> SubmissionReviewer:
+        current: SubmissionReviewer | None = application.state.submission_reviewer
+        if current is None:
+            if submission_reviewer_factory is None:
+                raise HTTPException(status_code=503, detail="Submission review is unavailable")
+            try:
+                current = submission_reviewer_factory()
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=503, detail="Submission review is unavailable"
+                ) from error
+            application.state.submission_reviewer = current
+        return current
 
     def runtime_writer() -> Writer:
         current: Writer | None = application.state.writer
@@ -101,6 +127,38 @@ def create_api(
                 detail="Invalid service credentials",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_failure(
+        request: Request, error: RequestValidationError
+    ) -> JSONResponse:
+        if request.url.path == "/v1/submission-reviews":
+            return JSONResponse(status_code=422, content={"detail": "Invalid submission source"})
+        return await request_validation_exception_handler(request, error)
+
+    @application.post(
+        "/v1/submission-reviews",
+        response_model=SubmissionReviewResponse,
+        dependencies=[Depends(authorize_service)],
+        tags=["submission-review-v1"],
+    )
+    async def review_submission(
+        request: SubmissionReviewRequest,
+        service: Annotated[SubmissionReviewer, Depends(runtime_submission_reviewer)],
+    ) -> SubmissionReviewResponse:
+        try:
+            async with asyncio.timeout(55):
+                return await service.run(request)
+        except UnsupportedSubmission:
+            raise HTTPException(status_code=422, detail="Unsupported submission text") from None
+        except InvalidSubmissionReview:
+            code = "INVALID_OUTPUT"
+        except Exception as error:
+            code = summary_failure(error)
+        logger.warning("Submission review failed", extra={
+            "operation_id": str(request.request_id), "failure_code": code,
+        })
+        raise HTTPException(status_code=502, detail={"code": code}) from None
 
     @application.post(
         "/v1/writing-actions",
