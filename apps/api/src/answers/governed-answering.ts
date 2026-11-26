@@ -4,6 +4,7 @@ import { canRead } from "../target-readers/policy.js";
 import type { AskArdenClient } from "./ai-client.js";
 import type { AnswerFeedback, Conversation, ConversationStore, ConversationTurn } from "./conversation-store.js";
 import { citationPage } from "./citation-page.js";
+import { recordUsageBestEffort, type ProviderUsageEvent, type UsageTelemetryFailure } from "./usage-contracts.js";
 import { evidenceMatchesManifest, GovernedAnswerError, parseGenerationResponse, parseRetrievalResponse, sourceLabel,
   type DialogueTurn, type Evidence, type EvidenceReference, type PublicCitation, type StoredAnswer } from "./governed-contracts.js";
 
@@ -29,7 +30,14 @@ function uniqueReferences(references: EvidenceReference[]): EvidenceReference[] 
 
 /** Core owns every evidence handoff. The service never decides business access. */
 export class GovernedAnswering {
-  constructor(private readonly repository: AnswerRepository, private readonly ai: AskArdenClient | null) {}
+  constructor(private readonly repository: AnswerRepository, private readonly ai: AskArdenClient | null,
+    private readonly onUsageFailure?: UsageTelemetryFailure) {}
+
+  /** Usage is recorded right after each provider call so later access failures do not lose it. */
+  private recordUsage(user: string, organization: string, requestId: string, events: ProviderUsageEvent[]) {
+    return recordUsageBestEffort(() => this.repository.recordAiUsageEvents(user, organization, requestId, events),
+      this.onUsageFailure);
+  }
 
   private get store(): ConversationStore {
     if (!this.repository.conversations) throw new Error("Conversation persistence is unavailable");
@@ -113,9 +121,7 @@ export class GovernedAnswering {
         requestId: input.requestId, organizationId: organization, query: input.query,
         allowedGenerationIds: before.map((source) => source.generationId), history: context.history,
         sourceHints: before.map((source) => ({ generationId: source.generationId, label: sourceLabel(source) })) }), input.requestId);
-      if (!await this.repository.recordAiUsageEvents(user, organization, input.requestId, retrieval.usageEvents)) {
-        throw new Error("AI retrieval usage could not be recorded");
-      }
+      await this.recordUsage(user, organization, input.requestId, retrieval.usageEvents);
       const references: EvidenceReference[] = retrieval.evidence.map((chunk) => {
         const source = before.find((source) => source.generationId === chunk.generationId);
         if (!source) throw unavailable();
@@ -137,9 +143,7 @@ export class GovernedAnswering {
           requestId: input.requestId, organizationId: organization, query: retrieval.standaloneQuery,
           history: context.history, evidence };
         const generated = parseGenerationResponse(await ai.generate(request), request);
-        if (!await this.repository.recordAiUsageEvents(user, organization, input.requestId, generated.usageEvents)) {
-          throw new Error("AI generation usage could not be recorded");
-        }
+        await this.recordUsage(user, organization, input.requestId, generated.usageEvents);
         if (!await this.referencesAvailable(user, organization, allReferences)) throw unavailable();
         const citations: PublicCitation[] = generated.citations.map((citation) => {
           const chunk = evidence.find((chunk) => chunk.chunkId === citation.chunkId)!;

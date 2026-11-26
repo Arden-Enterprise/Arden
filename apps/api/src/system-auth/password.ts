@@ -1,10 +1,12 @@
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 
-const SCRYPT_N = 16384;
+// OWASP-recommended scrypt cost for interactive logins; stored hashes keep their own parameters.
+const SCRYPT_N = 32768;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
 const SCRYPT_KEYLEN = 64;
-const SCRYPT_MAXMEM = 32 * 1024 * 1024;
+// Large enough to verify the strongest accepted stored parameters (N=65536, r=8 needs 64 MiB).
+const SCRYPT_MAXMEM = 96 * 1024 * 1024;
 const DUMMY_SALT = Buffer.from("000102030405060708090a0b0c0d0e0f", "hex");
 
 function deriveScrypt(password: string, salt: Buffer, n: number, r: number, p: number, keylen: number): Promise<Buffer> {
@@ -47,6 +49,22 @@ export async function verifySystemAdminPassword(password: string, storedHash: st
   const expected = Buffer.from(hashHex, "hex");
   const actual = await deriveScrypt(password, salt, n, r, p, expected.length);
   return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+/**
+ * Bounds concurrent scrypt work so a burst of sign-in attempts cannot exhaust the libuv
+ * thread pool shared with file and DNS work. A caller that cannot get a slot is told to retry.
+ */
+export class PasswordWorkLimiter {
+  private active = 0;
+  constructor(private readonly capacity = 4) {}
+
+  async run<T>(work: () => Promise<T>): Promise<{ value: T } | null> {
+    if (this.active >= this.capacity) return null;
+    this.active++;
+    try { return { value: await work() }; }
+    finally { this.active--; }
+  }
 }
 
 export function verifySetupToken(provided: string, expected: string): boolean {

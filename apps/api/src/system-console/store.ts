@@ -1,7 +1,7 @@
-import type { PoolClient } from "pg";
+import type { SystemAuthDatabase } from "../system-auth/database.js";
 
 export type SystemConsoleReportKind = "OVERVIEW" | "ORGANIZATIONS" | "ORGANIZATION" | "KNOWLEDGE"
-  | "AI_USAGE" | "CONTRIBUTIONS" | "FEEDBACK" | "QUALITY" | "HEALTH";
+  | "AI_USAGE" | "CONTRIBUTIONS" | "FEEDBACK" | "QUALITY" | "HEALTH" | "PRIVATE_FEEDBACK";
 export type SystemConsoleQuery = {
   kind: SystemConsoleReportKind;
   organizationId?: string;
@@ -19,31 +19,39 @@ export class SystemConsoleError extends Error {
   constructor(readonly code: SystemConsoleErrorCode) { super(code); }
 }
 
-type SystemAdminTransaction = <T>(actorUserId: string,
-  work: (client: PoolClient) => Promise<T>) => Promise<T | null>;
+/** The authenticated isolated administrator and the server-side session being used. */
+export type SystemConsoleActor = { adminId: string; sessionId: string };
 
 export interface SystemConsoleStore {
-  canAccess(actorUserId: string): Promise<boolean>;
-  report(actorUserId: string, query: SystemConsoleQuery): Promise<SystemConsoleReport>;
+  report(actor: SystemConsoleActor, query: SystemConsoleQuery): Promise<SystemConsoleReport>;
 }
 
 export class PgSystemConsoleStore implements SystemConsoleStore {
-  constructor(private readonly withSystemAdmin: SystemAdminTransaction) {}
+  constructor(private readonly database: SystemAuthDatabase) {}
 
-  async canAccess(actorUserId: string) {
-    return (await this.withSystemAdmin(actorUserId, async () => true)) === true;
-  }
-
-  async report(actorUserId: string, query: SystemConsoleQuery) {
-    const result = await this.withSystemAdmin(actorUserId, async client => {
-      const report = await client.query<{ report: SystemConsoleReport }>(`SELECT system_console_report(
-        $1, $2, $3, $4, $5, $6, $7, $8, $9) AS report`, [
-        actorUserId, query.kind, query.organizationId ?? null, query.from, query.to,
-        query.search ?? "", query.status ?? "", query.page ?? 1, query.pageSize ?? 25,
-      ]);
-      return report.rows[0]?.report ?? {};
-    });
-    if (result === null) throw new SystemConsoleError("SYSTEM_CONSOLE_UNAVAILABLE");
-    return result;
+  /** Reports run only through `arden_system.console_report`, executable by `arden_system_auth`. */
+  async report(actor: SystemConsoleActor, query: SystemConsoleQuery) {
+    const report = await this.database.transaction("session", { actorId: actor.adminId, sessionId: actor.sessionId },
+      async (client) => {
+        const active = await client.query(
+          `SELECT 1 FROM arden_system.admin_session
+            WHERE session_id = $1 AND admin_id = $2 AND revoked_at IS NULL AND expires_at > now()`,
+          [actor.sessionId, actor.adminId],
+        );
+        if (!active.rowCount) return null;
+        const result = await client.query<{ report: SystemConsoleReport | null }>(
+          `SELECT arden_system.console_report($1, $2, $3, $4, $5, $6, $7, $8, $9) AS report`, [
+            actor.adminId, query.kind, query.organizationId ?? null, query.from, query.to,
+            query.search ?? "", query.status ?? "", query.page ?? 1, query.pageSize ?? 25,
+          ]);
+        return result.rows[0]?.report ?? null;
+      }).catch((error: unknown) => {
+        // The routine refuses a revoked administrator with 42501; treat it as unavailable.
+        if ((error as { code?: string }).code === "42501") return null;
+        throw error;
+      });
+    // An unknown organization yields NULL, which is reported like any unavailable resource.
+    if (report === null) throw new SystemConsoleError("SYSTEM_CONSOLE_UNAVAILABLE");
+    return report;
   }
 }

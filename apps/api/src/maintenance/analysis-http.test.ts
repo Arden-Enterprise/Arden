@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { describe, expect, it, vi } from "vitest";
-import { httpAnalysisAdapter } from "./analysis.js";
+import { AnalysisRejectedError, httpAnalysisAdapter } from "./analysis.js";
 
 const token = "local-analysis-token";
 
@@ -62,7 +62,10 @@ describe("maintenance analysis HTTP contract", () => {
         contractVersion: 2, requestId: input.requestId, caseId: input.caseId,
         sources: [{ versionId, text, textHash }],
       });
-      await expect(adapter(input)).rejects.toThrow("invalid citation");
+      // A rejected citation still carries the provider usage so the run's cost is not lost.
+      const rejected = await adapter(input).catch((error: unknown) => error);
+      expect(rejected).toBeInstanceOf(AnalysisRejectedError);
+      expect((rejected as AnalysisRejectedError).usageEvents).toEqual(usageEvents);
       await expect(adapter({ ...input, sources: [{ versionId, text: "x".repeat(8_001) }] }))
         .rejects.toThrow("too large");
       expect(network).toHaveBeenCalledTimes(2);

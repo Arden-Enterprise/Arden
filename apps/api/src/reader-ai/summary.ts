@@ -12,9 +12,10 @@ export interface ReaderAiClient extends ReaderSourceClient {
   summarizeReaderSource(source: ReaderSourceResponse): Promise<unknown>;
 }
 export type PublicReaderSummary = { requestId: string; status: "COMPLETED"; documentId: string; versionId: string;
-  points: Array<{ kind: SummaryKind; text: string; citations: PublicCitation[] }>;
-  usageRequestId: string; usageEvents: ProviderUsageEvent[] };
-type Completed = { result: PublicReaderSummary; source: ReaderSourceResponse };
+  points: Array<{ kind: SummaryKind; text: string; citations: PublicCitation[] }> };
+/** Engine result: the public summary plus internal usage telemetry that routes strip before responding. */
+export type ReaderSummaryResult = PublicReaderSummary & { usageRequestId: string; usageEvents: ProviderUsageEvent[] };
+type Completed = { result: ReaderSummaryResult; source: ReaderSourceResponse };
 export type SummaryStage = "ACCESS" | "ADMISSION" | "SOURCE" | "GENERATION" | "VALIDATION" | "FINAL_ACCESS" | "JOIN";
 type Observe = (stage: SummaryStage, joinedOperationId?: string) => void;
 
@@ -25,7 +26,7 @@ export class ReaderSummary {
     private readonly admission = new ReaderAdmission()) {}
 
   async summarize(user: string, organization: string, publication: string, requestId: string,
-    observe: Observe = () => {}): Promise<PublicReaderSummary> {
+    observe: Observe = () => {}): Promise<ReaderSummaryResult> {
     observe("ACCESS");
     await this.sources.checkAccess(user, organization, publication); // denial must stay 404 even during cooldown
     const key = `${organization}:${user}:${publication}`, pending = this.pending.get(key);

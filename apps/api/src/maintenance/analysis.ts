@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
-import { parseUsageEvents } from "../answers/usage-contracts.js";
-import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
+import { readUsageEnvelope, type ProviderUsageEvent } from "../answers/usage-contracts.js";
 
 export type AnalysisState = "queued" | "running" | "succeeded" | "failed" | "cancelled";
 export const maintenanceSourceTextLimit = 8_000;
@@ -37,6 +36,17 @@ export type AnalysisRun = {
 
 export type AnalysisAdapter = (request: AnalysisRequest) => Promise<AnalysisResult>;
 
+/**
+ * The provider answered but its findings or citations were rejected. The provider call still
+ * happened, so its usage travels with the rejection and is recorded for the failed run.
+ */
+export class AnalysisRejectedError extends Error {
+  constructor(readonly usageEvents: ProviderUsageEvent[]) {
+    super("Maintenance analysis returned an invalid result.");
+    this.name = "AnalysisRejectedError";
+  }
+}
+
 /** Posts the versioned maintenance contract to Arden-AI. The token and response body are not logged. */
 export function httpAnalysisAdapter(baseUrl: string, serviceToken: string, mode: "controlled" | "provider" = "controlled"): AnalysisAdapter {
   return async (request) => {
@@ -60,28 +70,30 @@ export function httpAnalysisAdapter(baseUrl: string, serviceToken: string, mode:
       redirect: "error",
     });
     if (!response.ok) throw new Error("Maintenance analysis is unavailable.");
-    const result = await response.json() as { contractVersion?: unknown; state?: unknown; findings?: unknown;
-      usageContractVersion?: unknown; usageEvents?: unknown };
+    const parsed: unknown = await response.json();
+    const result = (parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}) as {
+      contractVersion?: unknown; state?: unknown; findings?: unknown };
+    // A provider-backed analysis always calls a provider: missing or malformed usage is incomplete, not free.
+    const reported = provider ? readUsageEnvelope(result as Record<string, unknown>, { scopeId: request.requestId,
+      allowed: ["MAINTENANCE_ANALYSIS"], fallback: "MAINTENANCE_ANALYSIS", providerCallRequired: true }) : [];
+    const usageEvents = reported.length > 1 ? reported.slice(0, 1).map((event) => ({ ...event, usageComplete: false })) : reported;
     if (result.contractVersion !== body.contractVersion || result.state !== "succeeded" || !Array.isArray(result.findings)
-      || result.findings.length < 1 || result.findings.length > 4
-      || (provider && result.usageContractVersion !== 1)) {
-      throw new Error("Maintenance analysis returned an invalid result.");
+      || result.findings.length < 1 || result.findings.length > 4) {
+      throw new AnalysisRejectedError(usageEvents);
     }
-    const usageEvents = provider ? parseUsageEvents(result.usageEvents, ["MAINTENANCE_ANALYSIS"]) : [];
-    if (usageEvents.length > 1) throw new Error("Maintenance analysis returned invalid usage metadata.");
     return {
       contractVersion: 1,
       state: "succeeded",
       findings: result.findings.map((item) => {
         const finding = item as { versionId?: unknown; summary?: unknown; textHash?: unknown; quote?: unknown };
         if (typeof finding?.versionId !== "string" || typeof finding.summary !== "string") {
-          throw new Error("Maintenance analysis returned an invalid finding.");
+          throw new AnalysisRejectedError(usageEvents);
         }
         if (sources) {
           const source = sources.find((entry) => entry.versionId === finding.versionId);
           if (!source || source.textHash !== finding.textHash || typeof finding.quote !== "string"
             || !finding.quote.trim() || finding.quote.length > 240 || !source.text.includes(finding.quote)) {
-            throw new Error("Maintenance analysis returned an invalid citation.");
+            throw new AnalysisRejectedError(usageEvents);
           }
         }
         return { versionId: finding.versionId, summary: finding.summary };

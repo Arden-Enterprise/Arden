@@ -5,6 +5,7 @@ import { ArdenAiAnswerError, type AskArdenClient } from "../answers/ai-client.js
 import { ReaderSourcePreparation } from "./source-preparation.js";
 import { ReaderSourceError } from "./contracts.js";
 import { ReaderSummaryError } from "./summary-contracts.js";
+import { recordUsageBestEffort } from "../answers/usage-contracts.js";
 import { ReaderQuestion } from "./question.js";
 
 export function registerReaderQuestionRoutes(app: FastifyInstance,
@@ -31,12 +32,13 @@ export function registerReaderQuestionRoutes(app: FastifyInstance,
         if (!engine) throw new ReaderSummaryError("UNAVAILABLE");
         const answer = await engine.answer(context.userId, request.params.organizationId, request.params.publishedVersionId,
           request.body.requestId, request.body.query);
-        const recordedUsage = await repository.recordAiUsageEvents(context.userId, request.params.organizationId,
-          answer.requestId, answer.usageEvents);
-        if (!recordedUsage) throw new Error("AI usage metadata was not recorded");
-        const recorded = await repository.recordAiAnswerResult(context.userId, request.params.organizationId,
-          answer.requestId, "READER_QUESTION", answer.status, answer.citations.length);
-        if (!recorded) throw new Error("Answer result metadata was not recorded");
+        // Telemetry is best-effort: a failed write is logged and never fails the delivered answer.
+        const telemetryFailure = (operation: string) => (error: unknown) => request.log.warn({ requestId: request.id, operation,
+          errorType: error instanceof Error ? error.name : "Unknown" }, "AI telemetry write failed");
+        await recordUsageBestEffort(() => repository.recordAiUsageEvents(context.userId, request.params.organizationId,
+          answer.requestId, answer.usageEvents), telemetryFailure("READER_QUESTION_USAGE"));
+        await recordUsageBestEffort(() => repository.recordAiAnswerResult(context.userId, request.params.organizationId,
+          answer.requestId, "READER_QUESTION", answer.status, answer.citations.length), telemetryFailure("READER_QUESTION_RESULT"));
         const { usageEvents: _usageEvents, ...publicAnswer } = answer;
         return publicAnswer;
       } catch (error) {

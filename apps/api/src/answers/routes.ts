@@ -5,6 +5,7 @@ import type { AskArdenClient } from "./ai-client.js";
 import type { AnswerFeedback } from "./conversation-store.js";
 import { GovernedAnswering } from "./governed-answering.js";
 import { GovernedAnswerError } from "./governed-contracts.js";
+import { recordUsageBestEffort } from "./usage-contracts.js";
 
 type Actor = (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>;
 type Params = { organizationId: string; conversationId: string };
@@ -12,7 +13,9 @@ type Body = { query: string; conversationId?: string; requestId?: string; expect
 export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenDataRepository, ai: AskArdenClient | null,
   actor: Actor, uuidPattern: string): void {
   const base = "/api/v1/organizations/:organizationId/ai";
-  const engine = new GovernedAnswering(repository, ai);
+  const usageFailure = (operation: string) => (error: unknown) => app.log.warn({ operation,
+    errorType: error instanceof Error ? error.name : "Unknown" }, "AI telemetry write failed");
+  const engine = new GovernedAnswering(repository, ai, usageFailure("CHAT_USAGE"));
   const params = { type: "object", required: ["organizationId"], additionalProperties: false,
     properties: { organizationId: { type: "string", pattern: uuidPattern } } };
   const fail = (reply: FastifyReply, error: unknown, request: FastifyRequest) => {
@@ -45,9 +48,8 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
       const answer = await engine.answer(context.userId, request.params.organizationId, { query,
         conversationId: request.body.conversationId ?? randomUUID(), requestId,
         expectedRevision: request.body.expectedRevision ?? 0 });
-      const recorded = await repository.recordAiAnswerResult(context.userId, request.params.organizationId, requestId,
-        "CHAT", answer.status, answer.citations.length);
-      if (!recorded) throw new Error("Answer result metadata was not recorded");
+      await recordUsageBestEffort(() => repository.recordAiAnswerResult(context.userId, request.params.organizationId,
+        requestId, "CHAT", answer.status, answer.citations.length), usageFailure("CHAT_RESULT"));
       return { ...answer, requestId };
     } catch (error) { return fail(reply, error, request); }
   });

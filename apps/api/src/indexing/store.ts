@@ -3,6 +3,9 @@ import type { IndexGenerationJob, IndexGenerationManifest } from "./contracts.js
 import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { assertIndexGenerationJob, IndexGenerationSupersededError } from "./contracts.js";
 
+/** Matches the per-call cap enforced by `record_index_ai_usage`. */
+export const indexUsageBatchSize = 32;
+
 type ClaimedJobRow = {
   job_id: string;
   generation_id: string;
@@ -64,9 +67,13 @@ export class PgIndexGenerationStore implements IndexGenerationStore {
 
   async recordUsage(job: IndexGenerationJob, workerId: string, events: ProviderUsageEvent[]): Promise<void> {
     if (!events.length) return;
+    // The manifest accepts up to 64 events; the database gate accepts 32 per call. All batches
+    // share one transaction so a failed batch leaves no partial usage for the job.
     await this.transaction(async client => {
-      await client.query("SELECT record_index_ai_usage($1, $2, $3::jsonb)",
-        [job.jobId, workerId, JSON.stringify(events)]);
+      for (let start = 0; start < events.length; start += indexUsageBatchSize) {
+        await client.query("SELECT record_index_ai_usage($1, $2, $3::jsonb)",
+          [job.jobId, workerId, JSON.stringify(events.slice(start, start + indexUsageBatchSize))]);
+      }
     });
   }
 

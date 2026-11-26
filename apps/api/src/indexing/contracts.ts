@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { parseUsageEvents, usageContractVersion, type ProviderUsageEvent } from "../answers/usage-contracts.js";
+import { readUsageEnvelope, usageEnvelopeKeys, type ProviderUsageEvent } from "../answers/usage-contracts.js";
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const sha256Pattern = /^[0-9a-f]{64}$/;
@@ -102,9 +102,11 @@ export function buildIndexGenerationRequest(
 
 export function parseIndexGenerationManifest(value: unknown, job: IndexGenerationSource): IndexGenerationManifest {
   const manifest = objectValue(value, "manifest");
+  // The usage envelope is optional: manifests stored before usage accounting, and older
+  // Arden-AI services, omit it. Those generations stay readable and report incomplete usage.
   exactKeys(manifest, ["contractVersion", "jobId", "generationId", "snapshotVersionId",
     "snapshotContentHash", "compilerVersion", "chunkingVersion", "embeddingModel",
-    "embeddingDimensions", "markdownContentHash", "chunksDigest", "chunks", "usageContractVersion", "usageEvents"]);
+    "embeddingDimensions", "markdownContentHash", "chunksDigest", "chunks"], usageEnvelopeKeys);
   if (manifest.contractVersion !== 1 || manifest.jobId !== job.jobId
     || manifest.generationId !== job.generationId || manifest.snapshotVersionId !== job.snapshotVersionId
     || manifest.snapshotContentHash !== job.snapshotContentHash) {
@@ -116,11 +118,8 @@ export function parseIndexGenerationManifest(value: unknown, job: IndexGeneratio
   const embeddingDimensions = positiveInteger(manifest.embeddingDimensions, "embeddingDimensions");
   const markdownContentHash = sha256(manifest.markdownContentHash, "markdownContentHash");
   const chunksDigest = sha256(manifest.chunksDigest, "chunksDigest");
-  try { usageContractVersion(manifest.usageContractVersion); }
-  catch { throw new IndexContractError("Unsupported provider usage contract"); }
-  let usageEvents: ProviderUsageEvent[];
-  try { usageEvents = parseUsageEvents(manifest.usageEvents, ["INDEX_EMBEDDING"]); }
-  catch { throw new IndexContractError("Invalid provider usage events"); }
+  const usageEvents = readUsageEnvelope(manifest, { scopeId: job.jobId, allowed: ["INDEX_EMBEDDING"],
+    fallback: "INDEX_EMBEDDING", providerCallRequired: false });
   if (!Array.isArray(manifest.chunks) || manifest.chunks.length === 0 || manifest.chunks.length > maxManifestChunks) {
     throw new IndexContractError("Manifest chunks must be a bounded non-empty array");
   }
@@ -191,8 +190,8 @@ function objectValue(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function exactKeys(value: Record<string, unknown>, expected: string[]): void {
-  const actual = Object.keys(value).sort();
+function exactKeys(value: Record<string, unknown>, expected: string[], optional: readonly string[] = []): void {
+  const actual = Object.keys(value).filter((key) => !optional.includes(key)).sort();
   const wanted = [...expected].sort();
   if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
     throw new IndexContractError("Manifest contains missing or unsupported fields");

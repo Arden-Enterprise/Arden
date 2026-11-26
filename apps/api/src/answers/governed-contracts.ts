@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { AuthorizedAiSource } from "../db/repository.js";
-import { parseUsageEvents, usageContractVersion, type ProviderUsageEvent, type UsageOperation } from "./usage-contracts.js";
+import { keysWithoutUsageEnvelope, readUsageEnvelope, type ProviderUsageEvent } from "./usage-contracts.js";
 
 export type DialogueTurn = { question: string; answer: string };
 export type EvidenceReference = { generationId: string; publishedVersionId: string; snapshotVersionId: string;
@@ -12,6 +12,7 @@ export type RetrievalRequest = { contractVersion: 2; purpose: "PUBLISHED_CHAT" |
   sourceHints: Array<{ generationId: string; label: string }> };
 export type RetrievalResponse = { contractVersion: 2; requestId: string; standaloneQuery: string;
   retrievalMode: "HYBRID" | "SEMANTIC" | "LEXICAL"; evidence: Evidence[];
+  /** Parsed output stays re-parseable: callers validate injected or local service ports again. */
   usageContractVersion: 1; usageEvents: ProviderUsageEvent[] };
 export type GenerationRequest = Omit<RetrievalRequest, "allowedGenerationIds" | "sourceHints"> & { evidence: Evidence[] };
 export type GenerationResponse = { contractVersion: 2; requestId: string; status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
@@ -34,6 +35,12 @@ function record(value: unknown, keys: string[]): Record<string, unknown> {
   if (Object.keys(value).sort().join() !== keys.sort().join()) return invalid();
   return value as Record<string, unknown>;
 }
+/** Top-level response check: the optional usage envelope is read separately and never fails an answer. */
+function response(value: unknown, keys: string[]): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
+  if (keysWithoutUsageEnvelope(value).sort().join() !== keys.sort().join()) return invalid();
+  return value as Record<string, unknown>;
+}
 function text(value: unknown, max: number, pattern?: RegExp): string {
   if (typeof value !== "string" || !value.length || value.length > max || (pattern && !pattern.test(value))) return invalid();
   return value;
@@ -46,8 +53,9 @@ function integer(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return invalid();
   return value;
 }
-export function parseRetrievalResponse(value: unknown, requestId: string): RetrievalResponse {
-  const row = record(value, ["contractVersion", "usageContractVersion", "usageEvents", "requestId", "standaloneQuery", "retrievalMode", "evidence"]);
+export function parseRetrievalResponse(value: unknown, requestId: string,
+  purpose: RetrievalRequest["purpose"] = "PUBLISHED_CHAT"): RetrievalResponse {
+  const row = response(value, ["contractVersion", "requestId", "standaloneQuery", "retrievalMode", "evidence"]);
   if (row.contractVersion !== 2 || row.requestId !== requestId
     || (row.retrievalMode !== "HYBRID" && row.retrievalMode !== "SEMANTIC" && row.retrievalMode !== "LEXICAL")) return invalid();
   const evidence = array(row.evidence, 8).map((value): Evidence => {
@@ -67,14 +75,15 @@ export function parseRetrievalResponse(value: unknown, requestId: string): Retri
   });
   if (new Set(evidence.map((chunk) => chunk.chunkId)).size !== evidence.length
     || evidence.reduce((sum, chunk) => sum + chunk.content.length, 0) > 64_000) return invalid();
-  usageContractVersion(row.usageContractVersion);
-  const usageEvents = parseUsageEvents(row.usageEvents, ["CHAT_RETRIEVAL", "READER_QUESTION_RETRIEVAL"]);
+  // Lexical retrieval can make no provider call, so only a missing or malformed envelope is incomplete.
+  const usageEvents = readUsageEnvelope(row, { scopeId: requestId, allowed: ["CHAT_RETRIEVAL", "READER_QUESTION_RETRIEVAL"],
+    fallback: purpose === "READER_QUESTION" ? "READER_QUESTION_RETRIEVAL" : "CHAT_RETRIEVAL", providerCallRequired: false });
   return { contractVersion: 2, usageContractVersion: 1, usageEvents, requestId,
     standaloneQuery: text(row.standaloneQuery, 4_000),
     retrievalMode: row.retrievalMode as RetrievalResponse["retrievalMode"], evidence };
 }
 export function parseGenerationResponse(value: unknown, request: GenerationRequest): GenerationResponse {
-  const row = record(value, ["contractVersion", "usageContractVersion", "usageEvents", "requestId", "status", "answer", "citations", "usedEvidence"]);
+  const row = response(value, ["contractVersion", "requestId", "status", "answer", "citations", "usedEvidence"]);
   if (row.contractVersion !== 2 || row.requestId !== request.requestId
     || (row.status !== "ANSWERED" && row.status !== "INSUFFICIENT_EVIDENCE")) return invalid();
   const usedEvidence = array(row.usedEvidence, 8).map((id) => text(id, 64, hash));
@@ -87,10 +96,9 @@ export function parseGenerationResponse(value: unknown, request: GenerationReque
     return { chunkId, quote };
   });
   if ((row.status === "ANSWERED") !== Boolean(citations.length)) return invalid();
-  usageContractVersion(row.usageContractVersion);
-  const allowed: UsageOperation[] = request.purpose === "READER_QUESTION"
-    ? ["READER_QUESTION_GENERATION"] : ["CHAT_GENERATION"];
-  const usageEvents = parseUsageEvents(row.usageEvents, allowed);
+  const operation = request.purpose === "READER_QUESTION" ? "READER_QUESTION_GENERATION" as const : "CHAT_GENERATION" as const;
+  const usageEvents = readUsageEnvelope(row, { scopeId: request.requestId, allowed: [operation], fallback: operation,
+    providerCallRequired: true });
   return { contractVersion: 2, usageContractVersion: 1, usageEvents, requestId: request.requestId,
     status: row.status, answer: text(row.answer, 12_000), citations, usedEvidence };
 }

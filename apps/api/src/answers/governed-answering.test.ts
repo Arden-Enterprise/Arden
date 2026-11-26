@@ -5,6 +5,7 @@ import type { ArdenDataRepository, AuthorizedAiSource } from "../db/repository.j
 import type { AskArdenClient } from "./ai-client.js";
 import { MemoryConversationStore } from "./conversation.test-support.js";
 import { GovernedAnswering } from "./governed-answering.js";
+import { incompleteUsageMarker } from "./usage-contracts.js";
 import { parseGenerationResponse, parsePublicCitations, parseRetrievalResponse, type Evidence, type GenerationRequest,
   type GenerationResponse, type RetrievalRequest, type RetrievalResponse } from "./governed-contracts.js";
 
@@ -165,7 +166,25 @@ describe("v2 runtime contracts", () => {
     const golden = JSON.parse(readFileSync(new URL("./fixtures/governed-v2.json", import.meta.url), "utf8")) as {
       retrievalResponse: RetrievalResponse; generationRequest: GenerationRequest; generationResponse: GenerationResponse };
     expect(parseRetrievalResponse(golden.retrievalResponse, golden.generationRequest.requestId)).toEqual(golden.retrievalResponse);
-    expect(parseGenerationResponse(golden.generationResponse, golden.generationRequest)).toEqual(golden.generationResponse);
+    // Generation always calls a provider: an empty reported list is stored as incomplete usage.
+    expect(parseGenerationResponse(golden.generationResponse, golden.generationRequest)).toEqual({ ...golden.generationResponse,
+      usageEvents: [incompleteUsageMarker(golden.generationRequest.requestId, "CHAT_GENERATION")] });
+  });
+  it("accepts responses from an Arden-AI release that predates usage accounting", () => {
+    const golden = JSON.parse(readFileSync(new URL("./fixtures/governed-v2.json", import.meta.url), "utf8")) as {
+      retrievalResponse: RetrievalResponse; generationRequest: GenerationRequest; generationResponse: GenerationResponse };
+    const { usageContractVersion: _r, usageEvents: _re, ...olderRetrieval } = golden.retrievalResponse;
+    const { usageContractVersion: _g, usageEvents: _ge, ...olderGeneration } = golden.generationResponse;
+    const requestId = golden.generationRequest.requestId;
+    expect(parseRetrievalResponse(olderRetrieval, requestId).usageEvents)
+      .toEqual([incompleteUsageMarker(requestId, "CHAT_RETRIEVAL")]);
+    expect(parseGenerationResponse(olderGeneration, golden.generationRequest).usageEvents)
+      .toEqual([incompleteUsageMarker(requestId, "CHAT_GENERATION")]);
+    // A malformed envelope is also incomplete usage, never a failed answer.
+    expect(parseGenerationResponse({ ...golden.generationResponse, usageContractVersion: 99 }, golden.generationRequest).status)
+      .toBe(golden.generationResponse.status);
+    // The marker is deterministic, so a retried request cannot add a second incomplete row.
+    expect(incompleteUsageMarker(requestId, "CHAT_GENERATION")).toEqual(incompleteUsageMarker(requestId, "CHAT_GENERATION"));
   });
   it("rejects unknown properties, raw text hash/offset mismatches and undeclared evidence", () => {
     const f = fixture();

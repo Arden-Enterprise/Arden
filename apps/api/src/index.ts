@@ -18,6 +18,8 @@ import { IndexingWorker, indexWorkerLeaseSeconds } from "./indexing/worker.js";
 import { NotificationOutboxWorker, notificationWorkerPollMilliseconds } from "./notifications/outbox.js";
 import { notificationRealtimeConfiguration } from "./notifications/realtime.js";
 import { PrivateTrashRetention, startPrivateTrashRetentionLoop } from "./private-notes/trash-retention.js";
+import { createSystemAdministrationServices, type SystemAdministrationServices } from "./system-auth/services.js";
+import { createSystemHealthProbe } from "./system-console/routes.js";
 
 const publicationExpiryReminderIntervalMs = 60 * 60 * 1000;
 
@@ -154,11 +156,38 @@ try {
   throw new Error("Notification worker database role or schema is unavailable; verify ARDEN_NOTIFICATION_DATABASE_URL and its arden_notification_worker membership");
 }
 
-const configuredSystemSetupToken = process.env.ARDEN_SYSTEM_SETUP_TOKEN?.trim();
-if (configuredSystemSetupToken !== undefined && configuredSystemSetupToken.length < 16) {
-  throw new Error("ARDEN_SYSTEM_SETUP_TOKEN must be at least 16 characters when configured");
+// Decision 0010 (2026-11-27): isolated System Admin storage is reached only through a
+// dedicated login that is a member of `arden_system_auth`. The ordinary request login is
+// never granted that role. Production without the URL disables System Admin routes (503).
+const production = process.env.NODE_ENV === "production";
+const systemAuthDatabaseUrl = process.env.ARDEN_SYSTEM_AUTH_DATABASE_URL?.trim();
+const systemAuthPool = systemAuthDatabaseUrl
+  ? new Pool({ connectionString: systemAuthDatabaseUrl, max: 4, connectionTimeoutMillis: 10_000 })
+  // Local development only: the disposable superuser login can switch to the role itself.
+  : production ? null : pool;
+let systemAdministration: SystemAdministrationServices | null = systemAuthPool
+  ? createSystemAdministrationServices(systemAuthPool) : null;
+let systemSetupStatus: Awaited<ReturnType<SystemAdministrationServices["auth"]["setupStatus"]>> | null = null;
+if (systemAdministration) {
+  try {
+    systemSetupStatus = await systemAdministration.auth.setupStatus();
+  } catch {
+    // Fail closed: System Admin routes answer 503 instead of failing per request.
+    systemAdministration = null;
+    console.warn("System Admin features are unavailable; verify ARDEN_SYSTEM_AUTH_DATABASE_URL, its arden_system_auth membership and migrations 0072 and 0074.");
+  }
+} else if (production) {
+  console.warn("System Admin features are disabled: ARDEN_SYSTEM_AUTH_DATABASE_URL is not configured.");
 }
-const systemSetupToken = configuredSystemSetupToken ?? randomBytes(32).toString("base64url");
+
+// Production requires an operator-supplied setup token; a generated token would be printed
+// to container logs. Development may still print a generated one-time token.
+const configuredSystemSetupToken = process.env.ARDEN_SYSTEM_SETUP_TOKEN?.trim() || undefined;
+const minimumSetupTokenLength = production ? 32 : 16;
+if (configuredSystemSetupToken !== undefined && configuredSystemSetupToken.length < minimumSetupTokenLength) {
+  throw new Error(`ARDEN_SYSTEM_SETUP_TOKEN must be at least ${minimumSetupTokenLength} characters when configured`);
+}
+const systemSetupToken = configuredSystemSetupToken ?? (production ? undefined : randomBytes(32).toString("base64url"));
 
 const repository = new ArdenRepository(pool, contentStorage);
 const app = buildApp({
@@ -176,6 +205,9 @@ const app = buildApp({
   sessionSigningKey: sessionSigningKey(process.env.ARDEN_SESSION_SIGNING_KEY,
     process.env.NODE_ENV === "production"),
   systemSetupToken,
+  systemAdministration,
+  systemHealthProbe: createSystemHealthProbe({ supabaseUrl: process.env.SUPABASE_URL,
+    ardenAiUrl: process.env.ARDEN_AI_URL, ardenAiServiceToken: process.env.ARDEN_AI_SERVICE_TOKEN }),
   repository,
   storage: contentStorage,
   invitationMailer,
@@ -299,27 +331,26 @@ async function shutdown() {
   await pool.end();
   await indexPool?.end();
   await notificationPool?.end();
+  if (systemAuthPool && systemAuthPool !== pool) await systemAuthPool.end();
 }
 
 process.once("SIGINT", () => void shutdown());
 process.once("SIGTERM", () => void shutdown());
 
 await app.listen({ port, host });
-try {
-  const setupStatus = await repository.systemAuth.setupStatus();
-  if (setupStatus.needsInitialSetup) {
-    if (configuredSystemSetupToken) {
-      app.log.warn("System Admin is not initialized. Open /system/setup and enter your configured ARDEN_SYSTEM_SETUP_TOKEN.");
-    } else {
-      process.stdout.write(
-        `\n[Arden System Setup] System Admin is not initialized.\n` +
-        `[Arden System Setup] Open /system/setup and enter this one-time setup token:\n` +
-        `[Arden System Setup] ${systemSetupToken}\n\n`,
-      );
-    }
+if (systemSetupStatus?.needsInitialSetup) {
+  if (configuredSystemSetupToken) {
+    app.log.warn("System Admin is not initialized. Open /system/setup and enter your configured ARDEN_SYSTEM_SETUP_TOKEN.");
+  } else if (systemSetupToken) {
+    // Development only (see above); production never prints a setup token.
+    process.stdout.write(
+      `\n[Arden System Setup] System Admin is not initialized.\n` +
+      `[Arden System Setup] Open /system/setup and enter this one-time setup token:\n` +
+      `[Arden System Setup] ${systemSetupToken}\n\n`,
+    );
+  } else {
+    app.log.warn("System Admin setup is closed until ARDEN_SYSTEM_SETUP_TOKEN is configured.");
   }
-} catch {
-  app.log.warn("System Admin setup status could not be checked; verify migration 0064 is applied.");
 }
 scheduleIndexWorker(250);
 scheduleNotificationWorker(250);

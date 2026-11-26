@@ -9,6 +9,7 @@ import { ReaderSourcePreparation } from "./source-preparation.js";
 import type { ReaderSourceRecord } from "./source-store.js";
 import { parseReaderSummary, type ReaderSummaryResponse } from "./summary-contracts.js";
 import { ReaderSummary, SummaryAdmission } from "./summary.js";
+import { incompleteUsageMarker } from "../answers/usage-contracts.js";
 import { registerReaderSummaryRoutes } from "./routes.js";
 import { parsePublicReaderSummary, parseReaderSummaryAccess } from "../../../../packages/ui/src/shared/reader-summary-contracts.js";
 
@@ -42,7 +43,9 @@ function harness() {
 describe("Reader Summary source-bound contract", () => {
   it("accepts the paired golden output and exposes original navigable codepoint citations only", async () => {
     const h = harness();
-    expect(parseReaderSummary(h.result, h.input.response)).toEqual(golden);
+    // The golden output reports no usage; a summary always calls a provider, so it is incomplete.
+    expect(parseReaderSummary(h.result, h.input.response)).toEqual({ ...golden,
+      usageEvents: [incompleteUsageMarker(h.input.response.requestId, "READER_SUMMARY")] });
     const response = await h.run(), citation = response.points[0].citations[0];
     expect(response.versionId).toBe(h.input.response.publishedVersionId);
     expect(citation.documentId).toBe(h.record.documentId);

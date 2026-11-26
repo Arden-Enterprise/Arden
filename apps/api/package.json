@@ -9,7 +9,6 @@
     "db:migrate": "tsx src/db/migrate.ts --local-full",
     "db:migrate:plan": "tsx src/db/migrate.ts --plan",
     "db:migrate:apply-safe": "tsx src/db/migrate.ts --apply-safe",
-    "system-admin:bootstrap": "tsx src/db/bootstrap-system-admin.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run src",
     "build": "tsc -p tsconfig.build.json && esbuild src/app.ts src/index.ts src/indexing/worker-main.ts --bundle --platform=node --format=esm --packages=external --alias:@arden/domain=../../packages/domain/src/index.ts --outbase=src --outdir=dist",

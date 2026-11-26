@@ -104,6 +104,20 @@ describe("indexing worker", () => {
     expect(store.failure).toBeNull();
   });
 
+  it("activates the generation even when its usage telemetry cannot be recorded", async () => {
+    const job = makeJob();
+    const store = new FakeStore(job);
+    store.recordUsage = async () => { throw new Error("usage table unavailable"); };
+    const errors: Array<Record<string, unknown>> = [];
+    const worker = new IndexingWorker("10000000-0000-4000-8000-000000000008", 90, store, storage,
+      { index: async () => makeManifest(job) }, { ...logger, error: (fields) => { errors.push(fields); } });
+
+    await expect(worker.runOnce()).resolves.toBe(true);
+    expect(store.completed).toBe(true);
+    expect(store.failure).toBeNull();
+    expect(errors).toEqual([expect.objectContaining({ errorCode: "INDEX_USAGE_NOT_RECORDED" })]);
+  });
+
   it("passes an integrity-checked PDF snapshot to Arden AI as base64", async () => {
     const job = makeJob({
       mimeType: "application/pdf",

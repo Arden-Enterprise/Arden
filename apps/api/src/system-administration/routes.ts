@@ -1,8 +1,14 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import {
+  accountPasswordMaximumLength,
+  accountPasswordMaximumLengthMessage,
+  accountPasswordRequirementsMessage,
+  meetsAccountPasswordRequirements,
+} from "@arden/domain";
+import { isNormalizedEmail } from "../email-address.js";
+import { hashSystemAdminPassword, type PasswordWorkLimiter } from "../system-auth/password.js";
+import type { SystemActor, SystemActorResolver } from "../system-auth/routes.js";
 import { SystemAdministrationError, type SystemAdministrationStore } from "./store.js";
-
-type ActorResolver = (request: FastifyRequest, reply: FastifyReply) =>
-  Promise<{ userId: string } | null>;
 
 function failure(reply: FastifyReply, error: unknown) {
   if (!(error instanceof SystemAdministrationError)) throw error;
@@ -19,47 +25,82 @@ function failure(reply: FastifyReply, error: unknown) {
     message: "The System Admin assignment could not be changed." } });
 }
 
+/**
+ * MANAGE_SYSTEM_ADMINS API for the isolated System Admin identity (API only; the Console
+ * has no admin-grant UI). The caller must hold a live System Admin session; the store
+ * rechecks manager capability inside each transaction.
+ */
 export function registerSystemAdministrationRoutes(app: FastifyInstance,
-  store: SystemAdministrationStore | undefined, actor: ActorResolver, uuid: string) {
-  const run = async (request: FastifyRequest, reply: FastifyReply,
-    work: (service: SystemAdministrationStore, actorUserId: string) => Promise<unknown>) => {
-    const session = await actor(request, reply);
-    if (!session) return;
+  store: SystemAdministrationStore | undefined, resolveActor: SystemActorResolver, uuid: string,
+  passwordWork: PasswordWorkLimiter) {
+  const actors = new WeakMap<FastifyRequest, SystemActor>();
+  const authenticate = async (request: FastifyRequest, reply: FastifyReply) => {
     reply.header("Cache-Control", "no-store");
+    const actor = await resolveActor(request, reply);
+    if (!actor) return reply;
+    actors.set(request, actor);
+  };
+  const run = async (request: FastifyRequest, reply: FastifyReply,
+    work: (service: SystemAdministrationStore, actor: SystemActor) => Promise<unknown>) => {
+    const actor = actors.get(request);
+    if (!actor) return reply;
     if (!store) return reply.code(503).send({ error: { code: "SYSTEM_ADMINISTRATION_SERVICE_UNAVAILABLE",
       message: "System administration is unavailable." } });
-    try { return await work(store, session.userId); }
+    // Monitoring-only administrators are not told that the management API exists.
+    if (!actor.canManageSystemAdmins) return failure(reply, new SystemAdministrationError("SYSTEM_ADMINISTRATION_UNAVAILABLE"));
+    try { return await work(store, actor); }
     catch (error) { return failure(reply, error); }
   };
   const root = "/api/v1/system/administrators";
-  const targetSchema = { type: "object", additionalProperties: false, required: ["userId"],
-    properties: { userId: { type: "string", pattern: uuid } } };
+  const adminParams = { type: "object", additionalProperties: false, required: ["adminId"],
+    properties: { adminId: { type: "string", pattern: uuid } } };
 
-  app.get(root, (request, reply) => run(request, reply,
-    (service, actorUserId) => service.overview(actorUserId)));
-  app.get("/api/v1/system/analytics/private-feedback", {
-    schema: { querystring: { type: "object", additionalProperties: false, properties: {} } },
-  }, (request, reply) => run(request, reply, async (service, actorUserId) =>
-    ({ weeks: await service.privateFeedback(actorUserId) })));
-  app.post<{ Body: { userId: string } }>(root, { schema: { body: targetSchema } },
-    (request, reply) => run(request, reply, async (service, actorUserId) => {
-      reply.code(201);
-      return service.grant(actorUserId, request.body.userId, request.id);
-    }));
-  app.post<{ Params: { userId: string } }>(`${root}/:userId/revoke`, {
-    schema: { params: { type: "object", additionalProperties: false, required: ["userId"],
-      properties: { userId: { type: "string", pattern: uuid } } },
-      body: { type: "object", additionalProperties: false, properties: {} } },
+  app.get(root, { onRequest: authenticate }, (request, reply) => run(request, reply,
+    (service, actor) => service.overview(actor)));
+
+  app.post<{ Body: { email: string; fullName: string; password: string } }>(root, {
+    onRequest: authenticate,
+    schema: { body: { type: "object", additionalProperties: false, required: ["email", "fullName", "password"],
+      properties: {
+        email: { type: "string", minLength: 3, maxLength: 320 },
+        fullName: { type: "string", minLength: 1, maxLength: 200 },
+        password: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
+      } } },
+  }, (request, reply) => run(request, reply, async (service, actor) => {
+    const email = request.body.email.trim().toLowerCase();
+    const fullName = request.body.fullName.trim();
+    if (!isNormalizedEmail(email)) {
+      return reply.code(400).send({ error: { code: "INVALID_EMAIL", message: "Enter a valid email address." } });
+    }
+    if (!fullName) return reply.code(400).send({ error: { code: "INVALID_FULL_NAME", message: "Enter a name." } });
+    if (request.body.password.length > accountPasswordMaximumLength) {
+      return reply.code(400).send({ error: { code: "INVALID_PASSWORD", message: accountPasswordMaximumLengthMessage } });
+    }
+    if (!meetsAccountPasswordRequirements(request.body.password)) {
+      return reply.code(400).send({ error: { code: "INVALID_PASSWORD", message: accountPasswordRequirementsMessage } });
+    }
+    const hashed = await passwordWork.run(() => hashSystemAdminPassword(request.body.password));
+    if (!hashed) {
+      reply.header("Retry-After", "1");
+      return reply.code(429).send({ error: { code: "TOO_MANY_ATTEMPTS", message: "Try again in a moment." } });
+    }
+    const created = await service.grant(actor, { email, fullName, passwordHash: hashed.value }, request.id);
+    return reply.code(201).send(created);
+  }));
+
+  app.post<{ Params: { adminId: string } }>(`${root}/:adminId/revoke`, {
+    onRequest: authenticate,
+    schema: { params: adminParams, body: { type: "object", additionalProperties: false, properties: {} } },
   }, (request, reply) => run(request, reply,
-    (service, actorUserId) => service.revoke(actorUserId, request.params.userId, request.id)));
+    (service, actor) => service.revoke(actor, request.params.adminId, request.id)));
 
-  app.patch<{ Params: { userId: string }; Body: { canManageSystemAdmins: boolean } }>(`${root}/:userId`, {
+  app.patch<{ Params: { adminId: string }; Body: { canManageSystemAdmins: boolean } }>(`${root}/:adminId`, {
+    onRequest: authenticate,
     schema: {
-      params: { type: "object", additionalProperties: false, required: ["userId"],
-        properties: { userId: { type: "string", pattern: uuid } } },
+      params: adminParams,
       body: { type: "object", additionalProperties: false, required: ["canManageSystemAdmins"],
         properties: { canManageSystemAdmins: { type: "boolean" } } },
     },
-  }, (request, reply) => run(request, reply, (service, actorUserId) =>
-    service.setManagerCapability(actorUserId, request.params.userId, request.body.canManageSystemAdmins, request.id)));
+  }, (request, reply) => run(request, reply, (service, actor) =>
+    service.setManagerCapability(actor, request.params.adminId, request.body.canManageSystemAdmins, request.id)));
 }

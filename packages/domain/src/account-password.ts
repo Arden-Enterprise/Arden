@@ -3,6 +3,10 @@ export const accountPasswordMaximumLength = 100;
 
 export const accountPasswordMaximumLengthMessage = "Password must be 100 characters or fewer.";
 
+/** Server-side message for a password that fails the account requirements. */
+export const accountPasswordRequirementsMessage =
+  "Password must have at least 8 characters, one uppercase letter, and one special character.";
+
 export type AccountPasswordChecks = {
   minimumLength: boolean;
   uppercaseLetter: boolean;

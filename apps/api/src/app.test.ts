@@ -13,7 +13,6 @@ import { MemoryPrivateOrganizationStore } from "./private-notes/organization.tes
 import type { InvitationEmail, InvitationMailer } from "./email/smtp-mailer.js";
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
 import { AudienceGroupError, type AudienceGroup, type AudienceGroupStore } from "./audiences/store.js";
-import { SystemAdministrationError, type SystemAdministrator, type SystemAdministrationStore } from "./system-administration/store.js";
 import { parseSemanticDocument } from "@arden/domain";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { evidenceManifest, evidenceText, MemoryConversationStore } from "./answers/conversation.test-support.js";
@@ -238,9 +237,7 @@ describe("API auth and private draft routes", () => {
     expect(response.json()).toEqual({
       actor: { id: ownerId, email: "owner@example.test", fullName: "Owner", emailVerified: true },
       account: { passwordSetupRequired: false },
-      canAccessSystemConsole: false,
       sessionExpiresAt: expect.any(String),
-      systemAdmin: true,
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
         status: "active", departmentId: null, departmentName: null, roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
@@ -863,52 +860,26 @@ describe("API auth and private draft routes", () => {
     expect(repository.createdOrganization).toBeNull();
   });
 
-  it("keeps instance administration separate from organization administration", async () => {
-    const administrator = await desktopSession(app, "owner@example.test");
-    const overview = await app.inject({ method: "GET", url: "/api/v1/system/administrators",
-      headers: { cookie: administrator } });
-    expect(overview.statusCode).toBe(200);
-    expect(overview.json().administrators).toMatchObject([{ userId: ownerId, status: "ACTIVE" }]);
-    const granted = await app.inject({ method: "POST", url: "/api/v1/system/administrators",
-      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: { userId: systemAdminCandidateId } });
-    expect(granted.statusCode).toBe(201);
-    expect(granted.json()).toMatchObject({ userId: systemAdminCandidateId, status: "ACTIVE" });
-
-    const candidate = await desktopSession(app, "system-admin@example.test");
-    expect((await app.inject({ method: "GET", url: "/api/v1/system/administrators",
-      headers: { cookie: candidate } })).statusCode).toBe(200);
-    expect((await app.inject({ method: "GET",
-      url: `/api/v1/organizations/${organizationId}/administration`,
-      headers: { cookie: candidate } })).statusCode).toBe(404);
-
+  it("never accepts a member session on isolated System Admin routes", async () => {
+    // Decision 0010 (2026-11-27): System Admin identity is isolated from member accounts. A
+    // member session, even for a former Supabase-backed System Admin, carries no capability.
+    const owner = await desktopSession(app, "owner@example.test");
     const ordinaryMember = await desktopSession(app, "member@example.test");
-    const denied = await app.inject({ method: "GET", url: "/api/v1/system/administrators",
-      headers: { cookie: ordinaryMember } });
-    expect(denied.statusCode).toBe(404);
-    expect(denied.json().error.code).toBe("SYSTEM_ADMINISTRATION_UNAVAILABLE");
-
-    const feedbackUrl = "/api/v1/system/analytics/private-feedback";
-    const analytics = await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: candidate } });
-    expect(analytics.statusCode).toBe(200);
-    expect(analytics.headers["cache-control"]).toBe("no-store");
-    expect(analytics.json()).toEqual({ weeks: [{ weekStart: "2026-11-23", good: 2, bad: 1 }] });
-    expect((await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: ordinaryMember } })).statusCode).toBe(404);
-    expect((await app.inject({ method: "GET", url: feedbackUrl })).statusCode).toBe(401);
-    expect((await app.inject({ method: "GET", url: `${feedbackUrl}?userId=${ownerId}`, headers: { cookie: candidate } })).statusCode).toBe(400);
-    expect((await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: candidate } })).json().systemAdmin).toBe(true);
-    expect((await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: ordinaryMember } })).json().systemAdmin).toBeUndefined();
-    await app.inject({ method: "POST", url: `/api/v1/system/administrators/${systemAdminCandidateId}/revoke`,
-      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: {} });
-    expect((await app.inject({ method: "GET", url: feedbackUrl, headers: { cookie: candidate } })).statusCode).toBe(404);
-  });
-
-  it("does not allow revoking the last active Arden System Admin", async () => {
-    const administrator = await desktopSession(app, "owner@example.test");
-    const revoked = await app.inject({ method: "POST",
-      url: `/api/v1/system/administrators/${ownerId}/revoke`,
-      headers: { cookie: administrator, origin: "http://localhost:5180" }, payload: {} });
-    expect(revoked.statusCode).toBe(409);
-    expect(revoked.json().error.code).toBe("SYSTEM_ADMINISTRATOR_LAST_ACTIVE");
+    for (const cookie of [owner, ordinaryMember]) {
+      for (const url of ["/api/v1/system/administrators", "/api/v1/system/analytics/private-feedback",
+        "/api/v1/system/overview", "/api/v1/system/auth/me"]) {
+        const response = await app.inject({ method: "GET", url, headers: { cookie } });
+        expect([401, 404, 503]).toContain(response.statusCode);
+        expect(response.headers["cache-control"]).toBe("no-store");
+      }
+      const grant = await app.inject({ method: "POST", url: "/api/v1/system/administrators",
+        headers: { cookie, origin: "http://localhost:5180" },
+        payload: { email: "new-admin@example.test", fullName: "New Admin", password: "StrongPassword!1" } });
+      expect([404, 503]).toContain(grant.statusCode);
+      const me = (await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie } })).json();
+      expect(me).not.toHaveProperty("systemAdmin");
+      expect(me).not.toHaveProperty("canAccessSystemConsole");
+    }
   });
 
   it("sends opaque invitations and accepts them only for the matching authenticated email once", async () => {
@@ -2953,64 +2924,6 @@ class MemoryAudienceGroupStore implements AudienceGroupStore {
   }
 }
 
-class MemorySystemAdministrationStore implements SystemAdministrationStore {
-  private administrators: SystemAdministrator[] = [{ userId: ownerId, status: "ACTIVE", canManageSystemAdmins: true, grantedByUserId: null,
-    grantedAt: new Date("2026-10-20T00:00:00.000Z"), revokedByUserId: null, revokedAt: null }];
-
-  private authorize(actorUserId: string) {
-    if (!this.administrators.some(item => item.userId === actorUserId && item.status === "ACTIVE")) {
-      throw new SystemAdministrationError("SYSTEM_ADMINISTRATION_UNAVAILABLE");
-    }
-  }
-
-  async canAccess(actorUserId: string) {
-    return this.administrators.some(item => item.userId === actorUserId && item.status === "ACTIVE");
-  }
-
-  async privateFeedback(actorUserId: string) {
-    this.authorize(actorUserId);
-    return [{ weekStart: "2026-11-23", good: 2, bad: 1 }];
-  }
-
-  async overview(actorUserId: string) {
-    this.authorize(actorUserId);
-    return { administrators: this.administrators, recentEvents: [] };
-  }
-
-  async grant(actorUserId: string, targetUserId: string) {
-    this.authorize(actorUserId);
-    const administrator = { userId: targetUserId, status: "ACTIVE" as const, canManageSystemAdmins: false,
-      grantedByUserId: actorUserId, grantedAt: new Date("2026-10-20T00:00:00.000Z"),
-      revokedByUserId: null, revokedAt: null };
-    this.administrators.push(administrator);
-    return administrator;
-  }
-
-  async revoke(actorUserId: string, targetUserId: string) {
-    this.authorize(actorUserId);
-    const administrator = this.administrators.find(item => item.userId === targetUserId);
-    if (!administrator) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
-    if (this.administrators.filter(item => item.status === "ACTIVE").length === 1) {
-      throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_LAST_ACTIVE");
-    }
-    const revoked = { ...administrator, status: "REVOKED" as const, revokedByUserId: actorUserId,
-      revokedAt: new Date("2026-10-20T00:01:00.000Z") };
-    Object.assign(administrator, revoked);
-    return revoked;
-  }
-
-  async setManagerCapability(actorUserId: string, targetUserId: string, enabled: boolean) {
-    this.authorize(actorUserId);
-    const administrator = this.administrators.find(item => item.userId === targetUserId && item.status === "ACTIVE");
-    if (!administrator) throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_CONFLICT");
-    if (!enabled && administrator.canManageSystemAdmins && this.administrators.filter(item => item.status === "ACTIVE" && item.canManageSystemAdmins).length === 1) {
-      throw new SystemAdministrationError("SYSTEM_ADMINISTRATOR_LAST_MANAGER");
-    }
-    administrator.canManageSystemAdmins = enabled;
-    return administrator;
-  }
-}
-
 class FakeAskArdenClient implements AskArdenClient {
   lastRequest: RetrievalRequest | null = null;
   onAnswer: (() => void) | null = null;
@@ -3038,7 +2951,6 @@ class FakeAskArdenClient implements AskArdenClient {
 class MemoryRepository implements ArdenDataRepository {
   readonly conversations = new MemoryConversationStore();
   readonly audienceGroups: AudienceGroupStore = new MemoryAudienceGroupStore();
-  readonly systemAdministration: SystemAdministrationStore = new MemorySystemAdministrationStore();
   readonly privateOrganization = new MemoryPrivateOrganizationStore({ organizationId, ownerId, memberIds: [otherId] });
   constructor() {
     this.privateOrganization.addNote({ id: draftId, title: "Review notes",

@@ -4,11 +4,9 @@ import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledg
 import { PgConversationStore, type AnswerFeedback, type ConversationStore } from "../answers/conversation-store.js";
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
 import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
+import { insertAiUsageEvents } from "./ai-usage.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
-import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
-import { PgSystemConsoleStore, type SystemConsoleStore } from "../system-console/store.js";
-import { PgSystemAuthStore, type SystemAuthStore } from "../system-auth/store.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
 import { PgDirectShareStore, type DirectShareStore } from "../private-notes/direct-share-store.js";
@@ -706,9 +704,6 @@ export interface ArdenDataRepository {
   readonly readerSources?: ReaderSourceStore;
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
-  readonly systemAdministration?: SystemAdministrationStore;
-  readonly systemConsole?: SystemConsoleStore;
-  readonly systemAuth?: SystemAuthStore;
   ratePrivateAnswer?(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean>;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
@@ -856,9 +851,6 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly conversations: ConversationStore;
   readonly knowledgeCatalog: KnowledgeCatalogStore;
   readonly audienceGroups: AudienceGroupStore;
-  readonly systemAdministration: SystemAdministrationStore;
-  readonly systemConsole: SystemConsoleStore;
-  readonly systemAuth: SystemAuthStore;
   readonly maintenance: MaintenancePort;
   readonly privateOrganization: PgPrivateOrganizationStore;
   readonly directShares: PgDirectShareStore;
@@ -871,9 +863,6 @@ export class ArdenRepository implements ArdenDataRepository {
     this.knowledgeCatalog = new PgKnowledgeCatalogStore((user, org, work) => this.withActorContext(user, org, work),
       (user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
-    this.systemAdministration = new PgSystemAdministrationStore((user, work) => this.withSystemAdminManager(user, work));
-    this.systemConsole = new PgSystemConsoleStore((user, work) => this.withSystemConsoleAdmin(user, work));
-    this.systemAuth = new PgSystemAuthStore(pool);
     this.maintenance = new PgMaintenanceStore((user, org, work) => this.withActorContext(user, org, work), content);
     this.privateOrganization = new PgPrivateOrganizationStore((user, org, work) => this.withActorContext(user, org, work),
       (work) => this.withPrivateTrashRetention(work));
@@ -917,26 +906,7 @@ export class ArdenRepository implements ArdenDataRepository {
     events: ProviderUsageEvent[]) {
     return this.withActorContext(userId, organizationId, async client => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return false;
-      for (const event of events) {
-        await client.query(`INSERT INTO ai_usage_event(organization_id, request_id, idempotency_key,
-          operation, provider, model, input_tokens, output_tokens, latency_ms, usage_complete,
-          estimated_cost_micro_usd, price_book_version)
-          SELECT $1, $2, $2::text || ':' || $3, $4, $5, $6, $7, $8, $9, $10,
-            CASE WHEN $10 AND price.price_book_version IS NOT NULL THEN
-              ceil(($7::numeric * price.input_micro_usd_per_million_tokens
-                + $8::numeric * price.output_micro_usd_per_million_tokens) / 1000000)::bigint END,
-            price.price_book_version
-          FROM (SELECT 1) seed LEFT JOIN LATERAL (
-            SELECT pb.price_book_version, pb.input_micro_usd_per_million_tokens,
-              pb.output_micro_usd_per_million_tokens
-            FROM ai_price_book pb WHERE pb.provider=$5 AND pb.model=$6
-              AND pb.effective_from<=now() AND (pb.effective_until IS NULL OR pb.effective_until>now())
-            ORDER BY pb.effective_from DESC LIMIT 1) price ON true
-          ON CONFLICT (idempotency_key) DO NOTHING`, [organizationId, requestId, event.eventId,
-          event.operation, event.provider, event.model, event.inputTokens, event.outputTokens,
-          event.latencyMs, event.usageComplete]);
-      }
-      return true;
+      return insertAiUsageEvents(client, organizationId, requestId, events);
     });
   }
 
@@ -944,9 +914,15 @@ export class ArdenRepository implements ArdenDataRepository {
     return this.withActorContext(userId, organizationId, async client => {
       const membershipId = await this.activeActorMembership(client, userId, organizationId);
       if (!membershipId) return false;
+      // Only a Reader answer this member owns in this organization can be rated here; any other
+      // request id inserts nothing and maps to 404. Ask Arden chat ratings are saved on the turn
+      // (PUT .../turns/:turnId/feedback), so each rating has exactly one source of truth.
       const result = await client.query(`INSERT INTO ai_answer_feedback(
         request_id, organization_id, membership_id, rating)
-        VALUES ($1, $2, $3, $4)
+        SELECT ar.request_id, ar.organization_id, ar.owner_membership_id, $4::text
+          FROM ai_answer_result ar
+         WHERE ar.request_id = $1::uuid AND ar.organization_id = $2::uuid AND ar.owner_membership_id = $3::uuid
+           AND ar.result_type = 'READER_QUESTION'
         ON CONFLICT (request_id, membership_id) DO UPDATE
           SET rating = EXCLUDED.rating, updated_at = now()
         RETURNING feedback_id`, [requestId, organizationId, membershipId, rating]);
@@ -1610,86 +1586,9 @@ export class ArdenRepository implements ArdenDataRepository {
     }
   }
 
-  private async withSystemConsoleAdmin<T>(actorId: string, work: (client: PoolClient) => Promise<T>): Promise<T | null> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SET LOCAL ROLE arden_system_auth");
-      await client.query("SET LOCAL search_path TO arden_system, arden, public");
-      await client.query(`SELECT set_config('arden.system_auth_mode', 'session', true),
-        set_config('arden.actor_id', $1, true),
-        set_config('arden.instance_admin', 'true', true)`, [actorId]);
-      const isolated = await client.query(
-        "SELECT 1 FROM arden_system.administrator WHERE admin_id = $1 AND status = 'ACTIVE'",
-        [actorId],
-      );
-      if (isolated.rowCount) {
-        const result = await work(client);
-        await client.query("COMMIT");
-        return result;
-      }
-      await client.query("ROLLBACK");
-    } catch (error) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      throw error;
-    } finally {
-      client.release();
-    }
-    return this.withSystemAdmin(actorId, work);
-  }
-
-  private async withSystemAdmin<T>(userId: string, work: (client: PoolClient) => Promise<T>): Promise<T | null> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SET LOCAL ROLE arden_runtime");
-      await client.query("SET LOCAL search_path TO arden, public");
-      await client.query(`SELECT set_config('arden.actor_id', $1, true),
-        set_config('arden.organization_id', '', true), set_config('arden.org_admin', 'false', true),
-        set_config('arden.instance_admin', 'true', true),
-        set_config('arden.manage_system_admins', 'false', true),
-        set_config('arden.system_admin_target_id', $1, true)`, [userId]);
-      const administrator = await client.query<{ can_manage_system_admins: boolean }>(`SELECT sa.can_manage_system_admins
-        FROM system_administrator sa JOIN user_account ua ON ua.user_id = sa.user_id
-        WHERE sa.user_id = $1 AND sa.status = 'ACTIVE' AND ua.status = 'ACTIVE'
-          AND NOT EXISTS (SELECT 1 FROM organization_membership om WHERE om.user_id = sa.user_id)`, [userId]);
-      if (!administrator.rowCount) {
-        await client.query("ROLLBACK");
-        return null;
-      }
-      await client.query(`SELECT set_config('arden.instance_admin', 'true', true),
-        set_config('arden.manage_system_admins', $1, true), set_config('arden.system_admin_target_id', '', true)`,
-      [administrator.rows[0]?.can_manage_system_admins ? "true" : "false"]);
-      const result = await work(client);
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
-  private async withSystemAdminManager<T>(userId: string, work: (client: PoolClient) => Promise<T>): Promise<T | null> {
-    return this.withSystemAdmin(userId, async client => {
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
-      await client.query("SELECT set_config('arden.system_admin_target_id', $1, true)", [userId]);
-      const manager = await client.query(`SELECT 1 FROM system_administrator sa
-        JOIN user_account ua ON ua.user_id = sa.user_id
-        WHERE sa.user_id = $1 AND sa.status = 'ACTIVE' AND sa.can_manage_system_admins
-          AND ua.status = 'ACTIVE'
-          AND NOT EXISTS (SELECT 1 FROM organization_membership om WHERE om.user_id = sa.user_id)`, [userId]);
-      await client.query("SELECT set_config('arden.manage_system_admins', $1, true)",
-        [manager.rowCount ? "true" : "false"]);
-      await client.query("SELECT set_config('arden.system_admin_target_id', '', true)");
-      return manager.rowCount ? work(client) : null;
-    });
-  }
-
+  /** Upserts the profile only; it creates no membership or privilege, so it takes no global lock. */
   async registerAccountProfile(userId: string, email: string, fullName: string | null): Promise<boolean> {
     return this.withActorContext(userId, null, async client => {
-      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
       const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
       await client.query(`INSERT INTO user_account (user_id, email, full_name)
         VALUES ($1, $2, $3)
