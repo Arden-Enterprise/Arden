@@ -238,6 +238,7 @@ describe("API auth and private draft routes", () => {
       memberships: [{
         organization: { id: organizationId, name: "Arden Test Org" },
         status: "active", departmentId: null, departmentName: null, roleCodes: ["MEMBER"], canUsePrivateWorkspace: true,
+        canReview: false,
       }],
     });
   });

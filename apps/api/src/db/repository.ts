@@ -28,6 +28,8 @@ export type MembershipSummary = {
   departmentName?: string | null;
   roleCodes: string[];
   canUsePrivateWorkspace: boolean;
+  /** Organization Admin or an active reviewer grant: the member can use Reviews. Absent means false. */
+  canReview?: boolean;
 };
 export type ActiveMembership = { membershipId: string; organizationId: string; userId: string };
 
@@ -898,6 +900,22 @@ export class ArdenRepository implements ArdenDataRepository {
        GROUP BY o.organization_id, o.name, om.membership_id, om.status
        ORDER BY o.name, o.organization_id`, [userId, "PRIVATE_WORKSPACE_READ"]);
 
+    // Reviews is for Organization Admins and members with an active reviewer grant. Grants are readable only
+    // inside their organization's context, so each active membership is checked in its own context.
+    const reviewers = new Set<string>();
+    for (const row of result.rows) {
+      if (row.status !== "ACTIVE") continue;
+      if ((row.role_codes ?? []).includes("ORG_ADMIN")) { reviewers.add(row.organization_id); continue; }
+      await client.query("SELECT set_config('arden.organization_id', $1, true)", [row.organization_id]);
+      const grant = await client.query(`SELECT 1 FROM reviewer_grant g
+        JOIN organization_membership om ON om.membership_id = g.reviewer_membership_id
+       WHERE g.organization_id = $1 AND om.user_id = $2 AND om.status = 'ACTIVE' AND g.status = 'ACTIVE'
+         AND g.valid_from <= now() AND (g.valid_until IS NULL OR g.valid_until > now())
+       LIMIT 1`, [row.organization_id, userId]);
+      if (grant.rowCount) reviewers.add(row.organization_id);
+    }
+    await client.query("SELECT set_config('arden.organization_id', '', true)");
+
     return result.rows.map((row) => ({
       organizationId: row.organization_id,
       organizationName: row.organization_name,
@@ -906,6 +924,7 @@ export class ArdenRepository implements ArdenDataRepository {
       departmentName: row.department_name,
       roleCodes: row.role_codes ?? [],
       canUsePrivateWorkspace: row.can_use_private_workspace,
+      canReview: reviewers.has(row.organization_id),
     }));
     });
   }

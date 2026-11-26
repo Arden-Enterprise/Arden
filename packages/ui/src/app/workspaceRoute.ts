@@ -20,7 +20,7 @@ export type WorkspaceRoute =
 /** What every routed feature currently shows, as reported to the shell. */
 export type FeatureLocations = { knowledge: KnowledgeRoute; conversationId: string | null; private: PrivateLocation };
 
-export type RouteCapabilities = { admin: boolean; privateNotes: boolean };
+export type RouteCapabilities = { admin: boolean; privateNotes: boolean; reviews: boolean };
 
 export const homeRoute: WorkspaceRoute = { view: "knowledge", at: { kind: "home" } };
 
@@ -138,6 +138,8 @@ export function routeForView(view: WorkspaceView, features: FeatureLocations): W
 export function allowedRoute(route: WorkspaceRoute, capabilities: RouteCapabilities): WorkspaceRoute {
   if (route.view === "organization-access" && !capabilities.admin) return homeRoute;
   if (route.view === "personal-workspace" && !capabilities.privateNotes) return homeRoute;
+  // Reviews belongs to Organization Admins and members with an active reviewer grant.
+  if (route.view === "review-queue" && !capabilities.reviews) return homeRoute;
   return route;
 }
 
