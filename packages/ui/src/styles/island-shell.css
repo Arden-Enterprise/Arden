@@ -163,7 +163,6 @@
   min-width: 22px; height: 22px; margin-left: auto; padding: 0 7px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center;
   color: var(--arden-text-secondary) !important; background: var(--arden-surface-raised); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
 }
-.arden-app-shell .sidebar-planned { margin-left: auto; color: var(--arden-text-disabled); font-size: 11px; }
 .arden-app-shell .sidebar-session {
   display: flex; flex-direction: row; flex-wrap: wrap; align-items: stretch; gap: 0; margin: 12px 0 0; padding: 0;
   border-top: 0;
@@ -213,8 +212,7 @@
 
 .arden-app-shell .app-sidebar.is-collapsed { padding: 10px 0; align-items: center; }
 .app-sidebar.is-collapsed .access-card { justify-content: center; padding: 6px 0; }
-.app-sidebar.is-collapsed .access-card-switch,
-.app-sidebar.is-collapsed .sidebar-planned { display: none; }
+.app-sidebar.is-collapsed .access-card-switch { display: none; }
 .app-sidebar.is-collapsed .navigation-label { height: 1px; width: 22px; margin: 10px auto; padding: 0; overflow: hidden; color: transparent; background: var(--arden-border); }
 .app-sidebar.is-collapsed .sidebar-nav-item { justify-content: center; gap: 0; width: 40px; padding: 0; min-height: 36px; }
 .app-sidebar.is-collapsed .sidebar-review-count { position: absolute; transform: translate(12px, -10px); min-width: 18px; height: 18px; padding: 0 4px; font-size: 10px; }
@@ -224,7 +222,6 @@
 .arden-app-shell .app-sidebar.is-collapsed .sidebar-nav-label,
 .arden-app-shell .app-sidebar.is-collapsed .access-card-copy,
 .arden-app-shell .app-sidebar.is-collapsed .sidebar-member > div { max-width: 0; opacity: 0; }
-.arden-app-shell .app-sidebar.is-collapsed .sidebar-planned { display: none; }
 .arden-app-shell .app-sidebar.is-collapsed .sidebar-workspace-row { flex-direction: row; align-items: center; justify-content: center; gap: 0; width: 100%; }
 .arden-app-shell .app-sidebar.is-collapsed .sidebar-workspace-row .access-card { flex: 0 0 0; max-width: 0; min-width: 0; opacity: 0; padding: 0; overflow: hidden; pointer-events: none; }
 .arden-app-shell .app-sidebar.is-collapsed .sidebar-workspace-row .sidebar-collapse { width: 36px; height: 36px; min-height: 36px; border-radius: 8px; }
@@ -495,7 +492,7 @@
   .arden-app-shell.is-nav-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
   .arden-app-shell .app-sidebar { position: sticky; top: var(--arden-shell-gap); width: 72px; height: var(--arden-shell-height); padding: 10px 8px; border: 1px solid var(--arden-border); }
   .arden-app-shell .app-sidebar .access-card-copy, .arden-app-shell .app-sidebar .access-card-switch,
-  .arden-app-shell .app-sidebar .sidebar-nav-label, .arden-app-shell .app-sidebar .sidebar-planned,
+  .arden-app-shell .app-sidebar .sidebar-nav-label,
   .arden-app-shell .app-sidebar .sidebar-member > div, .arden-app-shell .sidebar-collapse { display: none; }
   .arden-app-shell .app-sidebar .access-card { display: flex; justify-content: center; padding: 6px 0; }
   .arden-app-shell .app-sidebar .navigation-label { display: block; height: 1px; margin: 10px 8px; padding: 0; overflow: hidden; color: transparent; background: var(--arden-border); }

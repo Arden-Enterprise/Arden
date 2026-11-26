@@ -58,18 +58,10 @@ export function ReaderAiPanel({ id, title, versionLabel, task, onTask, onClose, 
         <span className="reader-ai-task-icon"><Icon name="chat" size={15} /></span>
         <span><strong>Ask a question</strong><small>Answers come from this version only.</small></span>
       </button>
-      <button type="button" className="reader-ai-task" disabled>
-        <span className="reader-ai-task-icon"><Icon name="search" size={15} /></span>
-        <span><strong>Explain a selection <span className="island-chip tone-info">Coming later</span></strong>
-          <small>Select text in the document, then explain it.</small></span>
-      </button>
     </div> : <div className="reader-ai-tabs" role="tablist" aria-label="Arden AI tasks">
       {tasks.map(item => <button key={item.task} id={readerAiTabId(id, item.task)} type="button" role="tab"
         className="reader-ai-tab" aria-selected={task === item.task} aria-controls={readerAiPanelId(id, item.task)}
         tabIndex={task === item.task ? 0 : -1} onKeyDown={moveTab} onClick={() => onTask(item.task)}>{item.label}</button>)}
-      <button type="button" role="tab" className="reader-ai-tab" aria-selected={false} aria-disabled="true" disabled tabIndex={-1}>
-        Explain <span className="reader-ai-soon">Later</span>
-      </button>
     </div>}
 
     {children}

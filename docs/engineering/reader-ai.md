@@ -653,10 +653,11 @@ consulted; the earlier RA-04/RA-05 UI notes remain the history of the replaced l
 
 - One violet **Arden AI** viewer-bar action with the shipped Arden mark
   (`arden-logo-white.png`) and Ctrl J opens a side island beside the document.
-  Opening it starts nothing: a task choice offers Summarize, Ask a question and a
-  disabled Explain a selection labelled Coming later (RA-06 is not delivered).
+  Opening it starts nothing: a task choice offers Summarize and Ask a question.
+  RA-06 is not delivered; at the maintainer's request on 27 November 2026 its disabled
+  "Explain a selection · Coming later" choice and Explain tab are no longer shown.
 - After a choice the island shows Summary / Ask tabs (Arrow, Home and End move between
-  them) and a disabled Explain tab. Choosing Summary is the on-request generation;
+  them). Choosing Summary is the on-request generation;
   switching tabs keeps each task's retained state exactly as the separate panels did.
 - Document information steps aside while the island is open without changing the
   saved collapse preference; Show document information still works. Below 980px of
