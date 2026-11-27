@@ -40,6 +40,9 @@ export interface MaintenanceTx {
   hasUnread(membershipId: string, caseId: string): Promise<boolean>;
   markRead(membershipId: string, caseId: string): Promise<void>;
   readVersionText(publishedVersionId: string): Promise<{ documentId: string; text: string | null } | null>;
+  readVersionOriginal?(publishedVersionId: string): Promise<
+    { documentId: string; text: string | null; mimeType?: string; pdfBase64?: string | null } | null
+  >;
   listDocumentVersions(documentId: string, pinnedVersionId: string): Promise<Array<{ publishedVersionId: string; versionNo: number; publishedAt: string; current: boolean }>>;
   readPublicationProof(documentId: string, publishedVersionId: string): Promise<PublicationProof>;
   readPublicationSubmission(submissionId: string): Promise<PublicationSubmission | null>;
@@ -676,7 +679,9 @@ export class MaintenanceCaseService {
   }
 
   readOriginal(userId: string, organizationId: string, caseId: string, publishedVersionId: string): Promise<
-    { unavailable: true; publishedVersionId: string } | { unavailable: false; publishedVersionId: string; text: string }
+    | { unavailable: true; publishedVersionId: string }
+    | { unavailable: false; publishedVersionId: string; text: string }
+    | { unavailable: false; publishedVersionId: string; mimeType: "application/pdf"; pdfBase64: string }
   > {
     assertUuid(organizationId);
     assertUuid(caseId);
@@ -693,8 +698,16 @@ export class MaintenanceCaseService {
       const view = projectCase(row, actor, access);
       // Sources need reviewer authority for the pin; Org Admin alone reads metadata only (decisions 0010, 0023).
       if (!view || view.kind === "minimal" || view.kind === "reporter" || !access.hasGrant) throw new MaintenanceError("DENIED");
-      const source = await tx.readVersionText(publishedVersionId);
-      if (!source || source.documentId !== row.documentId || source.text === null || source.text.length > 20_000) {
+      const source: { documentId: string; text: string | null; mimeType?: string; pdfBase64?: string | null } | null = tx.readVersionOriginal
+        ? await tx.readVersionOriginal(publishedVersionId)
+        : await tx.readVersionText(publishedVersionId);
+      if (!source || source.documentId !== row.documentId) {
+        return { unavailable: true as const, publishedVersionId };
+      }
+      if (source.mimeType === "application/pdf" && typeof source.pdfBase64 === "string" && source.pdfBase64.length > 0) {
+        return { unavailable: false as const, publishedVersionId, mimeType: "application/pdf" as const, pdfBase64: source.pdfBase64 };
+      }
+      if (source.text === null || source.text.length > 20_000) {
         return { unavailable: true as const, publishedVersionId };
       }
       return { unavailable: false as const, publishedVersionId, text: source.text };

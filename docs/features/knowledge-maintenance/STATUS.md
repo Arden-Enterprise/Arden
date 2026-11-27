@@ -28,7 +28,7 @@ Found in the pre-merge review, or left from automated review as low impact. None
 
 | # | Limitation | Effect | Follow-up |
 | --- | --- | --- | --- |
-| 1 | PDF versions have no in-app comparison or original | A PDF case shows "Comparison is unavailable", and its Open original buttons return unavailable, so the manual path the screen offers is a dead end | Serve the exact stored PDF version through the case-scoped source resolver (F4-03) |
+| 1 | PDF versions have no in-app text diff | A PDF case still shows "Comparison is unavailable", while **Open reported version** and **Open earlier/later original** now serve and preview the exact stored PDF version (with Download PDF) through the case-scoped source resolver (F4-03) | Optional visual/page-by-page PDF comparison remains a future enhancement |
 | 2 | Case lists have no paging | The queue and My reports read every visible case, about four database calls each, and keep resolved cases forever | Server-side status filter, paging and a set-based projection |
 | 3 | Imported reports send no new-case notice | The notice trigger fires only for `SUBMITTED`; reviewers find imported cases in the queue | Notify eligible reviewers on `IMPORTED` too |
 | 4 | Before claiming, an eligible reviewer can read the case's public messages in its history, and the version list includes numbers and dates of versions the reviewer cannot open | The report text stays hidden; comparing an unreadable version reports unavailable | Align with the F4-02 and F4-03 projections in the flow spec |

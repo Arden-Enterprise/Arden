@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MaintenanceCaseScreen } from "../src/maintenance/MaintenanceCaseScreen";
 import type { MaintenanceCase } from "../src/maintenance/maintenance-client";
 
-afterEach(() => cleanup());
+vi.mock("../src/knowledge/PdfReader", () => ({
+  PdfReader: ({ title, base64 }: { title: string; base64: string }) => <div data-testid="mock-pdf-reader" data-title={title} data-base64={base64}>PDF viewer</div>,
+}));
+
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 const item: MaintenanceCase = {
   kind: "assigned",
@@ -139,5 +143,26 @@ describe("maintenance case screen", () => {
     expect(screen.queryByText("That case is unavailable")).toBeNull();
     expect(screen.getByLabelText("Reporter explanation")).toHaveProperty("value", "Step 3 now names the right menu.");
     expect(screen.getByLabelText("Reviewer rationale")).toHaveProperty("value", "Checked against the current screens.");
+  });
+
+  it("renders a PDF viewer and Download PDF link when the opened original is a PDF", () => {
+    const createUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:maintenance-pdf");
+    const revokeUrl = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const pdfBase64 = btoa("%PDF-1.4\n%%EOF\n");
+    const view = render(<MaintenanceCaseScreen item={item} history={{ items: [], nextCursor: null }} loading={false} error="" busy={false}
+      original={{ unavailable: false, label: "Version 140", mimeType: "application/pdf", pdfBase64 }}
+      onOpenReported={() => undefined}
+      onBack={() => undefined} onClaim={() => undefined} onResolve={() => undefined} onReassign={() => undefined}
+      onMoreHistory={() => undefined} onRetry={() => undefined} />);
+    expect(screen.queryByText("This original is unavailable.")).toBeNull();
+    const reader = screen.getByTestId("mock-pdf-reader");
+    expect(reader.getAttribute("data-base64")).toBe(pdfBase64);
+    expect(reader.getAttribute("data-title")).toContain("IT Support Guide");
+    const download = screen.getByRole("link", { name: "Download PDF" });
+    expect(download.getAttribute("href")).toBe("blob:maintenance-pdf");
+    expect(download.getAttribute("download")).toBe("IT Support Guide - Version 140.pdf");
+    expect(createUrl).toHaveBeenCalledOnce();
+    view.unmount();
+    expect(revokeUrl).toHaveBeenCalledWith("blob:maintenance-pdf");
   });
 });

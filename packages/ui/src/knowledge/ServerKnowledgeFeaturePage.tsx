@@ -42,7 +42,7 @@ import { KnowledgeDialog } from "./KnowledgeDialog";
 import { ReportIssueDialog } from "../maintenance/ReportIssueDialog";
 import { MyReports } from "../maintenance/MyReports";
 import { MaintenanceQueue } from "../maintenance/MaintenanceQueue";
-import { MaintenanceCaseScreen } from "../maintenance/MaintenanceCaseScreen";
+import { MaintenanceCaseScreen, type MaintenanceOriginalView } from "../maintenance/MaintenanceCaseScreen";
 import { caseLoadVisible, startCaseLoad } from "../maintenance/case-load";
 import { describeVersionPair, type VersionPair } from "../maintenance/version-pair";
 import {
@@ -193,7 +193,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const analysisKey = useRef<{ evidence: string; key: string } | null>(null);
   const analysisEpoch = useRef(0);
   const caseLoad = useRef({ request: 0 });
-  const [maintenanceOriginal, setMaintenanceOriginal] = useState<{ unavailable: true; label: string } | { unavailable: false; label: string; text: string } | null>(null);
+  const [maintenanceOriginal, setMaintenanceOriginal] = useState<MaintenanceOriginalView>(null);
   const linkKey = useRef<CommandKey | null>(null);
   const [maintenanceComparison, setMaintenanceComparison] = useState<MaintenanceComparison | null>(null);
   const [versionPair, setVersionPair] = useState<VersionPair | null>(null);
@@ -204,6 +204,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const requestedCaseId = useRef<string | null>(null);
   const historyEpoch = useRef(0);
   const comparisonRequest = useRef(0);
+  const originalRequest = useRef(0);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceError, setMaintenanceError] = useState("");
   // A failed load replaces the case; a failed action stays inline so the case and typed notes remain.
@@ -343,6 +344,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     maintenancePairIndex.current = index;
     maintenancePairTo.current = toIndex;
     const comparing = ++comparisonRequest.current;
+    originalRequest.current += 1;
     const current = () => caseLoad.current.request === request && comparisonRequest.current === comparing;
     setMaintenanceOriginal(null);
     setMaintenanceComparison(null);
@@ -371,15 +373,23 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const openExactOriginal = useCallback((versionId: string, label: string) => {
     if (!maintenanceCase) return;
     const request = caseLoad.current.request;
+    const opening = ++originalRequest.current;
     const caseId = maintenanceCase.caseId;
+    const current = () => caseLoad.current.request === request && originalRequest.current === opening;
     void readMaintenanceOriginal(platform, organizationId, caseId, versionId)
       .then((result: MaintenanceOriginal) => {
-        if (caseLoad.current.request !== request) return;
-        setMaintenanceOriginal(result.unavailable
-          ? { unavailable: true, label }
-          : { unavailable: false, label, text: result.text });
+        if (!current()) return;
+        if (result.unavailable) {
+          setMaintenanceOriginal({ unavailable: true, label });
+          return;
+        }
+        if (result.mimeType === "application/pdf" && result.pdfBase64) {
+          setMaintenanceOriginal({ unavailable: false, label, mimeType: "application/pdf", pdfBase64: result.pdfBase64 });
+          return;
+        }
+        setMaintenanceOriginal({ unavailable: false, label, text: result.text ?? "" });
       })
-      .catch(() => { if (caseLoad.current.request === request) setMaintenanceOriginal({ unavailable: true, label }); });
+      .catch(() => { if (current()) setMaintenanceOriginal({ unavailable: true, label }); });
   }, [maintenanceCase, organizationId, platform]);
   const openOriginal = (which: "earlier" | "later") => {
     const version = maintenanceVersions.current[which === "later" ? maintenancePairTo.current : maintenancePairIndex.current];
@@ -412,6 +422,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     historyEpoch.current += 1;
     const request = startCaseLoad(caseLoad.current);
     analysisEpoch.current += 1;
+    originalRequest.current += 1;
     setMaintenanceCase(null);
     setMaintenanceHistory(null);
     setRelatedCases([]);

@@ -57,7 +57,13 @@ const caseColumns = `case_id, organization_id, origin, reporter_membership_id, d
   project_tag, author_membership_id, assignee_membership_id, reporter_status, outcome, reporter_explanation,
   reviewer_rationale, publication_link_version_id, publication_link_submission_id, publication_link_reason, revision, first_claimed_at, created_at, resolved_at`;
 
-export type VersionContentReader = { read(sourceUri: string, expectedHash: string): Promise<string> };
+export type VersionContentReader = {
+  read(sourceUri: string, expectedHash: string): Promise<string>;
+  readPdf?(sourceUri: string, expectedHash: string): Promise<Buffer>;
+};
+
+const maxMaintenancePdfBytes = 5 * 1024 * 1024;
+const pdfMagicHeader = Buffer.from("%PDF-");
 
 export class PgMaintenanceStore implements MaintenancePort {
   constructor(private readonly withMember: MemberTransaction, private readonly content?: VersionContentReader) {}
@@ -312,6 +318,34 @@ class PgMaintenanceTx implements MaintenanceTx {
     try {
       const body = await this.content.read(row.content_uri, row.content_hash);
       return { documentId: row.document_id, text: visibleVersionText(body, row.mime_type) };
+    } catch {
+      return { documentId: row.document_id, text: null };
+    }
+  }
+
+  async readVersionOriginal(publishedVersionId: string): Promise<
+    { documentId: string; text: string | null; mimeType?: string; pdfBase64?: string | null } | null
+  > {
+    const result = await this.client.query<{ document_id: string; content_uri: string; content_hash: string; mime_type: string }>(
+      `SELECT document_id, content_uri, content_hash, mime_type FROM maintenance_version_source($1)`, [publishedVersionId]);
+    const row = result.rows[0];
+    if (!row) return null;
+    if (row.mime_type === "application/pdf") {
+      if (!this.content?.readPdf) return { documentId: row.document_id, text: null };
+      try {
+        const bytes = await this.content.readPdf(row.content_uri, row.content_hash);
+        if (bytes.length === 0 || bytes.length > maxMaintenancePdfBytes || !bytes.subarray(0, 5).equals(pdfMagicHeader)) {
+          return { documentId: row.document_id, text: null };
+        }
+        return { documentId: row.document_id, mimeType: "application/pdf", pdfBase64: bytes.toString("base64"), text: null };
+      } catch {
+        return { documentId: row.document_id, text: null };
+      }
+    }
+    if (!this.content) return { documentId: row.document_id, text: null };
+    try {
+      const body = await this.content.read(row.content_uri, row.content_hash);
+      return { documentId: row.document_id, mimeType: row.mime_type, text: visibleVersionText(body, row.mime_type) };
     } catch {
       return { documentId: row.document_id, text: null };
     }

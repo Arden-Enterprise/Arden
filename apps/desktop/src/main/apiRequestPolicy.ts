@@ -62,6 +62,7 @@ const maintenanceCase = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/mai
 const maintenanceHistory = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/history$`);
 const maintenanceReviewers = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/reviewers$`);
 const maintenanceVersions = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/versions(?:/${uuid})?$`);
+const maintenanceVersionItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/versions/${uuid}$`);
 const maintenanceLinks = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/links$`);
 const maintenanceAnalysis = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/analysis$`);
 const maintenanceCommand = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/(claim|reassign|decisions|compare|messages|publication-confirmation|publication-link|links|analysis|analysis-cancellation)$`);
@@ -135,7 +136,7 @@ export function desktopApiResponseLimit(request: DesktopApiRequest): number {
   const knowledgeDetail = ((request.method === "GET" || request.method === "PATCH")
     && (knowledgeDraftItem.test(pathname) || knowledgeDraftVersionItem.test(pathname)))
     || (request.method === "GET" && (knowledgeReviewItem.test(pathname)
-      || publishedKnowledgeItem.test(pathname)));
+      || publishedKnowledgeItem.test(pathname) || maintenanceVersionItem.test(pathname)));
   if (pdfCreate || knowledgeDetail || privatePdfRead) return 7_100_000;
   if (request.method === "GET" && aiConversationItemPath.test(pathname)) return 2 * 1024 * 1024;
   return 1024 * 1024;
