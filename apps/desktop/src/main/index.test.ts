@@ -271,6 +271,27 @@ describe("desktop API session delivery", () => {
     assert.equal(sentSessions.at(-1), "arden_session=current");
   });
 
+  it("treats invitation registration as an explicit sign-in (decision 0038)", async () => {
+    const firstFetch = deferred();
+    const delayedResponse = deferred<Response>();
+    const { api, savedSessions } = desktopApiFixture(async (url, options) => {
+      if (String(url).endsWith("/account")) {
+        return Response.json({ authenticated: true, accepted: true }, { status: 201, headers: { "set-cookie": "arden_session=invited" } });
+      }
+      const cookie = new Headers(options?.headers).get("cookie");
+      if (cookie === "arden_session=original") { firstFetch.resolve(); return delayedResponse.promise; }
+      return Response.json({ cookie });
+    });
+    const inFlight = api.request(aiRequest);
+    await firstFetch.promise;
+    const discarded = assert.rejects(inFlight, /The desktop session changed/);
+    await api.request({ path: `/api/v1/invitations/${"A".repeat(43)}/account`, method: "POST", body: "{}" });
+    delayedResponse.resolve(Response.json({ cookie: "previous" }, { headers: { "set-cookie": "arden_session=previous" } }));
+    await discarded;
+    assert.equal(savedSessions.at(-1), "invited");
+    assert.deepEqual(JSON.parse((await api.request(aiRequest)).body), { cookie: "arden_session=invited" });
+  });
+
   it("keeps the newer cookie revision when concurrent requests return credentials", async () => {
     const firstFetch = deferred();
     const delayedResponse = deferred<Response>();

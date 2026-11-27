@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "./app.js";
 import { resolveSupabaseAuthPublicUrl, SupabaseAuthProvider } from "./auth/provider.js";
+import { SupabaseInvitationAccountAdmin } from "./auth/invitation-account-admin.js";
 import { sessionSigningKey } from "./auth/session-timebox.js";
 import { assertLocalFlow1TestTarget, LocalFlow1TestAuthProvider, parseLocalTestAccounts } from "./auth/local-flow1-test.js";
 import { assertBooleanEnvironmentValue, parseUiSurfaceV3Environment } from "./config/env.js";
@@ -36,6 +37,8 @@ if (!databaseUrl) {
 const pool = new Pool({ connectionString: databaseUrl });
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabasePublishableKey = process.env.SUPABASE_PUBLISHABLE_KEY ?? process.env.SUPABASE_ANON_KEY;
+// Decision 0038: optional server-only key for invitation account routing; never logged or sent to clients.
+const supabaseSecretKey = process.env.SUPABASE_SECRET_KEY?.trim() || undefined;
 const supabaseAuthPublicUrl = resolveSupabaseAuthPublicUrl(
   process.env.SUPABASE_AUTH_PUBLIC_URL, supabaseUrl,
 );
@@ -201,6 +204,9 @@ const app = buildApp({
         requirePublicAuthUrl: process.env.NODE_ENV === "production",
       })
       : null,
+  invitationAccountAdmin: !flow1TestMode && supabaseUrl && supabasePublishableKey && supabaseSecretKey
+    ? new SupabaseInvitationAccountAdmin(supabaseUrl, supabaseSecretKey)
+    : null,
   testActor: remoteFlow1TestMode ? kietLocalFlow1TestActor : undefined,
   authTrustedOrigins: flow1TestMode ? [localFlow1Origin("ARDEN_PUBLIC_WEB_ORIGIN", "http://127.0.0.1:5180")] : trustedOrigins,
   secureCookies: process.env.NODE_ENV === "production",

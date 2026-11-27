@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "./app.js";
 import type { AuthProvider, SupabaseSignUp } from "./auth/provider.js";
+import type { ConfirmedInvitationAccount, InvitationAccountAdmin, InvitationAccountStatus } from "./auth/invitation-account-admin.js";
 import { ReviewerGrantConflictError, type ActiveMembership, type ArdenDataRepository, type DecidedReview, type AuthorizedAiSource, type CreatedOrganization, type CreateSharedDraftResult, type OrganizationSetup, type DecideReviewResult, type DeleteDepartmentResult, type DraftCursor, type DraftListItem, type DraftPatch, type DraftUpdateResult, type DraftWrite, type KnowledgeDraftVersion, type KnowledgeOptions, type MembershipSummary, type OrganizationAdminData, type PrivateContributionSource, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type ReviewerGrantRecord, type ReviewDetail, type SharedDraftPatch, type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type StoredContentFields, type SubmitKnowledgeDraftResult, type UpdateSharedDraftResult, type WithdrawKnowledgeSubmissionResult, type RetryKnowledgePublicationResult, type GovernancePublication, type GovernanceInspectionView, type GovernanceDocumentView, type PublicationReport, type OpenGovernanceInspectionResult, type DirectWithdrawalResult, type ReportPublicationResult, type PublicationChangeInput, type RequestPublicationChangeResult, type PublicationRenewalInput, type PublicationRenewalState, type RequestPublicationRenewalResult } from "./db/repository.js";
 import type { AssignedReview } from "./knowledge/review-queue.js";
 import type { ReviewAction } from "./knowledge/review-decision.js";
@@ -933,6 +934,153 @@ describe("API auth and private draft routes", () => {
     expect(accepted.statusCode).toBe(204);
     const replay = await app.inject({ method: "POST", url: "/api/v1/invitations/accept", headers: { cookie: invitedSession, origin: "http://localhost:5180" }, payload: { token: resentToken } });
     expect(replay.statusCode).toBe(404);
+  });
+
+  describe("invitation account routing (decision 0038)", () => {
+    const strongPassword = "Synthetic-password1";
+    let accountAdmin: FakeInvitationAccountAdmin;
+    let routedApp: ReturnType<typeof buildApp>;
+
+    beforeEach(() => {
+      accountAdmin = new FakeInvitationAccountAdmin(authProvider);
+      routedApp = buildApp({
+        checkDatabase: async () => undefined, auth: authProvider, invitationAccountAdmin: accountAdmin,
+        authTrustedOrigins: ["http://localhost:5180"], secureCookies: false, repository, storage, invitationMailer,
+        publicWebOrigin: "https://arden.example.test",
+      });
+    });
+
+    afterEach(async () => {
+      await routedApp.close();
+    });
+
+    async function invite(email = "new.member@example.test"): Promise<string> {
+      const created = await routedApp.inject({
+        method: "POST", url: `/api/v1/organizations/${organizationId}/invitations`,
+        headers: { cookie: await desktopSession(routedApp, "owner@example.test"), origin: "http://localhost:5180" },
+        payload: { email },
+      });
+      expect(created.statusCode).toBe(202);
+      const token = invitationMailer.sent.at(-1)?.invitationUrl.split("/").at(-1);
+      if (!token) throw new Error("missing invitation token");
+      return token;
+    }
+
+    function register(token: string, payload: Record<string, unknown> = { fullName: " New Member ", password: strongPassword }) {
+      return routedApp.inject({
+        method: "POST", url: `/api/v1/invitations/${token}/account`, headers: { origin: "http://localhost:5180" }, payload,
+      });
+    }
+
+    it("reports whether the invited address has an account only for a valid token", async () => {
+      const token = await invite();
+      const fresh = await routedApp.inject({ method: "GET", url: `/api/v1/invitations/${token}` });
+      expect(fresh.json()).toMatchObject({ email: "new.member@example.test", accountStatus: "new" });
+
+      accountAdmin.existing.add("new.member@example.test");
+      const known = await routedApp.inject({ method: "GET", url: `/api/v1/invitations/${token}` });
+      expect(known.json().accountStatus).toBe("existing");
+
+      const lookupsBefore = accountAdmin.lookups.length;
+      const invalid = await routedApp.inject({ method: "GET", url: `/api/v1/invitations/${"C".repeat(43)}` });
+      expect(invalid.statusCode).toBe(404);
+      expect(accountAdmin.lookups).toHaveLength(lookupsBefore);
+
+      accountAdmin.lookupFailure = true;
+      const unavailable = await routedApp.inject({ method: "GET", url: `/api/v1/invitations/${token}` });
+      expect(unavailable.statusCode).toBe(200);
+      expect(unavailable.json()).not.toHaveProperty("accountStatus");
+
+      const withoutCapability = await app.inject({ method: "GET", url: `/api/v1/invitations/${token}` });
+      expect(withoutCapability.json()).not.toHaveProperty("accountStatus");
+    });
+
+    it("creates a confirmed account for the invited address, signs in and accepts once", async () => {
+      const token = await invite();
+      const response = await register(token);
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toEqual({ authenticated: true, accepted: true });
+      expect(accountAdmin.created).toEqual([{ email: "new.member@example.test", password: strongPassword, fullName: "New Member" }]);
+      const cookies = [response.headers["set-cookie"]].flat().join("\n");
+      expect(cookies).toContain("access-invited");
+      expect(cookies).toMatch(/pending[^=]*=;/i);
+
+      const replay = await register(token);
+      expect(replay.statusCode).toBe(404);
+      expect(accountAdmin.created).toHaveLength(1);
+    });
+
+    it("never changes an existing account, including an unconfirmed one", async () => {
+      const token = await invite();
+      accountAdmin.existing.add("new.member@example.test");
+      const response = await register(token);
+      expect(response.statusCode).toBe(409);
+      expect(response.json().error.code).toBe("ACCOUNT_ALREADY_EXISTS");
+      expect(response.headers["set-cookie"]).toBeUndefined();
+      expect(accountAdmin.created).toHaveLength(0);
+    });
+
+    it("validates the token, name and password before creating anything", async () => {
+      const token = await invite();
+      expect((await register("D".repeat(43))).statusCode).toBe(404);
+      expect((await register(token, { fullName: "   ", password: strongPassword })).json().error.code).toBe("INVALID_FULL_NAME");
+      const weak = await register(token, { fullName: "New Member", password: "synthetic-password" });
+      expect(weak.statusCode).toBe(400);
+      expect(weak.json().error.code).toBe("INVALID_PASSWORD");
+      expect((await register(token, { fullName: "New Member", password: "Ab1!" })).json().error.code).toBe("INVALID_PASSWORD");
+      const chosenEmail = await register(token, { fullName: "New Member", password: strongPassword, email: "other@example.test" });
+      expect(chosenEmail.statusCode).toBe(400);
+      expect(accountAdmin.created).toHaveLength(0);
+    });
+
+    it("is unavailable without the server account capability", async () => {
+      const token = await invite();
+      const response = await app.inject({
+        method: "POST", url: `/api/v1/invitations/${token}/account`, headers: { origin: "http://localhost:5180" },
+        payload: { fullName: "New Member", password: strongPassword },
+      });
+      expect(response.statusCode).toBe(503);
+    });
+
+    it("throttles repeated provider rejections for the invited address", async () => {
+      const token = await invite();
+      accountAdmin.createFailure = "SIGNUP_REJECTED";
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        expect((await register(token)).json().error.code).toBe("ACCOUNT_SETUP_UNAVAILABLE");
+      }
+      const locked = await register(token);
+      expect(locked.statusCode).toBe(429);
+      expect(locked.headers["retry-after"]).toBeDefined();
+    });
+
+    it("reports an unknown creation outcome without counting it as a password failure", async () => {
+      const token = await invite();
+      accountAdmin.createFailure = "ACCOUNT_SETUP_UNCONFIRMED";
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const response = await register(token);
+        expect(response.statusCode).toBe(503);
+        expect(response.json().error.code).toBe("ACCOUNT_SETUP_UNCONFIRMED");
+      }
+    });
+
+    it("keeps the invitation pending and asks to sign in when sign-in fails after creation", async () => {
+      const token = await invite();
+      authProvider.signInFailure = "SUPABASE_AUTH_UNAVAILABLE";
+      const response = await register(token);
+      expect(response.statusCode).toBe(503);
+      expect(response.json().error.code).toBe("ACCOUNT_CREATED_SIGN_IN_REQUIRED");
+      expect(accountAdmin.created).toHaveLength(1);
+      authProvider.signInFailure = null;
+      const session = await routedApp.inject({
+        method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" },
+        payload: { email: "new.member@example.test", password: strongPassword },
+      });
+      const accepted = await routedApp.inject({
+        method: "POST", url: "/api/v1/invitations/accept",
+        headers: { cookie: cookieHeader(session.headers["set-cookie"]), origin: "http://localhost:5180" }, payload: { token },
+      });
+      expect(accepted.statusCode).toBe(204);
+    });
   });
 
   it("does not acknowledge invitation delivery when SMTP reports a failure", async () => {
@@ -2838,7 +2986,18 @@ class FakeAuthProvider implements AuthProvider {
   rotatedSession: { accessToken: string; refreshToken: string; expiresIn: number } | null = null;
   private readonly usersByAccessToken = new Map<string, { userId: string; email: string; passwordSetupRequired: boolean }>();
 
+  readonly confirmedAccounts = new Map<string, string>();
+  signInFailure: string | null = null;
+
   async signIn(credentials: { email: string; password: string }) {
+    if (this.signInFailure) throw new Error(this.signInFailure);
+    const createdPassword = this.confirmedAccounts.get(credentials.email);
+    if (createdPassword !== undefined) {
+      if (createdPassword !== credentials.password) throw new Error("INVALID_CREDENTIALS");
+      const tokens = { accessToken: "access-invited", refreshToken: "refresh-invited", expiresIn: 3600 };
+      this.usersByAccessToken.set(tokens.accessToken, { userId: otherId, email: credentials.email, passwordSetupRequired: false });
+      return { userId: otherId, email: credentials.email, fullName: null, tokens };
+    }
     if (credentials.email === "unconfirmed@example.test") throw new Error("EMAIL_NOT_CONFIRMED");
     if (credentials.password !== "synthetic-password" || !credentials.email.endsWith("@example.test")) throw new Error("INVALID_CREDENTIALS");
     const suffix = credentials.email.startsWith("owner") ? "owner"
@@ -3556,6 +3715,30 @@ class MemoryRepository implements ArdenDataRepository {
       position: this.privateOrganization.notes.get(draftId)?.position ?? null,
       text: this.currentSource.text ?? null,
     };
+  }
+}
+
+class FakeInvitationAccountAdmin implements InvitationAccountAdmin {
+  readonly lookups: string[] = [];
+  readonly created: ConfirmedInvitationAccount[] = [];
+  readonly existing = new Set<string>();
+  lookupFailure = false;
+  createFailure: string | null = null;
+
+  constructor(private readonly auth: FakeAuthProvider) {}
+
+  async accountStatus(email: string): Promise<InvitationAccountStatus> {
+    this.lookups.push(email);
+    if (this.lookupFailure) throw new Error("ACCOUNT_LOOKUP_UNAVAILABLE");
+    return this.existing.has(email) ? "existing" : "new";
+  }
+
+  async createConfirmedAccount(account: ConfirmedInvitationAccount): Promise<void> {
+    if (this.createFailure) throw new Error(this.createFailure);
+    if (this.existing.has(account.email)) throw new Error("USER_ALREADY_EXISTS");
+    this.created.push(account);
+    this.existing.add(account.email);
+    this.auth.confirmedAccounts.set(account.email, account.password);
   }
 }
 

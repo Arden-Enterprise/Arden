@@ -920,10 +920,19 @@ export type InvitationPreview = {
   organizationName: string;
   email: string;
   expiresAt: string;
+  /** Present only when the server can route the invitation to sign-in or registration (decision 0038). */
+  accountStatus?: "existing" | "new";
 };
 
 export async function getInvitationPreview(platform: Platform, token: string): Promise<InvitationPreview> {
   return request<InvitationPreview>(platform, `/api/v1/invitations/${encodeURIComponent(token)}`);
+}
+
+/** Creates a confirmed account for the invited address, signs in and accepts the invitation. */
+export async function createInvitationAccount(platform: Platform, token: string, fullName: string, password: string): Promise<{ accepted: boolean }> {
+  return request<{ accepted: boolean }>(platform, `/api/v1/invitations/${encodeURIComponent(token)}/account`, {
+    method: "POST", body: JSON.stringify({ fullName, password }),
+  });
 }
 
 export async function acceptInvitation(platform: Platform, token: string): Promise<void> {

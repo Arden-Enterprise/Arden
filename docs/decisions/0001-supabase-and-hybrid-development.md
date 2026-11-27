@@ -39,7 +39,7 @@ Arden is self-hosted first and must keep organization membership, scoped roles, 
 
 Fastify request tests exercise Supabase sign-in/session behavior through a synthetic provider, and API/UI typecheck, unit/request tests, and builds are expected to validate this branch. A gated live Supabase Auth test requires a dedicated project and synthetic account. The real PostgreSQL/RLS test requires an already-migrated disposable database. Neither live test, nor Supabase Storage/Realtime policy verification or a production Coolify deployment, is evidence available from this decision alone.
 
-Do not configure Supabase/Auth credentials for a shared or production environment until the administrator provides the approved project URL and publishable/anon key through the private environment. Never request or store a service-role key for the current authentication slice.
+Do not configure Supabase/Auth credentials for a shared or production environment until the administrator provides the approved project URL and publishable/anon key through the private environment. Never request or store a service-role key for the current authentication slice, except the server-only `SUPABASE_SECRET_KEY` that [0038](0038-invitation-account-routing-and-direct-setup.md) limits to invitation account lookup and confirmed creation.
 
 ## Rules and documentation updates
 

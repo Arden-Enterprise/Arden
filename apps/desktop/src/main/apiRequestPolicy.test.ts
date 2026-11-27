@@ -520,6 +520,12 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ ...changePassword, body: undefined }), false);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/invitations/4e-SL2tSdcYWMhj7HFTDKIcw5Vks-ygUeOY8JfkuZGg", method: "GET" }), true);
     assert.equal(validateDesktopApiRequest({ path: "/api/v1/invitations/4e-SL2tSdcYWMhj7HFTDKIcw5Vks-ygUeOY8JfkuZGg", method: "POST" }), false);
+    const invitationAccount = { path: "/api/v1/invitations/4e-SL2tSdcYWMhj7HFTDKIcw5Vks-ygUeOY8JfkuZGg/account", method: "POST",
+      body: JSON.stringify({ fullName: "Synthetic Member", password: "Synthetic-password1" }) };
+    assert.equal(validateDesktopApiRequest(invitationAccount), true);
+    assert.equal(validateDesktopApiRequest({ ...invitationAccount, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ ...invitationAccount, body: undefined }), false);
+    assert.equal(validateDesktopApiRequest({ ...invitationAccount, path: "/api/v1/invitations/short/account" }), false);
   });
 
   it("permits the bounded author, reviewer, publication and admin routes", () => {

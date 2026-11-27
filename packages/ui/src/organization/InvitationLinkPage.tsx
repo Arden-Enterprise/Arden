@@ -7,6 +7,7 @@ import { VisiblePasswordField } from "../sign-in/VisiblePasswordField";
 import {
   acceptInvitation,
   ApiError,
+  createInvitationAccount,
   currentSession,
   getInvitationPreview,
   signIn,
@@ -44,6 +45,8 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  // Decision 0038: when the server reports whether the invited address has an account, show only that form.
+  const routed = Boolean(invitation?.accountStatus);
 
   useEffect(() => {
     let active = true;
@@ -53,6 +56,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
         if (!active) return;
         setInvitation(preview);
         setEmail(preview.email);
+        setMode(preview.accountStatus === "new" ? "create-account" : "sign-in");
         setLoadingInvitation(false);
       })
       .catch((cause) => {
@@ -127,6 +131,52 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     } finally { setBusy(false); }
   };
 
+  const createRoutedAccount = async () => {
+    let accepted: boolean;
+    try {
+      accepted = (await createInvitationAccount(platform, token, fullName.trim(), password)).accepted;
+    } catch (cause) {
+      showRoutedAccountError(cause);
+      return;
+    }
+    // The account exists and this browser is signed in from here on, even if loading the session fails.
+    setPassword("");
+    setSignedIn(true);
+    try {
+      const updatedSession = await currentSession(platform);
+      onSessionChange?.(updatedSession);
+      if (updatedSession.actor?.email) setCurrentAccountEmail(updatedSession.actor.email);
+      if (accepted) onAccepted(updatedSession);
+      else setMessage("Your account is ready. Accept the invitation to continue.");
+    } catch {
+      setMessage(accepted
+        ? "Your account is ready and you joined the organization. Reload to open your workspace."
+        : "Your account is ready. Accept the invitation to continue.");
+    }
+  };
+
+  const showRoutedAccountError = (cause: unknown) => {
+    if (cause instanceof ApiError && cause.code === "ACCOUNT_ALREADY_EXISTS") {
+      setError("An account already exists for this email. Sign in to accept the invitation.");
+      setMode("sign-in");
+      setPassword("");
+    } else if (cause instanceof ApiError && cause.code === "ACCOUNT_CREATED_SIGN_IN_REQUIRED") {
+      setMessage("Your account was created. Sign in to accept the invitation.");
+      setMode("sign-in");
+      setPassword("");
+    } else if (cause instanceof ApiError && cause.code === "ACCOUNT_SETUP_UNAVAILABLE") {
+      setError("Your password meets the listed requirements, but account setup could not be completed. Try a different password.");
+    } else if (cause instanceof ApiError && cause.code === "ACCOUNT_SETUP_UNCONFIRMED") {
+      setError("Couldn’t confirm account setup. Try again; if your account was created, you’ll be asked to sign in.");
+    } else if (cause instanceof ApiError && cause.status === 404) {
+      setInvitationInvalid(true);
+    } else if (cause instanceof ApiError && cause.status !== 0 && cause.status < 500 && cause.message) {
+      setError(cause.message);
+    } else {
+      setError("Couldn’t create account. Please try again.");
+    }
+  };
+
   const handleSignUp = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
     setEmail(email.trim());
@@ -152,6 +202,12 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
     }
     if (!meetsAccountPasswordRequirements(password)) {
       setError(accountPasswordRequirementMessage);
+      setBusy(false);
+      return;
+    }
+    if (routed) {
+      // The email checks above pass unchanged: a routed form keeps the invited address.
+      await createRoutedAccount();
       setBusy(false);
       return;
     }
@@ -346,7 +402,9 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
           ) : (
             <>
               <p className="auth-new-account">
-                {mode === "sign-in" ? (
+                {routed ? (
+                  mode === "sign-in" ? "Sign in to your Arden account to accept" : "Create your Arden account to accept"
+                ) : mode === "sign-in" ? (
                   <>
                     Need an account?{" "}
                     <button type="button" onClick={() => { setMode("create-account"); setPassword(""); setError(""); setMessage(""); }}>
@@ -371,6 +429,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       autoComplete="email"
                       type="email"
                       required
+                      readOnly={routed}
                       maxLength={320}
                       placeholder="name@company.com"
                       value={email}
@@ -403,6 +462,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       onChange={(event) => setFullName(event.target.value)}
                     />
                   </label>
+                  {!routed && (
                   <label>
                     <span>Email address</span>
                     <input
@@ -421,6 +481,7 @@ export function InvitationLinkPage({ platform, token, authenticated = false, ses
                       </span>
                     )}
                   </label>
+                  )}
                   <NewPasswordField value={password} onChange={setPassword} />
                   <button type="submit" className="auth-primary" disabled={busy}>
                     {busy ? "Creating account…" : "Create account and accept"}
