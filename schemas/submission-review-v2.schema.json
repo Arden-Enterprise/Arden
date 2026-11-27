@@ -1,0 +1,226 @@
+{
+  "$defs": {
+    "ReviewCheckV2": {
+      "additionalProperties": false,
+      "properties": {
+        "additionalCitations": {
+          "items": {
+            "$ref": "#/$defs/ReviewCitation"
+          },
+          "maxItems": 3,
+          "title": "Additionalcitations",
+          "type": "array"
+        },
+        "category": {
+          "enum": [
+            "CLARITY",
+            "CONSISTENCY",
+            "MISSING_CONTEXT",
+            "SENSITIVE_CONTENT"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "citation": {
+          "$ref": "#/$defs/ReviewCitation"
+        },
+        "text": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "citation",
+        "additionalCitations",
+        "category"
+      ],
+      "title": "ReviewCheckV2",
+      "type": "object"
+    },
+    "ReviewCitation": {
+      "additionalProperties": false,
+      "properties": {
+        "excerpt": {
+          "maxLength": 360,
+          "minLength": 1,
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Page"
+        }
+      },
+      "required": [
+        "excerpt",
+        "page"
+      ],
+      "title": "ReviewCitation",
+      "type": "object"
+    },
+    "ReviewPointV2": {
+      "additionalProperties": false,
+      "properties": {
+        "additionalCitations": {
+          "items": {
+            "$ref": "#/$defs/ReviewCitation"
+          },
+          "maxItems": 3,
+          "title": "Additionalcitations",
+          "type": "array"
+        },
+        "citation": {
+          "$ref": "#/$defs/ReviewCitation"
+        },
+        "text": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "citation",
+        "additionalCitations"
+      ],
+      "title": "ReviewPointV2",
+      "type": "object"
+    },
+    "SubmissionReviewRequestV2": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "anyOf": [
+            {
+              "maxLength": 1500000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "contractVersion": {
+          "const": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "mimeType": {
+          "enum": [
+            "text/plain",
+            "application/pdf"
+          ],
+          "title": "Mimetype",
+          "type": "string"
+        },
+        "pdfBase64": {
+          "anyOf": [
+            {
+              "maxLength": 16000000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfbase64"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "mimeType",
+        "contractVersion"
+      ],
+      "title": "SubmissionReviewRequestV2",
+      "type": "object"
+    },
+    "SubmissionReviewResponseV2": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/ReviewCheckV2"
+          },
+          "maxItems": 3,
+          "title": "Checks",
+          "type": "array"
+        },
+        "contractVersion": {
+          "const": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        },
+        "summary": {
+          "items": {
+            "$ref": "#/$defs/ReviewPointV2"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Summary",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requestId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "contractVersion",
+        "summary",
+        "checks"
+      ],
+      "title": "SubmissionReviewResponseV2",
+      "type": "object"
+    }
+  },
+  "title": "Arden submission review contract v2"
+}

@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
@@ -47,7 +48,7 @@ class GenerationIndexer:
         self._store = store
 
     async def index(self, request: IndexGenerationRequest) -> IndexGenerationManifest:
-        prepared = prepare_generation(request)
+        prepared = await asyncio.to_thread(prepare_generation, request)
         await self._store.replace_candidate(request, prepared)
 
         chunks_payload = [

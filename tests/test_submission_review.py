@@ -18,18 +18,20 @@ from arden_ai.presentation.api import create_api
 
 
 class Provider:
-    def __init__(self, source_id: str = "S1") -> None:
+    def __init__(self, *source_ids: str) -> None:
         self.passages: dict[str, ReviewCitation] = {}
-        self.source_id = source_id
+        self.source_ids = source_ids or ("S1",)
+        self.max_sources = 0
 
-    async def generate(self, passages: dict[str, ReviewCitation]) -> ModelReview:
+    async def generate(self, passages: dict[str, ReviewCitation], max_sources: int) -> ModelReview:
         self.passages = passages
+        self.max_sources = max_sources
         return ModelReview.model_validate({
-            "summary": [{"text": "Managers approve exceptions.", "source_id": self.source_id}],
+            "summary": [{"text": "Managers approve exceptions.", "source_ids": self.source_ids}],
             "checks": [{
                 "category": "CLARITY",
                 "text": "Verify which managers are responsible.",
-                "source_id": self.source_id,
+                "source_ids": self.source_ids,
             }],
         })
 
@@ -74,6 +76,8 @@ def test_service_auth_snapshot_integrity_and_grounded_result() -> None:
     result = response.json()
     assert result["snapshotVersionId"] == body["snapshotVersionId"]
     assert result["summary"][0]["citation"] == {"excerpt": text, "page": None}
+    assert "additionalCitations" not in result["summary"][0]
+    assert provider.max_sources == 1
     assert result["checks"][0]["citation"] == {"excerpt": text, "page": None}
     assert "decision" not in result
 
@@ -91,8 +95,7 @@ def test_rejects_unknown_ids_and_does_not_review_over_limit_text() -> None:
 def test_pdf_citation_keeps_the_original_page_number() -> None:
     writer = PdfWriter()
     writer.add_blank_page(width=300, height=200)
-    page = writer.add_blank_page(width=300, height=200)
-    page[NameObject("/Resources")] = DictionaryObject({
+    resources = DictionaryObject({
         NameObject("/Font"): DictionaryObject({
             NameObject("/F1"): DictionaryObject({
                 NameObject("/Type"): NameObject("/Font"),
@@ -101,9 +104,12 @@ def test_pdf_citation_keeps_the_original_page_number() -> None:
             })
         })
     })
-    stream = DecodedStreamObject()
-    stream.set_data(b"BT /F1 12 Tf 20 100 Td (Managers approve exceptions.) Tj ET")
-    page.replace_contents(stream)
+    for text in [b"Managers approve exceptions.", b"Practice on a new example."]:
+        page = writer.add_blank_page(width=300, height=200)
+        page[NameObject("/Resources")] = resources
+        stream = DecodedStreamObject()
+        stream.set_data(b"BT /F1 12 Tf 20 100 Td (" + text + b") Tj ET")
+        page.replace_contents(stream)
     output = io.BytesIO()
     writer.write(output)
 
@@ -112,3 +118,25 @@ def test_pdf_citation_keeps_the_original_page_number() -> None:
     assert response.json()["summary"][0]["citation"] == {
         "excerpt": "Managers approve exceptions.", "page": 2,
     }
+    response = client(Provider("S1", "S2")).post(
+        PATH, json={**payload(output.getvalue()), "contractVersion": 2}, headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert response.json()["summary"][0]["additionalCitations"] == [
+        {"excerpt": "Practice on a new example.", "page": 3},
+    ]
+
+
+def test_v2_returns_adjacent_passages_and_rejects_duplicate_or_unknown_ids() -> None:
+    provider = Provider("S1", "S2")
+    text = "Review the problem, the approach, and the implementation.\n" * 7
+    text += "Finally, practice the pattern on a new example."
+    body = {**payload(text), "contractVersion": 2}
+    response = client(provider).post(PATH, json=body, headers=AUTH)
+    assert response.status_code == 200
+    point = response.json()["summary"][0]
+    assert point["citation"]["excerpt"] in text
+    assert "practice" in point["additionalCitations"][0]["excerpt"]
+    assert provider.max_sources == 4
+    for sources in [("S1", "S1"), ("S1", "S99")]:
+        assert client(Provider(*sources)).post(PATH, json=body, headers=AUTH).status_code == 502

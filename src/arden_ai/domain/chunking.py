@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
+from itertools import pairwise
 
 import tiktoken
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from arden_ai.domain.compiler import CompiledMarkdown, SourceSpan
+from arden_ai.domain.compiler import CompiledMarkdown
 
 CHUNKING_VERSION = "langchain-section-token-v1"
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small"
@@ -25,35 +27,6 @@ class PreparedChunk:
     source_block_ids: tuple[str, ...]
     parent_section_block_id: str | None
     heading_path: tuple[str, ...]
-
-
-def _overlapping_spans(
-    spans: tuple[SourceSpan, ...], start: int, end: int
-) -> tuple[SourceSpan, ...]:
-    return tuple(span for span in spans if span.start_offset < end and span.end_offset > start)
-
-
-def _parent_heading(
-    spans: tuple[SourceSpan, ...], start: int
-) -> tuple[str | None, tuple[str, ...]]:
-    headings = [
-        span for span in spans if span.block_type == "heading" and span.start_offset <= start
-    ]
-    if not headings:
-        return None, ()
-    parent = max(headings, key=lambda span: span.start_offset)
-    return parent.block_id, parent.heading_path
-
-
-def _sections(compiled: CompiledMarkdown) -> tuple[tuple[int, int], ...]:
-    heading_starts = sorted(
-        span.start_offset for span in compiled.source_map if span.block_type == "heading"
-    )
-    starts = ([0] if not heading_starts or heading_starts[0] > 0 else []) + heading_starts
-    return tuple(
-        (start, starts[index + 1] if index + 1 < len(starts) else len(compiled.markdown))
-        for index, start in enumerate(starts)
-    )
 
 
 def chunk_markdown(
@@ -82,15 +55,18 @@ def chunk_markdown(
     chunks: list[PreparedChunk] = []
     ordinal = 0
 
-    for section_start, section_end in _sections(compiled):
-        section_heading = next(
-            (
-                span
-                for span in compiled.source_map
-                if span.block_type == "heading" and span.start_offset == section_start
-            ),
-            None,
-        )
+    # Both compilers emit non-overlapping source spans in Markdown order.
+    spans = compiled.source_map
+    span_starts = [span.start_offset for span in spans]
+    span_ends = [span.end_offset for span in spans]
+    headings = {span.start_offset: span for span in spans if span.block_type == "heading"}
+    section_starts = list(headings)
+    if 0 not in headings:
+        section_starts.insert(0, 0)
+    section_bounds = [*section_starts, len(compiled.markdown)]
+
+    for section_start, section_end in pairwise(section_bounds):
+        section_heading = headings.get(section_start)
         if section_heading is not None:
             body_start = section_heading.end_offset
             while body_start < section_end and compiled.markdown[body_start].isspace():
@@ -116,8 +92,9 @@ def chunk_markdown(
             if not text.strip():
                 continue
 
-            overlapping = _overlapping_spans(compiled.source_map, raw_start, end)
-            parent_id, heading_path = _parent_heading(compiled.source_map, raw_start)
+            overlapping = spans[bisect_right(span_ends, raw_start) : bisect_left(span_starts, end)]
+            parent_id = section_heading.block_id if section_heading else None
+            heading_path = section_heading.heading_path if section_heading else ()
             breadcrumb = " > ".join(heading_path)
             embedding_text = f"Section: {breadcrumb}\n\n{text}" if breadcrumb else text
             content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()

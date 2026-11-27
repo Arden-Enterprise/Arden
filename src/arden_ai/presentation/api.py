@@ -38,7 +38,12 @@ from arden_ai.contracts.governed import (
 )
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
-from arden_ai.contracts.submission_review import SubmissionReviewRequest, SubmissionReviewResponse
+from arden_ai.contracts.submission_review import (
+    SubmissionReviewRequest,
+    SubmissionReviewRequestV2,
+    SubmissionReviewResponse,
+    SubmissionReviewResponseV2,
+)
 from arden_ai.contracts.writing import WritingRequest, WritingResponse
 from arden_ai.presentation.summary_failures import summary_failure
 
@@ -138,14 +143,14 @@ def create_api(
 
     @application.post(
         "/v1/submission-reviews",
-        response_model=SubmissionReviewResponse,
+        response_model=SubmissionReviewResponse | SubmissionReviewResponseV2,
         dependencies=[Depends(authorize_service)],
         tags=["submission-review-v1"],
     )
     async def review_submission(
-        request: SubmissionReviewRequest,
+        request: SubmissionReviewRequest | SubmissionReviewRequestV2,
         service: Annotated[SubmissionReviewer, Depends(runtime_submission_reviewer)],
-    ) -> SubmissionReviewResponse:
+    ) -> SubmissionReviewResponse | SubmissionReviewResponseV2:
         try:
             async with asyncio.timeout(55):
                 return await service.run(request)

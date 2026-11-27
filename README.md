@@ -204,6 +204,13 @@ LangChain's token-aware `RecursiveCharacterTextSplitter` inside each section. De
 target 600 tokens with 60-token overlap; section breadcrumbs are included in embedding text while
 raw Markdown offsets remain exact for citations.
 
+`POST /v1/submission-reviews` accepts review contracts 1 and 2. Contract 1 returns a single source
+per point for older Core releases. Contract 2 returns the primary citation and up to three
+additional excerpts resolved from the same immutable submitted snapshot. The provider selects
+existing passage IDs. Arden-AI rejects invalid selections and resolves each valid ID to its original
+source text and page. Reviewer AI extracts pending submissions directly and uses one structured
+generation. Publication chunking and embeddings do not participate in that request.
+
 ## Pipeline boundary
 
 1. Arden core creates a durable indexing generation for an approved immutable snapshot.

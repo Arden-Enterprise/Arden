@@ -28,9 +28,13 @@ SENSITIVE_CONTENT when the text itself suggests a confidentiality concern. Descr
 material by type, without repeating its values in your text. Frame uncertain issues as
 questions to verify. If no concrete issue is grounded in the passages, return an empty array.
 
-Write in the document's main language. Use plain text. For each point, select one existing
-source_id whose passage directly supports the text. Omit a check if one passage cannot anchor
-it. Do not write quotes, URLs, citations or new source IDs in the text. Do not recommend an
+Write in the document's main language. Use plain text. For each point, provide source_ids in
+reading order from the supplied passages. Respect max_sources_per_point. Support every material
+claim, including each step of a procedure, every example, and both sides of an apparent conflict.
+Include adjacent passages when the evidence crosses a passage boundary, and include evidence from
+other pages when needed. Use the smallest set that covers the point. If the full point cannot be
+supported within the limit, narrow the summary or omit the check. Do not write quotes, URLs,
+citations or new source IDs in the text. Do not recommend an
 approval, rejection, edit, publication or readership change. The human makes those decisions.
 """
 
@@ -52,9 +56,11 @@ class OpenAISubmissionReviewProvider:
         )
         self._review = model.with_structured_output(ModelReview, method="json_schema", strict=True)
 
-    async def generate(self, passages: dict[str, ReviewCitation]) -> ModelReview:
+    async def generate(self, passages: dict[str, ReviewCitation], max_sources: int) -> ModelReview:
         payload = json.dumps(
-            {"passages": {key: citation.excerpt for key, citation in passages.items()}},
+            {"max_sources_per_point": max_sources,
+             "passages": {key: {"page": citation.page, "text": citation.excerpt}
+                          for key, citation in passages.items()}},
             ensure_ascii=False,
             separators=(",", ":"),
         )

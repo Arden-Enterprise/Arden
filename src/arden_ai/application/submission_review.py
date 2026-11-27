@@ -1,16 +1,21 @@
 """Prepare bounded passages and resolve model-selected citations."""
 
 import asyncio
+import logging
+import time
 from collections.abc import Iterator
 from typing import Annotated, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from arden_ai.contracts.submission_review import (
+    MAX_REVIEW_CITATIONS,
     CheckCategory,
     ReviewCitation,
     SubmissionReviewRequest,
+    SubmissionReviewRequestV2,
     SubmissionReviewResponse,
+    SubmissionReviewResponseV2,
 )
 from arden_ai.domain.pdf import compile_pdf
 from arden_ai.domain.semantic_document import (
@@ -25,6 +30,7 @@ from arden_ai.domain.semantic_document import (
 
 MAX_REVIEW_TEXT = 32_000
 PASSAGE_LENGTH = 360
+logger = logging.getLogger(__name__)
 
 
 class UnsupportedSubmission(ValueError):
@@ -38,7 +44,10 @@ class InvalidSubmissionReview(ValueError):
 class ModelPoint(BaseModel):
     model_config = ConfigDict(extra="forbid")
     text: Annotated[str, Field(min_length=1, max_length=240)]
-    source_id: Annotated[str, Field(pattern=r"^S[1-9][0-9]{0,4}$")]
+    source_ids: Annotated[
+        list[Annotated[str, Field(pattern=r"^S[1-9][0-9]{0,4}$")]],
+        Field(min_length=1, max_length=MAX_REVIEW_CITATIONS),
+    ]
 
 
 class ModelCheck(ModelPoint):
@@ -52,7 +61,9 @@ class ModelReview(BaseModel):
 
 
 class SubmissionReviewProvider(Protocol):
-    async def generate(self, passages: dict[str, ReviewCitation]) -> ModelReview: ...
+    async def generate(
+        self, passages: dict[str, ReviewCitation], max_sources: int,
+    ) -> ModelReview: ...
 
 
 def _visible_inlines(inlines: list[Inline]) -> str:
@@ -72,7 +83,9 @@ def _visible_blocks(blocks: list[SemanticBlock]) -> Iterator[str]:
         yield from _visible_blocks(block.children)
 
 
-def _review_passages(request: SubmissionReviewRequest) -> dict[str, ReviewCitation]:
+def _review_passages(
+    request: SubmissionReviewRequest | SubmissionReviewRequestV2,
+) -> dict[str, ReviewCitation]:
     sections: list[tuple[int | None, str]]
     try:
         if request.content is None:
@@ -98,7 +111,9 @@ def _review_passages(request: SubmissionReviewRequest) -> dict[str, ReviewCitati
         while start < len(text):
             end = min(start + PASSAGE_LENGTH, len(text))
             if end < len(text):
-                split = max(text.rfind("\n", end - 90, end), text.rfind(" ", end - 90, end))
+                split = text.rfind("\n", end - 90, end)
+                if split < start:
+                    split = text.rfind(" ", end - 90, end)
                 if split >= start:
                     end = split + 1
             excerpt = text[start:end].strip()
@@ -116,20 +131,40 @@ class SubmissionReviewer:
     def __init__(self, provider: SubmissionReviewProvider) -> None:
         self._provider = provider
 
-    async def run(self, request: SubmissionReviewRequest) -> SubmissionReviewResponse:
+    async def run(
+        self, request: SubmissionReviewRequest | SubmissionReviewRequestV2,
+    ) -> SubmissionReviewResponse | SubmissionReviewResponseV2:
+        started = time.monotonic()
         passages = await asyncio.to_thread(_review_passages, request)
-        result = await self._provider.generate(passages)
+        prepared = time.monotonic()
+        multi_source = request.contract_version == 2
+        max_sources = MAX_REVIEW_CITATIONS if multi_source else 1
+        result = await self._provider.generate(passages, max_sources)
+        generated = time.monotonic()
 
         def cite(point: ModelPoint) -> dict[str, object]:
-            citation = passages.get(point.source_id)
-            if citation is None or not point.text.strip():
+            ids = point.source_ids
+            if (len(ids) > max_sources or len(set(ids)) != len(ids)
+                or any(source_id not in passages for source_id in ids) or not point.text.strip()):
                 raise InvalidSubmissionReview("unverifiable review point")
-            return {"text": point.text.strip(), "citation": citation}
+            sources = [passages[source_id] for source_id in ids]
+            citations = list({(source.page, source.excerpt): source for source in sources}.values())
+            return {"text": point.text.strip(), "citation": citations[0],
+                    **({"additionalCitations": citations[1:]} if multi_source else {})}
 
-        return SubmissionReviewResponse.model_validate({
+        response = SubmissionReviewResponseV2 if multi_source else SubmissionReviewResponse
+        verified = response.model_validate({
+            "contractVersion": request.contract_version,
             "requestId": request.request_id,
             "snapshotVersionId": request.snapshot_version_id,
             "snapshotContentHash": request.snapshot_content_hash,
             "summary": [cite(point) for point in result.summary],
             "checks": [{**cite(point), "category": point.category} for point in result.checks],
         })
+        logger.info("Submission review completed", extra={
+            "operation_id": str(request.request_id),
+            "passage_count": len(passages),
+            "source_preparation_ms": round((prepared - started) * 1000),
+            "inference_ms": round((generated - prepared) * 1000),
+        })
+        return verified

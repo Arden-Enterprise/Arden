@@ -13,8 +13,7 @@ from arden_ai.contracts.indexing import ContractModel, Sha256
 CheckCategory = Literal["CLARITY", "CONSISTENCY", "MISSING_CONTEXT", "SENSITIVE_CONTENT"]
 
 
-class SubmissionReviewRequest(ContractModel):
-    contract_version: Literal[1] = 1
+class _SubmissionSource(ContractModel):
     request_id: UUID
     snapshot_version_id: UUID
     snapshot_content_hash: Sha256
@@ -40,10 +39,18 @@ class SubmissionReviewRequest(ContractModel):
         return data
 
     @model_validator(mode="after")
-    def verify_snapshot(self) -> "SubmissionReviewRequest":
+    def verify_snapshot(self) -> "_SubmissionSource":
         if hashlib.sha256(self.source_bytes()).hexdigest() != self.snapshot_content_hash:
             raise ValueError("snapshot hash mismatch")
         return self
+
+
+class SubmissionReviewRequest(_SubmissionSource):
+    contract_version: Literal[1] = 1
+
+
+class SubmissionReviewRequestV2(_SubmissionSource):
+    contract_version: Literal[2]
 
 
 class ReviewCitation(ContractModel):
@@ -60,10 +67,32 @@ class ReviewCheck(ReviewPoint):
     category: CheckCategory
 
 
-class SubmissionReviewResponse(ContractModel):
-    contract_version: Literal[1] = 1
+class _ReviewIdentity(ContractModel):
     request_id: UUID
     snapshot_version_id: UUID
     snapshot_content_hash: Sha256
+
+
+class SubmissionReviewResponse(_ReviewIdentity):
+    contract_version: Literal[1] = 1
     summary: Annotated[list[ReviewPoint], Field(min_length=1, max_length=3)]
     checks: Annotated[list[ReviewCheck], Field(max_length=3)]
+
+
+MAX_REVIEW_CITATIONS = 4
+
+
+class ReviewPointV2(ReviewPoint):
+    additional_citations: Annotated[
+        list[ReviewCitation], Field(max_length=MAX_REVIEW_CITATIONS - 1)
+    ]
+
+
+class ReviewCheckV2(ReviewPointV2):
+    category: CheckCategory
+
+
+class SubmissionReviewResponseV2(_ReviewIdentity):
+    contract_version: Literal[2]
+    summary: Annotated[list[ReviewPointV2], Field(min_length=1, max_length=3)]
+    checks: Annotated[list[ReviewCheckV2], Field(max_length=3)]
