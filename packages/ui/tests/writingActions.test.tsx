@@ -66,7 +66,7 @@ it("keeps Explain available when page formatting prevents a safe replacement", (
   expect((screen.getByRole("button", { name: "Improve Writing" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("button", { name: "Reformat" }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole("button", { name: "Explain" }) as HTMLButtonElement).disabled).toBe(false);
-  expect(screen.getByRole("status").textContent).toContain("select plain text");
+  expect(screen.getByRole("status").textContent).toContain("select text in one paragraph with a single style");
 });
 
 it("shows the formatting row with its active state, also without AI writing", () => {

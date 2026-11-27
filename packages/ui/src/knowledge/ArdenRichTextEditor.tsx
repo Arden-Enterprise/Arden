@@ -9,6 +9,7 @@ import type { Platform } from "../shared/types";
 import { WritingActionPanel, type InlineFormat } from "../shared/WritingActionPanel";
 import { pointAnchor, type EditorActionAnchor } from "../shared/editor-action-anchor";
 import { runEditorClipboard, type EditorClipboardAction } from "../shared/editor-clipboard";
+import { uniformSelectionMarks } from "./writingSelectionMarks";
 
 type ArdenEditor = BlockNoteEditor<
   typeof ardenDocumentSchema.blockSchema,
@@ -218,7 +219,10 @@ const disabledBlockNoteUi = {
   attributionTooltip: false,
 } as const;
 
-type WritingSelection = { text: string; from: number; to: number; body: string; plain: boolean; wholeBlock: boolean; page?: boolean };
+type EditorMark = ArdenEditor["_tiptapEditor"]["state"]["doc"]["marks"][number];
+/** `plain` means AI text can replace the selection safely; `marks` is the formatting the replacement keeps. */
+type WritingSelection = { text: string; from: number; to: number; body: string; plain: boolean; wholeBlock: boolean;
+  page?: boolean; marks?: readonly EditorMark[] };
 
 function richTextAnchor(editor: ArdenEditor): EditorActionAnchor {
   const { view, state } = editor._tiptapEditor;
@@ -244,11 +248,9 @@ function captureWritingSelection(editor: ArdenEditor): WritingSelection | null {
   const { from, to, $from, $to } = state.selection;
   if (!text.trim() || from === to || text.length > 12_000) return null;
   const sameBlock = $from.parent === $to.parent && $from.parent.isTextblock;
-  let plain = sameBlock;
-  state.doc.nodesBetween(from, to, node => {
-    if (node.isText && node.marks.length > 0) plain = false;
-  });
-  return { text, from, to, body: serializeArdenDocument(editor.document), plain,
+  // Text in one style (all bold, all italic, ...) keeps that style; mixed styles or links stay blocked.
+  const marks = sameBlock ? uniformSelectionMarks(state.doc, from, to) : null;
+  return { text, from, to, body: serializeArdenDocument(editor.document), plain: marks !== null, marks: marks ?? undefined,
     wholeBlock: sameBlock && from === $from.start() && to === $to.end() };
 }
 
@@ -399,7 +401,10 @@ export function ArdenRichTextEditor({ body, instanceKey, disabled = false, maxLe
           editor.pasteMarkdown(replacement);
         } else {
           const tiptap = editor._tiptapEditor;
-          tiptap.view.dispatch(tiptap.state.tr.insertText(replacement, writingSelection.from, writingSelection.to));
+          const { from, to, marks = [] } = writingSelection;
+          tiptap.view.dispatch(replacement
+            ? tiptap.state.tr.replaceWith(from, to, tiptap.state.schema.text(replacement, marks))
+            : tiptap.state.tr.delete(from, to));
         }
         suppressSelection.current = true;
         setPopup(null); setWritingSelection(null); editor.focus();
