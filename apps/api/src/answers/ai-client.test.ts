@@ -1,11 +1,15 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpAskArdenClient } from "./ai-client.js";
-import type { GenerationRequest, RetrievalRequest } from "./governed-contracts.js";
+import { parseGenerationV3Response, type GenerationRequest, type GenerationV3Request,
+  type RetrievalRequest } from "./governed-contracts.js";
 import type { ReaderSourceRequest, ReaderSourceResponse } from "../reader-ai/contracts.js";
+import { incompleteUsageMarker } from "./usage-contracts.js";
 
 const golden = JSON.parse(readFileSync(new URL("./fixtures/governed-v2.json", import.meta.url), "utf8")) as {
   retrievalRequest: RetrievalRequest; retrievalResponse: unknown; generationRequest: GenerationRequest; generationResponse: unknown };
+const goldenV3 = JSON.parse(readFileSync(new URL("./fixtures/governed-v3.json", import.meta.url), "utf8")) as {
+  generationV3Request: GenerationV3Request; generationV3Response: unknown };
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe("paired v2 HTTP adapter", () => {
   it.each(["TIMEOUT", "PROVIDER_BUSY", "PROVIDER_AUTH", "INVALID_OUTPUT"])("accepts only the safe Summary failure %s", async code => {
@@ -78,5 +82,84 @@ describe("paired v2 HTTP adapter", () => {
     await expect(client.retrieve(golden.retrievalRequest)).rejects.toMatchObject({ code: "AI_ANSWER_TOO_LARGE" });
     await expect(client.retrieve(golden.retrievalRequest)).rejects.toMatchObject({ code: "AI_ANSWER_INVALID_JSON" });
     await expect(client.retrieve(golden.retrievalRequest)).rejects.toMatchObject({ code: "INVALID_EVIDENCE" });
+  });
+});
+
+describe("additive v3 HTTP adapter", () => {
+  it("posts GenerationV3Request to /v3/generations with 120_000 ms timeout and parses golden response", async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(Response.json(goldenV3.generationV3Response));
+    vi.stubGlobal("fetch", fetch);
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const client = new HttpAskArdenClient("http://ai.example.test", "synthetic-v3-token", 9_999);
+
+    const result = await client.generateV3(goldenV3.generationV3Request);
+    expect(result).toEqual({
+      ...(goldenV3.generationV3Response as Record<string, unknown>),
+      usageContractVersion: 1,
+      usageEvents: [incompleteUsageMarker(goldenV3.generationV3Request.requestId, "CHAT_GENERATION")],
+    });
+    expect(String(fetch.mock.calls[0]![0])).toBe("http://ai.example.test/v3/generations");
+    expect(fetch.mock.calls[0]![1].headers.authorization).toBe("Bearer synthetic-v3-token");
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toEqual(goldenV3.generationV3Request);
+    expect(timeout).toHaveBeenCalledWith(120_000);
+  });
+
+  it("passes malformed uiSurface through raw when uiSurfaceStatus is GENERATED without throwing INVALID_EVIDENCE", () => {
+    const malformed = {
+      ...(goldenV3.generationV3Response as Record<string, unknown>),
+      uiSurface: { schemaVersion: 99, nodes: "corrupted", unexpected: true },
+      uiSurfaceStatus: "GENERATED",
+    };
+    const parsed = parseGenerationV3Response(malformed, goldenV3.generationV3Request);
+    expect(parsed.status).toBe("ANSWERED");
+    expect(parsed.uiSurfaceStatus).toBe("GENERATED");
+    expect(parsed.uiSurface).toEqual({ schemaVersion: 99, nodes: "corrupted", unexpected: true });
+  });
+
+  it.each(["OMITTED_INVALID", "DISABLED"] as const)(
+    "normalizes uiSurface to null for non-GENERATED status %s without failing chat delivery",
+    (uiSurfaceStatus) => {
+      const response = {
+        ...(goldenV3.generationV3Response as Record<string, unknown>),
+        uiSurface: null,
+        uiSurfaceStatus,
+      };
+      const parsed = parseGenerationV3Response(response, goldenV3.generationV3Request);
+      expect(parsed.uiSurfaceStatus).toBe(uiSurfaceStatus);
+      expect(parsed.uiSurface).toBeNull();
+    },
+  );
+
+  it("accepts INSUFFICIENT_EVIDENCE with OMITTED_INSUFFICIENT and null uiSurface", () => {
+    const response = {
+      contractVersion: 3,
+      requestId: goldenV3.generationV3Request.requestId,
+      status: "INSUFFICIENT_EVIDENCE",
+      answer: "No authorized policy answers that question.",
+      citations: [],
+      usedEvidence: [goldenV3.generationV3Request.evidence[0]!.chunkId],
+      uiSurface: null,
+      uiSurfaceStatus: "OMITTED_INSUFFICIENT",
+    };
+    const parsed = parseGenerationV3Response(response, goldenV3.generationV3Request);
+    expect(parsed).toEqual({
+      ...response, usageContractVersion: 1,
+      usageEvents: [incompleteUsageMarker(response.requestId, "CHAT_GENERATION")],
+    });
+  });
+
+  it("rejects invalid contractVersion, unknown uiSurfaceStatus, extra keys, forged quotes, or undeclared usedEvidence", () => {
+    const base = goldenV3.generationV3Response as Record<string, unknown>;
+    const badCases = [
+      { ...base, contractVersion: 2 },
+      { ...base, uiSurfaceStatus: "BOGUS" },
+      { ...base, extra: true },
+      { ...base, citations: [{ chunkId: goldenV3.generationV3Request.evidence[0]!.chunkId, quote: "not verbatim" }] },
+      { ...base, usedEvidence: [] },
+      { ...base, answer: "a".repeat(12_001) },
+    ];
+    for (const candidate of badCases) {
+      expect(() => parseGenerationV3Response(candidate, goldenV3.generationV3Request)).toThrow("INVALID_EVIDENCE");
+    }
   });
 });

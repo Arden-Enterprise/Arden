@@ -1,5 +1,6 @@
 import { useId, useState } from "react";
 import { CitedAnswer } from "../ask-arden/CitedAnswer";
+import { ApiError, submitAiAnswerFeedback } from "../shared/api-client";
 import { askReaderQuestion, type ReaderAnswer } from "../shared/reader-question-api";
 import { Icon } from "../shared/Icon";
 import { useReaderOperation, type ReaderOperationOptions } from "./useReaderOperation";
@@ -9,15 +10,32 @@ import { ReaderAiGenerated } from "./ReaderAiPanel";
 export function ReaderQuestionPanel({ id, labelledBy, options, access }: { id: string; labelledBy: string;
   options: ReaderOperationOptions; access: ReaderAccessSession }) {
   const fieldId = useId(), [query, setQuery] = useState(""), [submitted, setSubmitted] = useState("");
+  // Feedback belongs to one rated answer in one access scope; a late result for another answer is ignored.
+  const [rating, setRating] = useState<{ key: string; value: "POSITIVE" | "NEGATIVE" | "SAVING" | null; error: boolean } | null>(null);
   const operation = useReaderOperation<ReaderAnswer, string>(options, access, {
     label: "Document Q&A", busyRetrySeconds: 10,
     run: (config, input, signal) => askReaderQuestion(config.platform, config.context, input, signal),
   });
   const { state } = operation, waiting = state.status === "loading" || state.status === "checking";
+  const answerKey = state.result ? `${options.context.organizationId}:${state.result.requestId}` : null;
+  const current = rating && rating.key === answerKey ? rating : null;
+  const feedback = current?.value ?? null, feedbackError = current?.error ?? false;
+  const rateAnswer = async (value: "POSITIVE" | "NEGATIVE") => {
+    if (!state.result || !answerKey || feedback) return;
+    const key = answerKey;
+    setRating({ key, value: "SAVING", error: false });
+    try {
+      await submitAiAnswerFeedback(options.platform, options.context.organizationId, state.result.requestId, value);
+      setRating((previous) => previous?.key === key ? { key, value, error: false } : previous);
+    } catch (error) {
+      setRating((previous) => previous?.key === key
+        ? { key, value: null, error: !(error instanceof ApiError && error.status === 404) } : previous);
+    }
+  };
   if (options.visible === false) return null;
   const submit = () => {
     if (!query.trim() || waiting) return;
-    options.onCitation(null); setSubmitted(query); void operation.open(query);
+    options.onCitation(null); setSubmitted(query); setRating(null); void operation.open(query);
   };
   const showQuestion = Boolean(submitted) && state.status !== "closed";
   return <section id={id} role="tabpanel" className="reader-ai-body reader-ai-ask" aria-labelledby={labelledBy}>
@@ -37,6 +55,13 @@ export function ReaderQuestionPanel({ id, labelledBy, options, access }: { id: s
               <button className="reader-ai-source" key={index} type="button" aria-label={`View answer source ${index + 1}`}
                 onClick={() => void operation.navigate(citation)}>{citation.page ? `p. ${citation.page}` : "Source"}</button>)}</div>
           </>}
+        <div className="ask-answer-feedback" aria-label="Rate this answer">
+          <span>{feedbackError ? "Feedback could not be saved." : feedback === "POSITIVE" || feedback === "NEGATIVE" ? "Thanks for your feedback." : "Was this helpful?"}</span>
+          <button type="button" disabled={Boolean(feedback)} aria-pressed={feedback === "POSITIVE"}
+            onClick={() => void rateAnswer("POSITIVE")}>{feedback === "SAVING" ? "Saving…" : "Yes"}</button>
+          <button type="button" disabled={Boolean(feedback)} aria-pressed={feedback === "NEGATIVE"}
+            onClick={() => void rateAnswer("NEGATIVE")}>No</button>
+        </div>
         <p className="sr-only" role="status">Answer ready.</p>
       </div>}
     </div>

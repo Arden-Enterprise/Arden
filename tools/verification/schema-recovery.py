@@ -1,4 +1,4 @@
-"""Rehearse the publication reset, 0022-0070 forward upgrade and scoped restore on a disposable CI DB.
+"""Rehearse the publication reset, 0022-0077 forward upgrade and scoped restore on a disposable CI DB.
 
 This is verification, not a release/migration command. It accepts only the
 GitHub job's PostgreSQL service and creates its own unpredictable test database.
@@ -16,7 +16,7 @@ import uuid
 
 def validate_migration_inventory(migrations):
     """Keep this destructive disposable rehearsal bounded to reviewed history."""
-    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 71)]:
+    if [p.name[:4] for p in migrations] != [f"{n:04}" for n in range(1, 78)]:
         raise ValueError("Revisit this bounded rehearsal before changing migration inventory")
 
 
@@ -112,7 +112,7 @@ def main():
         except subprocess.CalledProcessError:
             assert snapshot() == before_reviewer_upgrade, "Failed reviewer upgrade changed baseline"
         sql(forward + "COMMIT;")
-        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"70"
+        assert sql("SELECT count(*) FROM public.arden_schema_migrations;").strip() == b"77"
         assert sql("SELECT name FROM arden.knowledge_base;").strip() == b"Preserve on reviewer upgrade"
         assert sql("SELECT count(*) FROM arden.organization;").strip() == b"1"
         assert sql("SELECT column_default FROM information_schema.columns "
@@ -121,13 +121,13 @@ def main():
         # Recover only Arden and its ledger, keeping the external service probe.
         restore = docker("exec", "-i", container, "pg_restore", "--file=-", data=backup)
         restore += docker("exec", "-i", container, "pg_restore", "--file=-", data=ledger)
-        sql("BEGIN; DROP SCHEMA arden CASCADE; DROP TABLE public.arden_schema_migrations;\n"
+        sql("BEGIN; DROP SCHEMA IF EXISTS arden_system CASCADE; DROP SCHEMA arden CASCADE; DROP TABLE public.arden_schema_migrations;\n"
             + restore.decode("utf-8") + "\nCOMMIT;")
         assert snapshot() == before, "Restored data/ledger differs from baseline"
         assert sql("SELECT value FROM public.outside_restore_boundary;").strip() == b"preserve-external-service"
         assert sql("SELECT to_regclass('arden.knowledge_index_generation') IS NULL;").strip() == b"t"
         assert sql("SELECT count(*) FROM pg_trigger WHERE tgname='trg_audit_event_append_only';").strip() == b"1"
-        print("PASS: atomic reset/forward failures, populated 0021->0070 upgrade, "
+        print("PASS: atomic reset/forward failures, populated 0021->0077 upgrade, "
               "exact table/ledger restore, external boundary preserved")
     finally:
         docker("exec", container, "dropdb", "-U", "postgres", database)

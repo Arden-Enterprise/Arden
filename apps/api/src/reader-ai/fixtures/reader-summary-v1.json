@@ -32,5 +32,7 @@
         }
       ]
     }
-  ]
+  ],
+  "usageContractVersion": 1,
+  "usageEvents": []
 }

@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { ASK_PANEL_MIN, ASK_PANEL_STEP, clampAskPanelWidth } from "./askPanelWidth";
 
 export type AskPanelResize = {
@@ -11,15 +11,26 @@ export type AskPanelResize = {
   onCommit: (width: number) => void;
   /** Double-click: back to the default width. */
   onReset: () => void;
+  /** Notifies the shell while an interactive pointer drag is active so layout transitions pause. */
+  onDraggingChange?: (dragging: boolean) => void;
 };
 
 /**
  * The docked Ask Arden panel's left edge (spec F13-RESIZE). Drag to resize; with the keyboard, Left widens and
  * Right narrows by 16px, Home and End go to the narrowest and widest. A window splitter in ARIA terms.
  */
-export function AskPanelResizeHandle({ width, max, onChange, onCommit, onReset }: AskPanelResize) {
+export function AskPanelResizeHandle({ width, max, onChange, onCommit, onReset, onDraggingChange }: AskPanelResize) {
   const drag = useRef<{ pointerId: number; startX: number; startWidth: number; width: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const draggingChangeRef = useRef(onDraggingChange);
+  draggingChangeRef.current = onDraggingChange;
+
+  useEffect(() => () => {
+    if (drag.current !== null) {
+      drag.current = null;
+      draggingChangeRef.current?.(false);
+    }
+  }, []);
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -27,6 +38,7 @@ export function AskPanelResizeHandle({ width, max, onChange, onCommit, onReset }
     event.currentTarget.setPointerCapture?.(event.pointerId);
     drag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: width, width };
     setDragging(true);
+    onDraggingChange?.(true);
   };
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     const current = drag.current;
@@ -40,6 +52,7 @@ export function AskPanelResizeHandle({ width, max, onChange, onCommit, onReset }
     if (!current || current.pointerId !== event.pointerId) return;
     drag.current = null;
     setDragging(false);
+    onDraggingChange?.(false);
     if (current.width !== current.startWidth) onCommit(current.width);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {

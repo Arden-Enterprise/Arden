@@ -2,7 +2,7 @@ import { SignJWT } from "jose";
 
 export type NotificationRealtimeConfiguration = {
   endpoint: string;
-  apiKey: string;
+  gatewayApiKey?: string | null;
   signingKey: Uint8Array;
   namespace: string;
 };
@@ -17,15 +17,16 @@ export type NotificationRealtimeCredential = {
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const namespacePattern = /^[a-z0-9][a-z0-9_-]{1,39}$/;
+const socketTokenLifetimeSeconds = 24 * 60 * 60;
 
 export function notificationRealtimeConfiguration(environment: NodeJS.ProcessEnv): NotificationRealtimeConfiguration | null {
   const endpointValue = environment.SUPABASE_REALTIME_PUBLIC_URL?.trim();
-  const apiKey = (environment.SUPABASE_PUBLISHABLE_KEY ?? environment.SUPABASE_ANON_KEY)?.trim();
+  const gatewayApiKey = environment.SUPABASE_REALTIME_API_KEY?.trim() || null;
   const signingSecret = environment.ARDEN_NOTIFICATION_JWT_SECRET?.trim();
   const namespace = environment.ARDEN_NOTIFICATION_CHANNEL_NAMESPACE?.trim();
-  if (!endpointValue && !signingSecret && !namespace) return null;
-  if (!endpointValue || !apiKey || !signingSecret || !namespace) {
-    throw new Error("Notification Realtime requires SUPABASE_REALTIME_PUBLIC_URL, a Supabase publishable key, ARDEN_NOTIFICATION_JWT_SECRET, and ARDEN_NOTIFICATION_CHANNEL_NAMESPACE together");
+  if (!endpointValue && !gatewayApiKey && !signingSecret && !namespace) return null;
+  if (!endpointValue || !signingSecret || !namespace) {
+    throw new Error("Notification Realtime requires SUPABASE_REALTIME_PUBLIC_URL, ARDEN_NOTIFICATION_JWT_SECRET, and ARDEN_NOTIFICATION_CHANNEL_NAMESPACE together");
   }
   const endpoint = new URL(endpointValue);
   const loopback = ["127.0.0.1", "localhost", "[::1]"].includes(endpoint.hostname);
@@ -37,8 +38,11 @@ export function notificationRealtimeConfiguration(environment: NodeJS.ProcessEnv
   if (!/^[0-9a-f]{64}$/i.test(signingSecret)) {
     throw new Error("ARDEN_NOTIFICATION_JWT_SECRET must be a 64-character hexadecimal secret");
   }
+  if (gatewayApiKey !== null && (gatewayApiKey.length < 16 || gatewayApiKey.length > 4096)) {
+    throw new Error("SUPABASE_REALTIME_API_KEY must be between 16 and 4096 characters when set");
+  }
   if (!namespacePattern.test(namespace)) throw new Error("ARDEN_NOTIFICATION_CHANNEL_NAMESPACE has an invalid format");
-  return { endpoint: endpoint.toString().replace(/\/$/, ""), apiKey,
+  return { endpoint: endpoint.toString().replace(/\/$/, ""), gatewayApiKey,
     signingKey: new TextEncoder().encode(signingSecret), namespace };
 }
 
@@ -49,6 +53,14 @@ export function notificationTopic(namespace: string, organizationId: string, mem
   return `arden-notifications:${namespace}:${organizationId}:${membershipId}`;
 }
 
+async function signNotificationSocketToken(configuration: NotificationRealtimeConfiguration, nowSeconds: number): Promise<string> {
+  return new SignJWT({ role: "arden_notification_socket", namespace: configuration.namespace })
+    .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+    .setIssuedAt(nowSeconds).setExpirationTime(nowSeconds + socketTokenLifetimeSeconds)
+    .setIssuer("arden-core").setSubject("arden-notification-socket")
+    .sign(configuration.signingKey);
+}
+
 export async function signNotificationReaderToken(configuration: NotificationRealtimeConfiguration,
   input: { userId: string; organizationId: string; membershipId: string }): Promise<NotificationRealtimeCredential> {
   if (!uuidPattern.test(input.userId) || !uuidPattern.test(input.organizationId) || !uuidPattern.test(input.membershipId)) {
@@ -56,14 +68,17 @@ export async function signNotificationReaderToken(configuration: NotificationRea
   }
   const topic = notificationTopic(configuration.namespace, input.organizationId, input.membershipId);
   const now = Math.floor(Date.now() / 1000);
-  const accessToken = await new SignJWT({
-    role: "arden_notification_reader", topic,
-    namespace: configuration.namespace,
-    organization_id: input.organizationId, membership_id: input.membershipId,
-  }).setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .setIssuedAt(now).setExpirationTime(now + 120).setIssuer("arden-core")
-    .setSubject(input.userId).sign(configuration.signingKey);
-  return { endpoint: configuration.endpoint, apiKey: configuration.apiKey, accessToken, topic,
+  const [apiKey, accessToken] = await Promise.all([
+    configuration.gatewayApiKey ? Promise.resolve(configuration.gatewayApiKey) : signNotificationSocketToken(configuration, now),
+    new SignJWT({
+      role: "arden_notification_reader", topic,
+      namespace: configuration.namespace,
+      organization_id: input.organizationId, membership_id: input.membershipId,
+    }).setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .setIssuedAt(now).setExpirationTime(now + 120).setIssuer("arden-core")
+      .setSubject(input.userId).sign(configuration.signingKey),
+  ]);
+  return { endpoint: configuration.endpoint, apiKey, accessToken, topic,
     expiresAt: new Date((now + 120) * 1000).toISOString() };
 }
 
@@ -86,10 +101,18 @@ export async function broadcastNotification(configuration: NotificationRealtimeC
   fetcher: typeof fetch = fetch): Promise<void> {
   const topic = notificationTopic(configuration.namespace, input.organizationId, input.membershipId);
   const senderToken = await signNotificationSenderToken(configuration, topic);
-  const response = await fetcher(`${configuration.endpoint}/api/broadcast/${topic}/events/notification?private=true`, {
+  const response = await fetcher(`${configuration.endpoint}/api/broadcast`, {
     method: "POST",
-    headers: { apikey: configuration.apiKey, authorization: `Bearer ${senderToken}`, "content-type": "application/json" },
-    body: JSON.stringify({ notificationId: input.notificationId }),
+    headers: {
+      apikey: configuration.gatewayApiKey ?? senderToken,
+      authorization: `Bearer ${senderToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      messages: [
+        { topic, event: "notification", payload: { notificationId: input.notificationId }, private: true },
+      ],
+    }),
     signal: AbortSignal.timeout(5_000),
   });
   if (!response.ok) throw new Error(`REALTIME_HTTP_${response.status}`);

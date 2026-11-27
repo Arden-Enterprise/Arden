@@ -201,7 +201,9 @@ export function PersonalWorkspacePage({ controller, platform, organizationId, co
               {isDirty && <button type="button" className="secondary-button" disabled={saving} onClick={() => setDiscarding(true)}>Discard changes</button>}
               {shareButton}
               {headerMenu(current)}
-              <button type="button" className="primary-button" disabled={!isDirty || saving} onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : "Save"}</button>
+              {/* Notes save themselves (decision 0030); a manual save is offered only to retry one that failed. */}
+              {error && isDirty && <button type="button" className="secondary-button" disabled={saving}
+                onClick={() => void controller.save(platform, organizationId)}>{saving ? "Saving…" : "Try again"}</button>}
             </>}
             platform={platform} organizationId={organizationId} assistantEnabled={serverBacked}
             onTitleChange={controller.editTitle} onBodyChange={controller.editBody} />}

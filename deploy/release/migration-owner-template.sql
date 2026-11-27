@@ -45,6 +45,22 @@ BEGIN
        OR to_regclass('public.arden_schema_migrations') IS NULL THEN
         RAISE EXCEPTION 'The Arden schema or its migration ledger is missing';
     END IF;
+    -- The isolated System Admin schema (0072/0074) stays with the bootstrap superuser: its
+    -- SECURITY DEFINER routines read FORCE RLS tables, and this transfer never touches it.
+    IF to_regnamespace('arden_system') IS NOT NULL AND EXISTS (
+        SELECT owner_oid FROM (
+            SELECT n.nspowner AS owner_oid FROM pg_namespace n WHERE n.nspname = 'arden_system'
+            UNION
+            SELECT c.relowner FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = 'arden_system'
+            UNION
+            SELECT p.proowner FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+             WHERE n.nspname = 'arden_system'
+        ) owned JOIN pg_roles owner_role ON owner_role.oid = owned.owner_oid
+         WHERE NOT owner_role.rolsuper
+    ) THEN
+        RAISE EXCEPTION 'The arden_system schema has a non-administrator owner; review it before transfer';
+    END IF;
     IF EXISTS (
         SELECT owner_oid
           FROM (

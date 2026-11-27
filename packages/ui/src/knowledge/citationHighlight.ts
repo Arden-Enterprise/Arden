@@ -1,4 +1,4 @@
-import { findQuoteInSegments, type TextMatch } from "./citationTextMatch";
+import { findPageQuoteMatches, findQuoteInSegments, type TextMatch } from "./citationTextMatch";
 
 export function textNodesIn(root: Node): Text[] {
   const walker = root.ownerDocument!.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -22,21 +22,46 @@ function rangesFor(nodes: readonly Text[], match: TextMatch): Array<{ node: Text
  * Wraps the quote in `<mark>` elements. Only for DOM this code owns (the PDF text layer);
  * an editor-managed DOM would discard the change, so use {@link highlightQuoteRanges} there.
  */
-export function markQuote(root: HTMLElement, quote: string, className: string): { marks: HTMLElement[]; complete: boolean } {
+export function markQuote(root: HTMLElement, quote: string, className: string, onCitedPage = false): { marks: HTMLElement[]; complete: boolean } {
+  return markQuotes(root, [quote], className, onCitedPage);
+}
+
+export function markQuotes(root: HTMLElement, quotes: readonly string[], className: string, onCitedPage = false): { marks: HTMLElement[]; complete: boolean } {
   const nodes = textNodesIn(root);
-  const match = findQuoteInSegments(nodes.map((node) => node.data), quote);
-  if (!match) return { marks: [], complete: false };
-  const marks: HTMLElement[] = [];
-  for (const { node, from, to } of rangesFor(nodes, match).reverse()) {
-    const middle = from > 0 ? node.splitText(from) : node;
-    if (to - from < middle.data.length) middle.splitText(to - from);
-    const mark = root.ownerDocument.createElement("mark");
-    mark.className = className;
-    middle.parentNode!.insertBefore(mark, middle);
-    mark.appendChild(middle);
-    marks.unshift(mark);
+  const segments = nodes.map(node => node.data);
+  const matches = quotes.map(quote => onCitedPage ? findPageQuoteMatches(segments, quote) : [findQuoteInSegments(segments, quote)]);
+  const rangesByNode = new Map<Text, Array<{ from: number; to: number }>>();
+  for (const match of matches.flat()) {
+    if (!match) continue;
+    for (const { node, from, to } of rangesFor(nodes, match)) {
+      const ranges = rangesByNode.get(node) ?? [];
+      ranges.push({ from, to });
+      rangesByNode.set(node, ranges);
+    }
   }
-  return { marks, complete: match.complete };
+  const marks: HTMLElement[] = [];
+  for (const node of nodes) {
+    const ranges = rangesByNode.get(node);
+    if (!ranges) continue;
+    const merged: typeof ranges = [];
+    for (const range of ranges.sort((left, right) => left.from - right.from)) {
+      const last = merged.at(-1);
+      if (last && last.to >= range.from) last.to = Math.max(last.to, range.to);
+      else merged.push(range);
+    }
+    const nodeMarks = [];
+    for (const { from, to } of merged.reverse()) {
+      const middle = from > 0 ? node.splitText(from) : node;
+      if (to - from < middle.data.length) middle.splitText(to - from);
+      const mark = root.ownerDocument.createElement("mark");
+      mark.className = className;
+      middle.parentNode!.insertBefore(mark, middle);
+      mark.appendChild(middle);
+      nodeMarks.unshift(mark);
+    }
+    marks.push(...nodeMarks);
+  }
+  return { marks, complete: matches.every(group => group[0]?.complete === true) };
 }
 
 export function clearMarks(root: HTMLElement, className: string): void {

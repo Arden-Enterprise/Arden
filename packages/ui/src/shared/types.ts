@@ -1,6 +1,6 @@
 export type Platform = "web" | "desktop";
 
-export type WorkspaceView = "ask-arden" | "personal-workspace" | "organization-access" | "knowledge" | "review-queue";
+export type WorkspaceView = "ask-arden" | "personal-workspace" | "organization-access" | "knowledge" | "review-queue" | "graph";
 
 export type PrivateNote = {
   id: string;

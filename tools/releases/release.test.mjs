@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 let release;
@@ -233,4 +234,159 @@ test("preflight accepts the operator's non-promotable manual baseline format", a
   status.active.eligible_for_promotion = false;
   status.active.manifest.images.api.id = "unverified";
   await assert.rejects(() => release.checkReadiness(environment, async () => status));
+});
+
+test("production dual-preflight checks status and plan-migrations read-only without mutating", async () => {
+  const main = { ...environment, GITHUB_REF_NAME: "main" };
+  const source = inventorySource(main.GITHUB_SHA, "b".repeat(40));
+  const calls = [];
+  const plan = await release.checkProductionPromotionReadiness(main, source, async request => {
+    calls.push(request.op);
+    if (request.op === "status") {
+      return { active: { manifest: { schema: 2, commit: "b".repeat(40) } }, pending: null };
+    }
+    return { status: "NO_PENDING", migration_ids: [] };
+  }, async () => main.GITHUB_SHA);
+  assert.deepEqual(plan, { status: "NO_PENDING", migration_ids: [] });
+  assert.deepEqual(calls, ["status", "plan-migrations"]);
+});
+
+test("production dual-preflight blocks REQUIRES_OPERATOR, RECOVERY_REQUIRED, and staging calls without reconciling", async () => {
+  const main = { ...environment, GITHUB_REF_NAME: "main" };
+  const source = inventorySource(main.GITHUB_SHA, "b".repeat(40));
+  await assert.rejects(() => release.checkProductionPromotionReadiness(environment, source, async () => {
+    throw new Error("should not call transport on staging");
+  }, async () => environment.GITHUB_SHA), /Production promotion preflight/i);
+
+  for (const blocked of [
+    { status: "REQUIRES_OPERATOR", migration_ids: ["0071_system_console_least_privilege"] },
+    { status: "RECOVERY_REQUIRED", migration_ids: [] },
+    { status: "OUTCOME_UNKNOWN", migration_ids: [] },
+  ]) {
+    const calls = [];
+    await assert.rejects(
+      () => release.checkProductionPromotionReadiness(main, source, async request => {
+        calls.push(request.op);
+        if (request.op === "status") {
+          return { active: { manifest: { schema: 2, commit: "b".repeat(40) } }, pending: null };
+        }
+        return blocked;
+      }, async () => main.GITHUB_SHA),
+      err => err.code === "ARDEN_MIGRATION_BLOCKED" && err.status === blocked.status,
+    );
+    assert.deepEqual(calls, ["status", "plan-migrations"]);
+  }
+});
+
+function extractWorkflowJob(yamlText, jobName) {
+  const lines = yamlText.split(/\r?\n/);
+  const start = lines.findIndex(line => line === `  ${jobName}:`);
+  assert.notEqual(start, -1, `Expected job ${jobName} in workflow`);
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^  [a-zA-Z0-9_-]+:$/.test(lines[i])) { end = i; break; }
+  }
+  const block = lines.slice(start, end);
+  const needsLine = block.find(line => /^\s{4}needs:\s*\[/.test(line));
+  const needs = needsLine
+    ? needsLine.slice(needsLine.indexOf("[") + 1, needsLine.lastIndexOf("]")).split(",").map(s => s.trim()).filter(Boolean)
+    : [];
+  const ifIndex = block.findIndex(line => /^\s{4}if:/.test(line));
+  assert.notEqual(ifIndex, -1, `Expected if condition on job ${jobName}`);
+  let ifExpr = block[ifIndex].replace(/^\s{4}if:\s*/, "").trim();
+  if (ifExpr === ">-" || ifExpr === ">") {
+    const parts = [];
+    for (let i = ifIndex + 1; i < block.length; i++) {
+      if (!/^\s{6}/.test(block[i])) break;
+      parts.push(block[i].trim());
+    }
+    ifExpr = parts.join(" ");
+  }
+  return { needs, ifExpr, text: block.join("\n") };
+}
+
+function evaluateJobIf(ifExpr, needs, ctx) {
+  const usesAlways = /\balways\(\)/.test(ifExpr);
+  if (!usesAlways && needs.some(dep => ctx.needs[dep]?.result !== "success")) {
+    return false;
+  }
+  const jsExpr = ifExpr
+    .replace(/needs\.([a-z0-9-]+)\./g, (_, name) => `needs[${JSON.stringify(name)}].`)
+    .replace(/\balways\(\)/g, "true")
+    .replace(/\bcancelled\(\)/g, "cancelled");
+  return Boolean(new Function("github", "needs", "inputs", "cancelled", `return (${jsExpr});`)(
+    ctx.github, ctx.needs, ctx.inputs, ctx.cancelled ?? false,
+  ));
+}
+
+test("ci.yml and release-ai.yml enforce production dual-preflight and deployment ordering across all scenarios", () => {
+  const ciYaml = readFileSync(".github/workflows/ci.yml", "utf8");
+  const releaseAiYaml = readFileSync(".github/workflows/release-ai.yml", "utf8");
+  const preflight = extractWorkflowJob(ciYaml, "preflight-production");
+  const releaseAi = extractWorkflowJob(ciYaml, "release-ai");
+  const releaseJob = extractWorkflowJob(ciYaml, "release");
+
+  assert.deepEqual(preflight.needs, ["check", "database", "ai-check"]);
+  assert.deepEqual(releaseAi.needs, ["check", "database", "ai-check", "preflight-production"]);
+  assert.deepEqual(releaseJob.needs, ["check", "database", "preflight-production", "release-ai"]);
+
+  function runGraph({ event_name = "push", ref_name = "main", ai_changed = "true", force_ai_deploy = false,
+    checkResult = "success", dbResult = "success", aiCheckResult = "success",
+    preflightResult = "success", releaseAiResult = "success" }) {
+    const github = { repository: "Arden-Enterprise/Arden", event: { repository: { visibility: "public" } }, event_name, ref_name };
+    const inputs = { force_ai_deploy };
+    const needs = {
+      check: { result: checkResult },
+      database: { result: dbResult },
+      "ai-check": { result: aiCheckResult, outputs: { ai_changed } },
+    };
+    const preflightRan = evaluateJobIf(preflight.ifExpr, preflight.needs, { github, needs, inputs });
+    needs["preflight-production"] = { result: preflightRan ? preflightResult : "skipped" };
+    const releaseAiRan = evaluateJobIf(releaseAi.ifExpr, releaseAi.needs, { github, needs, inputs });
+    needs["release-ai"] = { result: releaseAiRan ? releaseAiResult : "skipped" };
+    const releaseRan = evaluateJobIf(releaseJob.ifExpr, releaseJob.needs, { github, needs, inputs });
+    return { preflightRan, releaseAiRan, releaseRan };
+  }
+
+  // 1. Main push with AI changes and passing preflight runs preflight -> AI -> Core.
+  assert.deepEqual(runGraph({ ref_name: "main", ai_changed: "true" }), {
+    preflightRan: true, releaseAiRan: true, releaseRan: true,
+  });
+  // 2. Failed production preflight stops BOTH release-ai and Core release.
+  assert.deepEqual(runGraph({ ref_name: "main", ai_changed: "true", preflightResult: "failure" }), {
+    preflightRan: true, releaseAiRan: false, releaseRan: false,
+  });
+  // 3. Failed database check stops preflight, release-ai, and Core release.
+  assert.deepEqual(runGraph({ ref_name: "main", ai_changed: "true", dbResult: "failure" }), {
+    preflightRan: false, releaseAiRan: false, releaseRan: false,
+  });
+  // 4. Staging push with AI changes skips production preflight and runs both AI and Core.
+  assert.deepEqual(runGraph({ ref_name: "staging", ai_changed: "true" }), {
+    preflightRan: false, releaseAiRan: true, releaseRan: true,
+  });
+  // 5. Core-only push on staging or main skips preflight and AI while Core release still runs.
+  for (const ref_name of ["staging", "main"]) {
+    assert.deepEqual(runGraph({ ref_name, ai_changed: "false" }), {
+      preflightRan: false, releaseAiRan: false, releaseRan: true,
+    });
+  }
+  // 6. Failed AI release on staging or main blocks Core release.
+  for (const ref_name of ["staging", "main"]) {
+    assert.deepEqual(runGraph({ ref_name, ai_changed: "true", releaseAiResult: "failure" }), {
+      preflightRan: ref_name === "main", releaseAiRan: true, releaseRan: false,
+    });
+  }
+  // 7. Staging workflow_dispatch force_ai_deploy runs AI only without production preflight or Core release.
+  assert.deepEqual(runGraph({ event_name: "workflow_dispatch", ref_name: "staging", ai_changed: "false", force_ai_deploy: true }), {
+    preflightRan: false, releaseAiRan: true, releaseRan: false,
+  });
+  // 8. Disabled ARDEN_AI_RELEASE_ENABLED gates both preflight-production and release-ai.yml steps cleanly
+  //    so both jobs finish with success and Core release is never blocked.
+  assert.match(preflight.text, /ENABLED:\s*\$\{\{\s*vars\.ARDEN_AI_RELEASE_ENABLED\s*\}\}/);
+  assert.match(preflight.text, /if:\s*steps\.gate\.outputs\.enabled == 'true'[\s\S]*node tools\/releases\/release\.mjs preflight-plan/);
+  assert.match(releaseAiYaml, /ENABLED:\s*\$\{\{\s*vars\.ARDEN_AI_RELEASE_ENABLED\s*\}\}/);
+  assert.match(releaseAiYaml, /if:\s*steps\.gate\.outputs\.enabled == 'true'[\s\S]*node tools\/releases\/ai-release\.mjs preflight/);
+  assert.deepEqual(runGraph({ ref_name: "main", ai_changed: "true", preflightResult: "success", releaseAiResult: "success" }), {
+    preflightRan: true, releaseAiRan: true, releaseRan: true,
+  });
 });

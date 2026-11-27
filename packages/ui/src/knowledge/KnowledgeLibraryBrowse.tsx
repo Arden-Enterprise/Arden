@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { knowledgeTypes, validityStatus } from "@arden/domain";
 import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
+import { IslandPagination, pageCountFor, type PageSize } from "../shared/IslandPagination";
 import type { KnowledgeCatalog, PublishedKnowledge } from "../shared/api-client";
 import { libraryDateLabel } from "./libraryDisplay";
 import { knowledgeCovers } from "./KnowledgeCatalogEditor";
@@ -60,45 +61,92 @@ export function sortRegister(items: PublishedKnowledge[], sort: RegisterSort): P
   });
 }
 
-function DocumentRegister({ items, onOpen, recent = false, showReaders = false }: { items: PublishedKnowledge[]; onOpen: (id: string) => void; recent?: boolean; showReaders?: boolean }) {
+/** Larger registers are paged; the short Newly published list never is. */
+const pagedFrom = 10;
+
+function DocumentRegister({ items, onOpen, onViewInGraph, recent = false, showReaders = false, resetKey = "" }: {
+  items: PublishedKnowledge[];
+  onOpen: (id: string) => void;
+  onViewInGraph?: (documentId: string) => void;
+  recent?: boolean;
+  showReaders?: boolean;
+  /** Search and filters behind `items` determine when the register returns to page 1. */
+  resetKey?: string;
+}) {
   const [sort, setSort] = useState<RegisterSort>(defaultRegisterSort);
+  const [pageSize, setPageSize] = useState<PageSize>(20);
+  const [position, setPosition] = useState({ resetKey, page: 1 });
   const sorted = sortRegister(items, sort);
+  const paged = !recent && items.length > pagedFrom;
+  // A background refresh can shrink the list, so the remembered page is clamped rather than trusted.
+  const page = paged && position.resetKey === resetKey ? Math.min(position.page, pageCountFor(items.length, pageSize)) : 1;
+  const visible = paged ? sorted.slice((page - 1) * pageSize, page * pageSize) : sorted;
   const today = todayIso();
-  const toggle = (key: RegisterSortKey) => setSort((current) => current.key === key
-    ? { key, direction: current.direction === "ascending" ? "descending" : "ascending" }
-    : { key, direction: key === "updated" ? "descending" : "ascending" });
-  return <IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={760} className="library-register"
+  const tableRef = useRef<HTMLDivElement>(null);
+  const showPage = (next: number) => {
+    setPosition({ resetKey, page: next });
+    // Paging from the footer would otherwise leave the reader below the new rows.
+    const table = tableRef.current;
+    if (table && table.getBoundingClientRect().top < 0) table.scrollIntoView({ block: "start" });
+  };
+  const toggle = (key: RegisterSortKey) => {
+    setSort((current) => current.key === key
+      ? { key, direction: current.direction === "ascending" ? "descending" : "ascending" }
+      : { key, direction: key === "updated" ? "descending" : "ascending" });
+    setPosition({ resetKey, page: 1 });
+  };
+  return <div ref={tableRef} className="library-register-frame"><IslandTable label={recent ? "Newly published documents" : "All documents"} minWidth={760} className="library-register"
     columns="minmax(260px, 2.6fr) minmax(110px, 1fr) minmax(120px, 1fr) minmax(120px, 1fr) 120px"
     sort={{ index: sortColumns.findIndex((column) => column.key === sort.key), direction: sort.direction }}
     headers={sortColumns.map((column) => <button type="button" className="library-sort" onClick={() => toggle(column.key)}
       aria-label={`Sort by ${column.label.toLowerCase()}`}>{column.label}{sort.key === column.key
         && <Icon name={sort.direction === "ascending" ? "arrow-up" : "arrow-down"} size={11} />}</button>)}>
-    {sorted.map(item => {
+    {visible.map(item => {
       const expiring = expiringLabel(item, today);
       const release = item.management?.releaseKind;
       const releaseTag = recent && release ? release === "UPDATED" ? "Updated" : "New" : null;
+      const openButton = <button className="island-row-name library-row-name" type="button" data-publication-id={item.id} aria-label={`Read ${item.title}`}
+        title={item.title} onClick={() => onOpen(item.id)}>
+        <span className="library-row-icon"><Icon name="document" size={17} /></span><span className="library-row-copy">
+          <span className="library-row-heading"><strong className="library-row-title">{item.title}</strong>
+            {expiring && <span className="library-row-expiring" role="img" aria-label={expiring} title={expiring}><ClockIcon /></span>}</span>
+          {/* The meta line exists only when it says something; an empty line would add height to every row. */}
+          {(showReaders || releaseTag) && <span className="library-row-meta">{showReaders && (item.targetReaders?.mode === "DEPARTMENT" ? "Department readers" : "Selected readers")}
+            {releaseTag && <span className="km-release">{releaseTag}</span>}</span>}
+        </span></button>;
       return <IslandRow key={item.id} className="library-row">
-        <IslandCell className="island-row-cell is-name"><button className="island-row-name library-row-name" type="button" data-publication-id={item.id} aria-label={`Read ${item.title}`}
-          title={item.title} onClick={() => onOpen(item.id)}>
-          <span className="library-row-icon"><Icon name="document" size={17} /></span><span className="library-row-copy">
-            <span className="library-row-heading"><strong className="library-row-title">{item.title}</strong>
-              {expiring && <span className="library-row-expiring" role="img" aria-label={expiring} title={expiring}><ClockIcon /></span>}</span>
-            {/* The meta line exists only when it says something; an empty line would add height to every row. */}
-            {(showReaders || releaseTag) && <span className="library-row-meta">{showReaders && (item.targetReaders?.mode === "DEPARTMENT" ? "Department readers" : "Selected readers")}
-              {releaseTag && <span className="km-release">{releaseTag}</span>}</span>}
-          </span></button></IslandCell>
+        <IslandCell className="island-row-cell is-name">
+          {onViewInGraph ? (
+            <div className="library-row-name-wrap">
+              {openButton}
+              <button
+                type="button"
+                className="island-icon-button library-row-graph-btn"
+                aria-label={`View ${item.title} in Graph`}
+                title="View in Graph"
+                onClick={() => onViewInGraph(item.draftId)}
+              >
+                <Icon name="graph" size={14} />
+              </button>
+            </div>
+          ) : openButton}
+        </IslandCell>
         <IslandCell className="library-row-secondary">{item.management?.type ?? "—"}</IslandCell>
         <IslandCell className="library-row-secondary">{item.responsibleDepartmentName ?? "—"}</IslandCell>
         <IslandCell className="library-row-secondary library-row-author">{item.authorName || "—"}</IslandCell>
         <IslandCell className="library-row-date">{libraryDateLabel(item.publishedAt)}</IslandCell>
       </IslandRow>;
     })}
-  </IslandTable>;
+  </IslandTable>
+  {paged && <IslandPagination label="All documents" noun="documents" page={page} pageSize={pageSize} total={items.length}
+    onPage={showPage} onPageSize={(size) => { setPageSize(size); setPosition({ resetKey, page: 1 }); }} />}
+  </div>;
 }
 
-export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, filters, onFilters, discover, onBrowse, onOpen, onManage, allowCollections = true, showReaders = false }: {
+export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, filters, onFilters, discover, onBrowse, onOpen, onManage, onViewInGraph, allowCollections = true, showReaders = false }: {
   items: PublishedKnowledge[]; catalog: KnowledgeCatalog | null; catalogError: string; query: string; filters: LibraryFilters;
   onFilters: (filters: LibraryFilters) => void; discover: boolean; onBrowse: () => void; onOpen: (id: string) => void; onManage: () => void;
+  onViewInGraph?: (documentId: string) => void;
   allowCollections?: boolean;
   showReaders?: boolean;
 }) {
@@ -127,7 +175,7 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
       </section>
       <section aria-labelledby="km-new"><header className="km-section-heading"><div><h2 id="km-new">Newly published</h2></div>
         <button className="km-text-button" type="button" onClick={() => browseWith({})}>View all <Icon name="arrow" size={13} /></button></header>
-        {items.length ? <DocumentRegister recent items={filterLibrary(items, catalog, "", emptyLibraryFilters()).slice(0, 8)} onOpen={onOpen} />
+        {items.length ? <DocumentRegister recent items={filterLibrary(items, catalog, "", emptyLibraryFilters()).slice(0, 8)} onOpen={onOpen} onViewInGraph={onViewInGraph} />
           : <div className="island island-empty"><h3>No documents available</h3><p>Published documents will appear here.</p></div>}
       </section>
     </> : <>
@@ -142,7 +190,8 @@ export function KnowledgeLibraryBrowse({ items, catalog, catalogError, query, fi
         {Object.values(filters).some(Boolean) && <button type="button" className="km-text-button" onClick={() => onFilters(emptyLibraryFilters())}>Clear filters</button>}
       </div>{!unavailableCollection && <span className="island-meta" role="status">{filtered.length} documents</span>}</div>
       {unavailableCollection ? <p role="status" className="island-note is-warning">Collection unavailable. Clear filters to browse documents.</p>
-        : filtered.length ? <DocumentRegister items={filtered} onOpen={onOpen} showReaders={showReaders} /> : <div className="island island-empty"><h3>{items.length ? "No results" : "No documents available"}</h3><p>{items.length ? "Try another search or filter." : "Published documents will appear here."}</p></div>}
+        : filtered.length ? <DocumentRegister items={filtered} onOpen={onOpen} onViewInGraph={onViewInGraph} showReaders={showReaders}
+          resetKey={JSON.stringify([query.trim(), filters])} /> : <div className="island island-empty"><h3>{items.length ? "No results" : "No documents available"}</h3><p>{items.length ? "Try another search or filter." : "Published documents will appear here."}</p></div>}
     </>}
   </div>;
 }

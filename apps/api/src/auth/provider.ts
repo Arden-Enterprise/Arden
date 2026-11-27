@@ -78,6 +78,7 @@ export class SupabaseAuthProvider implements AuthProvider {
     const { data, error } = await this.createAuthClient().auth.signInWithPassword(credentials);
     if (error) {
       if (isEmailNotConfirmed(error)) throw new Error("EMAIL_NOT_CONFIRMED");
+      if (error.status === 429 || error.code === "over_request_rate_limit") throw new Error("RATE_LIMITED");
       throw new Error(isClientAuthFailure(error) ? "INVALID_CREDENTIALS" : "SUPABASE_AUTH_UNAVAILABLE");
     }
     if (!data.user || !data.session) throw new Error("SUPABASE_AUTH_UNAVAILABLE");

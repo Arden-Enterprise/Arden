@@ -3,7 +3,8 @@ import {
   type ActorRecord, type AnchorRecord, type CaseEventRecord, type CaseProjection, type CaseRecord,
   type HistoryPage, type IntakeInput, type LegacyReport, type NotificationRecord, type PublicationSubmission, MaintenanceError, assertUuid, commandHash, intakeHash, legacyRequestKey,
 } from "./contracts.js";
-import { maintenanceSourceTextLimit, type AnalysisAdapter, type AnalysisFinding, type AnalysisRun } from "./analysis.js";
+import { AnalysisRejectedError, maintenanceSourceTextLimit, type AnalysisAdapter, type AnalysisFinding, type AnalysisRun } from "./analysis.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { compareLines, type DiffRow } from "./diff.js";
 import { type PublicationProof } from "./publication-proof.js";
 import { projectCase, type CaseAccess } from "./policy.js";
@@ -39,6 +40,9 @@ export interface MaintenanceTx {
   hasUnread(membershipId: string, caseId: string): Promise<boolean>;
   markRead(membershipId: string, caseId: string): Promise<void>;
   readVersionText(publishedVersionId: string): Promise<{ documentId: string; text: string | null } | null>;
+  readVersionOriginal?(publishedVersionId: string): Promise<
+    { documentId: string; text: string | null; mimeType?: string; pdfBase64?: string | null } | null
+  >;
   listDocumentVersions(documentId: string, pinnedVersionId: string): Promise<Array<{ publishedVersionId: string; versionNo: number; publishedAt: string; current: boolean }>>;
   readPublicationProof(documentId: string, publishedVersionId: string): Promise<PublicationProof>;
   readPublicationSubmission(submissionId: string): Promise<PublicationSubmission | null>;
@@ -50,6 +54,8 @@ export interface MaintenanceTx {
   latestAnalysis(caseId: string): Promise<AnalysisRun | null>;
   claimAnalysis(caseId: string, fence: string): Promise<AnalysisRun | null>;
   commitAnalysis(caseId: string, fence: string, state: "succeeded" | "failed", findings: AnalysisFinding[]): Promise<boolean>;
+  /** Best-effort usage write isolated from the analysis commit; false means it was not recorded. */
+  recordAiUsageEvents?(requestId: string, events: ProviderUsageEvent[]): Promise<boolean>;
   failActiveAnalysis(caseId: string): Promise<void>;
   expireStaleAnalysis(caseId: string): Promise<void>;
 }
@@ -71,7 +77,8 @@ function publicationEvidenceMatches(row: CaseRecord, proof: PublicationProof, su
 }
 
 export class MaintenanceCaseService {
-  constructor(private readonly port: MaintenancePort, private readonly adapter: AnalysisAdapter | null = null) {}
+  constructor(private readonly port: MaintenancePort, private readonly adapter: AnalysisAdapter | null = null,
+    private readonly onUsageFailure?: (error: unknown) => void) {}
 
   createCase(userId: string, organizationId: string, input: IntakeInput, requestKey: string): Promise<CaseProjection> {
     assertUuid(organizationId);
@@ -549,13 +556,18 @@ export class MaintenanceCaseService {
     }
     const fence = prepared.fence;
     let result: { findings: AnalysisFinding[] } | null = null;
+    // Provider usage is kept even when the findings are rejected or the run is later fenced out.
+    let usageEvents: ProviderUsageEvent[] = [];
     try {
-      const response = await this.adapter({ contractVersion: 1, caseId, versionIds: prepared.versionIds, sources });
+      const response = await this.adapter({ contractVersion: 1, requestId: prepared.runId,
+        caseId, versionIds: prepared.versionIds, sources });
       const valid = response.contractVersion === 1 && response.state === "succeeded"
         && response.findings.length >= 1 && response.findings.length <= 4
         && response.findings.every((item) => prepared.versionIds.includes(item.versionId) && item.summary.trim().length > 0 && item.summary.length <= 350);
+      usageEvents = response.usageEvents;
       result = valid ? { findings: response.findings } : null;
-    } catch {
+    } catch (error) {
+      if (error instanceof AnalysisRejectedError) usageEvents = error.usageEvents;
       result = null;
     }
     return this.port.transaction(userId, organizationId, async (tx) => {
@@ -563,6 +575,9 @@ export class MaintenanceCaseService {
       const row = await tx.lockCase(caseId);
       const latest = await tx.latestAnalysis(caseId);
       if (!latest) throw new MaintenanceError("DENIED");
+      if (usageEvents.length && tx.recordAiUsageEvents && !await tx.recordAiUsageEvents(prepared.runId, usageEvents)) {
+        this.onUsageFailure?.(new Error("Maintenance analysis usage was not recorded"));
+      }
       if (latest.state !== "running" || latest.fence !== fence) return (await this.visibleRun(tx, row, latest))!;
       const sources = await Promise.all(prepared.versionIds.map((versionId) => tx.readVersionText(versionId)));
       const sourcesReady = sources.every((source) => source && row && source.documentId === row.documentId && source.text !== null);
@@ -664,7 +679,9 @@ export class MaintenanceCaseService {
   }
 
   readOriginal(userId: string, organizationId: string, caseId: string, publishedVersionId: string): Promise<
-    { unavailable: true; publishedVersionId: string } | { unavailable: false; publishedVersionId: string; text: string }
+    | { unavailable: true; publishedVersionId: string }
+    | { unavailable: false; publishedVersionId: string; text: string }
+    | { unavailable: false; publishedVersionId: string; mimeType: "application/pdf"; pdfBase64: string }
   > {
     assertUuid(organizationId);
     assertUuid(caseId);
@@ -681,8 +698,16 @@ export class MaintenanceCaseService {
       const view = projectCase(row, actor, access);
       // Sources need reviewer authority for the pin; Org Admin alone reads metadata only (decisions 0010, 0023).
       if (!view || view.kind === "minimal" || view.kind === "reporter" || !access.hasGrant) throw new MaintenanceError("DENIED");
-      const source = await tx.readVersionText(publishedVersionId);
-      if (!source || source.documentId !== row.documentId || source.text === null || source.text.length > 20_000) {
+      const source: { documentId: string; text: string | null; mimeType?: string; pdfBase64?: string | null } | null = tx.readVersionOriginal
+        ? await tx.readVersionOriginal(publishedVersionId)
+        : await tx.readVersionText(publishedVersionId);
+      if (!source || source.documentId !== row.documentId) {
+        return { unavailable: true as const, publishedVersionId };
+      }
+      if (source.mimeType === "application/pdf" && typeof source.pdfBase64 === "string" && source.pdfBase64.length > 0) {
+        return { unavailable: false as const, publishedVersionId, mimeType: "application/pdf" as const, pdfBase64: source.pdfBase64 };
+      }
+      if (source.text === null || source.text.length > 20_000) {
         return { unavailable: true as const, publishedVersionId };
       }
       return { unavailable: false as const, publishedVersionId, text: source.text };

@@ -79,9 +79,8 @@
 .review-pdf-size { flex: none; color: var(--arden-text-muted); font-size: 12px; }
 .review-pdf-spacer { flex: 1; }
 .arden-app-shell .review-pdf-toolbar .island-icon-button { width: 28px; height: 28px; border-radius: 999px; }
-.review-pdf-canvas { display: flex; flex: 1; min-height: 0; background: #0f0f12; }
-.review-pdf-canvas > object { flex: 1; width: 100%; height: 100%; min-height: 0; border: 0; }
-.review-pdf-canvas > p { margin: auto; color: var(--arden-text-muted); font-size: 13px; }
+.review-pdf-canvas { display: grid; grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; background: #0f0f12; }
+.review-pdf-canvas > .pdf-reader { min-width: 0; min-height: 0; height: 100%; }
 
 /* Right: properties, submitted details, note and the pinned decision footer */
 .review-detail-side { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
@@ -99,6 +98,34 @@
 .review-frozen dt { color: var(--arden-text-muted); }
 .review-frozen dd { min-width: 0; margin: 0; overflow: hidden; color: var(--arden-text-primary); text-overflow: ellipsis; white-space: nowrap; }
 .island-note.review-blocked-note { margin: 0; padding: 10px 12px; font-size: 12px; }
+.review-ai { padding: 12px; border: 1px solid var(--arden-border); border-radius: 9px;
+  background: var(--arden-surface-base); font-size: 13px; line-height: 1.45; }
+.review-ai-head { display: flex; align-items: center; gap: 10px; }
+.review-ai-mark { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 7px;
+  color: var(--arden-violet-hover); background: color-mix(in srgb, var(--arden-violet) 15%, transparent); }
+.review-ai-heading { flex: 1; min-width: 0; }
+.arden-app-shell .review-ai-title { margin: 0; font-size: 14px; }
+.review-ai .review-ai-run { flex: none; min-height: 30px; padding: 4px 12px; }
+.review-ai p { margin: 0; }
+.review-ai > p { margin-top: 8px; }
+.review-ai > [role="region"] { margin-top: 10px; }
+.review-ai h4 { margin: 14px 0 6px; font-size: 13px; }
+.review-ai ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.review-ai li { display: grid; gap: 5px; padding: 7px 0; overflow-wrap: anywhere; }
+.review-ai li + li { border-top: 1px solid var(--arden-border); }
+.review-ai .review-ai-checks li { padding: 8px 10px; border: 1px solid var(--arden-border); border-radius: 7px; }
+.review-ai-checks li > strong { color: var(--arden-text-primary); font-size: 12px; }
+.review-ai .review-ai-hint { color: var(--arden-text-muted); font-size: 12px; }
+.review-ai .review-ai-source-message { margin-top: 8px; }
+.review-ai-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.review-ai-source { display: inline-flex; align-items: center; justify-self: start; gap: 5px; min-height: 25px;
+  padding: 3px 7px; border: 1px solid var(--arden-border); border-radius: 6px; color: var(--arden-text-secondary);
+  background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.review-ai-source:hover:not(:disabled), .review-ai-source[aria-current="location"] {
+  border-color: var(--arden-violet); color: var(--arden-violet-hover);
+}
+.review-ai-source:focus-visible { outline: 2px solid var(--arden-focus-ring); outline-offset: 2px; }
+.review-ai-source:disabled { opacity: .5; cursor: default; }
 .review-note { display: grid; gap: 8px; }
 .review-note-label { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--arden-text-secondary); font-size: 13px; font-weight: 500; }
 .review-note-label small { color: var(--arden-text-muted); font-size: 12px; font-weight: 400; }
@@ -126,7 +153,7 @@
   .review-detail-body { display: block; overflow-y: auto; }
   .review-detail-document { overflow: visible; }
   .review-detail-document.is-pdf { border-right: 0; }
-  .review-pdf-canvas { height: 70vh; }
+  .review-pdf-canvas { flex: none; height: 70vh; }
   .review-detail-text { padding: 24px 20px 28px; }
   .review-detail-side { overflow: visible; border-top: 1px solid var(--arden-border); }
   .review-detail-side-body { overflow: visible; }
@@ -157,53 +184,53 @@
   display: flex; flex: 999 1 520px; flex-direction: column; gap: 0; min-width: 0; padding-bottom: 18px;
   border-color: #1c1c22; border-radius: 10px; background: #141418; box-shadow: none;
 }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-rich-text-shell { overflow: visible; border: 0; border-radius: 0; background: transparent; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar {
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-rich-text-shell { overflow: visible; border: 0; border-radius: 0; background: transparent; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar {
   gap: 4px; min-height: 40px; margin: 0 0 8px; padding: 0; border-bottom: 1px solid #1c1c22; background: transparent;
 }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button {
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar button {
   min-width: 32px; min-height: 32px; padding: 0 8px; border: 0; border-radius: 8px;
   color: var(--arden-text-secondary); background: transparent; font-size: 13px; font-weight: 600;
 }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button:hover:not(:disabled),
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.is-active { border: 0; color: var(--arden-text-primary); background: #2e2e38; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-divider { height: 16px; margin: 0 4px; background: #2a2a32; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-group { display: flex; align-items: center; gap: 2px; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-block { width: 32px; padding: 0; font-size: 15px; line-height: 1; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size { position: relative; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.arden-text-size-trigger {
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar button:hover:not(:disabled),
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar button.is-active { border: 0; color: var(--arden-text-primary); background: #2e2e38; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-divider { height: 16px; margin: 0 4px; background: #2a2a32; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-group { display: flex; align-items: center; gap: 2px; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-block { width: 32px; padding: 0; font-size: 15px; line-height: 1; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-text-size { position: relative; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar button.arden-text-size-trigger {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 108px; min-width: 108px; min-height: 32px; padding: 0 10px;
   border: 1px solid #2a2a32; border-radius: 8px; color: var(--arden-text-primary); background: #1c1c22; font-size: 13px; font-weight: 500;
 }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size-trigger::after {
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-text-size-trigger::after {
   content: ""; flex: none; width: 0; height: 0; border-right: 4px solid transparent; border-left: 4px solid transparent; border-top: 4px solid currentColor; opacity: .7;
 }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size-trigger::after { transition: transform 140ms var(--arden-motion-ease, ease); }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.arden-text-size-trigger:hover:not(:disabled),
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size.is-open .arden-text-size-trigger { border-color: #2a2a32; color: var(--arden-text-primary); background: #1c1c22; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.arden-text-size-trigger:focus,
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar button.arden-text-size-trigger:focus-visible { outline: none; box-shadow: none; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size.is-open .arden-text-size-trigger::after { transform: rotate(180deg); }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size-menu {
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-text-size-trigger::after { transition: transform 140ms var(--arden-motion-ease, ease); }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar button.arden-text-size-trigger:hover:not(:disabled),
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-text-size.is-open .arden-text-size-trigger { border-color: #2a2a32; color: var(--arden-text-primary); background: #1c1c22; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar button.arden-text-size-trigger:focus,
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar button.arden-text-size-trigger:focus-visible { outline: none; box-shadow: none; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-text-size.is-open .arden-text-size-trigger::after { transform: rotate(180deg); }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-text-size-menu {
   position: absolute; top: calc(100% + 4px); left: 0; z-index: 6; display: grid; gap: 1px; width: 108px; padding: 4px;
   border: 1px solid #2a2a32; border-radius: 8px; background: #1c1c22; box-shadow: 0 12px 28px rgb(0 0 0 / 36%);
   transform-origin: top center; animation: arden-text-size-in 140ms var(--arden-motion-ease, ease);
 }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button {
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar .arden-text-size-menu button {
   justify-content: flex-start; width: 100%; min-width: 0; min-height: 26px; padding: 0 8px; border: 0; border-radius: 5px;
   color: var(--arden-text-secondary); background: transparent; text-align: left; font-size: 12px; font-weight: 500; white-space: nowrap;
 }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button:nth-child(2) { font-size: 14px; font-weight: 600; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button:nth-child(3) { font-size: 16px; font-weight: 650; }
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button:hover:not(:disabled),
-.arden-app-shell :is(.draft-document, .arden-document-field) .arden-format-toolbar .arden-text-size-menu button.is-selected { color: var(--arden-text-primary); background: #2e2e38; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar .arden-text-size-menu button:nth-child(2) { font-size: 14px; font-weight: 600; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar .arden-text-size-menu button:nth-child(3) { font-size: 16px; font-weight: 650; }
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar .arden-text-size-menu button:hover:not(:disabled),
+.arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-format-toolbar .arden-text-size-menu button.is-selected { color: var(--arden-text-primary); background: #2e2e38; }
 .arden-app-shell .draft-document .bn-editor { min-height: 280px; padding: 8px 2px 16px; color: #dcdbe3; font-size: 15px; line-height: 1.75; }
 .arden-app-shell .draft-document .bn-editor:focus,
 .arden-app-shell .draft-document .bn-editor:focus-visible,
 .arden-app-shell .draft-document .ProseMirror:focus,
 .arden-app-shell .draft-document .ProseMirror:focus-visible { outline: none; box-shadow: none; }
 @keyframes arden-text-size-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) { .arden-app-shell :is(.draft-document, .arden-document-field) .arden-text-size-menu { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .arden-app-shell :is(.draft-document, .arden-document-field, .note-rich-body) .arden-text-size-menu { animation: none; } }
 .draft-document { display: flex; flex: 999 1 520px; flex-direction: column; gap: 12px; min-width: 0; padding-bottom: 18px; }
 .draft-document > .knowledge-notice { margin: 0 18px; }
 .draft-document-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--arden-border); }
@@ -295,7 +322,6 @@
 .reader-ai-tab:hover:not(:disabled) { color: var(--arden-text-primary); }
 .reader-ai-tab[aria-selected="true"] { color: var(--arden-text-primary); background: var(--arden-surface-raised); box-shadow: 0 0 0 1px var(--arden-border); }
 .reader-ai-tab:disabled { color: var(--arden-text-disabled); cursor: default; }
-.reader-ai-soon { padding: 0 5px; border: 1px solid var(--arden-info-border); border-radius: 5px; color: var(--arden-info); background: var(--arden-info-subtle); font-size: 10px; }
 .reader-ai-launcher { display: grid; gap: 8px; padding: 6px 12px 14px; overflow: auto; }
 .reader-ai-launcher > p { margin: 0 2px 4px; color: var(--arden-text-secondary); font-size: 13px; }
 .reader-ai-task {
@@ -401,7 +427,8 @@
   --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
 }
 .pdf-reader-page .textLayer .markedContent { display: contents; }
-.pdf-reader-page .textLayer ::selection { background: rgb(139 130 246 / 30%); }
+/* The global selection colour would paint the invisible text runs over the page image. */
+.pdf-reader-page .textLayer ::selection { color: transparent; background: rgb(139 130 246 / 30%); }
 /* Marks sit inside a text run, so they flow with it instead of being positioned. */
 .pdf-reader-page .textLayer mark.pdf-citation-mark {
   position: static; margin: -1px 0; padding: 1px 0; border-radius: 2px; color: transparent;
@@ -410,6 +437,8 @@
 @keyframes citation-mark-in { from { background: transparent; box-shadow: none; } }
 .pdf-reader-unavailable { margin: 0; padding: 24px; color: var(--arden-text-secondary); font-size: 13px; }
 ::highlight(arden-citation) { background-color: rgb(255 214 10 / 38%); color: inherit; }
+::highlight(arden-review-source) { background-color: rgb(255 214 10 / 38%); color: inherit; }
+.review-detail-text .is-review-source { outline: 2px solid var(--arden-violet-hover); outline-offset: 3px; }
 .knowledge-reader-content .is-citation-source {
   scroll-margin-block: 120px; outline: 2px solid color-mix(in srgb, var(--arden-violet-hover) 78%, transparent); outline-offset: 8px;
   border-radius: 4px; background: color-mix(in srgb, var(--arden-violet) 13%, transparent); animation: citation-source-in .38s ease-out;
@@ -578,3 +607,6 @@ button.review-row:disabled { cursor: progress; }
 .direct-share-copy span { color: var(--arden-text-secondary); font-size: 12px; }
 .shared-item-label { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--arden-warning); font-size: 13px; }
 .shared-item-text { max-width: 760px; color: var(--arden-text-primary); font-size: 15px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Paged Home register: the table and its pager move together; scroll-margin keeps the first row clear of the topbar. */
+.library-register-frame { display: grid; gap: 10px; min-width: 0; scroll-margin-top: 96px; }

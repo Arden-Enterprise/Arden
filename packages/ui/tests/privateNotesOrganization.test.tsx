@@ -11,6 +11,7 @@ import { trashMeta } from "../src/personal-workspace/PrivateNotesTrash";
 import type { PrivateCollection, PrivateNote } from "../src/shared/types";
 import { installTestDialogs } from "./dialogTestSupport";
 
+vi.mock("../src/knowledge/ArdenRichTextEditor", () => import("./richEditorStub"));
 vi.mock("../src/shared/useAutosizeTextarea", () => ({ useAutosizeTextarea: () => ({ current: null }) }));
 
 const collections: PrivateCollection[] = [
@@ -227,13 +228,23 @@ describe("Private tree in demo mode", () => {
   it("asks before trashing a note with unsaved edits", async () => {
     render(createElement(Workspace));
     fireEvent.click(within(tree()).getByRole("button", { name: "Loose idea" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Note content" }), { target: { value: "Unsaved" } });
+    fireEvent.change(await screen.findByRole("textbox", { name: "Note content" }), { target: { value: "Unsaved" } });
     openRowMenu("Loose idea");
     await act(async () => fireEvent.click(menuItem("Move to trash")));
     expect(controllerRef.trashConfirm).toEqual({ kind: "note", id: "n1" });
     expect(rowTitles()).toContain("Loose idea, unsaved changes");
     act(() => controllerRef.cancelTrash());
     expect(controllerRef.state.drafts.n1?.body).toBe("Unsaved");
+  });
+
+  it("relies on autosave instead of a Save button in the note toolbar", async () => {
+    render(createElement(Workspace));
+    fireEvent.click(within(tree()).getByRole("button", { name: "Loose idea" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Note content" }), { target: { value: "Edited" } });
+    const toolbar = screen.getByRole("toolbar", { name: "Note actions" });
+    expect(within(toolbar).getByText("Unsaved changes")).toBeTruthy();
+    expect(within(toolbar).queryByRole("button", { name: "Save" })).toBeNull();
+    expect(within(toolbar).queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
   it("opens a collection page listing its children with a New note in this collection action", async () => {

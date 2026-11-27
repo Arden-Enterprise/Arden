@@ -8,6 +8,9 @@ import { ServerKnowledgeFeaturePage } from "../src/knowledge/ServerKnowledgeFeat
 import { installTestDialogs } from "./dialogTestSupport";
 
 vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({ ArdenDocumentView: () => null }));
+vi.mock("../src/knowledge/PdfReader", () => ({
+  PdfReader: ({ title, base64 }: { title: string; base64: string }) => <div data-testid="mock-pdf-reader" data-title={title} data-base64={base64}>PDF viewer</div>,
+}));
 vi.mock("../src/shared/WorkspaceTopbar", () => ({ WorkspaceTopbar: () => null }));
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
@@ -166,6 +169,22 @@ describe("maintenance case actions", () => {
     fireEvent.click(await screen.findByRole("tab", { name: /My reports/ }));
     expect(await screen.findByText("No reports yet")).toBeTruthy();
     expect(screen.queryByLabelText("Reporter explanation")).toBeNull();
+  });
+
+  it("opens a reported PDF version in the PDF viewer with a Download PDF link", async () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:reported-pdf");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    const { openCase } = openReviews();
+    const pdfBase64 = btoa("%PDF-1.4\n%%EOF\n");
+    vi.spyOn(maintenance, "readMaintenanceOriginal").mockResolvedValue({
+      unavailable: false, publishedVersionId: "v1", mimeType: "application/pdf", pdfBase64,
+    });
+    await openCase();
+    fireEvent.click(await screen.findByRole("button", { name: "Open reported version" }));
+    const reader = await screen.findByTestId("mock-pdf-reader");
+    expect(reader.getAttribute("data-base64")).toBe(pdfBase64);
+    expect(screen.queryByText("This original is unavailable.")).toBeNull();
+    expect((await screen.findByRole("link", { name: "Download PDF" })).getAttribute("href")).toBe("blob:reported-pdf");
   });
 });
 

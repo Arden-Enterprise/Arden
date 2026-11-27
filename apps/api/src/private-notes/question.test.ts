@@ -1,3 +1,4 @@
+import { ARDEN_DOCUMENT_PREFIX, serializeSemanticDocument } from "@arden/domain";
 import { createHash, randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +25,8 @@ function harness(body = "# Handover\nReturn the badge on Friday.", enabled = tru
     contractVersion: 2, requestId: input.requestId, status: "ANSWERED", answer: "Return the badge on Friday.",
     citations: [{ chunkId: input.evidence[0].chunkId, quote: "Return the badge on Friday." }],
     usedEvidence: input.evidence.map(passage => passage.chunkId),
+    usageContractVersion: 1,
+    usageEvents: [],
   }));
   const actor = async (request: import("fastify").FastifyRequest) => ({
     userId: request.headers["x-other-member"] ? randomUUID() : userId,
@@ -89,6 +92,25 @@ describe("exact private note questions", () => {
     const result = await h.ask();
     expect(result.statusCode).toBe(200);
     expect(result.json().noteCoverage).toBe("FULL");
+  });
+
+  it("answers a rich note from its text, never from the stored document encoding", async () => {
+    const body = serializeSemanticDocument({ schemaVersion: 1, blocks: [
+      { id: "h", type: "heading", props: { level: 2 }, content: [{ type: "text", text: "Handover", styles: {} }], children: [] },
+      { id: "p", type: "paragraph", props: {}, content: [{ type: "text", text: "Return the badge on ", styles: {} },
+        { type: "text", text: "Friday", styles: { bold: true } }, { type: "text", text: ".", styles: {} }], children: [] }] });
+    const h = harness(body);
+    const response = await h.ask();
+    expect(response.statusCode).toBe(200);
+    expect(h.generate.mock.calls[0][0].evidence.map(passage => passage.content).join("")).toBe("Handover\nReturn the badge on Friday.");
+  });
+
+  it("refuses a malformed rich note without inference", async () => {
+    const h = harness(`${ARDEN_DOCUMENT_PREFIX}{broken`);
+    const response = await h.ask();
+    expect(response.statusCode).toBe(422);
+    expect(response.json().error.code).toBe("DOCUMENT_QUESTION_UNSUPPORTED");
+    expect(h.generate).not.toHaveBeenCalled();
   });
 
   it("supplies a complete note for an overview when its UTF-8 text fits the budget", async () => {

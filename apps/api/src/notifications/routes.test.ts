@@ -54,7 +54,7 @@ describe("notification routes", () => {
     registerNotificationRoutes(app, {
       repository, store,
       requestActor: async () => ({ userId, email: "member@example.test", fullName: null, emailVerified: true }),
-      realtime: input.realtime ? { endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
+      realtime: input.realtime ? { endpoint: "https://realtime.example.test/realtime/v1",
         signingKey: new TextEncoder().encode(secret), namespace: "staging-blue" } : null,
     });
     return { app, list, store, repository };

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +6,7 @@ import { buildApp } from "./app.js";
 import { resolveSupabaseAuthPublicUrl, SupabaseAuthProvider } from "./auth/provider.js";
 import { sessionSigningKey } from "./auth/session-timebox.js";
 import { assertLocalFlow1TestTarget, LocalFlow1TestAuthProvider, parseLocalTestAccounts } from "./auth/local-flow1-test.js";
+import { assertBooleanEnvironmentValue, parseUiSurfaceV3Environment } from "./config/env.js";
 import { ArdenRepository } from "./db/repository.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
 import { createSmtpMailer, smtpConfigurationFromEnvironment } from "./email/smtp-mailer.js";
@@ -18,6 +19,8 @@ import { IndexingWorker, indexWorkerLeaseSeconds } from "./indexing/worker.js";
 import { NotificationOutboxWorker, notificationWorkerPollMilliseconds } from "./notifications/outbox.js";
 import { notificationRealtimeConfiguration } from "./notifications/realtime.js";
 import { PrivateTrashRetention, startPrivateTrashRetentionLoop } from "./private-notes/trash-retention.js";
+import { createSystemAdministrationServices, type SystemAdministrationServices } from "./system-auth/services.js";
+import { createSystemHealthProbe } from "./system-console/routes.js";
 
 const publicationExpiryReminderIntervalMs = 60 * 60 * 1000;
 
@@ -86,11 +89,16 @@ if (Boolean(aiUrl) !== Boolean(aiServiceToken)) {
   throw new Error("ARDEN_AI_URL and ARDEN_AI_SERVICE_TOKEN must be configured together");
 }
 const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServiceToken) : null;
-const privateNoteAiOrganizations = new Set((process.env.ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS ?? "")
-  .split(",").map(id => id.trim().toLowerCase()).filter(Boolean));
-if ([...privateNoteAiOrganizations].some(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))) {
-  throw new Error("ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS requires comma-separated organization UUIDs");
+const useUiSurfaceV3 = parseUiSurfaceV3Environment(process.env.ARDEN_AI_UI_SURFACE_V3);
+function optedInOrganizations(variable: string): ReadonlySet<string> {
+  const ids = new Set((process.env[variable] ?? "").split(",").map(id => id.trim().toLowerCase()).filter(Boolean));
+  if ([...ids].some(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))) {
+    throw new Error(`${variable} requires comma-separated organization UUIDs`);
+  }
+  return ids;
 }
+const privateNoteAiOrganizations = optedInOrganizations("ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS");
+const reviewerAiOrganizations = optedInOrganizations("ARDEN_REVIEWER_AI_ORGANIZATIONS");
 const indexPool = askArden && indexDatabaseUrl
   ? new Pool({ connectionString: indexDatabaseUrl, max: 2, connectionTimeoutMillis: 10_000 }) : null;
 const contentStorage = new LocalPrivateContentStorage(privateStorageRoot ?? defaultStorageRoot);
@@ -150,6 +158,39 @@ try {
   throw new Error("Notification worker database role or schema is unavailable; verify ARDEN_NOTIFICATION_DATABASE_URL and its arden_notification_worker membership");
 }
 
+// Decision 0010 (2026-11-27): isolated System Admin storage is reached only through a
+// dedicated login that is a member of `arden_system_auth`. The ordinary request login is
+// never granted that role. Production without the URL disables System Admin routes (503).
+const production = process.env.NODE_ENV === "production";
+const systemAuthDatabaseUrl = process.env.ARDEN_SYSTEM_AUTH_DATABASE_URL?.trim();
+const systemAuthPool = systemAuthDatabaseUrl
+  ? new Pool({ connectionString: systemAuthDatabaseUrl, max: 4, connectionTimeoutMillis: 10_000 })
+  // Local development only: the disposable superuser login can switch to the role itself.
+  : production ? null : pool;
+let systemAdministration: SystemAdministrationServices | null = systemAuthPool
+  ? createSystemAdministrationServices(systemAuthPool) : null;
+let systemSetupStatus: Awaited<ReturnType<SystemAdministrationServices["auth"]["setupStatus"]>> | null = null;
+if (systemAdministration) {
+  try {
+    systemSetupStatus = await systemAdministration.auth.setupStatus();
+  } catch {
+    // Fail closed: System Admin routes answer 503 instead of failing per request.
+    systemAdministration = null;
+    console.warn("System Admin features are unavailable; verify ARDEN_SYSTEM_AUTH_DATABASE_URL, its arden_system_auth membership and migrations 0072 and 0074.");
+  }
+} else if (production) {
+  console.warn("System Admin features are disabled: ARDEN_SYSTEM_AUTH_DATABASE_URL is not configured.");
+}
+
+// Production requires an operator-supplied setup token; a generated token would be printed
+// to container logs. Development may still print a generated one-time token.
+const configuredSystemSetupToken = process.env.ARDEN_SYSTEM_SETUP_TOKEN?.trim() || undefined;
+const minimumSetupTokenLength = production ? 32 : 16;
+if (configuredSystemSetupToken !== undefined && configuredSystemSetupToken.length < minimumSetupTokenLength) {
+  throw new Error(`ARDEN_SYSTEM_SETUP_TOKEN must be at least ${minimumSetupTokenLength} characters when configured`);
+}
+const systemSetupToken = configuredSystemSetupToken ?? (production ? undefined : randomBytes(32).toString("base64url"));
+
 const repository = new ArdenRepository(pool, contentStorage);
 const app = buildApp({
   checkDatabase: checkRuntimeDatabase,
@@ -165,11 +206,17 @@ const app = buildApp({
   secureCookies: process.env.NODE_ENV === "production",
   sessionSigningKey: sessionSigningKey(process.env.ARDEN_SESSION_SIGNING_KEY,
     process.env.NODE_ENV === "production"),
+  systemSetupToken,
+  systemAdministration,
+  systemHealthProbe: createSystemHealthProbe({ supabaseUrl: process.env.SUPABASE_URL,
+    ardenAiUrl: process.env.ARDEN_AI_URL, ardenAiServiceToken: process.env.ARDEN_AI_SERVICE_TOKEN }),
   repository,
   storage: contentStorage,
   invitationMailer,
   askArden,
+  useUiSurfaceV3,
   privateNoteAiOrganizations,
+  reviewerAiOrganizations,
   readerAi: askArden,
   notificationRealtime,
   invitationDeliveryMode: smtpConfiguration ? "email" : "local-test-no-email",
@@ -287,12 +334,27 @@ async function shutdown() {
   await pool.end();
   await indexPool?.end();
   await notificationPool?.end();
+  if (systemAuthPool && systemAuthPool !== pool) await systemAuthPool.end();
 }
 
 process.once("SIGINT", () => void shutdown());
 process.once("SIGTERM", () => void shutdown());
 
 await app.listen({ port, host });
+if (systemSetupStatus?.needsInitialSetup) {
+  if (configuredSystemSetupToken) {
+    app.log.warn("System Admin is not initialized. Open /system/setup and enter your configured ARDEN_SYSTEM_SETUP_TOKEN.");
+  } else if (systemSetupToken) {
+    // Development only (see above); production never prints a setup token.
+    process.stdout.write(
+      `\n[Arden System Setup] System Admin is not initialized.\n` +
+      `[Arden System Setup] Open /system/setup and enter this one-time setup token:\n` +
+      `[Arden System Setup] ${systemSetupToken}\n\n`,
+    );
+  } else {
+    app.log.warn("System Admin setup is closed until ARDEN_SYSTEM_SETUP_TOKEN is configured.");
+  }
+}
 scheduleIndexWorker(250);
 scheduleNotificationWorker(250);
 scheduleExpiryReminders(30_000);
@@ -310,8 +372,4 @@ function localFlow1Origin(name: string, fallback: string): string {
     throw new Error(`${name} must be an exact loopback HTTP origin`);
   }
   return parsed.origin;
-}
-
-function assertBooleanEnvironmentValue(name: string, value: string | undefined): void {
-  if (value !== undefined && value !== "true" && value !== "false") throw new Error(`${name} must be true or false`);
 }

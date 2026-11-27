@@ -39,26 +39,24 @@ export type NavigationItem = {
   shortLabel: string;
   icon: IconName;
   view?: WorkspaceView;
-  planned?: boolean;
 };
 
 /** Home is the published-knowledge start page (requested 15 Nov 2026); it replaced the sample My Work dashboard. */
 export const workNavigation: NavigationItem[] = [
   { label: "Home", shortLabel: "Home", icon: "home", view: "knowledge" },
+  { label: "Graph", shortLabel: "Graph", icon: "graph", view: "graph" },
   { label: "Ask Arden", shortLabel: "Ask", icon: "chat", view: "ask-arden" },
   { label: "Private", shortLabel: "Private", icon: "lock", view: "personal-workspace" },
 ];
 
 export const knowledgeNavigation: NavigationItem[] = [
   { label: "Reviews", shortLabel: "Reviews", icon: "review", view: "review-queue" },
-  { label: "Integrations", shortLabel: "Integrations", icon: "integrations", planned: true },
 ];
 
 export const adminNavigation: NavigationItem = { label: "Administration", shortLabel: "Admin", icon: "organization", view: "organization-access" };
 
 /** Server-backed sessions expose Ask Arden through the authenticated Core API and restrict destinations with connected server workflows. */
 export function navigationDisabled(item: NavigationItem, _authenticated: boolean, isUnassigned?: boolean): boolean {
-  if (item.planned) return true;
   if (isUnassigned && (item.view === "personal-workspace" || item.view === "review-queue")) {
     return true;
   }
@@ -187,14 +185,13 @@ export function AppSidebar({
         className={`sidebar-nav-item${active ? " is-active" : ""}`}
         onClick={() => { if (item.view) onNavigate(item.view); }}
         disabled={disabled}
-        aria-label={reviewCount !== undefined ? `${item.label}, ${reviewCount} assigned` : item.planned ? `${item.label} — not available yet` : item.label}
+        aria-label={reviewCount !== undefined ? `${item.label}, ${reviewCount} assigned` : item.label}
         aria-current={active ? "page" : undefined}
-        title={unassignedNotice ?? (item.planned ? `${item.label} is not available yet` : item.label)}
+        title={unassignedNotice ?? item.label}
       >
         <Icon name={item.icon} size={18} />
         <span className="sidebar-nav-label"><span className="nav-label-full">{item.label}</span><span className="nav-label-short" aria-hidden="true">{item.shortLabel}</span></span>
         {reviewCount !== undefined && reviewCount > 0 && <small className="sidebar-review-count">{reviewCount}</small>}
-        {item.planned && <small className="sidebar-planned">Coming later</small>}
       </button>
     );
   };

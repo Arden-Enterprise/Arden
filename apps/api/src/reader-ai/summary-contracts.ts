@@ -1,11 +1,13 @@
 import type { ReaderSourceResponse } from "./contracts.js";
+import { keysWithoutUsageEnvelope, readUsageEnvelope, type ProviderUsageEvent } from "../answers/usage-contracts.js";
 
 export type SummaryKind = "KEY_POINT" | "STEP" | "CONDITION" | "EXCEPTION";
 export type SummaryPoint = { kind: SummaryKind; text: string; citations: Array<{ chunkId: string; quote: string }> };
 export type ReaderSummaryResponse = Pick<ReaderSourceResponse, "contractVersion" | "purpose" | "requestId"
   | "organizationId" | "publishedVersionId" | "generationId" | "snapshotVersionId" | "snapshotContentHash"
   | "markdownContentHash" | "chunksDigest"> & { status: "COMPLETED"; points: SummaryPoint[];
-    coverage: Array<{ startOffset: number; endOffset: number }>; usedChunkIds: string[] };
+    coverage: Array<{ startOffset: number; endOffset: number }>; usedChunkIds: string[];
+    usageContractVersion: 1; usageEvents: ProviderUsageEvent[] };
 
 export class ReaderSummaryError extends Error {
   constructor(readonly code: "INVALID_SUMMARY" | "UNSUPPORTED" | "BUSY" | "UNAVAILABLE" | "TIMEOUT" | "PROVIDER_BUSY" | "PROVIDER_AUTH",
@@ -17,6 +19,12 @@ function record(value: unknown, keys: readonly string[]): Record<string, unknown
     || Object.keys(value).sort().join() !== [...keys].sort().join()) return invalid();
   return value as Record<string, unknown>;
 }
+/** Top-level summary check; the optional usage envelope is read separately and never fails a summary. */
+function response(value: unknown, keys: readonly string[]): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || keysWithoutUsageEnvelope(value).sort().join() !== [...keys].sort().join()) return invalid();
+  return value as Record<string, unknown>;
+}
 function boundedText(value: unknown, maximum: number): string {
   if (typeof value !== "string" || !value.trim() || Array.from(value).length > maximum) return invalid();
   return value;
@@ -26,7 +34,7 @@ function boundedText(value: unknown, maximum: number): string {
 export function parseReaderSummary(value: unknown, source: ReaderSourceResponse): ReaderSummaryResponse {
   const identity = ["contractVersion", "purpose", "requestId", "organizationId", "publishedVersionId", "generationId",
     "snapshotVersionId", "snapshotContentHash", "markdownContentHash", "chunksDigest"] as const;
-  const row = record(value, [...identity, "status", "points", "coverage", "usedChunkIds"]);
+  const row = response(value, [...identity, "status", "points", "coverage", "usedChunkIds"]);
   if (identity.some(key => row[key] !== source[key]) || row.status !== "COMPLETED") return invalid();
   if (!Array.isArray(row.coverage) || !row.coverage.length || row.coverage.length > 8) return invalid();
   let end = 0;
@@ -56,7 +64,9 @@ export function parseReaderSummary(value: unknown, source: ReaderSourceResponse)
     });
     return { kind, text: boundedText(point.text, 350), citations };
   });
-  return { contractVersion: 1, purpose: "READER_SUMMARY", requestId: source.requestId,
+  const usageEvents = readUsageEnvelope(row, { scopeId: source.requestId, allowed: ["READER_SUMMARY"],
+    fallback: "READER_SUMMARY", providerCallRequired: true });
+  return { contractVersion: 1, purpose: "READER_SUMMARY", usageContractVersion: 1, usageEvents, requestId: source.requestId,
     organizationId: source.organizationId, publishedVersionId: source.publishedVersionId, generationId: source.generationId,
     snapshotVersionId: source.snapshotVersionId, snapshotContentHash: source.snapshotContentHash,
     markdownContentHash: source.markdownContentHash, chunksDigest: source.chunksDigest,

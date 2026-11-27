@@ -1,9 +1,10 @@
 import Fastify, { LogController, type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText, matchesPublicationScope, publicationScopes, type PublicationScope } from "@arden/domain";
+import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, accountPasswordRequirementsMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText, matchesPublicationScope, publicationScopes, type PublicationScope } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
+import { SignInThrottle } from "./auth/sign-in-throttle.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
-  type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
+  type DraftWrite, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type SharedDraftPatch,
   type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type GovernanceDocumentView, type StoredContentFields } from "./db/repository.js";
 import { newSessionExpiry, readSessionExpiry, sealSession } from "./auth/session-timebox.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
@@ -11,6 +12,11 @@ import type { InvitationMailer } from "./email/smtp-mailer.js";
 import { allKnowledgeClassifications, defaultKnowledgeClassification, type KnowledgeClassification } from "./knowledge/policy.js";
 import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
+import { registerSystemConsoleRoutes } from "./system-console/routes.js";
+import { createSystemActorResolver, registerSystemAuthRoutes } from "./system-auth/routes.js";
+import { PasswordWorkLimiter } from "./system-auth/password.js";
+import type { SystemAdministrationServices } from "./system-auth/services.js";
+import type { SystemHealthProbe } from "./system-console/routes.js";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { registerAnswerRoutes } from "./answers/routes.js";
 import { registerReaderSummaryRoutes } from "./reader-ai/routes.js";
@@ -18,6 +24,7 @@ import { registerReaderQuestionRoutes } from "./reader-ai/question-routes.js";
 import { registerPrivateNoteQuestion } from "./private-notes/question.js";
 import { privateFeedbackTickets, registerPrivateFeedbackRoute } from "./private-notes/feedback.js";
 import { registerWritingRoutes } from "./writing/routes.js";
+import { registerReviewerAiRoutes } from "./knowledge/review-ai-routes.js";
 import type { ReaderAiClient } from "./reader-ai/summary.js";
 import { canRead, readerModes, type ReaderSelection, type TargetReadersInput } from "./target-readers/policy.js";
 import { managementSchema, registerKnowledgeCatalogRoutes } from "./knowledge/catalog-routes.js";
@@ -29,13 +36,16 @@ import { MaintenanceError } from "./maintenance/contracts.js";
 import { registerMaintenanceRoutes } from "./maintenance/routes.js";
 import { registerPrivateOrganizationRoutes, representNoteSummary, representPrivateNote } from "./private-notes/organization-routes.js";
 import { registerDirectShareRoutes } from "./private-notes/direct-share-routes.js";
+import { isNormalizedEmail } from "./email-address.js";
+import { GraphProjectionService } from "./graph/graph-service.js";
+import { DocumentRelationshipService } from "./graph/relationship-service.js";
+import { registerGraphRoutes } from "./graph/graph-routes.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
 const maxPdfBase64Length = Math.ceil(maxPdfBytes / 3) * 4;
 const maxTitleCodePoints = 200;
 const defaultListLimit = 50;
-const accountPasswordRequirementsMessage = "Password must have at least 8 characters, one uppercase letter, and one special character.";
 const uuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
 // Decision 0013: legacy classification is optional input and no longer routes review.
 const classificationSchema = { type: "string", enum: [...allKnowledgeClassifications] } as const;
@@ -52,6 +62,12 @@ type AppDependencies = {
   authTrustedOrigins: string[];
   secureCookies: boolean;
   sessionSigningKey?: Buffer;
+  /** Isolated System Admin stores on the dedicated `arden_system_auth` pool; absent means 503. */
+  systemAdministration?: SystemAdministrationServices | null;
+  /** Undefined when setup is not configured (production without ARDEN_SYSTEM_SETUP_TOKEN). */
+  systemSetupToken?: string;
+  /** Sanitized dependency probes for the System Console health report. */
+  systemHealthProbe?: SystemHealthProbe;
   repository: ArdenDataRepository;
   storage: PrivateContentStorage;
   invitationMailer?: InvitationMailer | null;
@@ -59,7 +75,9 @@ type AppDependencies = {
   publicApiOrigin?: string | null;
   invitationDeliveryMode?: "email" | "local-test-no-email";
   askArden?: AskArdenClient | null;
+  useUiSurfaceV3?: boolean;
   privateNoteAiOrganizations?: ReadonlySet<string>;
+  reviewerAiOrganizations?: ReadonlySet<string>;
   readerAi?: ReaderAiClient | null;
   notificationRealtime?: NotificationRealtimeConfiguration | null;
   testActor?: SessionContext;
@@ -72,6 +90,7 @@ type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification?: 
 
 export function buildApp(dependencies: AppDependencies) {
   const sessionKey = dependencies.sessionSigningKey ?? randomBytes(32);
+  const signInThrottle = new SignInThrottle();
   const app = Fastify({
     // Explicit metadata-only operation events replace URL/IP-bearing automatic access logs.
     logController: new LogController({ disableRequestLogging: true }),
@@ -89,7 +108,7 @@ export function buildApp(dependencies: AppDependencies) {
       },
       redact: {
         paths: ["req.headers.authorization", "req.headers.cookie", "req.body.password", "req.body.currentPassword", "req.body.newPassword",
-          "req.body.token", "req.body.accessToken", "req.body.refreshToken", "res.headers.set-cookie"],
+          "req.body.setupToken", "req.body.token", "req.body.accessToken", "req.body.refreshToken", "res.headers.set-cookie"],
         censor: "[REDACTED]",
       },
     },
@@ -111,9 +130,22 @@ export function buildApp(dependencies: AppDependencies) {
     requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, sessionKey, dependencies.testActor);
   registerAudienceGroupRoutes(app, dependencies.repository.audienceGroups, requestActor, uuidPattern);
   registerKnowledgeCatalogRoutes(app, dependencies.repository.knowledgeCatalog, requestActor, uuidPattern);
-  registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern);
+  registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern,
+    { useUiSurfaceV3: dependencies.useUiSurfaceV3 });
   registerReaderSummaryRoutes(app, dependencies.repository, dependencies.storage, dependencies.readerAi ?? null, requestActor, uuidPattern);
   registerReaderQuestionRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null, requestActor, uuidPattern);
+  // Decision 0010 (2026-11-27): System Admin routes accept only the isolated System Admin
+  // session; an ordinary member session never reaches them.
+  const systemServices = dependencies.systemAdministration ?? null;
+  const passwordWork = new PasswordWorkLimiter();
+  registerSystemAuthRoutes(app, {
+    store: systemServices?.auth,
+    setupToken: dependencies.systemSetupToken,
+    sessionKey,
+    secureCookies: dependencies.secureCookies,
+    passwordWork,
+  });
+  const systemActor = createSystemActorResolver(systemServices?.auth, sessionKey, dependencies.secureCookies);
   const privateAiOrganizations = dependencies.privateNoteAiOrganizations ?? new Set<string>();
   const feedbackTickets = privateFeedbackTickets(sessionKey);
   const ratePrivateAnswer = dependencies.repository.ratePrivateAnswer?.bind(dependencies.repository);
@@ -123,7 +155,13 @@ export function buildApp(dependencies: AppDependencies) {
     requestActor, uuidPattern, privateAiOrganizations, feedbackTickets);
   registerWritingRoutes(app, dependencies.repository, dependencies.askArden ?? null,
     requestActor, uuidPattern, privateAiOrganizations);
-  registerSystemAdministrationRoutes(app, dependencies.repository.systemAdministration, requestActor, uuidPattern);
+  const reviewerAiOrganizations = dependencies.reviewerAiOrganizations ?? new Set<string>();
+  registerReviewerAiRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null,
+    requestActor, uuidPattern, reviewerAiOrganizations);
+  registerSystemAdministrationRoutes(app, systemServices?.administration, systemActor, uuidPattern, passwordWork);
+  registerSystemConsoleRoutes(app, systemServices?.console, systemActor, uuidPattern,
+    dependencies.systemHealthProbe ?? (async () => ({
+      auth: { status: "not_configured", latencyMs: null }, ardenAi: { status: "not_configured", latencyMs: null } })));
   registerNotificationRoutes(app, { repository: dependencies.repository,
     store: dependencies.repository.notifications, requestActor, realtime: dependencies.notificationRealtime ?? null });
   registerPrivateOrganizationRoutes(app, { store: dependencies.repository.privateOrganization,
@@ -131,6 +169,15 @@ export function buildApp(dependencies: AppDependencies) {
   if (dependencies.repository.directShares) {
     registerDirectShareRoutes(app, { store: dependencies.repository.directShares, storage: dependencies.storage, requestActor, uuidPattern });
   }
+  const graphRelationshipService = dependencies.repository.graphRelationships
+    ? new DocumentRelationshipService(dependencies.repository.graphRelationships)
+    : undefined;
+  registerGraphRoutes(app, {
+    service: dependencies.repository.graph ? new GraphProjectionService(dependencies.repository.graph) : undefined,
+    relationshipService: graphRelationshipService,
+    requestActor,
+    uuidPattern,
+  });
   const maintenanceMode = process.env.ARDEN_MAINTENANCE_ANALYSIS_ADAPTER;
   const maintenanceAdapter = maintenanceMode === "http" || maintenanceMode === "http-provider"
     ? httpAnalysisAdapter(process.env.ARDEN_AI_URL ?? "", process.env.ARDEN_AI_SERVICE_TOKEN ?? "",
@@ -142,7 +189,9 @@ export function buildApp(dependencies: AppDependencies) {
       return controlledAnalysisAdapter(request);
     } : null;
   registerMaintenanceRoutes(app, dependencies.repository.maintenance
-    ? new MaintenanceCaseService(dependencies.repository.maintenance, maintenanceAdapter) : undefined, requestActor, uuidPattern);
+    ? new MaintenanceCaseService(dependencies.repository.maintenance, maintenanceAdapter, (error) => app.log.warn({
+      operation: "MAINTENANCE_USAGE", errorType: error instanceof Error ? error.name : "Unknown" }, "AI telemetry write failed"))
+    : undefined, requestActor, uuidPattern);
   app.setErrorHandler((error: FastifyError, request, reply) => {
     if (error.validation) {
       const isEmailError = error.validation.some((v) =>
@@ -213,15 +262,26 @@ export function buildApp(dependencies: AppDependencies) {
     if (!isNormalizedEmail(normalizedEmail)) {
       return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
     }
+    const locked = signInThrottle.state(normalizedEmail);
+    if (locked) {
+      reply.header("Retry-After", String(locked.retryAfterSeconds));
+      return reply.code(429).send(safeError("TOO_MANY_ATTEMPTS", "Too many failed sign-in attempts. Wait a moment and try again.", request.id));
+    }
     try {
       const result = await dependencies.auth.signIn({ email: normalizedEmail, password: request.body.password });
+      signInThrottle.clear(normalizedEmail);
       setAuthCookies(reply, result.tokens, dependencies.secureCookies, sessionKey);
       return { authenticated: true };
     } catch (error) {
       if (error instanceof Error && error.message === "EMAIL_NOT_CONFIRMED") {
         return reply.code(403).send(safeError("EMAIL_NOT_CONFIRMED", "Your email address has not been confirmed yet. Please check your inbox for the confirmation link.", request.id));
       }
+      if (error instanceof Error && error.message === "RATE_LIMITED") {
+        reply.header("Retry-After", "30");
+        return reply.code(429).send(safeError("TOO_MANY_ATTEMPTS", "Too many failed sign-in attempts. Wait a moment and try again.", request.id));
+      }
       if (error instanceof Error && error.message === "INVALID_CREDENTIALS") {
+        signInThrottle.recordFailure(normalizedEmail);
         return reply.code(401).send(safeError("INVALID_CREDENTIALS", "Email or password is incorrect.", request.id));
       }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Authentication provider sign-in failed");
@@ -613,15 +673,13 @@ export function buildApp(dependencies: AppDependencies) {
     const context = await requestActor(request, reply);
     if (!context) return;
     try {
-      const [memberships, systemAdmin] = await Promise.all([
-        dependencies.repository.listMemberships(context.userId),
-        dependencies.repository.systemAdministration?.canAccess(context.userId),
-      ]);
+      // Member sessions never carry System Admin capability: the System Console has its own
+      // isolated sign-in, so /me does not touch `arden_system` at all.
+      const memberships = await dependencies.repository.listMemberships(context.userId);
       const pendingInvitationToken = readPendingInvitationCookie(request.headers.cookie, dependencies.secureCookies);
       return {
-        actor: { id: context.userId, email: context.email, fullName: context.fullName },
+        actor: { id: context.userId, email: context.email, fullName: context.fullName, emailVerified: context.emailVerified },
         account: { passwordSetupRequired: Boolean(context.passwordSetupRequired) },
-        ...(systemAdmin ? { systemAdmin: true } : {}),
         ...(context.sessionExpiresAt ? { sessionExpiresAt: new Date(context.sessionExpiresAt * 1000).toISOString() } : {}),
         ...(dependencies.testActor ? { testMode: true } : {}),
         ...(pendingInvitationToken ? { pendingInvitationToken } : {}),
@@ -637,6 +695,21 @@ export function buildApp(dependencies: AppDependencies) {
       };
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Membership lookup failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+  });
+
+  app.post("/api/v1/account/profile", async (request, reply) => {
+    const context = await requestActor(request, reply);
+    if (!context) return;
+    if (!context.emailVerified || !isNormalizedEmail(context.email)) {
+      return reply.code(403).send(safeError("VERIFIED_ACCOUNT_REQUIRED", "A verified Auth session is required.", request.id));
+    }
+    try {
+      await dependencies.repository.registerAccountProfile(context.userId, context.email, context.fullName);
+      return reply.code(204).send();
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Account profile registration failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
   });
@@ -666,6 +739,9 @@ export function buildApp(dependencies: AppDependencies) {
       reply.header("Location", `/api/v1/organizations/${organization.organizationId}`);
       return reply.code(201).send({ organization });
     } catch (error) {
+      if (isCheckViolation(error)) {
+        return reply.code(409).send(safeError("SYSTEM_ADMIN_ORG_MEMBERSHIP_CONFLICT", "This account cannot join an organization.", request.id));
+      }
       if (isUniqueViolation(error)) {
         return reply.code(409).send(safeError("ORGANIZATION_CONFLICT", "An organization with these details could not be created.", request.id));
       }
@@ -917,6 +993,9 @@ export function buildApp(dependencies: AppDependencies) {
       reply.header("set-cookie", clearPendingInvitationCookie(dependencies.secureCookies));
       return reply.code(204).send();
     } catch (error) {
+      if (isCheckViolation(error)) {
+        return reply.code(409).send(safeError("SYSTEM_ADMIN_ORG_MEMBERSHIP_CONFLICT", "This account cannot join an organization.", request.id));
+      }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation acceptance failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
@@ -1744,15 +1823,24 @@ export function buildApp(dependencies: AppDependencies) {
     });
 
   // Decision 0032 A4: validity of the current publications the caller is responsible for (metadata only).
-  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/renewals", {
-    schema: { params: { type: "object", required: ["organizationId"], properties: {
-      organizationId: { type: "string", pattern: uuidPattern },
-    } } },
+  app.get<{ Params: { organizationId: string }; Querystring: { documentId?: string } }>("/api/v1/organizations/:organizationId/knowledge/renewals", {
+    schema: {
+      params: { type: "object", required: ["organizationId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern },
+      } },
+      querystring: { type: "object", additionalProperties: false, properties: {
+        documentId: { type: "string", pattern: uuidPattern },
+      } },
+    },
   }, async (request, reply) => {
     const context = await requestActor(request, reply);
     if (!context) return;
     try {
-      const items = await dependencies.repository.listPublicationRenewalState(context.userId, request.params.organizationId);
+      const items = await dependencies.repository.listPublicationRenewalState(
+        context.userId,
+        request.params.organizationId,
+        request.query.documentId,
+      );
       if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
       return { items };
@@ -1916,6 +2004,8 @@ export function buildApp(dependencies: AppDependencies) {
         }
         reply.header("Cache-Control", "no-store");
         return { ...representSubmission(detail.submission), ...content, mimeType: detail.mimeType,
+          reviewAiAvailable: detail.submission.requestType === "CONTENT" && Boolean(dependencies.askArden?.reviewSubmission)
+            && reviewerAiOrganizations.has(organizationId),
           submittedByMembershipId: detail.submittedByMembershipId,
           teamTag: detail.teamTag, projectTag: detail.projectTag, proposedReaders: detail.proposedReaders };
       } catch (error) {
@@ -2049,10 +2139,8 @@ export function buildApp(dependencies: AppDependencies) {
           const found = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
           return found && canRead(actor, { organizationId, readers: found.targetReaders }) ? found : null;
         };
-        const publication = await readablePublication();
-        if (!publication) return reply.code(404).send(resourceNotAvailable(request.id));
         // Decision 0032 A3: an old link to an expired publication explains instead of showing the content.
-        if (publication.expired) {
+        const expiredPublication = (publication: PublishedKnowledge) => {
           reply.header("Cache-Control", "no-store");
           const expiredOn = publication.management?.expirationDate ?? null;
           const owner = publication.responsibleDepartmentName;
@@ -2061,16 +2149,24 @@ export function buildApp(dependencies: AppDependencies) {
           return reply.code(410).send({ error: { code: "DOCUMENT_EXPIRED", requestId: request.id,
             message: `This document expired${shown ? ` on ${shown}` : ""}. Contact ${owner ?? "the owner department"}.`,
             expiredOn, ownerDepartmentName: owner, title: publication.title } });
-        }
+        };
+        const publication = await readablePublication();
+        if (!publication) return reply.code(404).send(resourceNotAvailable(request.id));
+        if (publication.expired) return expiredPublication(publication);
         const mimeType = publication.sourceUri.endsWith(".pdf") ? "application/pdf" : "text/plain";
         const content = await readKnowledgeContent(dependencies.storage, publication.sourceUri, publication.contentHash, mimeType);
+        const canEditRelationships = await graphRelationshipService?.canManageLinks(
+          context.userId, organizationId, publication.draftId,
+        ) ?? false;
         const stillAuthorized = await readablePublication();
         if (!stillAuthorized || stillAuthorized.contentHash !== publication.contentHash) {
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
+        if (stillAuthorized.expired) return expiredPublication(stillAuthorized);
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
           management: publication.management,
+          canEditRelationships,
           classification: publication.classification,
           responsibleDepartmentId: publication.responsibleDepartmentId,
           responsibleDepartmentName: publication.responsibleDepartmentName,
@@ -2721,13 +2817,6 @@ function safeErrorType(error: unknown): string {
   return error instanceof Error ? error.name : "UnknownError";
 }
 
-function isNormalizedEmail(email: string): boolean {
-  if (email.length > 320 || email !== email.trim().toLowerCase() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return false;
-  const domain = email.slice(email.lastIndexOf("@") + 1);
-  return domain.length <= 253 && domain.split(".").every((label) =>
-    label.length <= 63 && /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label));
-}
-
 function isValidLabel(value: string, maxLength: number): boolean {
   return value.length > 0 && value.length <= maxLength && !value.includes("\u0000");
 }
@@ -2738,6 +2827,10 @@ function hashInvitationToken(token: string): string {
 
 function isUniqueViolation(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "23505";
+}
+
+function isCheckViolation(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "23514";
 }
 
 function resourceNotAvailable(requestId: string) {

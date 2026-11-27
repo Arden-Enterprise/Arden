@@ -138,7 +138,9 @@ Path: permitted reader opens current published library → searches/filters → 
 
 ## F12 Graph and context
 
-Path requested in ARD-50: left navigation → dominant central graph → search/pan/zoom/fit/select → selected-item details → optional right-hand agent panel/context selection. Current graph remains planned; My Work is the current implemented entry screen.
+The local V1 worktree for ARD-50 adds Graph under Work. Members can search, pan, zoom and select a publication, then pin readable documents to the Company Ask Arden panel. Home remains the default landing screen. [ADR 0022](../decisions/0022-home-start-page-and-reader-validity.md)
+
+V1 uses `@xyflow/react` and `d3-hierarchy`, with ELK loaded on demand for cross-links. It adds opt-in Governance Monitor, dual-endpoint relationship authorization, and modular answers over `/v3/generations`. Flow 3 records local evidence and pending rollout gates. [ADR 0036](../decisions/0036-knowledge-graph-and-modular-typed-ui-blocks.md) · [Capability Map](../features/graph-and-agent-ui/CAPABILITY-MAP.md) · [Flow 3](flows/flow-3-graph-and-agent.md)
 
 | Acceptance ID | Complete path to verify | Evidence / remaining |
 | --- | --- | --- |

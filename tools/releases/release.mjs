@@ -151,6 +151,18 @@ export async function checkReadiness(env, request) {
   }
 }
 
+export async function checkProductionPromotionReadiness(env, source, send, getHead) {
+  const context = releaseContext(env);
+  if (context.environment !== "production" || source?.commit !== context.commit) {
+    throw new Error("Production promotion preflight source does not match this workflow commit");
+  }
+  await assertCurrentHead(env, getHead);
+  await checkReadiness(env, send);
+  // Strictly read-only: checks staging tree match and migration plan without reconciling or mutating.
+  const plan = await send(migrationPlanRequest(env, source));
+  return assertMigrationPlan(plan);
+}
+
 export function metadata() {
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const tree = execFileSync("git", ["rev-parse", "HEAD^{tree}"], { encoding: "utf8" }).trim();
@@ -258,14 +270,20 @@ async function main(mode, env) {
       join(root, "manifest.json"), join(root, "roundtrip")], { stdio: "inherit", timeout: 180_000 });
     return;
   }
-  if (!["preflight", "deploy"].includes(mode)) throw new Error("Unknown release client command");
+  if (!["preflight", "preflight-plan", "deploy"].includes(mode)) throw new Error("Unknown release client command");
   const context = releaseContext(env);
   prepareSsh(env, root);
-  if (mode === "preflight") {
+  if (mode === "preflight" || mode === "preflight-plan") {
     try {
-      await assertCurrentHead(env);
-      await checkReadiness(env, request => rpc(env, root, request));
-      console.log("Restricted deployment connection and release state are ready.");
+      if (mode === "preflight") {
+        await assertCurrentHead(env);
+        await checkReadiness(env, request => rpc(env, root, request));
+        console.log("Restricted deployment connection and release state are ready.");
+      } else {
+        const source = metadata();
+        const plan = await checkProductionPromotionReadiness(env, source, request => rpc(env, root, request));
+        console.log(`Production Core promotion preflight ready (${plan.status}).`);
+      }
     } finally {
       // Keep deployment credentials out of the following build/scan steps.
       for (const name of ["key", "known_hosts"]) {

@@ -1,0 +1,17 @@
+**
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**
+**/__pycache__
+**/*.pyc
+**/.git
+**/.venv
+**/.private
+**/.cache
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+**/*.log

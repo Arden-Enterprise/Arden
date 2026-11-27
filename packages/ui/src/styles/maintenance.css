@@ -186,9 +186,12 @@
 .maintenance-expand[data-open] { grid-template-rows: 1fr; opacity: 1; }
 .maintenance-expand-inner { display: grid; gap: 6px; min-height: 0; overflow: hidden; }
 
-.maintenance-original { display: grid; gap: 8px; padding: 18px 20px; border-radius: var(--arden-radius-md); background: var(--arden-bg-sidebar); }
+.maintenance-original { display: grid; gap: 10px; padding: 18px 20px; border-radius: var(--arden-radius-md); background: var(--arden-bg-sidebar); }
+.maintenance-original-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
 .arden-app-shell .maintenance-original h4 { margin: 0; color: var(--arden-text-secondary); font-size: 12px; font-weight: 600; }
-.maintenance-original p { max-height: 260px; margin: 0; overflow: auto; color: var(--arden-text-primary); font-size: 15px; line-height: 1.65; white-space: pre-wrap; }
+.maintenance-original > p { max-height: 260px; margin: 0; overflow: auto; color: var(--arden-text-primary); font-size: 15px; line-height: 1.65; white-space: pre-wrap; }
+.maintenance-original-pdf { display: grid; min-width: 0; border: 1px solid var(--arden-border); border-radius: var(--arden-radius-sm); overflow: hidden; }
+.maintenance-original-pdf > .pdf-reader { height: min(68vh, 720px); min-height: 420px; }
 
 .maintenance-progress { position: relative; height: 2px; overflow: hidden; border-radius: 2px; background: var(--arden-accent-subtle); }
 .maintenance-progress > span { position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: inherit; background: var(--arden-violet); }

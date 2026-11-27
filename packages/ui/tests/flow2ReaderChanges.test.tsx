@@ -6,7 +6,10 @@ import { installTestDialogs } from "./dialogTestSupport";
 import * as api from "../src/shared/api-client";
 import { ServerKnowledgeFeaturePage } from "../src/knowledge/ServerKnowledgeFeaturePage";
 
-vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({ ArdenDocumentView: () => null, ArdenRichTextEditor: () => null }));
+vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({
+  ArdenDocumentView: () => createElement("div", { className: "arden-blocknote-document" }, "Managers approve claims."),
+  ArdenRichTextEditor: () => null,
+}));
 vi.mock("../src/shared/WorkspaceTopbar", () => ({ WorkspaceTopbar: () => null }));
 
 let restoreDialogs: () => void;
@@ -61,6 +64,68 @@ describe("T2.2 reviewer approves fewer readers", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Approve", exact: true }));
     return dialog;
   }
+
+  it.each([
+    { teamTag: "Legacy team", projectTag: "Legacy project" },
+    { teamTag: null, projectTag: null },
+  ])("omits team and project metadata from older submissions ($teamTag / $projectTag)", async (legacyTags) => {
+    const readers: api.TargetReaders = { mode: "ORGANIZATION", departmentId: null, memberIds: [] };
+    await openReview({ ...reviewDetail(readers), ...legacyTags });
+
+    const details = within(screen.getByRole("region", { name: "SUBMITTED DETAILS" }));
+    expect(details.getByText("Everyone in organization")).toBeTruthy();
+    expect(details.getByText("Across departments")).toBeTruthy();
+    expect(details.queryByText("Team / project")).toBeNull();
+    expect(details.queryByText(/Legacy team|Legacy project|All teams|All projects/)).toBeNull();
+  });
+
+  it("shows AI evidence on demand and keeps the decision manual", async () => {
+    const detail = { ...reviewDetail(null, "CONTENT"), reviewAiAvailable: true };
+    const ai = vi.spyOn(api, "runSubmissionReview").mockResolvedValue({
+      contractVersion: 1, requestId: "request", snapshotVersionId: detail.snapshotVersionId,
+      snapshotContentHash: detail.contentHash,
+      summary: [{ text: "Describes the reimbursement process.", citation: { excerpt: "Managers approve claims.", page: null } }],
+      checks: [{ category: "CLARITY", text: "Verify which manager approves.", citation: { excerpt: "Managers approve claims.", page: null } }],
+    });
+    const decide = await openReview(detail);
+    expect(ai).not.toHaveBeenCalled();
+    const runAi = screen.getByRole("button", { name: "Review with AI" });
+    // The card names itself once; its action is a short Run beside the title.
+    expect(runAi.textContent).toBe("Run");
+    fireEvent.click(runAi);
+    expect(screen.queryByRole("button", { name: /Review with AI|Run/ })).toBeNull();
+    const result = await screen.findByRole("region", { name: "AI review results" });
+    expect(within(result).getByText("Describes the reimbursement process.")).toBeTruthy();
+    const open = within(result).getByRole("button", { name: "Open check 1 source" });
+    fireEvent.click(open);
+    await waitFor(() => expect(screen.getByText("Managers approve claims.").classList.contains("is-review-source")).toBe(true));
+    expect(open.getAttribute("aria-current")).toBe("location");
+    expect(within(result).queryByText("Managers approve claims.")).toBeNull();
+    expect(decide).not.toHaveBeenCalled();
+    await confirmApproval();
+    await waitFor(() => expect(decide).toHaveBeenCalledOnce());
+  });
+
+  it("offers one PDF source button per cited page for the same summary point", async () => {
+    const detail = { ...reviewDetail(null, "CONTENT"), mimeType: "application/pdf", reviewAiAvailable: true };
+    vi.spyOn(api, "runSubmissionReview").mockResolvedValue({
+      contractVersion: 2, requestId: "request", snapshotVersionId: detail.snapshotVersionId,
+      snapshotContentHash: detail.contentHash,
+      summary: [{ text: "Combines steps and examples.", citation: { excerpt: "The first step.", page: 5 },
+        additionalCitations: [{ excerpt: "Practice the pattern.", page: 5 }, { excerpt: "An example.", page: 7 }] }],
+      checks: [],
+    });
+    await openReview(detail);
+    fireEvent.click(screen.getByRole("button", { name: "Review with AI" }));
+    const result = await screen.findByRole("region", { name: "AI review results" });
+    const pageFive = within(result).getByRole("button", { name: "Open summary 1 source on page 5" });
+    const pageSeven = within(result).getByRole("button", { name: "Open summary 1 source on page 7" });
+    fireEvent.click(pageFive);
+    expect(pageFive.getAttribute("aria-current")).toBe("location");
+    fireEvent.click(pageSeven);
+    expect(pageFive.getAttribute("aria-current")).toBeNull();
+    expect(pageSeven.getAttribute("aria-current")).toBe("location");
+  });
 
   it("approves the proposed readers without sending approved readers", async () => {
     const decide = await openReview(reviewDetail({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: ["m1", "m2", "m3"] }));

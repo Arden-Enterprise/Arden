@@ -3,11 +3,11 @@ import type { KnowledgeCatalog } from "../shared/api-client";
 import type { HomeSource, HomeSourceState } from "./useHomePublications";
 
 export function KnowledgeHomeBrowse({ source, state, catalog, catalogError, query, filters, onFilters, organizationView,
-  onOrganizationView, onOpen, onManage, onRetry }: {
+  onOrganizationView, onOpen, onManage, onViewInGraph, onRetry }: {
   source: HomeSource; state: HomeSourceState; catalog: KnowledgeCatalog | null; catalogError: string;
   query: string; filters: LibraryFilters; onFilters: (filters: LibraryFilters) => void;
   organizationView: "overview" | "all"; onOrganizationView: (view: "overview" | "all") => void;
-  onOpen: (id: string) => void; onManage: () => void; onRetry: () => void;
+  onOpen: (id: string) => void; onManage: () => void; onViewInGraph?: (documentId: string) => void; onRetry: () => void;
 }) {
   const organization = source === "organization";
   const register = organizationView === "all" || Boolean(query.trim() || filters.type || filters.ownerId || filters.collectionId);
@@ -23,6 +23,6 @@ export function KnowledgeHomeBrowse({ source, state, catalog, catalogError, quer
       : state.status === "loading" ? <div className="island island-empty" role="status">Loading documents…</div>
       : <KnowledgeLibraryBrowse items={state.items} catalog={organization ? catalog : null} catalogError={organization ? catalogError : ""}
         allowCollections={organization} showReaders={source === "shared"} query={query} filters={filters} onFilters={onFilters}
-        discover={organization && !register} onBrowse={() => onOrganizationView("all")} onOpen={onOpen} onManage={onManage} />}
+        discover={organization && !register} onBrowse={() => onOrganizationView("all")} onOpen={onOpen} onManage={onManage} onViewInGraph={onViewInGraph} />}
   </section>;
 }

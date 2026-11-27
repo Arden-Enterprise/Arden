@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import type { GraphReaderScope, KnowledgeType } from "@arden/domain";
 import type { AuthorizedAiSource } from "../db/repository.js";
+import { keysWithoutUsageEnvelope, readUsageEnvelope, type ProviderUsageEvent } from "./usage-contracts.js";
 
 export type DialogueTurn = { question: string; answer: string };
 export type EvidenceReference = { generationId: string; publishedVersionId: string; snapshotVersionId: string;
@@ -10,10 +12,47 @@ export type RetrievalRequest = { contractVersion: 2; purpose: "PUBLISHED_CHAT" |
   organizationId: string; query: string; allowedGenerationIds: string[]; history: DialogueTurn[];
   sourceHints: Array<{ generationId: string; label: string }> };
 export type RetrievalResponse = { contractVersion: 2; requestId: string; standaloneQuery: string;
-  retrievalMode: "HYBRID" | "SEMANTIC" | "LEXICAL"; evidence: Evidence[] };
+  retrievalMode: "HYBRID" | "SEMANTIC" | "LEXICAL"; evidence: Evidence[];
+  /** Parsed output stays re-parseable: callers validate injected or local service ports again. */
+  usageContractVersion: 1; usageEvents: ProviderUsageEvent[] };
 export type GenerationRequest = Omit<RetrievalRequest, "allowedGenerationIds" | "sourceHints"> & { evidence: Evidence[] };
 export type GenerationResponse = { contractVersion: 2; requestId: string; status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
-  answer: string; citations: Array<{ chunkId: string; quote: string }>; usedEvidence: string[] };
+  answer: string; citations: Array<{ chunkId: string; quote: string }>; usedEvidence: string[];
+  usageContractVersion: 1; usageEvents: ProviderUsageEvent[] };
+export type UiSurfaceMode = "AUTO" | "DISABLED";
+export type UiSurfaceStatus = "GENERATED" | "OMITTED_INSUFFICIENT" | "OMITTED_INVALID" | "DISABLED";
+export type SourceCatalogEntry = {
+  docRef: string;
+  title: string;
+  type: KnowledgeType | null;
+  ownerDepartment: string;
+  version: string;
+  readerScope: GraphReaderScope;
+  hasDirectRelationships: boolean;
+  departmentRef: string;
+  collectionRef: string | null;
+};
+export type GenerationV3Request = {
+  contractVersion: 3;
+  purpose: "PUBLISHED_CHAT";
+  requestId: string;
+  organizationId: string;
+  query: string;
+  history: DialogueTurn[];
+  evidence: Evidence[];
+  sourceCatalog: SourceCatalogEntry[];
+  uiSurfaceMode: UiSurfaceMode;
+};
+export type GenerationV3Response = {
+  contractVersion: 3;
+  requestId: string;
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
+  answer: string;
+  citations: Array<{ chunkId: string; quote: string }>;
+  usedEvidence: string[];
+  uiSurface: unknown;
+  uiSurfaceStatus: UiSurfaceStatus;
+};
 export type PublicCitation = { documentId: string; versionId: string; blockId?: string; page?: number;
   excerpt: string; title: string; version: string; scope: string; classification: string;
   /** Decision 0021: always null. The key stays because installed clients still require it. */
@@ -31,6 +70,12 @@ function record(value: unknown, keys: string[]): Record<string, unknown> {
   if (Object.keys(value).sort().join() !== keys.sort().join()) return invalid();
   return value as Record<string, unknown>;
 }
+/** Top-level response check: the optional usage envelope is read separately and never fails an answer. */
+function response(value: unknown, keys: string[]): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
+  if (keysWithoutUsageEnvelope(value).sort().join() !== keys.sort().join()) return invalid();
+  return value as Record<string, unknown>;
+}
 function text(value: unknown, max: number, pattern?: RegExp): string {
   if (typeof value !== "string" || !value.length || value.length > max || (pattern && !pattern.test(value))) return invalid();
   return value;
@@ -43,8 +88,9 @@ function integer(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) return invalid();
   return value;
 }
-export function parseRetrievalResponse(value: unknown, requestId: string): RetrievalResponse {
-  const row = record(value, ["contractVersion", "requestId", "standaloneQuery", "retrievalMode", "evidence"]);
+export function parseRetrievalResponse(value: unknown, requestId: string,
+  purpose: RetrievalRequest["purpose"] = "PUBLISHED_CHAT"): RetrievalResponse {
+  const row = response(value, ["contractVersion", "requestId", "standaloneQuery", "retrievalMode", "evidence"]);
   if (row.contractVersion !== 2 || row.requestId !== requestId
     || (row.retrievalMode !== "HYBRID" && row.retrievalMode !== "SEMANTIC" && row.retrievalMode !== "LEXICAL")) return invalid();
   const evidence = array(row.evidence, 8).map((value): Evidence => {
@@ -64,11 +110,15 @@ export function parseRetrievalResponse(value: unknown, requestId: string): Retri
   });
   if (new Set(evidence.map((chunk) => chunk.chunkId)).size !== evidence.length
     || evidence.reduce((sum, chunk) => sum + chunk.content.length, 0) > 64_000) return invalid();
-  return { contractVersion: 2, requestId, standaloneQuery: text(row.standaloneQuery, 4_000),
+  // Lexical retrieval can make no provider call, so only a missing or malformed envelope is incomplete.
+  const usageEvents = readUsageEnvelope(row, { scopeId: requestId, allowed: ["CHAT_RETRIEVAL", "READER_QUESTION_RETRIEVAL"],
+    fallback: purpose === "READER_QUESTION" ? "READER_QUESTION_RETRIEVAL" : "CHAT_RETRIEVAL", providerCallRequired: false });
+  return { contractVersion: 2, usageContractVersion: 1, usageEvents, requestId,
+    standaloneQuery: text(row.standaloneQuery, 4_000),
     retrievalMode: row.retrievalMode as RetrievalResponse["retrievalMode"], evidence };
 }
 export function parseGenerationResponse(value: unknown, request: GenerationRequest): GenerationResponse {
-  const row = record(value, ["contractVersion", "requestId", "status", "answer", "citations", "usedEvidence"]);
+  const row = response(value, ["contractVersion", "requestId", "status", "answer", "citations", "usedEvidence"]);
   if (row.contractVersion !== 2 || row.requestId !== request.requestId
     || (row.status !== "ANSWERED" && row.status !== "INSUFFICIENT_EVIDENCE")) return invalid();
   const usedEvidence = array(row.usedEvidence, 8).map((id) => text(id, 64, hash));
@@ -81,8 +131,51 @@ export function parseGenerationResponse(value: unknown, request: GenerationReque
     return { chunkId, quote };
   });
   if ((row.status === "ANSWERED") !== Boolean(citations.length)) return invalid();
-  return { contractVersion: 2, requestId: request.requestId, status: row.status,
-    answer: text(row.answer, 12_000), citations, usedEvidence };
+  const operation = request.purpose === "READER_QUESTION" ? "READER_QUESTION_GENERATION" as const : "CHAT_GENERATION" as const;
+  const usageEvents = readUsageEnvelope(row, { scopeId: request.requestId, allowed: [operation], fallback: operation,
+    providerCallRequired: true });
+  return { contractVersion: 2, usageContractVersion: 1, usageEvents, requestId: request.requestId,
+    status: row.status, answer: text(row.answer, 12_000), citations, usedEvidence };
+}
+const uiSurfaceStatuses = new Set<UiSurfaceStatus>(["GENERATED", "OMITTED_INSUFFICIENT", "OMITTED_INVALID", "DISABLED"]);
+export function parseGenerationV3Response(value: unknown, request: GenerationV3Request):
+  GenerationV3Response & Pick<GenerationResponse, "usageContractVersion" | "usageEvents"> {
+  const row = response(value, [
+    "contractVersion", "requestId", "status", "answer", "citations", "usedEvidence", "uiSurface", "uiSurfaceStatus",
+  ]);
+  if (row.contractVersion !== 3 || row.requestId !== request.requestId
+    || (row.status !== "ANSWERED" && row.status !== "INSUFFICIENT_EVIDENCE")) return invalid();
+  if (typeof row.uiSurfaceStatus !== "string" || !uiSurfaceStatuses.has(row.uiSurfaceStatus as UiSurfaceStatus)) {
+    return invalid();
+  }
+  const uiSurfaceStatus = row.uiSurfaceStatus as UiSurfaceStatus;
+  const usedEvidence = array(row.usedEvidence, 8).map((id) => text(id, 64, hash));
+  if (usedEvidence.length !== request.evidence.length || new Set(usedEvidence).size !== usedEvidence.length
+    || request.evidence.some((chunk) => !usedEvidence.includes(chunk.chunkId))) return invalid();
+  const citations = array(row.citations, 12).map((entry) => {
+    const citation = record(entry, ["chunkId", "quote"]);
+    const chunkId = text(citation.chunkId, 64, hash), quote = text(citation.quote, 1_200);
+    if (!request.evidence.find((chunk) => chunk.chunkId === chunkId)?.content.includes(quote)) return invalid();
+    return { chunkId, quote };
+  });
+  if ((row.status === "ANSWERED") !== Boolean(citations.length)) return invalid();
+  // Pass uiSurface raw when GENERATED so malformed surface payloads degrade to fallback instead of failing chat delivery.
+  const uiSurface = row.status === "ANSWERED" && uiSurfaceStatus === "GENERATED" ? row.uiSurface : null;
+  const usageEvents = readUsageEnvelope(row, {
+    scopeId: request.requestId, allowed: ["CHAT_GENERATION"], fallback: "CHAT_GENERATION", providerCallRequired: true,
+  });
+  return {
+    contractVersion: 3,
+    requestId: request.requestId,
+    status: row.status,
+    answer: text(row.answer, 12_000),
+    citations,
+    usedEvidence,
+    uiSurface,
+    uiSurfaceStatus,
+    usageContractVersion: 1,
+    usageEvents,
+  };
 }
 export function evidenceMatchesManifest(evidence: Evidence, source: Pick<AuthorizedAiSource,
   "generationId" | "snapshotVersionId" | "snapshotContentHash" | "chunks">): boolean {

@@ -543,7 +543,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const deliveredIds: string[] = [];
     let deliveryAttempts = 0;
     const worker = new NotificationOutboxWorker(randomUUID(), notificationPool, {
-      endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
+      endpoint: "https://realtime.example.test/realtime/v1",
       signingKey: new TextEncoder().encode("ab".repeat(32)), namespace: "test-slot",
     }, { info: () => undefined, warn: () => undefined, error: () => undefined }, async (_configuration, event) => {
       if (event.notificationId !== targetNotificationId) return;
@@ -577,7 +577,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     await pool.query(`UPDATE arden.arden_notification_outbox SET available_at = '-infinity'::timestamptz
       WHERE notification_id = $1`, [targetNotificationId]);
     const exhausted = new NotificationOutboxWorker(randomUUID(), notificationPool, {
-      endpoint: "https://realtime.example.test/realtime/v1", apiKey: "publishable-key-value",
+      endpoint: "https://realtime.example.test/realtime/v1",
       signingKey: new TextEncoder().encode("ab".repeat(32)), namespace: "test-slot",
     }, { info: () => undefined, warn: () => undefined, error: () => undefined }, async () => {
       throw new Error("REALTIME_HTTP_503");
@@ -802,6 +802,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     if (!job) return;
     const manifest: IndexGenerationManifest = {
       contractVersion: 1,
+      usageContractVersion: 1,
+      usageEvents: [],
       jobId: job.jobId,
       generationId: job.generationId,
       snapshotVersionId: job.snapshotVersionId,
@@ -1115,7 +1117,8 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     const workerId = randomUUID();
     for (let claimed = await store.claim(workerId, 90); claimed; claimed = await store.claim(workerId, 90)) {
       await store.complete(claimed, workerId, {
-        contractVersion: 1, jobId: claimed.jobId, generationId: claimed.generationId,
+        contractVersion: 1, usageContractVersion: 1, usageEvents: [],
+        jobId: claimed.jobId, generationId: claimed.generationId,
         snapshotVersionId: claimed.snapshotVersionId, snapshotContentHash: claimed.snapshotContentHash,
         compilerVersion: "semantic-markdown-v1", chunkingVersion: "langchain-section-token-v1",
         embeddingModel: "text-embedding-3-small", embeddingDimensions: 1536,

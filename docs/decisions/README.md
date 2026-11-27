@@ -68,6 +68,11 @@ Version-matched official docs, repository code/tests, and authorized decisions.
 
 ## Status and synchronization
 
+[0010](0010-audiences-and-system-administration.md) remains the audience and authorization source;
+its System Admin scope was explicitly refined on 2026-11-23 to a no-membership, read-only
+System Console with separate `MANAGE_SYSTEM_ADMINS` authority. PostgreSQL rehearsal and rollout
+remain pending for the implementation branch.
+
 [0026: Flat Organization Collection placement](0026-flat-organization-collection-placement.md)
 records the accepted one-folder/Admin/Allowed types/version/Archive rules.
 P3B.1 is a local schema checkpoint only; new API/UI and legacy mapping remain.
@@ -116,3 +121,7 @@ Reviewer self-approval: [0033 — Reviewers with a matching grant may decide the
 Share button and direct sharing: [0034 — One Share button, unreviewed direct sharing with individuals and private PDF items](0034-share-button-direct-share-and-private-pdf.md) (accepted 26 November 2026) allows explicitly selected members to read a private item and lets Private store PDF files.
 
 Audit policy: [0035 — Audit only consequential actions](0035-audit-only-consequential-actions.md) (accepted 26 November 2026) supersedes the audit line of 0002. Permanent deletion and changes to share access are audited.
+
+Knowledge Graph and Modular Agent UI: [0036 — Knowledge Graph (`@xyflow/react`) and Modular Composable Typed UI Blocks](0036-knowledge-graph-and-modular-typed-ui-blocks.md) (accepted 26 November 2026; specification approved, implementation not started) supersedes Sigma.js in `technology-guide.md` Section 9, resolves navigation gap `G4` while keeping Home default (`0022`), and defines the A2UI-inspired Flat Adjacency `UiSurface` v1 contract over `/v3/generations` and ISO/IEC 38505-1:2026 Monitor Mode.
+
+AI Service Monorepo Consolidation and Isolated Release Pipeline: [0037 — Consolidate Python AI service into Arden monorepo with isolated release pipeline](0037-monorepo-ai-service-and-release-pipeline.md) (accepted 27 November 2026; Phase 1 implemented on branch `feat/consolidate-arden-ai-monorepo`, Phases 2–3 planned) supersedes only the separate-Git-repository and manual-AI-deploy portions of [0012](0012-separate-python-ai-service-and-chromadb.md) while keeping all runtime, PostgreSQL, network, and ChromaDB isolation invariants intact under `services/ai/`.

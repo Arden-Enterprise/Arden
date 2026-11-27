@@ -21,7 +21,7 @@ export type KnowledgeLocation = KnowledgeHomeLocation | KnowledgeReviewLocation;
 export type KnowledgeRoute = { home: KnowledgeHomeLocation; reviews: KnowledgeReviewLocation };
 
 /** A request from the shell (browser Back/Forward or an opened address) to show a location, handled once. */
-export type KnowledgeRouteRequest = { location: KnowledgeLocation; navigationId: string };
+export type KnowledgeRouteRequest = { location: KnowledgeLocation; navigationId: string; focusDocumentId?: string };
 
 export const emptyKnowledgeRoute: KnowledgeRoute = { home: { kind: "home" }, reviews: { kind: "reviews" } };
 

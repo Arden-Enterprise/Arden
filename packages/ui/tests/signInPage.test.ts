@@ -326,11 +326,11 @@ describe("SignInPage password reset flow", () => {
     expect(apiClient.signUp).not.toHaveBeenCalled();
     expect(screen.getByRole("alert").textContent).toContain("at least 8 characters");
 
-    for (const invalidPassword of ["abcdefgh!", "Abcdefgh"]) {
+    for (const invalidPassword of ["abcdefgh!", "LGK032005#", "Abcdefgh"]) {
       fireEvent.change(screen.getByLabelText("Password"), { target: { value: invalidPassword } });
       fireEvent.click(screen.getByRole("button", { name: /create account/i }));
       expect(apiClient.signUp).not.toHaveBeenCalled();
-      expect(screen.getByRole("alert").textContent).toContain("one uppercase letter, and one special character");
+      expect(screen.getByRole("alert").textContent).toContain("one uppercase letter, one lowercase letter, and one special character");
     }
   });
 
@@ -343,21 +343,30 @@ describe("SignInPage password reset flow", () => {
     expect(password.maxLength).toBe(100);
     const minimum = screen.getByText("At least 8 characters").closest("li");
     const uppercase = screen.getByText("At least 1 uppercase letter").closest("li");
+    const lowercase = screen.getByText("At least 1 lowercase letter").closest("li");
     const special = screen.getByText("At least 1 special character").closest("li");
     expect(minimum?.textContent).toContain("Pending:");
     expect(screen.getByRole("status").textContent).toBe("No password entered.");
     fireEvent.change(password, { target: { value: "short" } });
     expect(minimum?.textContent).toContain("Not met:");
     expect(uppercase?.textContent).toContain("Not met:");
+    expect(lowercase?.textContent).toContain("Met:");
     expect(special?.textContent).toContain("Not met:");
+    fireEvent.change(password, { target: { value: "LGK032005#" } });
+    expect(minimum?.textContent).toContain("Met:");
+    expect(uppercase?.textContent).toContain("Met:");
+    expect(lowercase?.textContent).toContain("Not met:");
+    expect(special?.textContent).toContain("Met:");
     fireEvent.change(password, { target: { value: "eight123" } });
     expect(minimum?.textContent).toContain("Met:");
     expect(uppercase?.textContent).toContain("Not met:");
+    expect(lowercase?.textContent).toContain("Met:");
     expect(special?.textContent).toContain("Not met:");
     fireEvent.change(password, { target: { value: "Eight123!" } });
     expect(uppercase?.textContent).toContain("Met:");
+    expect(lowercase?.textContent).toContain("Met:");
     expect(special?.textContent).toContain("Met:");
-    expect(screen.getByRole("status").textContent).toBe("3 of 3 password requirements met.");
+    expect(screen.getByRole("status").textContent).toBe("4 of 4 password requirements met.");
 
     fireEvent.click(screen.getByRole("button", { name: "Show password" }));
     expect(password.type).toBe("text");

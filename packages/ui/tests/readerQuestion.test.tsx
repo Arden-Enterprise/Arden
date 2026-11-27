@@ -153,7 +153,7 @@ describe("Ask this document reader", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Arden AI" }));
     fireEvent.click(screen.getByRole("button", { name: "Arden AI" }));
     expect(screen.queryByRole("tab", { name: "Summary" })).toBeNull();
-    expect(screen.getByRole("button", { name: /^Explain a selection/ }).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByRole("button", { name: /Explain a selection/ })).toBeNull();
     chooseReaderTask("question");
     expect(screen.queryByText("Approved readers only.")).toBeNull();
     expect((screen.getByRole("textbox", { name: "Your question" }) as HTMLTextAreaElement).value).toBe("");

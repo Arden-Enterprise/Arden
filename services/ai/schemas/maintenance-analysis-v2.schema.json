@@ -1,0 +1,143 @@
+{
+  "$defs": {
+    "MaintenanceEvidence": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "maxLength": 8000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "textHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Texthash",
+          "type": "string"
+        },
+        "versionId": {
+          "format": "uuid",
+          "title": "Versionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "versionId",
+        "textHash",
+        "text"
+      ],
+      "title": "MaintenanceEvidence",
+      "type": "object"
+    },
+    "MaintenanceProviderRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "caseId": {
+          "format": "uuid",
+          "title": "Caseid",
+          "type": "string"
+        },
+        "contractVersion": {
+          "const": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "requestId": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requestid"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/MaintenanceEvidence"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Sources",
+          "type": "array"
+        }
+      },
+      "required": [
+        "contractVersion",
+        "caseId",
+        "sources"
+      ],
+      "title": "MaintenanceProviderRequest",
+      "type": "object"
+    },
+    "MaintenanceProviderResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": 2,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/MaintenanceVerifiedFinding"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Findings",
+          "type": "array"
+        },
+        "state": {
+          "const": "succeeded",
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "contractVersion",
+        "state",
+        "findings"
+      ],
+      "title": "MaintenanceProviderResponse",
+      "type": "object"
+    },
+    "MaintenanceVerifiedFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "quote": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 350,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "textHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Texthash",
+          "type": "string"
+        },
+        "versionId": {
+          "format": "uuid",
+          "title": "Versionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "versionId",
+        "summary",
+        "quote",
+        "textHash"
+      ],
+      "title": "MaintenanceVerifiedFinding",
+      "type": "object"
+    }
+  },
+  "title": "Arden maintenance evidence contract v2"
+}

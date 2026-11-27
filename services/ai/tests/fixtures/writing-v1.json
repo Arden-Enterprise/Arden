@@ -1,0 +1,17 @@
+{
+  "request": {
+    "contractVersion": 1,
+    "requestId": "10000000-0000-4000-8000-000000000021",
+    "action": "IMPROVE",
+    "scope": "SELECTION",
+    "text": "This is a a sentence."
+  },
+  "response": {
+    "contractVersion": 1,
+    "requestId": "10000000-0000-4000-8000-000000000021",
+    "action": "IMPROVE",
+    "status": "CHANGED",
+    "text": "This is a sentence.",
+    "sourceQuote": ""
+  }
+}

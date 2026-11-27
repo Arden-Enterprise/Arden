@@ -1,14 +1,18 @@
 import type { ReaderSourceRequest, ReaderSourceResponse } from "../reader-ai/contracts.js";
-import { parseGenerationResponse, parseRetrievalResponse, type GenerationRequest, type GenerationResponse,
-  type RetrievalRequest, type RetrievalResponse } from "./governed-contracts.js";
+import { parseGenerationResponse, parseGenerationV3Response, parseRetrievalResponse, type GenerationRequest,
+  type GenerationResponse, type GenerationV3Request, type GenerationV3Response, type RetrievalRequest,
+  type RetrievalResponse } from "./governed-contracts.js";
 
 const maxResponseBytes = 2 * 1024 * 1024;
+const generationV3TimeoutMs = 120_000;
 
-/** Governed answering v2 only (decision 0021): there is no one-call v1 answer fallback. */
+/** Governed answering v2/v3 only (decision 0021 / ADR 0036): there is no one-call v1 answer fallback. */
 export interface AskArdenClient {
   retrieve(request: RetrievalRequest): Promise<RetrievalResponse>;
   generate(request: GenerationRequest): Promise<GenerationResponse>;
+  generateV3?(request: GenerationV3Request): Promise<GenerationV3Response>;
   writing?(request: unknown): Promise<unknown>;
+  reviewSubmission?(request: unknown): Promise<unknown>;
 }
 
 export class ArdenAiAnswerError extends Error {
@@ -30,7 +34,7 @@ export class HttpAskArdenClient implements AskArdenClient {
 
   async retrieve(request: RetrievalRequest): Promise<RetrievalResponse> {
     return parseRetrievalResponse(await this.post("/v2/retrievals", request, maxResponseBytes,
-      request.purpose === "READER_QUESTION" ? 75_000 : this.timeoutMs), request.requestId);
+      request.purpose === "READER_QUESTION" ? 75_000 : this.timeoutMs), request.requestId, request.purpose);
   }
 
   async prepareReaderSource(request: ReaderSourceRequest): Promise<unknown> {
@@ -46,8 +50,19 @@ export class HttpAskArdenClient implements AskArdenClient {
       request.purpose === "READER_QUESTION" ? 125_000 : this.timeoutMs), request);
   }
 
+  async generateV3(request: GenerationV3Request): Promise<GenerationV3Response> {
+    return parseGenerationV3Response(
+      await this.post("/v3/generations", request, maxResponseBytes, generationV3TimeoutMs),
+      request,
+    );
+  }
+
   async writing(request: unknown): Promise<unknown> {
     return this.post("/v1/writing-actions", request, 64 * 1024, 65_000);
+  }
+
+  async reviewSubmission(request: unknown): Promise<unknown> {
+    return this.post("/v1/submission-reviews", request, 64 * 1024, 65_000);
   }
 
   private async post(path: string, payload: unknown, responseLimit = maxResponseBytes, timeoutMs = this.timeoutMs): Promise<unknown> {

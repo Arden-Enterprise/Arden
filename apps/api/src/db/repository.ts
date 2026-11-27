@@ -2,13 +2,17 @@ import type { Pool, PoolClient, QueryResult } from "pg";
 import { metadataSubmissionErrors, validKnowledgeMetadata, type KnowledgeMetadata } from "@arden/domain";
 import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledge/catalog-store.js";
 import { PgConversationStore, type AnswerFeedback, type ConversationStore } from "../answers/conversation-store.js";
+import { PgSurfaceHydrator, type UiSurfaceHydrator } from "../answers/ui-surface-hydrator.js";
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
+import { insertAiUsageEvents } from "./ai-usage.js";
 import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
-import { PgSystemAdministrationStore, type SystemAdministrationStore } from "../system-administration/store.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
 import { PgDirectShareStore, type DirectShareStore } from "../private-notes/direct-share-store.js";
+import { PgGraphStore, type GraphStore } from "../graph/graph-service.js";
+import { PgDocumentRelationshipStore, type DocumentRelationshipStore } from "../graph/relationship-service.js";
 import { PgPrivateOrganizationStore, isActiveCollection, lockTree, type PrivateOrganizationStore,
   type PrivateTrashRetentionStore } from "../private-notes/organization-store.js";
 import type { MaintenancePort } from "../maintenance/case-service.js";
@@ -16,7 +20,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
 import { planReviewDecision, type ReviewAction, type ReviewDecisionPlan } from "../knowledge/review-decision.js";
-import { maxSelectedReaders, validateSelection, type ReaderActor, type ReaderMode, type ReaderSelection,
+import { canRead, maxSelectedReaders, validateSelection, type ReaderActor, type ReaderMode, type ReaderSelection,
   type SelectionFacts, type TargetReadersField, type TargetReadersInput } from "../target-readers/policy.js";
 import { sameReaders, type ApprovedReadersField } from "../target-readers/narrowing.js";
 
@@ -84,6 +88,7 @@ export type PrivateContributionSource = {
   sourceUri: string;
   mimeType: string;
   contentHash: string;
+  contentSizeBytes?: number | null;
 };
 export type SharedKnowledgeDraft = {
   management?: (KnowledgeMetadata & { schemaVersion?: number }) | null;
@@ -104,6 +109,7 @@ export type SharedKnowledgeDraft = {
   sourceUri: string;
   mimeType: string;
   contentHash: string;
+  contentSizeBytes?: number | null;
   currentVersion: number;
   hasPendingSubmission: boolean;
   createdAt: Date;
@@ -335,6 +341,8 @@ export type AuthorizedAiSource = {
   versionNo: number;
   classification: KnowledgeClassification;
   targetScopeType: "ORGANIZATION" | "DEPARTMENT";
+  /** Responsible department UUID for published versions (populated for Flow 2+ publications). */
+  responsibleDepartmentId?: string | null;
   /** Approved Target Readers; null keeps the legacy audience behaviour. */
   targetReaders: ReaderSelection | null;
 };
@@ -393,6 +401,7 @@ type SharedDraftRow = ReaderSelectionColumns & {
   content_uri: string;
   mime_type: string;
   content_hash: string;
+  content_size_bytes: number | null;
   current_version_no: number;
   has_pending_submission: boolean;
   created_at: Date;
@@ -411,7 +420,7 @@ const sharedDraftSelect = `
          EXISTS (SELECT 1 FROM shared_submission pending
                  WHERE pending.shared_draft_id = d.shared_draft_id
                    AND pending.status = 'PENDING_REVIEW') AS has_pending_submission,
-         v.shared_draft_version_id, v.content_uri, v.mime_type, v.content_hash,
+         v.shared_draft_version_id, v.content_uri, v.mime_type, v.content_hash, v.content_size_bytes,
          ARRAY(SELECT a.role_id::text FROM shared_draft_audience a
                WHERE a.shared_draft_id = d.shared_draft_id ORDER BY a.role_id) AS audience_role_ids,
          (SELECT rs.revision FROM reader_selection rs
@@ -439,6 +448,7 @@ function mapSharedDraft(row: SharedDraftRow, organizationId: string): SharedKnow
     sourceUri: row.content_uri,
     mimeType: row.mime_type,
     contentHash: row.content_hash,
+    contentSizeBytes: row.content_size_bytes,
     currentVersion: row.current_version_no,
     hasPendingSubmission: row.has_pending_submission,
     createdAt: row.created_at,
@@ -633,6 +643,7 @@ type AuthorizedAiSourceRow = ReaderSelectionColumns & {
   version_no: number;
   classification: KnowledgeClassification;
   target_scope_type: "ORGANIZATION" | "DEPARTMENT";
+  responsible_department_id: string | null;
 };
 const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
@@ -699,20 +710,31 @@ export interface ArdenDataRepository {
   readonly readerSources?: ReaderSourceStore;
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
   readonly audienceGroups?: AudienceGroupStore;
-  readonly systemAdministration?: SystemAdministrationStore;
   ratePrivateAnswer?(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean>;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
   /** Decision 0034: unreviewed, view-only sharing of private items with named members. */
   readonly directShares?: DirectShareStore;
+  /** Authorized Knowledge Graph projection store (GET /knowledge/graph). */
+  readonly graph?: GraphStore;
+  /** Governed document relationship mutation store (POST .../relationships & .../remove). */
+  readonly graphRelationships?: DocumentRelationshipStore;
+  /** Batched UiSurface metadata, capability, and live lineage hydrator (T-05a). */
+  readonly uiSurfaceHydrator?: UiSurfaceHydrator;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
+  recordAiAnswerResult(userId: string, organizationId: string, requestId: string,
+    resultType: "CHAT" | "READER_QUESTION", answerStatus: "ANSWERED" | "INSUFFICIENT_EVIDENCE", citationCount: number): Promise<boolean>;
+  recordAiUsageEvents(userId: string, organizationId: string, requestId: string,
+    events: ProviderUsageEvent[]): Promise<boolean>;
+  submitAiAnswerFeedback(userId: string, organizationId: string, requestId: string, rating: "POSITIVE" | "NEGATIVE"): Promise<boolean>;
   createOrganization(userId: string, email: string, fullName: string | null, setup: OrganizationSetup, requestId: string): Promise<CreatedOrganization>;
   createInvitation(userId: string, organizationId: string, departmentId: string | null | undefined, email: string, tokenHash: string, expiresAt: Date, requestId: string): Promise<CreatedInvitation | null>;
   rotateInvitation(userId: string, organizationId: string, invitationId: string, tokenHash: string, requestId: string): Promise<CreatedInvitation | null>;
   revokeInvitation(userId: string, organizationId: string, invitationId: string, requestId: string): Promise<boolean>;
   getInvitationByToken(tokenHash: string): Promise<{ invitationId: string; organizationName: string; email: string; expiresAt: Date } | null>;
   acceptInvitation(userId: string, email: string, fullName: string | null, emailVerified: boolean, tokenHash: string, requestId: string): Promise<boolean>;
+  registerAccountProfile(userId: string, email: string, fullName: string | null): Promise<boolean>;
   getOrganizationAdministration(userId: string, organizationId: string): Promise<OrganizationAdminData | null>;
   getKnowledgeOptions(userId: string, organizationId: string): Promise<KnowledgeOptions | null>;
   createDepartment(userId: string, organizationId: string, name: string, requestId: string): Promise<boolean>;
@@ -789,13 +811,16 @@ export interface ArdenDataRepository {
     expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
     idempotencyKey: string, requestId: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
-  listPublicationRenewalState(userId: string, organizationId: string): Promise<PublicationRenewalState[] | null>;
+  listPublicationRenewalState(userId: string, organizationId: string, documentId?: string): Promise<PublicationRenewalState[] | null>;
   requestPublicationRenewal(userId: string, organizationId: string, documentId: string,
     input: PublicationRenewalInput, requestId: string): Promise<RequestPublicationRenewalResult>;
   enqueuePublicationExpiryReminders(): Promise<number>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
-  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null>;
+  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[],
+    scopeDocumentIds?: readonly string[]): Promise<AuthorizedAiSource[] | null>;
   readonly conversations?: ConversationStore;
+  /** Dedicated publishedVersionIds-keyed availability check (eligible_ai_publications + canRead; bypasses 500-doc org cap). */
+  arePublishedVersionsAvailable?(userId: string, organizationId: string, publishedVersionIds: readonly string[]): Promise<boolean>;
   /** The caller as a TargetReaderPolicy actor, or null when they are not an active member. */
   getTargetReaderActor(userId: string, organizationId: string): Promise<ReaderActor | null>;
 }
@@ -841,26 +866,33 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly conversations: ConversationStore;
   readonly knowledgeCatalog: KnowledgeCatalogStore;
   readonly audienceGroups: AudienceGroupStore;
-  readonly systemAdministration: SystemAdministrationStore;
   readonly maintenance: MaintenancePort;
   readonly privateOrganization: PgPrivateOrganizationStore;
   readonly directShares: PgDirectShareStore;
+  readonly graph: GraphStore;
+  readonly graphRelationships: DocumentRelationshipStore;
+  readonly uiSurfaceHydrator: UiSurfaceHydrator;
   /** System-only retention capability for the in-process 30-day purge loop. */
   readonly privateTrashRetention: PrivateTrashRetentionStore;
-  constructor(private readonly pool: Pool, content?: { read(sourceUri: string, expectedHash: string): Promise<string> }) {
+  constructor(private readonly pool: Pool, content?: {
+    read(sourceUri: string, expectedHash: string): Promise<string>;
+    readPdf?(sourceUri: string, expectedHash: string): Promise<Buffer>;
+  }) {
     this.notifications = new PgNotificationStore((user, org, work) => this.withActorContext(user, org, work));
     this.readerSources = new PgReaderSourceStore((user, org, work) => this.withActorContext(user, org, work));
     this.conversations = new PgConversationStore((user, org, work) => this.withActorContext(user, org, work));
     this.knowledgeCatalog = new PgKnowledgeCatalogStore((user, org, work) => this.withActorContext(user, org, work),
       (user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
-    this.systemAdministration = new PgSystemAdministrationStore((user, work) => this.withSystemAdmin(user, work));
     this.maintenance = new PgMaintenanceStore((user, org, work) => this.withActorContext(user, org, work), content);
     this.privateOrganization = new PgPrivateOrganizationStore((user, org, work) => this.withActorContext(user, org, work),
       (work) => this.withPrivateTrashRetention(work));
     this.privateTrashRetention = this.privateOrganization;
     this.directShares = new PgDirectShareStore((user, org, work) => this.withActorContext(user, org, work),
       (user, org, work) => this.withOrganizationAdmin(user, org, work));
+    this.graph = new PgGraphStore((user, org, work) => this.withActorContext(user, org, work));
+    this.graphRelationships = new PgDocumentRelationshipStore((user, org, work) => this.withActorContext(user, org, work));
+    this.uiSurfaceHydrator = new PgSurfaceHydrator((user, org, work) => this.withActorContext(user, org, work));
   }
 
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
@@ -873,6 +905,52 @@ export class ArdenRepository implements ArdenDataRepository {
          WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'ACTIVE'`, [userId, organizationId]);
       const membershipId = result.rows[0]?.membership_id;
       return membershipId ? { membershipId, organizationId, userId } : null;
+    });
+  }
+
+  async recordAiAnswerResult(userId: string, organizationId: string, requestId: string,
+    resultType: "CHAT" | "READER_QUESTION", answerStatus: "ANSWERED" | "INSUFFICIENT_EVIDENCE", citationCount: number) {
+    return this.withActorContext(userId, organizationId, async client => {
+      const membershipId = await this.activeActorMembership(client, userId, organizationId);
+      if (!membershipId) return false;
+      const created = await client.query(`INSERT INTO ai_answer_result(
+        request_id, organization_id, owner_membership_id, result_type, answer_status, citation_count)
+        VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (request_id) DO NOTHING RETURNING request_id`,
+      [requestId, organizationId, membershipId, resultType, answerStatus, citationCount]);
+      if (created.rowCount) return true;
+      const existing = await client.query(`SELECT 1 FROM ai_answer_result WHERE request_id = $1
+        AND organization_id = $2 AND owner_membership_id = $3 AND result_type = $4
+        AND answer_status = $5 AND citation_count = $6`,
+      [requestId, organizationId, membershipId, resultType, answerStatus, citationCount]);
+      return Boolean(existing.rowCount);
+    });
+  }
+
+  async recordAiUsageEvents(userId: string, organizationId: string, requestId: string,
+    events: ProviderUsageEvent[]) {
+    return this.withActorContext(userId, organizationId, async client => {
+      if (!await this.activeActorMembership(client, userId, organizationId)) return false;
+      return insertAiUsageEvents(client, organizationId, requestId, events);
+    });
+  }
+
+  async submitAiAnswerFeedback(userId: string, organizationId: string, requestId: string, rating: "POSITIVE" | "NEGATIVE") {
+    return this.withActorContext(userId, organizationId, async client => {
+      const membershipId = await this.activeActorMembership(client, userId, organizationId);
+      if (!membershipId) return false;
+      // Only a Reader answer this member owns in this organization can be rated here; any other
+      // request id inserts nothing and maps to 404. Ask Arden chat ratings are saved on the turn
+      // (PUT .../turns/:turnId/feedback), so each rating has exactly one source of truth.
+      const result = await client.query(`INSERT INTO ai_answer_feedback(
+        request_id, organization_id, membership_id, rating)
+        SELECT ar.request_id, ar.organization_id, ar.owner_membership_id, $4::text
+          FROM ai_answer_result ar
+         WHERE ar.request_id = $1::uuid AND ar.organization_id = $2::uuid AND ar.owner_membership_id = $3::uuid
+           AND ar.result_type = 'READER_QUESTION'
+        ON CONFLICT (request_id, membership_id) DO UPDATE
+          SET rating = EXCLUDED.rating, updated_at = now()
+        RETURNING feedback_id`, [requestId, organizationId, membershipId, rating]);
+      return Boolean(result.rowCount);
     });
   }
 
@@ -945,6 +1023,7 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query("SET LOCAL ROLE arden_runtime");
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', '', true)", [userId]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
       const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
       await client.query(`
         INSERT INTO user_account (user_id, email, full_name)
@@ -1440,6 +1519,7 @@ export class ArdenRepository implements ArdenDataRepository {
       await client.query("SET LOCAL search_path TO arden, public");
       await client.query(`SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', '', true),
                                  set_config('arden.invitation_token_hash', $2, true)`, [userId, tokenHash]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended('arden:system-administrator-lifecycle', 0))");
       const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
       await client.query(`
         INSERT INTO user_account (user_id, email, full_name)
@@ -1530,31 +1610,16 @@ export class ArdenRepository implements ArdenDataRepository {
     }
   }
 
-  private async withSystemAdmin<T>(userId: string, work: (client: PoolClient) => Promise<T>): Promise<T | null> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      await client.query("SET LOCAL ROLE arden_runtime");
-      await client.query("SET LOCAL search_path TO arden, public");
-      await client.query(`SELECT set_config('arden.actor_id', $1, true),
-        set_config('arden.organization_id', '', true), set_config('arden.org_admin', 'false', true),
-        set_config('arden.instance_admin', 'false', true)`, [userId]);
-      const administrator = await client.query(`SELECT 1 FROM system_administrator sa JOIN user_account ua USING (user_id)
-        WHERE sa.user_id = $1 AND sa.status = 'ACTIVE' AND ua.status = 'ACTIVE'`, [userId]);
-      if (!administrator.rowCount) {
-        await client.query("ROLLBACK");
-        return null;
-      }
-      await client.query("SELECT set_config('arden.instance_admin', 'true', true)");
-      const result = await work(client);
-      await client.query("COMMIT");
-      return result;
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
+  /** Upserts the profile only; it creates no membership or privilege, so it takes no global lock. */
+  async registerAccountProfile(userId: string, email: string, fullName: string | null): Promise<boolean> {
+    return this.withActorContext(userId, null, async client => {
+      const profileName = fullName ?? email.split("@", 1)[0] ?? "Arden member";
+      await client.query(`INSERT INTO user_account (user_id, email, full_name)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, full_name = EXCLUDED.full_name, updated_at = now()`,
+      [userId, email, profileName]);
+      return true;
+    });
   }
 
   async ratePrivateAnswer(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean> {
@@ -1725,9 +1790,9 @@ export class ArdenRepository implements ArdenDataRepository {
       }
 
       await client.query(`
-        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash)
-        VALUES ($1, 1, $2, $3, $4)`, [draftId, input.copiedContent.sourceUri,
-        input.copiedContent.mimeType, input.copiedContent.contentHash]);
+        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
+        VALUES ($1, 1, $2, $3, $4, $5)`, [draftId, input.copiedContent.sourceUri,
+        input.copiedContent.mimeType, input.copiedContent.contentHash, input.copiedContent.contentSizeBytes ?? null]);
       // The contributed wording must stay exactly as reviewed: later saves start a new private version.
       await client.query(`UPDATE draft_version SET sealed_at = now() WHERE draft_version_id = $1 AND sealed_at IS NULL`,
         [input.sourceVersionId]);
@@ -1775,8 +1840,9 @@ export class ArdenRepository implements ArdenDataRepository {
           ? { kind: "replayed", draft: raced.draft } : { kind: "idempotency-conflict" };
       }
       await client.query(`
-        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash)
-        VALUES ($1, 1, $2, $3, $4)`, [draftId, input.content.sourceUri, input.content.mimeType, input.content.contentHash]);
+        INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
+        VALUES ($1, 1, $2, $3, $4, $5)`, [draftId, input.content.sourceUri, input.content.mimeType,
+        input.content.contentHash, input.content.contentSizeBytes ?? null]);
       await this.appendAudit(client, organizationId, input.actorMembershipId,
         "SHARED_DRAFT_CREATED", draftId, 1, input.requestId);
       const created = await this.findSharedDraftByCreateRequest(client, input.actorMembershipId, organizationId, input.idempotencyKey);
@@ -1925,10 +1991,11 @@ export class ArdenRepository implements ArdenDataRepository {
             SELECT $1, $2, unnest($3::uuid[])`, [draftId, organizationId, next.audienceRoleIds]);
         }
       }
-      const object = content ?? { sourceUri: current.sourceUri, mimeType: current.mimeType, contentHash: current.contentHash };
-      await client.query(`INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash)
-        VALUES ($1, $2, $3, $4, $5)`, [draftId, expectedVersion + 1,
-        object.sourceUri, object.mimeType, object.contentHash]);
+      const object = content ?? { sourceUri: current.sourceUri, mimeType: current.mimeType,
+        contentHash: current.contentHash, contentSizeBytes: current.contentSizeBytes };
+      await client.query(`INSERT INTO shared_draft_version (shared_draft_id, version_no, content_uri, mime_type, content_hash, content_size_bytes)
+        VALUES ($1, $2, $3, $4, $5, $6)`, [draftId, expectedVersion + 1,
+        object.sourceUri, object.mimeType, object.contentHash, object.contentSizeBytes ?? null]);
       const membership = await client.query<{ membership_id: string }>(`
         SELECT membership_id FROM organization_membership WHERE user_id = $1 AND organization_id = $2
           AND status = 'ACTIVE'`, [userId, organizationId]);
@@ -2664,9 +2731,11 @@ export class ArdenRepository implements ArdenDataRepository {
   }
 
   /** Decision 0032: renewal state of current publications the caller is responsible for (author, Admin, reviewer). */
-  async listPublicationRenewalState(userId: string, organizationId: string): Promise<PublicationRenewalState[] | null> {
+  async listPublicationRenewalState(userId: string, organizationId: string, documentId?: string): Promise<PublicationRenewalState[] | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      const sourceSql = documentId ? "get_publication_renewal_state($1)" : "list_publication_renewal_state()";
+      const params = documentId ? [documentId] : [];
       const result = await client.query<{ document_id: string; published_version_id: string; title: string;
         responsible_department_id: string | null; expiration_date: string | null; renewal_pending: boolean;
         author_active: boolean; is_author: boolean; can_renew: boolean; pending_submission_id: string | null;
@@ -2678,7 +2747,9 @@ export class ArdenRepository implements ArdenDataRepository {
                 is_author, can_renew, pending_submission_id, pending_snapshot_version_id, pending_content_hash,
                 pending_on_behalf, pending_requested_by, pending_reason,
                 to_char(pending_expiration_date, 'YYYY-MM-DD') AS pending_expiration_date, pending_requested_at,
-                author_window_until, can_decide, author_name FROM list_publication_renewal_state()`);
+                author_window_until, can_decide, author_name FROM ${sourceSql}`,
+        params,
+      );
       return result.rows.map((row) => ({ documentId: row.document_id, publishedVersionId: row.published_version_id,
         title: row.title, responsibleDepartmentId: row.responsible_department_id, expirationDate: row.expiration_date,
         renewalPending: row.renewal_pending, authorActive: row.author_active, isAuthor: row.is_author,
@@ -2760,14 +2831,15 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null> {
+  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[],
+    scopeDocumentIds?: readonly string[]): Promise<AuthorizedAiSource[] | null> {
     if ((generationIds && generationIds.length > 64) || (chunkIds && chunkIds.length > 64)) throw new Error("Too many evidence locations");
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
       const result = await client.query<AuthorizedAiSourceRow>(`
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
-               pv.classification, kb.scope_type AS target_scope_type, pv.management,
+               pv.classification, kb.scope_type AS target_scope_type, pv.responsible_department_id, pv.management,
                ${readerSelectionColumns("pv.reader_selection_id")},
                CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
                  (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
@@ -2778,8 +2850,9 @@ export class ArdenRepository implements ArdenDataRepository {
             ON g.submission_id = pv.submission_id AND g.status = 'READY'
          WHERE g.organization_id = $1 AND pv.published_version_id IN (SELECT eligible_ai_publications())
            AND ($2::uuid[] IS NULL OR g.generation_id = ANY($2::uuid[]))
+           AND ($4::uuid[] IS NULL OR pv.shared_draft_id = ANY($4::uuid[]))
          ORDER BY pv.published_at DESC, pv.published_version_id DESC
-         LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null]);
+         LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null, scopeDocumentIds ?? null]);
       if (result.rows.length > 500) throw new Error("Authorized source count exceeds the request budget");
       return result.rows.map((row) => ({
         management: currentManagement(row.management),
@@ -2793,8 +2866,52 @@ export class ArdenRepository implements ArdenDataRepository {
         versionNo: row.version_no,
         classification: row.classification,
         targetScopeType: row.target_scope_type,
+        responsibleDepartmentId: row.responsible_department_id,
         targetReaders: mapReaderSelection(row),
       }));
+    });
+  }
+
+  async arePublishedVersionsAvailable(
+    userId: string,
+    organizationId: string,
+    publishedVersionIds: readonly string[],
+  ): Promise<boolean> {
+    const uniqueIds = [...new Set(publishedVersionIds)];
+    if (uniqueIds.length > 500) return false;
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const actorResult = await client.query<{ membership_id: string; status: ReaderActor["status"]; department_ids: string[] }>(`
+        SELECT om.membership_id, om.status,
+               ARRAY(SELECT dm.department_id::text FROM department_membership dm
+                       JOIN department d ON d.department_id = dm.department_id
+                                        AND d.organization_id = om.organization_id AND d.status = 'ACTIVE'
+                      WHERE dm.membership_id = om.membership_id AND dm.status = 'ACTIVE'
+                      ORDER BY dm.department_id) AS department_ids
+          FROM organization_membership om
+          JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
+          JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
+         WHERE om.user_id = $1 AND om.organization_id = $2`, [userId, organizationId]);
+      const actorRow = actorResult.rows[0];
+      if (!actorRow || actorRow.status !== "ACTIVE") return false;
+      if (uniqueIds.length === 0) return true;
+      const actor: ReaderActor = {
+        membershipId: actorRow.membership_id,
+        organizationId,
+        status: actorRow.status,
+        departmentIds: actorRow.department_ids,
+      };
+      const result = await client.query<{ published_version_id: string } & ReaderSelectionColumns>(`
+        SELECT pv.published_version_id,
+               ${readerSelectionColumns("pv.reader_selection_id")}
+          FROM published_knowledge_version pv
+         WHERE pv.published_version_id = ANY($1::uuid[])
+           AND pv.published_version_id IN (SELECT eligible_ai_publications())`, [uniqueIds]);
+      const allowed = new Set(
+        result.rows
+          .filter((row) => canRead(actor, { organizationId, readers: mapReaderSelection(row) }))
+          .map((row) => row.published_version_id),
+      );
+      return allowed.size === uniqueIds.length;
     });
   }
 
@@ -2907,10 +3024,11 @@ export class ArdenRepository implements ArdenDataRepository {
       const created = draft.rows[0];
       if (!created) throw new Error("Draft insert returned no row");
       const versionResult = await client.query<{ draft_version_id: string }>(`
-        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id,
+        INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id,
                                    text_source_uri, text_content_hash)
-        VALUES ($1, 1, $2, $3, $4, $5, $6, $7)
-        RETURNING draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash, membershipId,
+        VALUES ($1, 1, $2, $3, $4, $5, $6, $7, $8)
+        RETURNING draft_version_id`, [created.draft_id, content.sourceUri, content.mimeType, content.contentHash,
+        content.contentSizeBytes ?? null, membershipId,
         content.text?.sourceUri ?? null, content.text?.contentHash ?? null]);
       const versionId = versionResult.rows[0]?.draft_version_id;
       if (!versionId) throw new Error("Draft version insert returned no row");
@@ -2966,6 +3084,7 @@ export class ArdenRepository implements ArdenDataRepository {
         source_uri: string;
         mime_type: string;
         content_hash: string;
+        content_size_bytes: number | null;
         current_version_no: number;
         created_at: Date;
         updated_at: Date;
@@ -2976,7 +3095,7 @@ export class ArdenRepository implements ArdenDataRepository {
         text_content_hash: string | null;
         sealed: boolean;
       }>(`
-        SELECT om.membership_id, d.title, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash,
+        SELECT om.membership_id, d.title, v.draft_version_id, v.source_uri, v.mime_type, v.content_hash, v.content_size_bytes,
                d.current_version_no, d.created_at, d.updated_at, d.collection_id, d.favorited_at, d.sort_position,
                v.text_source_uri, v.text_content_hash,
                (v.sealed_at IS NOT NULL
@@ -3001,6 +3120,7 @@ export class ArdenRepository implements ArdenDataRepository {
         sourceUri: current.source_uri,
         mimeType: current.mime_type as StoredContentFields["mimeType"],
         contentHash: current.content_hash,
+        contentSizeBytes: current.content_size_bytes,
         text: storedText(current.text_source_uri, current.text_content_hash),
       };
       await client.query(`
@@ -3013,9 +3133,9 @@ export class ArdenRepository implements ArdenDataRepository {
         // Decision 0031: the open current version is overwritten instead of adding history.
         await client.query(`
           UPDATE draft_version SET version_no = $2, source_uri = $3, mime_type = $4, content_hash = $5,
-                 text_source_uri = $6, text_content_hash = $7
+                 content_size_bytes = $6, text_source_uri = $7, text_content_hash = $8
            WHERE draft_version_id = $1`, [current.draft_version_id, version, source.sourceUri, source.mimeType, source.contentHash,
-          source.text?.sourceUri ?? null, source.text?.contentHash ?? null]);
+          source.contentSizeBytes ?? null, source.text?.sourceUri ?? null, source.text?.contentHash ?? null]);
         versionId = current.draft_version_id;
         // Objects the overwrite made unreachable are erased by the caller after commit.
         for (const replaced of [current.source_uri, current.text_source_uri]) {
@@ -3026,10 +3146,11 @@ export class ArdenRepository implements ArdenDataRepository {
       } else {
         // A contributed (sealed) version stays as it is; the note continues in a new open version.
         const versionResult = await client.query<{ draft_version_id: string }>(`
-          INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, created_by_membership_id,
+          INSERT INTO draft_version (draft_id, version_no, source_uri, mime_type, content_hash, content_size_bytes, created_by_membership_id,
                                      text_source_uri, text_content_hash)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-          RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash, current.membership_id,
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          RETURNING draft_version_id`, [draftId, version, source.sourceUri, source.mimeType, source.contentHash,
+          source.contentSizeBytes ?? null, current.membership_id,
           source.text?.sourceUri ?? null, source.text?.contentHash ?? null]);
         const inserted = versionResult.rows[0]?.draft_version_id;
         if (!inserted) throw new Error("Draft version insert returned no row");
@@ -3065,9 +3186,9 @@ export class ArdenRepository implements ArdenDataRepository {
   private async findPrivateContributionSource(client: PoolClient, userId: string, organizationId: string, sourceVersionId: string): Promise<PrivateContributionSource | null> {
     const result = await client.query<{
       draft_version_id: string; membership_id: string; title: string;
-      source_uri: string; mime_type: string; content_hash: string;
+      source_uri: string; mime_type: string; content_hash: string; content_size_bytes: number | null;
     }>(`
-      SELECT v.draft_version_id, om.membership_id, d.title, v.source_uri, v.mime_type, v.content_hash
+      SELECT v.draft_version_id, om.membership_id, d.title, v.source_uri, v.mime_type, v.content_hash, v.content_size_bytes
         FROM draft_version v
         JOIN draft_document d ON d.draft_id = v.draft_id
         JOIN private_workspace w ON w.workspace_id = d.workspace_id
@@ -3086,6 +3207,7 @@ export class ArdenRepository implements ArdenDataRepository {
       sourceUri: row.source_uri,
       mimeType: row.mime_type,
       contentHash: row.content_hash,
+      contentSizeBytes: row.content_size_bytes,
     } : null;
   }
 
@@ -3233,7 +3355,7 @@ function storedText(sourceUri: string | null, contentHash: string | null): Store
 }
 /** Decision 0034: `text` is the extracted text of a PDF item (absent or null for text notes and PDFs without text). */
 export type StoredContentFields = { sourceUri: string; mimeType: "text/plain" | "application/pdf"; contentHash: string;
-  text?: StoredTextFields | null };
+  contentSizeBytes?: number | null; text?: StoredTextFields | null };
 
 function organizationSlug(name: string): string {
   const base = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()

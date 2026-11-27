@@ -1,26 +1,26 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { emptyKnowledgeMetadata, metadataSubmissionErrors, validityStatus, plainTextToSemanticDocument, serializeSemanticDocument, parseSemanticDocument, semanticDocumentHasText,
-  type KnowledgeMetadata } from "@arden/domain";
+  type KnowledgeMetadata, type SubmissionReviewPoint } from "@arden/domain";
 import { WorkspaceTopbar, type ContextControlProps } from "../shared/WorkspaceTopbar";
 import { SearchField } from "../shared/SearchField";
 import { KnowledgeHeading, KnowledgeNotice } from "./KnowledgePrimitives";
 import { Icon } from "../shared/Icon";
 import { IslandCell, IslandRow, IslandTable } from "../shared/IslandTable";
 import {
-  ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, listKnowledgeReviewBoard,
-  listKnowledgeDrafts, listKnowledgeSubmissions, loadKnowledgeDraft,
+  ApiError, createNewKnowledgeDraft, createPdfKnowledgeDraft, decideKnowledgeReview, loadKnowledgeDraft,
   withdrawKnowledgeSubmission, retryKnowledgePublication,
-  loadKnowledgeOptions, loadKnowledgeReview, loadPublishedKnowledge, listPublicationRenewals, type PublicationRenewalState, saveKnowledgeDraft, loadKnowledgeCatalog, replaceKnowledgePdf,
-  submitKnowledgeDraft, type AssignedKnowledgeReview, type DecidedKnowledgeReview, type KnowledgeDraftRecord,
-  type KnowledgeDraftSummary, type KnowledgeOptions, type KnowledgeReviewDetail,
-  type KnowledgeSubmission, type PublishedKnowledge, type KnowledgeCatalog, type TargetReaders,
+  loadKnowledgeReview, loadPublishedKnowledge, type PublicationRenewalState, saveKnowledgeDraft, replaceKnowledgePdf,
+  submitKnowledgeDraft, type KnowledgeDraftRecord, type KnowledgeReviewDetail,
+  type KnowledgeSubmission, type PublishedKnowledge, type TargetReaders,
   listKnowledgeDraftVersions, loadKnowledgeDraftVersion,
   type KnowledgeDraftVersionRecord, type KnowledgeDraftVersionSummary,
 } from "../shared/api-client";
 import type { Platform } from "../shared/types";
-import { PdfDocument, PdfViewer, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
-import { PdfReader } from "./PdfReader";
+import { PdfDocument, pdfFileName, pdfSizeLabel, usePdfObjectUrl } from "./PdfDocument";
+import { PdfReader, type PdfReaderFocus } from "./PdfReader";
+import { clearHighlight, paintHighlight, quoteRanges } from "./citationHighlight";
 import { ReviewList, initialsOf } from "./ReviewList";
+import { SubmissionReviewAi } from "./SubmissionReviewAi";
 import { reviewRequestPresentation } from "./reviewRequest";
 import { libraryDateLabel } from "./libraryDisplay";
 import { ownerDepartment } from "./readerSelection";
@@ -28,6 +28,7 @@ import { KnowledgeCatalogEditor } from "./KnowledgeCatalogEditor";
 import { emptyLibraryFilters, type LibraryFilters } from "./KnowledgeLibraryBrowse";
 import { KnowledgeHomeBrowse } from "./KnowledgeHomeBrowse";
 import { useHomePublications, type HomeSource } from "./useHomePublications";
+import { useKnowledgeScreenData } from "./useKnowledgeScreenData";
 import { KnowledgeHomeNavigation, type HomeTab } from "./KnowledgeHomeNavigation";
 import { DirectSharesSection, SharedItemReader } from "./DirectShares";
 import { KnowledgeMetadataFields, editableKnowledgeMetadata, targetReadersLabel } from "./KnowledgeMetadataFields";
@@ -41,7 +42,7 @@ import { KnowledgeDialog } from "./KnowledgeDialog";
 import { ReportIssueDialog } from "../maintenance/ReportIssueDialog";
 import { MyReports } from "../maintenance/MyReports";
 import { MaintenanceQueue } from "../maintenance/MaintenanceQueue";
-import { MaintenanceCaseScreen } from "../maintenance/MaintenanceCaseScreen";
+import { MaintenanceCaseScreen, type MaintenanceOriginalView } from "../maintenance/MaintenanceCaseScreen";
 import { caseLoadVisible, startCaseLoad } from "../maintenance/case-load";
 import { describeVersionPair, type VersionPair } from "../maintenance/version-pair";
 import {
@@ -53,6 +54,8 @@ import { PublicationChangeDialog, publicationChangeSentMessage, type Publication
 import { OnBehalfRenewalDecision, RenewPublicationDialog, renewalStatus } from "./RenewPublicationDialog";
 import type { KnowledgeReaderTarget, KnowledgeCitationReference } from "./knowledgeCitation";
 import type { KnowledgeHomeLocation, KnowledgeLocation, KnowledgeReviewLocation, KnowledgeRoute, KnowledgeRouteRequest } from "./knowledgeRoute";
+import { useShellBridge } from "../app/ShellBridgeContext";
+import { GraphRelationshipDialog } from "../graph/GraphRelationshipDialog";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
   .then((module) => ({ default: module.ArdenRichTextEditor })));
@@ -62,6 +65,7 @@ const ArdenDocumentView = lazy(() => import("./ArdenRichTextEditor")
 /** Reader status from the optional expiration date; publications are in force from approval. */
 /** Minimum time between window-focus refreshes of Home (deliberate Refresh and actions are not limited). */
 export const focusReloadIntervalMs = 30_000;
+const emptyRenewals = new Map<string, PublicationRenewalState>();
 
 function readerValidity(item: PublishedKnowledge): { status: "EFFECTIVE" | "EXPIRING" | "EXPIRED"; expiresInDays?: number } {
   const { status, daysLeft } = validityStatus(item.management, new Date().toLocaleDateString("en-CA"));
@@ -97,6 +101,7 @@ type Props = ContextControlProps & {
   onAssignedReviewCount?: (count: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
   awaitingAssignment?: boolean;
+  isAdmin?: boolean;
   onOpenPrivateNotes?: () => void;
   canUsePrivateWorkspace?: boolean;
 };
@@ -143,14 +148,9 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   requestedContributionId, onContributionTargetHandled, routeRequest, onRouteChange, onRouteSettled,
   onAssignedReviewCount, onDirtyChange, awaitingAssignment = false,
   onOpenPrivateNotes, canUsePrivateWorkspace = false, contextOpen, onToggleContext, onOpenReviews }: Props) {
-  const [drafts, setDrafts] = useState<KnowledgeDraftSummary[]>([]);
-  const [submissions, setSubmissions] = useState<KnowledgeSubmission[]>([]);
+  const shellBridge = useShellBridge();
+  const [manageLinksOpen, setManageLinksOpen] = useState(false);
   const home = useHomePublications(platform, organizationId);
-  const [reviews, setReviews] = useState<AssignedKnowledgeReview[]>([]);
-  const [decidedReviews, setDecidedReviews] = useState<DecidedKnowledgeReview[]>([]);
-  const [options, setOptions] = useState<KnowledgeOptions | null>(null);
-  const [catalog, setCatalog] = useState<KnowledgeCatalog | null>(null);
-  const [catalogError, setCatalogError] = useState("");
   const [managingCatalog, setManagingCatalog] = useState(false);
   const [filtersBySource, setFiltersBySource] = useState<Record<HomeSource, LibraryFilters>>(() => ({
     organization: emptyLibraryFilters(), shared: emptyLibraryFilters(), other: emptyLibraryFilters() }));
@@ -182,6 +182,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const [reportsError, setReportsError] = useState("");
   const [reviewSection, setReviewSection] = useState<"publication" | "maintenance">("publication");
   const [maintenanceQueue, setMaintenanceQueue] = useState<MaintenanceCase[]>([]);
+  const [maintenanceFocus, setMaintenanceFocus] = useState<{ documentId: string; navigationId: string } | null>(null);
   const [maintenanceQueueLoading, setMaintenanceQueueLoading] = useState(false);
   const [maintenanceQueueError, setMaintenanceQueueError] = useState("");
   const [maintenanceCase, setMaintenanceCase] = useState<MaintenanceCase | null>(null);
@@ -192,7 +193,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const analysisKey = useRef<{ evidence: string; key: string } | null>(null);
   const analysisEpoch = useRef(0);
   const caseLoad = useRef({ request: 0 });
-  const [maintenanceOriginal, setMaintenanceOriginal] = useState<{ unavailable: true; label: string } | { unavailable: false; label: string; text: string } | null>(null);
+  const [maintenanceOriginal, setMaintenanceOriginal] = useState<MaintenanceOriginalView>(null);
   const linkKey = useRef<CommandKey | null>(null);
   const [maintenanceComparison, setMaintenanceComparison] = useState<MaintenanceComparison | null>(null);
   const [versionPair, setVersionPair] = useState<VersionPair | null>(null);
@@ -203,6 +204,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const requestedCaseId = useRef<string | null>(null);
   const historyEpoch = useRef(0);
   const comparisonRequest = useRef(0);
+  const originalRequest = useRef(0);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceError, setMaintenanceError] = useState("");
   // A failed load replaces the case; a failed action stays inline so the case and typed notes remain.
@@ -228,7 +230,6 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const source: HomeSource = libraryTab === "drafts" || libraryTab === "reports" ? "organization" : libraryTab;
   const libraryFilters = filtersBySource[source];
   const setLibraryFilters = (value: LibraryFilters) => setFiltersBySource(previous => ({ ...previous, [source]: value }));
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -248,10 +249,15 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const openedCreatedDraftId = useRef<string | null>(null);
   const openedCitationId = useRef<string | null>(null);
   const requestedReviewHandled = useRef<string | null>(null);
+  const handledRoute = useRef<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const chooseFileButton = useRef<HTMLButtonElement>(null);
   const decisionReason = useRef<HTMLTextAreaElement>(null);
   const reviewBodyRef = useRef<HTMLDivElement>(null);
+  const [reviewSource, setReviewSource] = useState<{
+    key: string; citation: SubmissionReviewPoint["citation"]; focus: PdfReaderFocus;
+  } | null>(null);
+  const [missingReviewSource, setMissingReviewSource] = useState<PdfReaderFocus | null>(null);
   const pendingNextReview = useRef<string | null>(null);
   const readerReturnId = useRef<string | null>(null);
   const replaceRoute = useRef(false);
@@ -264,31 +270,49 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     (opener ?? window.document.getElementById("arden-main"))?.focus();
   }, [screen]);
 
-  const [renewals, setRenewals] = useState<Map<string, PublicationRenewalState>>(() => new Map());
   const [renewing, setRenewing] = useState<PublicationRenewalState | null>(null);
-  const lastReloadAt = useRef(0);
-  const reload = useCallback(async () => {
-    lastReloadAt.current = Date.now();
-    // Each reading view owns its wait/error state; one slow source must not hide the other tabs.
-    void home.refresh();
-    const [nextDrafts, nextSubmissions, nextBoard, nextOptions, nextCatalog] = await Promise.all([
-      listKnowledgeDrafts(platform, organizationId), listKnowledgeSubmissions(platform, organizationId),
-      listKnowledgeReviewBoard(platform, organizationId),
-      loadKnowledgeOptions(platform, organizationId),
-      loadKnowledgeCatalog(platform, organizationId).then(value => { setCatalogError(""); return value; })
-        .catch(() => { setCatalogError("Catalog is unavailable. You can still browse documents."); return null; }),
-    ]);
-    const nextReviews = nextBoard.items;
-    // Decision 0032: validity of my current publications; a failure only hides the Renew action.
-    void listPublicationRenewals(platform, organizationId)
-      .then((items) => setRenewals(new Map(items.filter((item) => item.isAuthor).map((item) => [item.documentId, item]))))
-      .catch(() => setRenewals(new Map()));
-    setDrafts(nextDrafts); setSubmissions(nextSubmissions);
-    setReviews(nextReviews); setDecidedReviews(nextBoard.decided); setOptions(nextOptions);
-    setCatalog(nextCatalog);
-    if (!nextCatalog?.canManage) setManagingCatalog(false);
-    onAssignedReviewCount?.(nextReviews.length);
-  }, [platform, organizationId, onAssignedReviewCount, home.refresh]);
+  const incomingRoute = routeRequest?.navigationId !== handledRoute.current ? routeRequest?.location.kind : undefined;
+  const homeActive = active && view === "knowledge";
+  const openingCreatedDraft = Boolean(createdDraftId && openedCreatedDraftId.current !== createdDraftId);
+  const onLibrary = homeActive && screen === "library" && !openingCreatedDraft
+    && (!incomingRoute || incomingRoute === "home");
+  const homeBrowse = onLibrary && libraryTab !== "drafts" && libraryTab !== "reports";
+  const contributionList = onLibrary && libraryTab === "drafts";
+  const publicationReviews = active && view === "review-queue" && reviewSection === "publication"
+    && incomingRoute !== "maintenance" && incomingRoute !== "maintenance-case";
+  const { reviewBoard, contributions, drafts: draftRequest, renewals: renewalRequest, catalog: catalogRequest, options: optionsRequest } =
+    useKnowledgeScreenData(platform, organizationId, {
+      reviews: publicationReviews,
+      contributions: contributionList || (homeActive && screen === "editor"),
+      documentOwnership: homeActive && screen === "document",
+      contributionList,
+      home: homeBrowse,
+      metadata: homeActive || (active && view === "review-queue" && (Boolean(review) || reviewSection === "maintenance")),
+    });
+  const drafts = contributions.data?.drafts ?? [];
+  const submissions = contributions.data?.submissions ?? [];
+  const reviews = reviewBoard.data?.items ?? [];
+  const decidedReviews = reviewBoard.data?.decided ?? [];
+  const options = optionsRequest.data;
+  const catalog = catalogRequest.data ?? null;
+  const catalogError = catalogRequest.error ? "Catalog is unavailable. You can still browse documents." : "";
+  const renewals = renewalRequest.data ?? emptyRenewals;
+  const refreshReviews = reviewBoard.refresh;
+  const refreshHome = useCallback(async () => {
+    await Promise.all([home.refresh(), catalogRequest.refresh()]);
+  }, [home.refresh, catalogRequest.refresh]);
+  const refreshContributions = async () => {
+    await contributions.refresh();
+    void renewalRequest.refresh();
+  };
+  useEffect(() => { if (homeBrowse) void home.refresh(); }, [homeBrowse, home.refresh]);
+  useEffect(() => {
+    if (publicationReviews && reviewBoard.data) onAssignedReviewCount?.(reviewBoard.data.items.length);
+    if (publicationReviews && reviewBoard.error) onAssignedReviewCount?.(0);
+  }, [publicationReviews, reviewBoard.data, reviewBoard.error, onAssignedReviewCount]);
+  useEffect(() => {
+    if (managingCatalog && !catalogRequest.loading && !catalog?.canManage) setManagingCatalog(false);
+  }, [managingCatalog, catalogRequest.loading, catalog?.canManage]);
 
   const loadReports = useCallback(async () => {
     setReportsLoading(true);
@@ -320,6 +344,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     maintenancePairIndex.current = index;
     maintenancePairTo.current = toIndex;
     const comparing = ++comparisonRequest.current;
+    originalRequest.current += 1;
     const current = () => caseLoad.current.request === request && comparisonRequest.current === comparing;
     setMaintenanceOriginal(null);
     setMaintenanceComparison(null);
@@ -348,15 +373,23 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const openExactOriginal = useCallback((versionId: string, label: string) => {
     if (!maintenanceCase) return;
     const request = caseLoad.current.request;
+    const opening = ++originalRequest.current;
     const caseId = maintenanceCase.caseId;
+    const current = () => caseLoad.current.request === request && originalRequest.current === opening;
     void readMaintenanceOriginal(platform, organizationId, caseId, versionId)
       .then((result: MaintenanceOriginal) => {
-        if (caseLoad.current.request !== request) return;
-        setMaintenanceOriginal(result.unavailable
-          ? { unavailable: true, label }
-          : { unavailable: false, label, text: result.text });
+        if (!current()) return;
+        if (result.unavailable) {
+          setMaintenanceOriginal({ unavailable: true, label });
+          return;
+        }
+        if (result.mimeType === "application/pdf" && result.pdfBase64) {
+          setMaintenanceOriginal({ unavailable: false, label, mimeType: "application/pdf", pdfBase64: result.pdfBase64 });
+          return;
+        }
+        setMaintenanceOriginal({ unavailable: false, label, text: result.text ?? "" });
       })
-      .catch(() => { if (caseLoad.current.request === request) setMaintenanceOriginal({ unavailable: true, label }); });
+      .catch(() => { if (current()) setMaintenanceOriginal({ unavailable: true, label }); });
   }, [maintenanceCase, organizationId, platform]);
   const openOriginal = (which: "earlier" | "later") => {
     const version = maintenanceVersions.current[which === "later" ? maintenancePairTo.current : maintenancePairIndex.current];
@@ -389,6 +422,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     historyEpoch.current += 1;
     const request = startCaseLoad(caseLoad.current);
     analysisEpoch.current += 1;
+    originalRequest.current += 1;
     setMaintenanceCase(null);
     setMaintenanceHistory(null);
     setRelatedCases([]);
@@ -571,30 +605,25 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     } finally { setBusy(false); }
   }, [maintenanceCase, platform, organizationId, refreshMaintenance, reloadMaintenanceInPlace]);
   useEffect(() => { setReportOpen(false); setMaintenanceCase(null); setMaintenanceHistory(null); setRelatedCases([]); setMaintenanceComparison(null); setVersionPair(null); setReviewerChoices([]); }, [organizationId]);
-  useEffect(() => { if (libraryTab === "reports") void loadReports(); }, [libraryTab, loadReports]);
+  useEffect(() => { if (onLibrary && libraryTab === "reports") void loadReports(); }, [onLibrary, libraryTab, loadReports]);
   useEffect(() => {
-    if (view === "review-queue" && reviewSection === "maintenance" && (!maintenanceCase || caseSurface !== "reviews")) void loadMaintenanceQueue();
-  }, [view, reviewSection, maintenanceCase, caseSurface, loadMaintenanceQueue]);
+    if (active && view === "review-queue" && reviewSection === "maintenance" && (!maintenanceCase || caseSurface !== "reviews")) void loadMaintenanceQueue();
+  }, [active, view, reviewSection, maintenanceCase, caseSurface, loadMaintenanceQueue]);
 
+  const lastFocusRefresh = useRef(0);
   useEffect(() => {
-    let present = true;
-    setLoading(true); setError("");
-    void reload().catch((cause) => { if (present) setError(errorMessage(cause)); })
-      .finally(() => { if (present) setLoading(false); });
-    return () => { present = false; };
-  }, [reload, createdDraftId]);
-
-  useEffect(() => {
-    if (!active) return;
-    // Returning to the window refreshes Home at most every 30 seconds, so switching tabs or apps does not
-    // refetch every list each time. Opening a document still rechecks access on its own.
+    if (!homeBrowse && !publicationReviews && !contributionList) return;
+    lastFocusRefresh.current = Date.now();
     const onFocus = () => {
-      if (Date.now() - lastReloadAt.current < focusReloadIntervalMs) return;
-      void reload().catch(() => undefined);
+      if (Date.now() - lastFocusRefresh.current < focusReloadIntervalMs) return;
+      lastFocusRefresh.current = Date.now();
+      if (homeBrowse) void refreshHome();
+      if (publicationReviews) void refreshReviews();
+      if (contributionList) { void contributions.refresh(); void renewalRequest.refresh(); }
     };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [active, reload]);
+  }, [homeBrowse, publicationReviews, contributionList, refreshHome, refreshReviews, contributions.refresh, renewalRequest.refresh]);
 
   const historyDraftId = screen === "editor" ? draft?.id ?? null
     : screen === "library" && libraryTab === "drafts" ? selectedContributionId : null;
@@ -629,12 +658,6 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       .catch((cause) => { if (present) setError(errorMessage(cause)); });
     return () => { present = false; };
   }, [active, createdDraftId, organizationId, platform]);
-
-  const refresh = async () => {
-    setError("");
-    try { await reload(); }
-    catch (cause) { setError(errorMessage(cause)); }
-  };
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true); setError(""); setMessage("");
@@ -686,7 +709,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     setNewTitle(""); setNewBody(serializeSemanticDocument(
       plainTextToSemanticDocument("", () => crypto.randomUUID()),
     )); setNewFile(null); setNewFileError(""); setNewTitleError("");
-    await refresh(); setMessage("Draft created");
+    setMessage("Draft created");
   });
 
   const saveDraft = () => void run(async () => {
@@ -702,7 +725,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     submitRequestKey.current = null;
     setDraft(saved); setEditor(valuesFromDraft(saved));
     setReplacementPdf(null);
-    await refresh(); setMessage("Draft saved");
+    await refreshContributions(); setMessage("Draft saved");
   });
 
   const submitDraft = () => void run(async () => {
@@ -713,20 +736,20 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     submitRequestKey.current = null;
     setDraft({ ...draft, hasPendingSubmission: true });
     setMessage(statusLabel(submission.status));
-    await refresh();
+    await refreshContributions();
   });
 
   const withdrawSubmission = (submissionId: string) => void run(async () => {
     const withdrawn = await withdrawKnowledgeSubmission(platform, organizationId, submissionId);
     setWithdrawConfirmId(null);
     setMessage(`Request ${statusLabel(withdrawn.status).toLowerCase()}`);
-    await refresh();
+    await refreshContributions();
   });
 
   const retryPublication = (submissionId: string) => void run(async () => {
     await retryKnowledgePublication(platform, organizationId, submissionId);
     setMessage("Publication restarted");
-    await refresh();
+    await refreshContributions();
   });
 
   const openReview = (id: string) => guardDiscard(Boolean(comment.trim()), () => { void run(async () => {
@@ -766,7 +789,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       readers ?? undefined);
     replaceRoute.current = true;
     decisionRequest.current = null; setReview(null); setDecisionToConfirm(null);
-    await refresh();
+    await refreshReviews();
     setMessage(result.status === "APPROVED"
       ? reviewRequestPresentation(result.requestType ?? review.requestType).success
       : "Submission rejected");
@@ -860,7 +883,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const cancelEditing = () => guardDiscard(dirty, () => {
     if (draft) setEditor(valuesFromDraft(draft));
     setReplacementPdf(null);
-    setError(""); setLibraryTab("drafts"); setScreen("library"); void refresh();
+    setError(""); setLibraryTab("drafts"); setScreen("library"); void refreshContributions();
   });
   const latest = draft ? latestByDraft.get(draft.id) : undefined;
   const currentDraftStatus = draft ? draftStatus({ hasPendingSubmission: draft.hasPendingSubmission,
@@ -877,7 +900,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const readersReady = targetReadersComplete(editor?.targetReaders);
   const parsedEditor = editor ? parseSemanticDocument(editor.body) : null;
   const hasContent = Boolean(draft?.currentVersion.mimeType === "application/pdf" || (parsedEditor?.ok ? semanticDocumentHasText(parsedEditor.document) : editor?.body.trim()));
-  const ready = Boolean(ownerDepartmentId && editor?.title.trim() && hasContent && readersReady && !metadataErrors.length && !versionAlreadyPublished);
+  const ready = Boolean(options && contributions.data && ownerDepartmentId && editor?.title.trim() && hasContent
+    && readersReady && !metadataErrors.length && !versionAlreadyPublished);
   const departmentName = (id: string | null) => options?.departments.find((item) => item.id === id)?.name ?? "Unassigned";
   const publicationDepartmentName = (item: PublishedKnowledge) =>
     item.responsibleDepartmentName?.trim() || departmentName(item.responsibleDepartmentId);
@@ -923,6 +947,50 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const openCreate = (mode: "text" | "pdf") => { resetCreation(); setCreateMode(mode); setScreen("create"); };
   const readerPdfUrl = usePdfObjectUrl(screen === "document" && document?.mimeType === "application/pdf" ? document.pdfBase64 : null);
   const reviewPdfUrl = usePdfObjectUrl(view === "review-queue" && review?.mimeType === "application/pdf" ? review.pdfBase64 : null);
+  const reviewKey = review && view === "review-queue" ? `${organizationId}:${review.id}:${review.snapshotVersionId}` : null;
+  const activeReviewSource = reviewSource?.key === reviewKey ? reviewSource : null;
+  const reviewTextFocus = review?.mimeType === "text/plain" ? activeReviewSource?.focus : null;
+  useEffect(() => {
+    setReviewSource(null);
+    setMissingReviewSource(null);
+  }, [reviewKey]);
+  useEffect(() => {
+    const body = reviewBodyRef.current;
+    if (!reviewTextFocus || !body) return;
+    const highlightName = "arden-review-source";
+    let fallback: HTMLElement | null = null;
+    const reveal = () => {
+      const content = body.querySelector<HTMLElement>(".arden-blocknote-document");
+      if (!content?.textContent?.trim()) return false;
+      const ranges = quoteRanges(content, reviewTextFocus.excerpt);
+      const anchor = ranges[0]?.startContainer.parentElement;
+      if (!anchor) { setMissingReviewSource(reviewTextFocus); return true; }
+      if (!paintHighlight(highlightName, ranges)) {
+        fallback = anchor;
+        fallback.classList.add("is-review-source");
+      }
+      anchor.scrollIntoView?.({ block: "center", behavior: "instant" });
+      return true;
+    };
+    const clear = () => { clearHighlight(highlightName); fallback?.classList.remove("is-review-source"); };
+    if (reveal()) return clear;
+    const timeout = window.setTimeout(() => {
+      observer.disconnect();
+      setMissingReviewSource(reviewTextFocus);
+    }, 5_000);
+    const observer = new MutationObserver(() => {
+      if (reveal()) { observer.disconnect(); window.clearTimeout(timeout); }
+    });
+    observer.observe(body, { childList: true, subtree: true, characterData: true });
+    return () => { observer.disconnect(); window.clearTimeout(timeout); clear(); };
+  }, [reviewTextFocus]);
+  const openReviewSource = (citation: SubmissionReviewPoint["citation"], additionalExcerpts: readonly string[]) => {
+    if (!reviewKey) return;
+    setReviewSource({ key: reviewKey, citation, focus: {
+      page: citation.page ?? undefined, excerpt: citation.excerpt, additionalExcerpts, samePage: review?.mimeType === "application/pdf",
+    } });
+    if (review?.mimeType === "application/pdf") reviewBodyRef.current?.scrollIntoView?.({ block: "nearest", behavior: "instant" });
+  };
   /** REV-03/04 breadcrumb "Reviews": back to the REV-02 list, keeping an unsent note behind the discard guard. */
   const backToAllReviews = () => guardDiscard(Boolean(comment.trim()), () => {
     setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
@@ -948,14 +1016,14 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     if (screen === "document" && document) readerReturnId.current = document.id;
     if (screen === "editor") {
       if (draft) setEditor(valuesFromDraft(draft));
-      setReplacementPdf(null); setLibraryTab("drafts"); void refresh();
+      setReplacementPdf(null); setLibraryTab("drafts"); void refreshContributions();
     }
     if (screen === "create") resetCreation();
     if (caseSurface === "reports" && maintenanceCase) leaveMaintenanceCase();
     setOpenedCitation(null); setError(""); setScreen("library");
   };
   const closeReview = () => { setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null; };
-  const showLocation = (location: KnowledgeLocation) => {
+  const showLocation = (location: KnowledgeLocation, focusDocumentId?: string, navigationId?: string) => {
     const settle = () => onRouteSettled?.();
     const homeDirty = (screen === "create" && creationDirty) || (screen === "editor" && dirty);
     const reviewDirty = Boolean(review && comment.trim());
@@ -981,18 +1049,22 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
         setReviewSection("publication"); leaveMaintenanceCase();
         setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
       }));
-      case "maintenance": return show(false, () => { setReviewSection("maintenance"); if (caseSurface === "reviews") leaveMaintenanceCase(); });
+      case "maintenance": return show(reviewDirty, () => {
+        closeReview();
+        setReviewSection("maintenance");
+        setMaintenanceFocus(focusDocumentId && navigationId ? { documentId: focusDocumentId, navigationId } : null);
+        if (caseSurface === "reviews") leaveMaintenanceCase();
+      });
       case "maintenance-case": return show(false, async () => {
         setReviewSection("maintenance");
         await openMaintenanceCase(location.caseId, "reviews");
       });
     }
   };
-  const handledRoute = useRef<string | null>(null);
   useEffect(() => {
     if (!routeRequest || handledRoute.current === routeRequest.navigationId) return;
     handledRoute.current = routeRequest.navigationId;
-    showLocation(routeRequest.location);
+    showLocation(routeRequest.location, routeRequest.focusDocumentId, routeRequest.navigationId);
   }, [routeRequest]);
   const loadMoreHistory = () => {
     if (!maintenanceCase || !maintenanceHistory?.nextCursor) return;
@@ -1020,9 +1092,9 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   return <main id={active ? "arden-main" : undefined} className="workspace-page" tabIndex={-1}>
     <WorkspaceTopbar breadcrumb={breadcrumb} contextOpen={contextOpen} onToggleContext={onToggleContext}
       search={librarySearch} searchActive={Boolean(librarySearch && query)} chrome={screen === "document" && document ? "reader" : "full"} />
-    <div className={`knowledge-feature-page knowledge-live-page${view === "review-queue" && !loading ? " is-review" : ""}`}>
+    <div className={`knowledge-feature-page knowledge-live-page${view === "review-queue" ? " is-review" : ""}`}>
       {error && <p role="alert" className="knowledge-live-error">{error}</p>}
-      {loading ? <div className="island island-empty" role="status">Loading documents…</div> : view === "review-queue" && reviewSection === "maintenance" ? <>
+      {view === "review-queue" && reviewSection === "maintenance" ? <>
         <div className="island-seg maintenance-section-switch" role="group" aria-label="Review sections">
           <button type="button" aria-pressed={false} onClick={() => { setReviewSection("publication"); leaveMaintenanceCase(); }}>Publications</button>
           <button type="button" aria-pressed={true} onClick={() => setReviewSection("maintenance")}>Maintenance</button>
@@ -1160,16 +1232,24 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
               reassignKey.current = null;
               return next;
             });
-          }} /> : <MaintenanceQueue items={maintenanceQueue} loading={maintenanceQueueLoading} error={maintenanceQueueError}
+          }} /> : <MaintenanceQueue key={maintenanceFocus?.navigationId} focusDocumentId={maintenanceFocus?.documentId}
+          items={maintenanceQueue} loading={maintenanceQueueLoading} error={maintenanceQueueError}
             onOpen={(caseId) => void openMaintenanceCase(caseId, "reviews")} onRetry={() => void loadMaintenanceQueue()} />}
       </> : view === "review-queue" && !review ? <>
         <div className="island-seg maintenance-section-switch" role="group" aria-label="Review sections">
           <button type="button" aria-pressed={true}>Publications</button>
-          <button type="button" aria-pressed={false} onClick={() => setReviewSection("maintenance")}>Maintenance</button>
+          <button type="button" aria-pressed={false} onClick={() => { setMaintenanceFocus(null); setReviewSection("maintenance"); }}>Maintenance</button>
         </div>
-        <PublicationReportsPanel platform={platform} organizationId={organizationId} departmentName={departmentName} />
-        <ReviewList pending={reviews} decided={decidedReviews}
-        departmentName={departmentName} busy={busy} onOpen={openReview} onRefresh={() => void refresh()} /></>
+        {reviewBoard.loading ? <div className="island island-empty" role="status">Loading reviews…</div>
+          : reviewBoard.error ? <div className="island island-empty">
+            <p role="alert">{reviewBoard.error instanceof ApiError ? reviewBoard.error.message : "Couldn’t load reviews."}</p>
+            <button type="button" className="secondary-button" onClick={() => void refreshReviews()}>Retry</button>
+          </div> : <>
+            <PublicationReportsPanel platform={platform} organizationId={organizationId} departmentName={departmentName} />
+            <ReviewList pending={reviews} decided={decidedReviews}
+              departmentName={departmentName} busy={busy} onOpen={openReview}
+              onRefresh={() => { setError(""); void refreshReviews(); }} />
+          </>}</>
       : view === "review-queue" && review ? <section className="island review-detail" aria-labelledby="review-detail-title">
         <header className="review-detail-bar">
           <nav className="review-detail-crumbs" aria-label="Breadcrumb">
@@ -1202,7 +1282,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                 </>}
               </div>
               <div className="review-pdf-canvas">
-                {reviewPdfUrl ? <PdfViewer url={reviewPdfUrl} title={review.title} /> : <p role="status">Preparing PDF preview…</p>}
+                <PdfReader key={reviewKey} base64={review.pdfBase64} title={review.title} focus={activeReviewSource?.focus} />
               </div>
             </div>
             : <div ref={reviewBodyRef} className="review-detail-document" tabIndex={0} aria-label={`Submitted document: ${review.title}`}>
@@ -1241,12 +1321,16 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                     <div><dt>Version</dt><dd>{review.management.version}</dd></div>
                     {review.management.expirationDate && <div><dt>Expiration Date</dt><dd>{review.management.expirationDate}</dd></div>}
                     {review.management.changeNote && <div><dt>Change Note</dt><dd>{review.management.changeNote}</dd></div>}
-                  </> : <>
+                  </> : (
                     <div><dt>Within</dt><dd>{review.targetScopeType === "DEPARTMENT" ? departmentName(review.targetDepartmentId ?? review.responsibleDepartmentId) : "Across departments"}</dd></div>
-                    <div><dt>Team / project</dt><dd>{review.teamTag || "All teams"} · {review.projectTag || "All projects"}</dd></div>
-                  </>}
+                  )}
                 </dl>
               </section>
+              {review.reviewAiAvailable && <SubmissionReviewAi key={reviewKey}
+                review={review} platform={platform} organizationId={organizationId} disabled={busy}
+                activeSource={activeReviewSource?.citation} onOpenSource={openReviewSource}
+                sourceMessage={reviewTextFocus && missingReviewSource === reviewTextFocus
+                  ? "The cited passage could not be highlighted in this preview." : ""} />}
               <ApprovedReadersField review={review} value={approvedReaders} departments={options?.departments ?? []}
                 departmentName={departmentName} busy={busy} platform={platform} organizationId={organizationId}
                 onChange={value => { setApprovedReaders(value); setDecisionToConfirm(null); }} />
@@ -1368,10 +1452,12 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                 <span>No organization reviewer assigned.</span></p>}
             <div className="draft-actions" role="group" aria-label="Draft actions">
               <button type="button" className="secondary-button" disabled={busy} onClick={cancelEditing}>{dirty ? "Cancel" : "Back"}</button>
-              <button type="button" className="secondary-button" disabled={busy || !(dirty || ownerOutOfSync)} onClick={saveDraft}>{busy ? "Saving…" : "Save changes"}</button>
+              <button type="button" className="secondary-button" disabled={busy || !options || !(dirty || ownerOutOfSync)} onClick={saveDraft}>{busy ? "Saving…" : "Save changes"}</button>
               <button type="button" className="primary-button" disabled={busy || draft.hasPendingSubmission || dirty || ownerOutOfSync || !ready || snapshotAlreadySubmitted} onClick={submitDraft}>Submit for review</button>
               <span className="island-meta" aria-live="polite">{dirty ? "Unsaved changes · " : ""}{ownerOutOfSync && !dirty ? "Save changes before submitting." : submitHint}</span>
             </div>
+            {Boolean(optionsRequest.error) && <p role="alert">Couldn’t load document options. <button type="button" className="island-link-button" onClick={() => void optionsRequest.refresh()}>Retry options</button></p>}
+            {Boolean(contributions.error) && <p role="alert">Couldn’t load submission history. <button type="button" className="island-link-button" onClick={() => void refreshContributions()}>Retry history</button></p>}
             <section className="island-detail-section" aria-label="Review history"><h3>History</h3>
               <DraftVersionHistory draftId={draft.id} versions={historyVersions?.draftId === draft.id ? historyVersions.items : null}
                 error={historyError} currentVersion={draft.currentVersion.version} submissions={submissions}
@@ -1385,7 +1471,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           documentId: document.draftId, versionId: document.id, contentHash: document.contentHash },
           onCitation: citation => setOpenedCitation(previous => citation ? { ...citation, navigationId: `reader-summary:${crypto.randomUUID()}` }
             : previous?.navigationId.startsWith("reader-summary:") ? null : previous),
-          onAccessLost: () => { home.forget(document.id); void home.refresh(); setOpenedCitation(null); setDocument(null); setScreen("library"); setError("This document is unavailable."); } }}
+          onAccessLost: () => { home.forget(document.id); void home.refresh(); setOpenedCitation(null); setManageLinksOpen(false); setDocument(null); setScreen("library"); setError("This document is unavailable."); } }}
         metadata={{
           title: document.title,
           ownerDepartment: publicationDepartmentName(document),
@@ -1397,12 +1483,18 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           versions: [{ id: document.id, label: document.management?.version || document.versionLabel || "",
             ...readerValidity(document) }],
         }}
-        onBack={() => { readerReturnId.current = document.id; setOpenedCitation(null); setScreen("library"); }}
+        onBack={() => { readerReturnId.current = document.id; setOpenedCitation(null); setManageLinksOpen(false); setScreen("library"); }}
+        informationActions={(shellBridge || document.canEditRelationships) ? <>
+          {shellBridge && <button type="button" className="secondary-button" onClick={() => shellBridge.dispatchGraphIntent({ type: "focus_nodes", documentIds: [document.draftId] })}>
+            <Icon name="graph" size={13} />View in Graph</button>}
+          {document.canEditRelationships && <button type="button" className="secondary-button" onClick={() => setManageLinksOpen(true)}>
+            <Icon name="branch" size={13} />Manage links</button>}
+        </> : undefined}
         surfaceActions={<>
           {readerPdfUrl && <a className="secondary-button" href={readerPdfUrl} download={pdfFileName(document.title)}><Icon name="download" size={13} />Download</a>}
           <button type="button" className="secondary-button" onClick={() => setReportOpen(true)}>
             <Icon name="flag" size={13} />Report an issue</button>
-          {!drafts.some((draft) => draft.id === document.draftId)
+          {draftRequest.data && !draftRequest.data.some(draft => draft.id === document.draftId)
             && <button type="button" className="secondary-button" onClick={() => setReviewOpen(true)}>Start review</button>}</>}
         content={document.mimeType === "application/pdf" && document.pdfBase64
           ? <PdfReader base64={document.pdfBase64} title={document.title} focus={openedCitation} />
@@ -1423,20 +1515,27 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           Waiting for an admin to assign your department. You can read documents shared with the whole organization.</p>}
         <KnowledgeHeading eyebrow="KNOWLEDGE" title={libraryTab === "drafts" ? "My Contributions" : libraryTab === "reports" ? "My reports" : "Home"}
           description=""
-          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="island-icon-button" aria-label="Refresh" title="Refresh" disabled={busy} onClick={() => { void refresh(); setDirectShareRefresh((value) => value + 1); }}><Icon name="refresh" size={16} /></button>
+          action={!managingCatalog && <div className="knowledge-live-actions"><button type="button" className="island-icon-button" aria-label="Refresh" title="Refresh" disabled={busy} onClick={() => {
+            setError("");
+            if (libraryTab === "drafts") void refreshContributions();
+            else if (libraryTab === "reports") void loadReports();
+            else void refreshHome();
+            if (libraryTab === "shared") setDirectShareRefresh(value => value + 1);
+          }}><Icon name="refresh" size={16} /></button>
             {catalog?.canManage && libraryTab === "organization" && (organizationView === "all" || query.trim() || home.views.organization.status !== "ready")
               && <button type="button" className="secondary-button" onClick={() => setManagingCatalog(true)}>Manage collections</button>}
             <button type="button" className="secondary-button" onClick={() => openCreate("text")}>New draft</button>
             <button type="button" className="primary-button" onClick={() => openCreate("pdf")}><Icon name="plus" size={14} />Create from PDF</button></div>} />
-        {!managingCatalog && <KnowledgeHomeNavigation tab={libraryTab} onTab={setLibraryTab} views={home.views} draftCount={drafts.length}
+        {!managingCatalog && <KnowledgeHomeNavigation tab={libraryTab} onTab={setLibraryTab} views={home.views} draftCount={contributions.data?.drafts.length}
           onPrivateNotes={onOpenPrivateNotes} canUsePrivateWorkspace={canUsePrivateWorkspace} />}
         {managingCatalog && catalog?.canManage ? <KnowledgeCatalogEditor platform={platform} organizationId={organizationId}
           catalog={catalog} publications={home.views.organization.items} publicationsUnavailable={home.views.organization.status === "error"}
-          onSaved={reload} onClose={() => setManagingCatalog(false)} />
+          onSaved={refreshHome} onClose={() => setManagingCatalog(false)} />
           : libraryTab !== "drafts" && libraryTab !== "reports" && <KnowledgeHomeBrowse source={source} state={{ ...home.views[source],
               items: home.views[source].items.map(item => ({ ...item, responsibleDepartmentName: publicationDepartmentName(item) })) }}
             catalog={catalog} catalogError={catalogError} query={query} filters={libraryFilters} onFilters={setLibraryFilters}
             organizationView={organizationView} onOrganizationView={value => { setOrganizationView(value); if (value === "overview") setQuery(""); }} onOpen={openPublished}
+            onViewInGraph={shellBridge ? (documentId) => shellBridge.dispatchGraphIntent({ type: "focus_nodes", documentIds: [documentId] }) : undefined}
             onManage={() => setManagingCatalog(true)} onRetry={() => void home.refresh()} />}
         {!managingCatalog && libraryTab === "shared" && <DirectSharesSection platform={platform} organizationId={organizationId}
           refreshKey={directShareRefresh} onOpen={(itemId) => { setSharedItemId(itemId); setScreen("shared"); }} />}
@@ -1449,7 +1548,12 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             onMoreHistory={loadMoreHistory} onClaim={() => undefined} onResolve={() => undefined} onReassign={() => undefined} />
           : <MyReports items={reports} loading={reportsLoading} error={reportsError}
             onOpen={(caseId) => void openMaintenanceCase(caseId, "reports")} onRetry={() => void loadReports()} />}</section>}
-        {!managingCatalog && libraryTab === "drafts" && <section role="tabpanel" aria-labelledby="home-tab-drafts">{filteredDrafts.length ? <div className="island-split">
+        {!managingCatalog && libraryTab === "drafts" && <section role="tabpanel" aria-labelledby="home-tab-drafts">{contributions.loading
+          ? <div className="island island-empty" role="status">Loading contributions…</div>
+          : contributions.error ? <div className="island island-empty">
+            <p role="alert">{contributions.error instanceof ApiError ? contributions.error.message : "Couldn’t load contributions."}</p>
+            <button type="button" className="secondary-button" onClick={() => void refreshContributions()}>Retry</button>
+          </div> : filteredDrafts.length ? <div className="island-split">
           <div className="island-main"><IslandTable label="My contributions" minWidth={620} columns="minmax(240px, 1.8fr) minmax(110px, 1fr) 110px minmax(150px, auto)"
             headers={["DOCUMENT", "DEPARTMENT", "UPDATED", "STATUS"]}>
             {filteredDrafts.map((item) => {
@@ -1483,7 +1587,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
             {renewals.get(selectedContribution.id)?.pending?.canDecide
               && <OnBehalfRenewalDecision key={renewals.get(selectedContribution.id)!.pending!.submissionId}
                 pending={renewals.get(selectedContribution.id)!.pending!} platform={platform} organizationId={organizationId}
-                onDecided={(action) => { setMessage(action === "APPROVE" ? "Renewal approved" : "Renewal rejected"); void refresh(); }} />}
+                onDecided={(action) => { setMessage(action === "APPROVE" ? "Renewal approved" : "Renewal rejected"); void refreshContributions(); }} />}
             {selectedContributionLatest?.withdrawal && <blockquote className="island-box contribution-reason">
               <strong>{selectedContributionLatest.withdrawal.by === "REVIEWER" ? "Withdrawn by a reviewer" : "Withdrawn by an administrator"}</strong>
               <p>{selectedContributionLatest.withdrawal.reason}</p></blockquote>}
@@ -1564,11 +1668,21 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     {changeRequest && selectedContribution && <PublicationChangeDialog type={changeRequest} documentTitle={selectedContribution.title}
       documentId={selectedContribution.id} platform={platform} organizationId={organizationId}
       departments={options?.departments ?? []} onClose={() => setChangeRequest(null)}
-      onSent={() => { const sent = changeRequest; setChangeRequest(null); setMessage(publicationChangeSentMessage(sent)); void refresh(); }} />}
+      onSent={() => { const sent = changeRequest; setChangeRequest(null); setMessage(publicationChangeSentMessage(sent)); void refreshContributions(); }} />}
     {renewing && <RenewPublicationDialog target={renewing} platform={platform} organizationId={organizationId}
       departmentName={departmentName}
       onClose={() => setRenewing(null)}
-      onSent={() => { setRenewing(null); setMessage("Renewal sent for review"); void refresh(); }} />}
+      onSent={() => { setRenewing(null); setMessage("Renewal sent for review"); void refreshContributions(); }} />}
+    {manageLinksOpen && document && <GraphRelationshipDialog
+      platform={platform}
+      organizationId={organizationId}
+      sourceDocument={{
+        documentId: document.draftId,
+        title: document.title,
+        version: document.management?.version || document.versionLabel || undefined,
+      }}
+      onClose={() => setManageLinksOpen(false)}
+    />}
     {discardAction && <DiscardChangesDialog exiting={false} onCancel={() => setDiscardAction(null)} onDiscard={() => {
       discardAction(); setDiscardAction(null);
     }} />}

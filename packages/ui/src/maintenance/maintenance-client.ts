@@ -138,7 +138,10 @@ export function listMaintenanceVersions(platform: Platform, organizationId: stri
   return apiRequest(platform, `${base(organizationId)}/cases/${caseId}/versions`);
 }
 
-export type MaintenanceOriginal = { unavailable: true; publishedVersionId: string } | { unavailable: false; publishedVersionId: string; text: string };
+export type MaintenanceOriginal =
+  | { unavailable: true; publishedVersionId: string }
+  | { unavailable: false; publishedVersionId: string; text: string; mimeType?: string; pdfBase64?: undefined }
+  | { unavailable: false; publishedVersionId: string; mimeType: "application/pdf"; pdfBase64: string; text?: undefined };
 
 export function readMaintenanceOriginal(platform: Platform, organizationId: string, caseId: string, publishedVersionId: string): Promise<MaintenanceOriginal> {
   return apiRequest(platform, `${base(organizationId)}/cases/${caseId}/versions/${publishedVersionId}`);

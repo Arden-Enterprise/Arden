@@ -23,6 +23,9 @@
     "tests/knowledgeRoute.test.tsx",
     "tests/privateNotesShare.test.tsx",
     "tests/privateNotesPdfItems.test.tsx",
-    "tests/privateNotesDirectShare.test.tsx"
+    "tests/privateNotesDirectShare.test.tsx",
+    "tests/graphIntentBus.test.ts",
+    "tests/ardenShellBridge.test.tsx",
+    "src/ask-arden/surface/UiSurfaceRenderer.test.tsx"
   ]
 }

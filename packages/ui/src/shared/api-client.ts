@@ -1,6 +1,19 @@
 import type { Platform } from "./types";
 import { rememberReturnPath } from "../app/workspaceRoute";
-import type { KnowledgeMetadata, PublicationScope, KnowledgeType } from "@arden/domain";
+import type {
+  AnswerScopeFilter,
+  BoundUiSurface,
+  DocumentRelationshipType,
+  GraphRelationshipEdge,
+  HydratedDocumentSummary,
+  KnowledgeGraphPayload,
+  KnowledgeGraphQuery,
+  KnowledgeMetadata,
+  KnowledgeType,
+  PublicationScope,
+  SubmissionReviewResult,
+  TurnHydration,
+} from "@arden/domain";
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
   departmentId: string | null; memberIds: string[] };
@@ -45,13 +58,12 @@ export type OrganizationMembership = {
   canReview?: boolean;
 };
 export type CurrentSession = {
-  actor: { id: string; email?: string; fullName?: string | null };
+  actor: { id: string; email?: string; fullName?: string | null; emailVerified?: boolean };
   account: { passwordSetupRequired: boolean };
   sessionExpiresAt?: string;
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
   testMode?: boolean;
-  systemAdmin?: boolean;
 };
 export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
@@ -194,6 +206,7 @@ export type ProposedReadersDetail = {
   members: Array<{ membershipId: string; displayName: string | null }>;
 };
 export type KnowledgeReviewDetail = KnowledgeSubmission & {
+  reviewAiAvailable?: boolean;
   /** Absent from older servers and null for a legacy audience submission. */
   proposedReaders?: ProposedReadersDetail | null;
   body: string;
@@ -224,6 +237,7 @@ export type PublishedKnowledge = {
   validUntil: string | null;
   /** Home AUTHOR column: the active author's display name; null shows "—" (decision 0032). */
   authorName?: string | null;
+  canEditRelationships?: boolean;
   body?: string;
   mimeType?: "text/plain" | "application/pdf";
   pdfBase64?: string;
@@ -243,6 +257,7 @@ export type ReviewerGrant = {
 };
 export type AnswerFeedback = "GOOD" | "BAD" | null;
 export type AskArdenAnswer = {
+  requestId?: string;
   conversationId?: string;
   revision?: number;
   turnId?: string;
@@ -264,14 +279,99 @@ export type AskArdenAnswer = {
     startOffset?: number;
     endOffset?: number;
   }>;
+  uiSurface?: BoundUiSurface | null;
+  turnHydration?: TurnHydration | null;
+  hydratedDocuments?: Record<string, HydratedDocumentSummary>;
 };
 export type AiConversationSummary = { id: string; title: string; revision: number; updatedAt: string };
-export type AiConversation = AiConversationSummary & { turns: Array<{
-  id: string; requestId: string; question: string; sequence: number; answer: string;
-  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE";
-  citations: AskArdenAnswer["citations"];
-  feedback?: AnswerFeedback;
-}> };
+export type AiConversation = AiConversationSummary & {
+  hasMore?: boolean;
+  hydratedDocuments?: Record<string, HydratedDocumentSummary>;
+  turns: Array<{
+    id: string; requestId: string; question: string; sequence: number; answer: string;
+    status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE";
+    citations: AskArdenAnswer["citations"];
+    feedback?: AnswerFeedback;
+    uiSurface?: BoundUiSurface | null;
+    turnHydration?: TurnHydration | null;
+  }>;
+};
+
+export type SystemConsoleQuery = { from: string; to: string; search?: string; status?: string; page?: number; pageSize?: number; organizationId?: string };
+export type SystemConsoleReport = Record<string, unknown>;
+export type SystemSetupStatus = { needsInitialSetup: boolean; hasOrganizations: boolean };
+export type SystemAdminSession = {
+  administrator: {
+    id: string;
+    email: string;
+    fullName: string;
+    canManageSystemAdmins: boolean;
+  };
+  sessionExpiresAt: string;
+};
+
+export function getSystemSetupStatus(platform: Platform): Promise<SystemSetupStatus> {
+  return request(platform, "/api/v1/system/setup/status");
+}
+
+export function completeSystemSetup(
+  platform: Platform,
+  input: { setupToken: string; email: string; fullName: string; password: string },
+): Promise<SystemAdminSession> {
+  return request(platform, "/api/v1/system/setup", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function systemSignIn(platform: Platform, email: string, password: string): Promise<SystemAdminSession> {
+  return request(platform, "/api/v1/system/auth/sign-in", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export type SystemConsoleReportName = "overview" | "organizations" | "knowledge" | "ai-usage" | "contributions"
+  | "feedback" | "quality" | "health" | "private-feedback";
+
+/** Revokes the server-side System Admin session; on desktop the persisted cookies are always cleared. */
+export async function systemSignOut(platform: Platform): Promise<void> {
+  if (platform !== "desktop") {
+    await request<void>(platform, "/api/v1/system/auth/sign-out", { method: "POST" });
+    return;
+  }
+  const bridge = requireDesktopBridge();
+  try { await request<void>(platform, "/api/v1/system/auth/sign-out", { method: "POST" }); }
+  finally { await bridge.clearSession(); }
+}
+
+export async function restoreSystemSession(platform: Platform): Promise<SystemAdminSession | null> {
+  try {
+    return await request<SystemAdminSession>(platform, "/api/v1/system/auth/me");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
+  }
+}
+
+const systemConsoleReportPath: Record<SystemConsoleReportName, string> = {
+  overview: "overview", organizations: "organizations", health: "health", knowledge: "reports/knowledge",
+  "ai-usage": "reports/ai-usage", contributions: "reports/contributions", feedback: "reports/feedback",
+  quality: "reports/quality", "private-feedback": "analytics/private-feedback",
+};
+
+export function getSystemConsoleReport(platform: Platform, report: SystemConsoleReportName,
+  query: SystemConsoleQuery): Promise<SystemConsoleReport> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return request(platform, `/api/v1/system/${systemConsoleReportPath[report]}?${params}`);
+}
+export function getSystemConsoleOrganization(platform: Platform, organizationId: string,
+  query: SystemConsoleQuery): Promise<SystemConsoleReport> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return request(platform, `/api/v1/system/organizations/${organizationId}?${params}`);
+}
 
 function knowledgePath(organizationId: string): string {
   return `/api/v1/organizations/${organizationId}/knowledge`;
@@ -422,6 +522,14 @@ export function loadKnowledgeReview(platform: Platform, organizationId: string, 
   return request(platform, `${knowledgePath(organizationId)}/reviews/${submissionId}`);
 }
 
+export function runSubmissionReview(platform: Platform, organizationId: string, review: KnowledgeReviewDetail,
+  signal: AbortSignal): Promise<SubmissionReviewResult> {
+  return request(platform, `${knowledgePath(organizationId)}/reviews/${review.id}/ai-review`, {
+    method: "POST", signal,
+    body: JSON.stringify({ snapshotVersionId: review.snapshotVersionId, snapshotContentHash: review.contentHash }),
+  }, platform === "web" ? 85_000 : undefined);
+}
+
 /**
  * `approvedReaders` (T2.1) keeps or narrows the proposed readers on approval; omit it to approve them as proposed.
  * The server rejects widening (409 READERS_WIDENED) and invalid selections (400 INVALID_READERS).
@@ -537,8 +645,13 @@ export function decidePublicationRenewal(platform: Platform, organizationId: str
   });
 }
 
-export async function listPublicationRenewals(platform: Platform, organizationId: string): Promise<PublicationRenewalState[]> {
-  const result = await request<{ items: PublicationRenewalState[] }>(platform, `${knowledgePath(organizationId)}/renewals`);
+export async function listPublicationRenewals(
+  platform: Platform,
+  organizationId: string,
+  documentId?: string,
+): Promise<PublicationRenewalState[]> {
+  const query = documentId ? `?documentId=${encodeURIComponent(documentId)}` : "";
+  const result = await request<{ items: PublicationRenewalState[] }>(platform, `${knowledgePath(organizationId)}/renewals${query}`);
   return result.items;
 }
 
@@ -561,11 +674,83 @@ export function loadPublishedKnowledge(platform: Platform, organizationId: strin
   return request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}`);
 }
 
+/** Fetches the authorized Knowledge Graph projection for the active organization. */
+export function getKnowledgeGraph(
+  platform: Platform,
+  organizationId: string,
+  query?: KnowledgeGraphQuery,
+): Promise<KnowledgeGraphPayload> {
+  const params = new URLSearchParams();
+  if (query) {
+    if (query.view) params.set("view", query.view);
+    if (query.q && query.q.trim()) params.set("q", query.q.trim().slice(0, 120));
+    if (query.ownerDepartmentId) params.set("ownerDepartmentId", query.ownerDepartmentId);
+    if (query.typeCode) params.set("typeCode", query.typeCode);
+    if (query.collectionId) params.set("collectionId", query.collectionId);
+    if (query.readerScope) params.set("readerScope", query.readerScope);
+    if (query.validity) params.set("validity", query.validity);
+    if (query.includeLinks) params.set("includeLinks", "true");
+    if (query.relationshipTypes) params.set("relationshipTypes", query.relationshipTypes);
+    if (query.monitor) params.set("monitor", "true");
+    if (query.onlyOpenCases) params.set("onlyOpenCases", "true");
+    if (query.onlyUnassignedOrg) params.set("onlyUnassignedOrg", "true");
+    if (query.includeExpired) params.set("includeExpired", "true");
+    if (query.focusDocumentId) params.set("focusDocumentId", query.focusDocumentId);
+    if (query.limit !== undefined && Number.isInteger(query.limit)) params.set("limit", String(query.limit));
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<KnowledgeGraphPayload>(platform, `${knowledgePath(organizationId)}/graph${suffix}`);
+}
+
+/** Declares an explicit governed relationship between two authorized published documents. */
+export function createDocumentRelationship(
+  platform: Platform,
+  organizationId: string,
+  sourceDocumentId: string,
+  input: { targetDocumentId: string; relationshipType: DocumentRelationshipType },
+  idempotencyKey: string,
+): Promise<GraphRelationshipEdge> {
+  return request<GraphRelationshipEdge>(
+    platform,
+    `${knowledgePath(organizationId)}/documents/${encodeURIComponent(sourceDocumentId)}/relationships`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+/** Removes an explicit governed relationship from a published document. */
+export function removeDocumentRelationship(
+  platform: Platform,
+  organizationId: string,
+  sourceDocumentId: string,
+  relationshipId: string,
+  idempotencyKey: string,
+): Promise<{ removed: boolean }> {
+  return request<{ removed: boolean }>(
+    platform,
+    `${knowledgePath(organizationId)}/documents/${encodeURIComponent(sourceDocumentId)}/relationships/${encodeURIComponent(relationshipId)}/remove`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: "{}",
+    },
+  );
+}
+
 export function askArden(platform: Platform, organizationId: string, query: string, conversation?: {
-  conversationId: string; requestId: string; expectedRevision: number;
+  conversationId: string; requestId: string; expectedRevision: number; scopeFilter?: AnswerScopeFilter;
 }): Promise<AskArdenAnswer> {
   return request(platform, `/api/v1/organizations/${organizationId}/ai/answers`, {
     method: "POST", body: JSON.stringify({ query, ...conversation }),
+  });
+}
+export function submitAiAnswerFeedback(platform: Platform, organizationId: string, requestId: string,
+  rating: "POSITIVE" | "NEGATIVE"): Promise<void> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/feedback`, {
+    method: "POST", body: JSON.stringify({ requestId, rating }),
   });
 }
 export async function listAiConversations(platform: Platform, organizationId: string): Promise<AiConversationSummary[]> {
@@ -573,8 +758,14 @@ export async function listAiConversations(platform: Platform, organizationId: st
     `/api/v1/organizations/${organizationId}/ai/conversations`);
   return result.items;
 }
-export function loadAiConversation(platform: Platform, organizationId: string, id: string): Promise<AiConversation> {
-  return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${id}`);
+export function loadAiConversation(
+  platform: Platform, organizationId: string, id: string, options?: { beforeSequence?: number; limit?: number },
+): Promise<AiConversation> {
+  const query = new URLSearchParams();
+  if (options?.beforeSequence !== undefined) query.set("beforeSequence", String(options.beforeSequence));
+  if (options?.limit !== undefined) query.set("limit", String(options.limit));
+  const search = query.size > 0 ? `?${query}` : "";
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${id}${search}`);
 }
 
 export function rateAiAnswer(platform: Platform, organizationId: string, conversationId: string, turnId: string,
@@ -584,10 +775,6 @@ export function rateAiAnswer(platform: Platform, organizationId: string, convers
   });
 }
 
-export type PrivateFeedbackWeek = { weekStart: string; good: number; bad: number };
-export function loadPrivateFeedbackAnalytics(platform: Platform): Promise<{ weeks: PrivateFeedbackWeek[] }> {
-  return request(platform, "/api/v1/system/analytics/private-feedback");
-}
 
 export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {
   const result = await request<{ items: ReviewerGrant[] }>(platform, `${knowledgePath(organizationId)}/reviewer-grants`);
@@ -612,6 +799,8 @@ const userErrorMessages: Record<string, string> = {
   IDEMPOTENCY_CONFLICT: "Request changed. Reopen to try again.",
   INVALID_EMAIL: "Enter a valid email address.",
   COLLECTION_CYCLE: "A collection can’t move into itself or a collection inside it.",
+  RELATIONSHIP_CYCLE: "This supersedes link would create a cycle between documents.",
+  RELATIONSHIP_EXISTS: "This relationship already exists between these documents.",
 };
 
 export class ApiError extends Error {
@@ -631,8 +820,8 @@ export async function signIn(platform: Platform, email: string, password: string
 
 export async function beginGoogleSignIn(platform: Platform): Promise<CurrentSession | null> {
   if (platform === "web") {
-    // Google returns to `/`; keep the workspace page the member was opening so sign-in lands there.
-    rememberReturnPath(window.location.pathname);
+    // Google returns to `/`; keep the workspace page (and query string) the member was opening so sign-in lands there.
+    rememberReturnPath(window.location.pathname, window.location.search);
     window.location.assign("/api/v1/auth/google/start?client=web");
     return null;
   }
@@ -696,10 +885,17 @@ export async function signOut(platform: Platform): Promise<void> {
  * Retrieves the current authenticated user session and organizations from the server.
  */
 export async function currentSession(platform: Platform): Promise<CurrentSession> {
-  const session = await request<Omit<CurrentSession, "account"> & {
+  const load = () => request<Omit<CurrentSession, "account"> & {
     account?: { passwordSetupRequired?: boolean };
     pendingInvitationToken?: string | null;
   }>(platform, "/api/v1/me");
+  let session = await load();
+  // A member account already has its profile; only a verified account with no organization
+  // yet registers it, so ordinary sign-in and reload make one request.
+  if (session.actor.emailVerified === true && session.memberships.length === 0) {
+    await request(platform, "/api/v1/account/profile", { method: "POST", body: "{}" });
+    session = await load();
+  }
   return {
     ...session,
     account: { passwordSetupRequired: session.account?.passwordSetupRequired === true },

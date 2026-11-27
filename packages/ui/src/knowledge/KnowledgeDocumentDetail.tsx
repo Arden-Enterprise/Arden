@@ -65,11 +65,13 @@ function dateLabel(value: string): string {
  * Reading layout: document information on the left, the viewer on the right. The title appears once,
  * in the viewer bar (the page h1); status and classification live in the information panel.
  */
-export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, focusTarget, onBack, onVersionChange, summaryOptions }: {
+export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, informationActions, focusTarget, onBack, onVersionChange, summaryOptions }: {
   metadata: ReaderDocumentMetadata;
   content: ReactNode;
   /** Actions for the viewer bar, such as Download PDF. */
   surfaceActions?: ReactNode;
+  /** Actions shown inside the Document Information island (e.g. View in Graph, Manage links). */
+  informationActions?: ReactNode;
   focusTarget?: KnowledgeCitationReference | null;
   onBack: () => void;
   onVersionChange?: (versionId: string) => void;
@@ -168,11 +170,17 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
       <span><strong>This version has expired.</strong> {hasEffectiveVersion ? "Choose the current version." : ""}</span>
     </div>}
 
-    {visibleFocus && <div className="knowledge-citation-focus" role="status">
-      <span className="knowledge-citation-focus-icon"><Icon name="search" size={14} /></span>
-      <div><strong>Cited passage</strong><mark>{visibleFocus.excerpt}</mark></div>
-      {visibleFocus.page && <small>Page {visibleFocus.page}</small>}
-    </div>}
+    {visibleFocus && (() => {
+      const hasExcerpt = visibleFocus.excerpt.trim().length > 0;
+      return <div className="knowledge-citation-focus" role="status">
+        <span className="knowledge-citation-focus-icon"><Icon name="search" size={14} /></span>
+        <div>
+          <strong>{hasExcerpt ? "Cited passage" : visibleFocus.page ? `Page ${visibleFocus.page}` : "Focused section"}</strong>
+          {hasExcerpt && <mark>{visibleFocus.excerpt}</mark>}
+        </div>
+        {hasExcerpt && visibleFocus.page && <small>Page {visibleFocus.page}</small>}
+      </div>;
+    })()}
 
     <div className={`knowledge-reader-layout${informationHidden ? " is-information-collapsed" : ""}${aiOpen ? " is-ai-open" : ""}`}>
       <aside id="knowledge-reader-information" hidden={informationHidden} className="island knowledge-reader-information" aria-labelledby="document-information-title">
@@ -208,6 +216,7 @@ export function KnowledgeDocumentDetail({ metadata, content, surfaceActions, foc
           <h3 id="document-summary-title">Summary</h3>
           <p>{metadata.summary}</p>
         </section>}
+        {informationActions && <div className="knowledge-reader-graph-actions">{informationActions}</div>}
       </aside>
 
       <article className="island knowledge-reader-surface" aria-label={`${metadata.title}, version ${activeVersion.label}`}>

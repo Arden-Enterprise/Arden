@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { noteText } from "./noteDocument";
 import { ApiError, createKnowledgeDraft, type CreatedKnowledgeDraft } from "../shared/api-client";
 import type { Platform } from "../shared/types";
 
@@ -29,7 +30,7 @@ export function ContributePrivateNoteDialog({ platform, organizationId, source, 
   const inFlight = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
   const titleId = useId();
-  const excerpt = source.body.replace(/\s+/g, " ").trim();
+  const excerpt = noteText(source.body).replace(/\s+/g, " ").trim();
 
   useEffect(() => {
     mounted.current = true;

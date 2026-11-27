@@ -1,3 +1,9 @@
+import {
+  PROTOTYPE_DENYLIST,
+  type BoundUiSurface,
+  type HydratedDocumentSummary,
+  type TurnHydration,
+} from "@arden/domain";
 import type { AnswerFeedback, AskArdenAnswer } from "../shared/api-client";
 
 export type AskArdenMessage = {
@@ -5,12 +11,15 @@ export type AskArdenMessage = {
   role: "member" | "assistant";
   body: string;
   citations?: AskArdenAnswer["citations"];
+  uiSurface?: BoundUiSurface | null;
+  turnHydration?: TurnHydration | null;
   savedTurn?: { conversationId: string; turnId: string };
   feedback?: AnswerFeedback;
   privateFeedbackToken?: string;
   noteCoverage?: "FULL" | "PARTIAL";
   insufficientEvidence?: boolean;
   unavailable?: boolean;
+  requestId?: string;
   /** The request failed before an answer was saved; sending the same text retries it. */
   unsent?: boolean;
 };
@@ -21,12 +30,59 @@ export const starterPrompts = [
   "Which policy covers external sharing?",
 ] as const;
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Defensively copies a server-provided hydratedDocuments map while stripping prototype keys. */
+export function parseHydratedDocuments(raw: unknown): Record<string, HydratedDocumentSummary> {
+  const result = Object.create(null) as Record<string, HydratedDocumentSummary>;
+  if (!isPlainRecord(raw)) return result;
+  for (const key of Object.keys(raw)) {
+    if (PROTOTYPE_DENYLIST.has(key)) continue;
+    const entry = raw[key];
+    if (isPlainRecord(entry) && typeof entry.documentId === "string" && typeof entry.publishedVersionId === "string" && typeof entry.title === "string") {
+      result[key] = entry as unknown as HydratedDocumentSummary;
+    }
+  }
+  return result;
+}
+
+export function mergeHydratedDocuments(
+  current: Readonly<Record<string, HydratedDocumentSummary>>,
+  incoming: unknown,
+): Record<string, HydratedDocumentSummary> {
+  const parsed = parseHydratedDocuments(incoming);
+  const incomingKeys = Object.keys(parsed);
+  if (incomingKeys.length === 0) return current as Record<string, HydratedDocumentSummary>;
+  const merged = Object.create(null) as Record<string, HydratedDocumentSummary>;
+  for (const key of Object.keys(current)) {
+    if (!PROTOTYPE_DENYLIST.has(key)) merged[key] = current[key]!;
+  }
+  for (const key of incomingKeys) {
+    merged[key] = parsed[key]!;
+  }
+  return merged;
+}
+
+export function parseTurnHydration(raw: unknown): TurnHydration | null {
+  if (!isPlainRecord(raw)) return null;
+  const metrics = isPlainRecord(raw.metrics) ? (raw.metrics as TurnHydration["metrics"]) : {};
+  const lineages = isPlainRecord(raw.lineages) ? (raw.lineages as TurnHydration["lineages"]) : {};
+  return { metrics, lineages };
+}
+
 export function answerMessage(answer: AskArdenAnswer, id: string): AskArdenMessage {
+  const uiSurface = isPlainRecord(answer.uiSurface) ? (answer.uiSurface as unknown as BoundUiSurface) : null;
+  const turnHydration = parseTurnHydration(answer.turnHydration);
   return {
     id,
     role: "assistant",
     body: answer.answer,
+    requestId: answer.requestId,
     citations: answer.citations.length ? answer.citations : undefined,
+    ...(uiSurface ? { uiSurface } : {}),
+    ...(turnHydration ? { turnHydration } : {}),
     insufficientEvidence: answer.status === "INSUFFICIENT_EVIDENCE",
     ...(answer.conversationId && answer.turnId ? { savedTurn: { conversationId: answer.conversationId, turnId: answer.turnId } } : {}),
     ...(answer.feedback !== undefined ? { feedback: answer.feedback } : {}),

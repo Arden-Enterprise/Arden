@@ -49,6 +49,28 @@ describe("WorkspaceSelectPage", () => {
     expect(onBack).toHaveBeenCalled();
   });
 
+  it("lets a verified account continue without creating an organization", () => {
+    const onCreateOrg = vi.fn().mockResolvedValue(undefined);
+    const onBack = vi.fn();
+
+    render(
+      createElement(WorkspaceSelectPage, {
+        organizationName: "test-org",
+        memberships: [],
+        onContinue: vi.fn(),
+        onBack,
+        onCreateOrganization: onCreateOrg,
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /continue without creating an organization/i }));
+    expect(screen.getByRole("heading", { name: /account setup complete/i })).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/e\.g\. Acme Corporation/i)).toBeNull();
+    expect(onCreateOrg).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /sign out/i }));
+    expect(onBack).toHaveBeenCalled();
+  });
+
   it("renders workspace choices when active memberships exist and allows creating another", async () => {
     const memberships: OrganizationMembership[] = [
       {

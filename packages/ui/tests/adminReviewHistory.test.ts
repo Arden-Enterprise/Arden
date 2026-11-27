@@ -126,7 +126,7 @@ describe("contribution version history", () => {
       organizationName: "Example", view: "knowledge", active: true, createdDraftId: null,
       contextOpen: false, onToggleContext: vi.fn() }));
     fireEvent.click(await screen.findByRole("tab", { name: /My Contributions/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Open details for Runbook" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open details for Runbook" }));
     fireEvent.click(await screen.findByRole("button", { name: "View version 1" }));
     expect(await screen.findByRole("dialog", { name: "Version v1" })).toBeTruthy();
     expect(await screen.findByText("Previous content")).toBeTruthy();

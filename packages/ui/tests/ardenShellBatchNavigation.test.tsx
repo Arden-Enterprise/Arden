@@ -49,31 +49,17 @@ describe("ArdenShell Private sidebar", () => {
 });
 
 describe("System Admin feedback analytics", () => {
-  it("opens anonymous weekly feedback from the workspace chooser even without an organization", async () => {
+  it("never offers System Admin analytics from a member session, even one without an organization", async () => {
+    // Decision 0010 (2026-11-27): Private Notes feedback analytics live in the isolated System Console.
     vi.mocked(apiClient.restoreSession).mockResolvedValue({
       actor: { id: "sys-1", email: "system@example.test" },
-      account: { passwordSetupRequired: false }, systemAdmin: true, memberships: [],
+      account: { passwordSetupRequired: false }, memberships: [],
     });
-    const analytics = vi.spyOn(apiClient, "loadPrivateFeedbackAnalytics").mockResolvedValue({ weeks: [
-      { weekStart: "2026-11-23", good: 2, bad: 1 },
-      { weekStart: "2026-11-16", good: 0, bad: 0 },
-    ] });
-    render(createElement(ArdenShell, { platform: "web" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Private AI feedback" }));
-    expect(await screen.findByRole("table", { name: "Weekly Private AI feedback" })).toBeTruthy();
-    expect(screen.getByRole("cell", { name: "67%" })).toBeTruthy();
-    expect(analytics).toHaveBeenCalledWith("web");
-    fireEvent.click(screen.getByRole("button", { name: "Back to workspaces" }));
-    expect(screen.getByRole("button", { name: "Private AI feedback" })).toBeTruthy();
-  });
-
-  it("offers no analytics entry to organization admins without System Admin access", async () => {
-    const analytics = vi.spyOn(apiClient, "loadPrivateFeedbackAnalytics");
     window.history.replaceState(null, "", "/workspaces");
     render(createElement(ArdenShell, { platform: "web" }));
-    await screen.findByRole("heading", { name: "Choose your workspace" });
+    await screen.findByRole("heading", { name: "Create your organization" });
     expect(screen.queryByRole("button", { name: "Private AI feedback" })).toBeNull();
-    expect(analytics).not.toHaveBeenCalled();
+    expect(screen.queryByRole("heading", { name: "Tổng quan" })).toBeNull();
   });
 });
 

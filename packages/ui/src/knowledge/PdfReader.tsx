@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../shared/Icon";
-import { clearMarks, markQuote } from "./citationHighlight";
+import { clearMarks, markQuotes } from "./citationHighlight";
 import { findQuoteInSegments } from "./citationTextMatch";
 import type { PDFDocumentProxy } from "./pdfRuntime";
 
 type PdfRuntime = typeof import("./pdfRuntime");
 
 /** A passage to show: the quote is highlighted on its page, which defaults to `page` when the quote is not found. */
-export type PdfReaderFocus = { page?: number; excerpt: string };
+export type PdfReaderFocus = { page?: number; excerpt: string; additionalExcerpts?: readonly string[]; samePage?: boolean };
 
 type PageSize = { width: number; height: number };
 type Target = { page: number; excerpt: string; request: PdfReaderFocus };
@@ -35,6 +35,8 @@ async function pageContainsQuote(document: PDFDocumentProxy, pageNumber: number,
 /** The cited page when it holds the quote, otherwise the first page that does, otherwise the cited page. */
 async function locateQuote(document: PDFDocumentProxy, focus: PdfReaderFocus): Promise<number | null> {
   const cited = focus.page && focus.page <= document.numPages ? focus.page : null;
+  // Review citations come with the page from this exact submitted PDF. A repeated phrase elsewhere isn't the source.
+  if (focus.samePage) return cited;
   if (cited && await pageContainsQuote(document, cited, focus.excerpt)) return cited;
   for (let page = 1; page <= Math.min(document.numPages, 300); page++) {
     if (page !== cited && await pageContainsQuote(document, page, focus.excerpt)) return page;
@@ -55,6 +57,8 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
   const [width, setWidth] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [target, setTarget] = useState<Target | null>(null);
+  const [match, setMatch] = useState<{ request: PdfReaderFocus; found: boolean; complete: boolean } | null>(null);
+  const visibleTarget = target?.request === focus ? target : null;
 
   useEffect(() => {
     let present = true;
@@ -89,35 +93,62 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
   }, [document]);
 
   useEffect(() => {
-    if (!document || !focus?.excerpt) { setTarget(null); return; }
+    if (!document || (!focus?.excerpt && !focus?.page)) { setTarget(null); return; }
+    if (!focus.excerpt.trim()) {
+      const page = focus.page && focus.page >= 1 && focus.page <= document.numPages ? focus.page : null;
+      setTarget(page ? { page, excerpt: "", request: focus } : null);
+      if (!page && focus.samePage) setMatch({ request: focus, found: false, complete: false });
+      return;
+    }
     let present = true;
     void locateQuote(document, focus).then((page) => {
       if (!present) return;
       setTarget(page ? { page, excerpt: focus.excerpt, request: focus } : null);
-      // Bring the page into view now; the highlight then centers the passage once the page has rendered.
-      const element = page ? scroller.current?.querySelector<HTMLElement>(`[data-page-number="${page}"]`) : null;
-      if (element && scroller.current) scroller.current.scrollTop = element.offsetTop - pagePadding;
+      if (!page && focus.samePage) setMatch({ request: focus, found: false, complete: false });
     }).catch(() => { if (present) setTarget(null); });
     return () => { present = false; };
   }, [document, focus]);
+
+  const scrolledRequest = useRef<PdfReaderFocus | null>(null);
+  useEffect(() => {
+    if (!visibleTarget) {
+      scrolledRequest.current = null;
+      return;
+    }
+    if (width === 0 || scrolledRequest.current === visibleTarget.request) return;
+    const container = scroller.current;
+    const page = container?.querySelector<HTMLElement>(`[data-page-number="${visibleTarget.page}"]`);
+    if (container && page) {
+      scrolledRequest.current = visibleTarget.request;
+      container.scrollTop += page.getBoundingClientRect().top - container.getBoundingClientRect().top - pagePadding;
+    }
+  }, [visibleTarget, width]);
 
   const widest = Math.max(1, ...sizes.map((size) => size.width));
   const fitScale = width > 0 ? Math.max(0.25, (width - pagePadding * 2) / widest) : 1;
   const scale = Math.round(fitScale * zoom * 100) / 100;
   const zoomIndex = zoomSteps.indexOf(zoom);
 
-  const revealMark = (mark: HTMLElement) => {
+  const revealMark = (mark: HTMLElement | null, citation: Target, complete: boolean) => {
+    if (citation.request.samePage) setMatch({ request: citation.request, found: Boolean(mark), complete });
+    if (!mark) return;
     const container = scroller.current;
     if (!container) return;
     const offset = mark.getBoundingClientRect().top - container.getBoundingClientRect().top;
-    container.scrollTo({ top: container.scrollTop + offset - container.clientHeight / 3, behavior: prefersReducedMotion() ? "auto" : "smooth" });
+    container.scrollTo?.({ top: container.scrollTop + offset - container.clientHeight / 3, behavior: prefersReducedMotion() ? "auto" : "smooth" });
   };
 
   if (failed) return <p className="pdf-reader-unavailable" role="status">PDF preview is unavailable here. Use Download to open the original file.</p>;
 
   return <div className="pdf-reader">
     <div className="pdf-reader-toolbar">
-      <span className="island-meta">{document ? `${sizes.length} ${sizes.length === 1 ? "page" : "pages"}` : "Loading PDF…"}</span>
+      <span className="island-meta">{document ? `${sizes.length} ${sizes.length === 1 ? "page" : "pages"}` : "Loading PDF…"}
+        {focus?.samePage && match?.request === focus && <span role="status" className={match.found && match.complete ? "sr-only" : ""}>
+          {match.complete ? `Cited text highlighted on page ${visibleTarget?.page}.`
+            : match.found ? ` · Part of the cited text could not be highlighted on page ${visibleTarget?.page}.`
+            : visibleTarget ? ` · Opened page ${visibleTarget.page}. Passage not found.` : " · Cited page unavailable."}
+        </span>}
+      </span>
       <div className="pdf-reader-zoom" role="group" aria-label="Zoom">
         <button type="button" className="island-icon-button" aria-label="Zoom out" disabled={!document || zoomIndex <= 0}
           onClick={() => setZoom(zoomSteps[Math.max(0, zoomIndex - 1)]!)}><Icon name="minus" size={13} /></button>
@@ -130,7 +161,7 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
     <div ref={scroller} className="pdf-reader-pages" tabIndex={0} role="document" aria-label={`PDF: ${title}`} aria-busy={!document}>
       {document && runtime && width > 0 && sizes.map((size, index) => <PdfPage key={index + 1} runtime={runtime} document={document}
         pageNumber={index + 1} size={size} scale={scale} root={scroller.current}
-        highlight={target?.page === index + 1 ? target : null} onHighlight={revealMark} />)}
+        highlight={visibleTarget?.page === index + 1 ? visibleTarget : null} onHighlight={revealMark} />)}
     </div>
   </div>;
 }
@@ -143,7 +174,7 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
   scale: number;
   root: HTMLElement | null;
   highlight: Target | null;
-  onHighlight: (mark: HTMLElement) => void;
+  onHighlight: (mark: HTMLElement | null, citation: Target, complete: boolean) => void;
 }) {
   const element = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -192,9 +223,10 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
     const layer = text.current;
     if (!layer || rendered === 0) return;
     clearMarks(layer, markClass);
-    if (!highlight) return;
-    const { marks } = markQuote(layer, highlight.excerpt, markClass);
-    if (marks[0]) onHighlight(marks[0]);
+    if (!highlight || !highlight.excerpt.trim()) return;
+    const { marks, complete } = markQuotes(layer, [highlight.excerpt, ...(highlight.request.additionalExcerpts ?? [])],
+      markClass, highlight.request.samePage);
+    onHighlight(marks[0] ?? null, highlight, complete);
     // Re-run only for a finished render or a new citation request, not for a new callback identity.
   }, [rendered, highlight]);
 

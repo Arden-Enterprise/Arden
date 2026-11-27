@@ -20,7 +20,7 @@ class MemoryMaintenance {
   imports = new Map<string, string>();
   unmapped: LegacyReport[] = [];
   reads = new Set<string>();
-  versions = new Map<string, { documentId: string; text: string | null }>();
+  versions = new Map<string, { documentId: string; text: string | null; mimeType?: string; pdfBase64?: string | null }>();
   proofs = new Map<string, { state: "pending" | "applicable" | "rejected" | "upcoming"; outcome: "UPDATED" | "WITHDRAWN" | null; publishedVersionId?: string | null }>();
   submissions = new Map<string, PublicationSubmission>();
   links: Array<[string, string]> = [];
@@ -100,7 +100,11 @@ class MemoryMaintenance {
       hasUnread: async (membershipId, caseId) => this.notices.some((item) => item.recipientMembershipId === membershipId
         && item.caseId === caseId && !this.reads.has(`${membershipId}:${caseId}`)),
       markRead: async (membershipId, caseId) => { this.reads.add(`${membershipId}:${caseId}`); },
-      readVersionText: async (publishedVersionId) => this.versions.get(publishedVersionId) ?? null,
+      readVersionText: async (publishedVersionId) => {
+        const entry = this.versions.get(publishedVersionId);
+        return entry ? { documentId: entry.documentId, text: entry.text } : null;
+      },
+      readVersionOriginal: async (publishedVersionId) => this.versions.get(publishedVersionId) ?? null,
       listDocumentVersions: async () => [],
       readPublicationSubmission: async (submissionId) => this.submissions.get(submissionId) ?? null,
       readPublicationProof: async (documentId, publishedVersionId) => {
@@ -360,6 +364,43 @@ describe("version comparison access", () => {
     await expect(serviceFor(memory, admin).compareCase(admin.userId, org, created.caseId, versionId, next)).rejects.toMatchObject({ code: "DENIED" });
     await expect(serviceFor(memory, admin).listVersions(admin.userId, org, created.caseId)).resolves.toMatchObject({ items: [] });
   });
+
+  it("returns PDF original bytes to an authorized reviewer while keeping text diff unavailable and denying non-reviewers", async () => {
+    const memory = new MemoryMaintenance();
+    memory.anchors.set(`${documentId}:${versionId}`, {
+      organizationId: org, documentId, publishedVersionId: versionId, contentHash: "ab".repeat(32),
+      title: "Onboarding PDF", classification: "INTERNAL", departmentId: "dept", teamTag: null, projectTag: null,
+      authorMembershipId: author.membershipId,
+    });
+    memory.grants.add(reviewer.membershipId);
+    const pdfBase64 = Buffer.from("%PDF-1.4\n%%EOF\n", "utf8").toString("base64");
+    const nextVersion = randomUUID();
+    const foreignVersion = randomUUID();
+    memory.versions.set(versionId, { documentId, text: null, mimeType: "application/pdf", pdfBase64 });
+    memory.versions.set(nextVersion, { documentId, text: null, mimeType: "application/pdf", pdfBase64 });
+    memory.versions.set(foreignVersion, { documentId: randomUUID(), text: null, mimeType: "application/pdf", pdfBase64 });
+
+    const created = await serviceFor(memory, reporter).createCase(reporter.userId, org, {
+      origin: "READER_REPORT", documentId, publishedVersionId: versionId, description: "Page 2 table is outdated.",
+    }, randomUUID());
+    await serviceFor(memory, reviewer).claimCase(reviewer.userId, org, created.caseId, 1, randomUUID());
+
+    // PDF comparison remains unavailable, while opening the exact PDF original succeeds.
+    await expect(serviceFor(memory, reviewer).compareCase(reviewer.userId, org, created.caseId, versionId, nextVersion))
+      .resolves.toMatchObject({ unavailable: true });
+    await expect(serviceFor(memory, reviewer).readOriginal(reviewer.userId, org, created.caseId, versionId))
+      .resolves.toEqual({ unavailable: false, publishedVersionId: versionId, mimeType: "application/pdf", pdfBase64 });
+    await expect(serviceFor(memory, reviewer).readOriginal(reviewer.userId, org, created.caseId, foreignVersion))
+      .resolves.toEqual({ unavailable: true, publishedVersionId: foreignVersion });
+
+    // Reporter, non-granted Org Admin, and revoked reviewer remain denied.
+    await expect(serviceFor(memory, reporter).readOriginal(reporter.userId, org, created.caseId, versionId)).rejects.toMatchObject({ code: "DENIED" });
+    const admin = { userId: randomUUID(), organizationId: org, membershipId: randomUUID() };
+    memory.admins.add(admin.membershipId);
+    await expect(serviceFor(memory, admin).readOriginal(admin.userId, org, created.caseId, versionId)).rejects.toMatchObject({ code: "DENIED" });
+    memory.grants.delete(reviewer.membershipId);
+    await expect(serviceFor(memory, reviewer).readOriginal(reviewer.userId, org, created.caseId, versionId)).rejects.toMatchObject({ code: "DENIED" });
+  });
 });
 
 describe("publication proof", () => {
@@ -500,7 +541,7 @@ describe("bounded analysis", () => {
       if (request.versionIds.includes(versionId) && memory.analyses.some((item) => item.state === "running")) {
         await serviceFor(memory, reviewer).cancelAnalysis(reviewer.userId, org, created.caseId, randomUUID());
       }
-      return { contractVersion: 1, state: "succeeded", findings: request.versionIds.map((id) => ({ versionId: id, summary: "The selected version was compared with the reported evidence." })) };
+      return { contractVersion: 1, state: "succeeded", usageEvents: [], findings: request.versionIds.map((id) => ({ versionId: id, summary: "The selected version was compared with the reported evidence." })) };
     });
     const queued = await service.startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
     expect(queued.state).toBe("queued");
@@ -511,7 +552,7 @@ describe("bounded analysis", () => {
     expect(withheld.findings).toEqual([]);
     const retry = serviceFor(memory, reviewer, async (request) => ({
       contractVersion: 1 as const, state: "succeeded" as const,
-      findings: request.versionIds.map((id) => ({ versionId: id, summary: "The selected version was compared with the reported evidence." })),
+      usageEvents: [], findings: request.versionIds.map((id) => ({ versionId: id, summary: "The selected version was compared with the reported evidence." })),
     }));
     const again = await retry.startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
     expect(again.attempt).toBe(2);
@@ -524,11 +565,11 @@ describe("bounded analysis", () => {
     memory.grants.delete(reviewer.membershipId);
     await retry.startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID()).catch(() => undefined);
     memory.grants.add(reviewer.membershipId);
-    const lost = await serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }] }))
+    const lost = await serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }], usageEvents: [] }))
       .startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
     expect(lost.state).toBe("queued");
     memory.grants.delete(reviewer.membershipId);
-    await expect(serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }] }))
+    await expect(serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }], usageEvents: [] }))
       .readAnalysis(reviewer.userId, org, created.caseId)).rejects.toMatchObject({ code: "DENIED" });
     expect(() => serviceFor(memory, reviewer).startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID()))
       .toThrow("UNAVAILABLE");
@@ -548,7 +589,7 @@ describe("bounded analysis", () => {
     }, randomUUID());
     await serviceFor(memory, reviewer).claimCase(reviewer.userId, org, created.caseId, 1, randomUUID());
     const adapter: import("./analysis.js").AnalysisAdapter = async (request) => ({
-      contractVersion: 1, state: "succeeded", findings: request.versionIds.map((id) => ({ versionId: id, summary: "Compared." })),
+      contractVersion: 1, state: "succeeded", usageEvents: [], findings: request.versionIds.map((id) => ({ versionId: id, summary: "Compared." })),
     });
     await serviceFor(memory, reviewer, adapter).startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
     // The second poll reads the run as queued; the first poll finishes it before the second one advances.

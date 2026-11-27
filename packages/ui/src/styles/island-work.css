@@ -132,3 +132,9 @@
   .arden-app-shell.is-nav-open .app-sidebar { z-index: 9; }
   .arden-app-shell .personal-content .workspace-scroll-content { padding-bottom: 112px; }
 }
+
+/* F22 revision 5: the Private note body is the rich editor, borderless and full width like the textarea it replaced. */
+.arden-app-shell .note-editor-page .note-rich-body { flex-direction: column; }
+.arden-app-shell .note-rich-body .arden-rich-text-shell { flex: 1; width: 100%; }
+.arden-app-shell .note-rich-body .arden-blocknote-editor { min-height: 240px; }
+.arden-app-shell .note-rich-body .bn-editor { padding-inline: 0; color: #dcdbe3; font-size: 15px; line-height: 1.75; background: transparent; }
