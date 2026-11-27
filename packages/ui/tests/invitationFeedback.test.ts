@@ -153,7 +153,7 @@ describe("invitation page feedback", () => {
       fireEvent.change(password, { target: { value: invalidPassword } });
       fireEvent.submit(form);
       expect(signUp).not.toHaveBeenCalled();
-      expect(screen.getByRole("alert").textContent).toContain("one uppercase letter, and one special character");
+      expect(screen.getByRole("alert").textContent).toContain("one uppercase letter, one lowercase letter, and one special character");
     }
   });
 
