@@ -16,7 +16,7 @@ type SourceCitation = SubmissionReviewPoint["citation"];
 export function SubmissionReviewAi({ platform, organizationId, review, disabled, activeSource, onOpenSource, sourceMessage }: {
   platform: Platform; organizationId: string; review: KnowledgeReviewDetail; disabled: boolean;
   activeSource?: SourceCitation;
-  onOpenSource: (source: SourceCitation) => void;
+  onOpenSource: (source: SourceCitation, additionalExcerpts: readonly string[]) => void;
   sourceMessage: string;
 }) {
   const title = useId();
@@ -47,14 +47,20 @@ export function SubmissionReviewAi({ platform, organizationId, review, disabled,
     }
   };
 
-  const sourceButton = (source: SourceCitation, label: string) => {
-    const pageLabel = source.page === null ? "Source" : `Page ${source.page}`;
-    return <button type="button" className="review-ai-source" title="Jump to the cited passage"
-      aria-label={`Open ${label} source${source.page === null ? "" : ` on page ${source.page}`}`}
-      aria-current={activeSource === source ? "location" : undefined}
-      disabled={disabled} onClick={() => onOpenSource(source)}>
-      <Icon name="arrow" size={12} /><span>{pageLabel}</span>
-    </button>;
+  const sourceButtons = (point: SubmissionReviewPoint, label: string) => {
+    const citations = [point.citation, ...(point.additionalCitations ?? [])];
+    return citations.map((source, index) => {
+      if (source.page !== null && citations.slice(0, index).some(citation => citation.page === source.page)) return null;
+      const additionalExcerpts = source.page === null ? [] : citations.slice(index + 1)
+        .filter(citation => citation.page === source.page).map(citation => citation.excerpt);
+      const pageLabel = source.page === null ? (citations.length === 1 ? "Source" : `Source ${index + 1}`) : `Page ${source.page}`;
+      return <button key={index} type="button" className="review-ai-source" title="Jump to the cited text"
+        aria-label={`Open ${label} ${source.page === null ? pageLabel.toLowerCase() : `source on page ${source.page}`}`}
+        aria-current={activeSource === source ? "location" : undefined}
+        disabled={disabled} onClick={() => onOpenSource(source, additionalExcerpts)}>
+        <Icon name="arrow" size={12} /><span>{pageLabel}</span>
+      </button>;
+    });
   };
 
   return <section className="review-ai" aria-labelledby={title}>
@@ -63,12 +69,12 @@ export function SubmissionReviewAi({ platform, organizationId, review, disabled,
       <p className="review-ai-hint">Verify AI findings against the submission.</p>
       <h4>Summary</h4>
       <ul>{result.summary.map((point, i) => <li key={i}>
-        <p>{point.text}</p>{sourceButton(point.citation, `summary ${i + 1}`)}
+        <p>{point.text}</p><div className="review-ai-sources">{sourceButtons(point, `summary ${i + 1}`)}</div>
       </li>)}</ul>
       <h4>Checks to consider</h4>
       {result.checks.length ? <ul className="review-ai-checks">{result.checks.map((check, i) => <li key={i}>
         <strong>{categoryLabels[check.category]}</strong>
-        <p>{check.text}</p>{sourceButton(check.citation, `check ${i + 1}`)}
+        <p>{check.text}</p><div className="review-ai-sources">{sourceButtons(check, `check ${i + 1}`)}</div>
       </li>)}</ul> : <p className="review-ai-hint">AI found no specific checks to flag.</p>}
       {sourceMessage && <p className="review-ai-hint review-ai-source-message" role="status">{sourceMessage}</p>}
     </div> : <>

@@ -88,6 +88,27 @@ describe("T2.2 reviewer approves fewer readers", () => {
     await waitFor(() => expect(decide).toHaveBeenCalledOnce());
   });
 
+  it("offers one PDF source button per cited page for the same summary point", async () => {
+    const detail = { ...reviewDetail(null, "CONTENT"), mimeType: "application/pdf", reviewAiAvailable: true };
+    vi.spyOn(api, "runSubmissionReview").mockResolvedValue({
+      contractVersion: 2, requestId: "request", snapshotVersionId: detail.snapshotVersionId,
+      snapshotContentHash: detail.contentHash,
+      summary: [{ text: "Combines steps and examples.", citation: { excerpt: "The first step.", page: 5 },
+        additionalCitations: [{ excerpt: "Practice the pattern.", page: 5 }, { excerpt: "An example.", page: 7 }] }],
+      checks: [],
+    });
+    await openReview(detail);
+    fireEvent.click(screen.getByRole("button", { name: "Review with AI" }));
+    const result = await screen.findByRole("region", { name: "AI review results" });
+    const pageFive = within(result).getByRole("button", { name: "Open summary 1 source on page 5" });
+    const pageSeven = within(result).getByRole("button", { name: "Open summary 1 source on page 7" });
+    fireEvent.click(pageFive);
+    expect(pageFive.getAttribute("aria-current")).toBe("location");
+    fireEvent.click(pageSeven);
+    expect(pageFive.getAttribute("aria-current")).toBeNull();
+    expect(pageSeven.getAttribute("aria-current")).toBe("location");
+  });
+
   it("approves the proposed readers without sending approved readers", async () => {
     const decide = await openReview(reviewDetail({ mode: "SELECTED_MEMBERS", departmentId: null, memberIds: ["m1", "m2", "m3"] }));
     expect(screen.getByRole("radio", { name: /Proposed readers/ })).toHaveProperty("checked", true);

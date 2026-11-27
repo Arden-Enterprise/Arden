@@ -47,19 +47,28 @@ describe("PDF reader failure and teardown", () => {
     const getContext = vi.fn().mockReturnValue({});
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(getContext);
     const phrase = "Return the workshop kit before Friday.";
+    const practice = "Practice on a new example.";
     const getPage = vi.fn(async (page: number) => ({
       getViewport: () => ({ width: 600, height: 800 }),
       render: () => ({ promise: Promise.resolve(), cancel() {} }),
-      streamTextContent: () => page <= 2 ? phrase : "A different passage.",
+      streamTextContent: () => page <= 2 ? `${phrase} Other text. ${practice}` : "A different passage.",
     }));
     runtime.getDocument.mockReturnValue({
       promise: Promise.resolve({ numPages: 3, getPage }), destroy: vi.fn().mockResolvedValue(undefined),
     });
     const props = { base64: "cGRm", title: "Synthetic PDF" };
-    const view = render(createElement(PdfReader, { ...props, focus: { page: 2, excerpt: phrase, samePage: true } }));
-    expect(await screen.findByText("Passage highlighted on page 2.")).toBeTruthy();
+    const view = render(createElement(PdfReader, { ...props, focus: {
+      page: 2, excerpt: phrase, additionalExcerpts: ["workshop kit before Friday.", practice], samePage: true,
+    } }));
+    expect(await screen.findByText("Cited text highlighted on page 2.")).toBeTruthy();
     const marks = () => Array.from(view.container.querySelectorAll("mark.pdf-citation-mark"));
-    expect(marks().map(mark => mark.closest("[data-page-number]")?.getAttribute("data-page-number"))).toEqual(["2"]);
+    expect(marks().map(mark => mark.closest("[data-page-number]")?.getAttribute("data-page-number"))).toEqual(["2", "2"]);
+    expect(marks().map(mark => mark.textContent)).toEqual([phrase, practice]);
+    view.rerender(createElement(PdfReader, { ...props, focus: {
+      page: 2, excerpt: phrase, additionalExcerpts: ["No matching second source."], samePage: true,
+    } }));
+    expect(await screen.findByText(/Part of the cited text could not be highlighted on page 2/)).toBeTruthy();
+    expect(marks().map(mark => mark.textContent)).toEqual([phrase]);
     view.rerender(createElement(PdfReader, { ...props, focus: { page: 3, excerpt: phrase, samePage: true } }));
     expect(await screen.findByText(/Opened page 3. Passage not found/)).toBeTruthy();
     expect(marks()).toHaveLength(0);

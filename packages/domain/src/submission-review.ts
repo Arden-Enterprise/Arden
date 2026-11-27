@@ -2,13 +2,16 @@ export const submissionCheckCategories = [
   "CLARITY", "CONSISTENCY", "MISSING_CONTEXT", "SENSITIVE_CONTENT",
 ] as const;
 
+export type SubmissionReviewCitation = { excerpt: string; page: number | null };
+
 export type SubmissionReviewPoint = {
   text: string;
-  citation: { excerpt: string; page: number | null };
+  citation: SubmissionReviewCitation;
+  additionalCitations?: SubmissionReviewCitation[];
 };
 
 export type SubmissionReviewResult = {
-  contractVersion: 1;
+  contractVersion: 1 | 2;
   requestId: string;
   snapshotVersionId: string;
   snapshotContentHash: string;

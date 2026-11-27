@@ -967,10 +967,10 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     observer.observe(body, { childList: true, subtree: true, characterData: true });
     return () => { observer.disconnect(); window.clearTimeout(timeout); clear(); };
   }, [reviewTextFocus]);
-  const openReviewSource = (citation: SubmissionReviewPoint["citation"]) => {
+  const openReviewSource = (citation: SubmissionReviewPoint["citation"], additionalExcerpts: readonly string[]) => {
     if (!reviewKey) return;
     setReviewSource({ key: reviewKey, citation, focus: {
-      page: citation.page ?? undefined, excerpt: citation.excerpt, samePage: review?.mimeType === "application/pdf",
+      page: citation.page ?? undefined, excerpt: citation.excerpt, additionalExcerpts, samePage: review?.mimeType === "application/pdf",
     } });
     if (review?.mimeType === "application/pdf") reviewBodyRef.current?.scrollIntoView?.({ block: "nearest", behavior: "instant" });
   };

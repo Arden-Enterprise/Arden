@@ -52,7 +52,7 @@ export class HttpAskArdenClient implements AskArdenClient {
   }
 
   async reviewSubmission(request: unknown): Promise<unknown> {
-    return this.post("/v1/submission-reviews", request, 32 * 1024, 65_000);
+    return this.post("/v1/submission-reviews", request, 64 * 1024, 65_000);
   }
 
   private async post(path: string, payload: unknown, responseLimit = maxResponseBytes, timeoutMs = this.timeoutMs): Promise<unknown> {
