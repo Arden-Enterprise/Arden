@@ -14,6 +14,7 @@ from arden_ai.infrastructure import (
     get_settings,
 )
 from arden_ai.infrastructure.hybrid import HybridRetriever
+from arden_ai.infrastructure.maintenance_analysis import OpenAIMaintenanceAnalyzer
 from arden_ai.infrastructure.reader_summary import OpenAISummaryGenerator
 from arden_ai.infrastructure.submission_review import OpenAISubmissionReviewProvider
 from arden_ai.infrastructure.writing import OpenAIWritingProvider
@@ -48,6 +49,11 @@ def create_app(
             OpenAISubmissionReviewProvider(service_settings)
         ),
         summaries_factory=lambda: ReaderSummarizer(OpenAISummaryGenerator(service_settings)),
+        maintenance_factory=(
+            (lambda: OpenAIMaintenanceAnalyzer(service_settings).analyze)
+            if service_settings.maintenance_provider_enabled
+            else None
+        ),
         governed_factory=lambda: GovernedAnswerer(
             HybridRetriever(ChromaPermissionAwareRetriever(service_settings)),
             OpenAIGroundedAnswerGenerator(service_settings),

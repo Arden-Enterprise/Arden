@@ -35,6 +35,22 @@ uv run uvicorn arden_ai.main:app --reload --port 8080
 
 Health endpoints are available at `/health/live` and `/health/ready`.
 
+## Maintenance analysis
+
+Core owns case access, evidence selection and the run lifecycle. The authenticated
+`POST /v1/maintenance-analyses` endpoint accepts version IDs and returns controlled
+findings for synthetic verification. The opt-in `POST /v2/maintenance-analyses`
+endpoint accepts one to four exact sources and their SHA-256 hashes. Each source
+has at most 8,000 characters. See the [v2 schema](schemas/maintenance-analysis-v2.schema.json).
+
+The v2 route requires `ARDEN_AI_MAINTENANCE_PROVIDER_ENABLED=true`, the configured
+service token and the existing OpenAI API key and model settings. Core chooses
+`ARDEN_MAINTENANCE_ANALYSIS_ADAPTER=http-provider` and connects using its Arden-AI
+URL and service token. Enable the transport only for an approved provider.
+The service validates all cited version IDs and exact quotes before returning results.
+The provider call has a bounded timeout, zero automatic retries and `store=false`.
+A configured live model check remains separate from the controlled contract tests.
+
 ## Architecture
 
 The service follows a layered dependency direction. Infrastructure implements application ports;

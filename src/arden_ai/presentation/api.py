@@ -3,7 +3,7 @@ import hmac
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
@@ -38,6 +38,15 @@ from arden_ai.contracts.governed import (
     RetrievalResponse,
 )
 from arden_ai.contracts.governed_v3 import GenerationV3Request, GenerationV3Response
+from arden_ai.contracts.maintenance_analysis import (
+    MaintenanceAnalysisRequest,
+    MaintenanceAnalysisResponse,
+    MaintenanceEvidence,
+    MaintenanceProviderFindings,
+    MaintenanceProviderRequest,
+    MaintenanceProviderResponse,
+    controlled_maintenance_analysis,
+)
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
 from arden_ai.contracts.submission_review import (
@@ -50,6 +59,7 @@ from arden_ai.contracts.writing import WritingRequest, WritingResponse
 from arden_ai.presentation.summary_failures import summary_failure
 
 logger = logging.getLogger(__name__)
+MaintenanceAnalyze = Callable[[Sequence[MaintenanceEvidence]], Awaitable[object]]
 
 
 def create_api(
@@ -69,6 +79,7 @@ def create_api(
     writer_factory: Callable[[], Writer] | None = None,
     submission_reviewer: SubmissionReviewer | None = None,
     submission_reviewer_factory: Callable[[], SubmissionReviewer] | None = None,
+    maintenance_factory: Callable[[], MaintenanceAnalyze] | None = None,
 ) -> FastAPI:
     application = FastAPI(
         title="Arden AI",
@@ -82,6 +93,7 @@ def create_api(
     application.state.reader_summarizer = summaries
     application.state.writer = writer
     application.state.submission_reviewer = submission_reviewer
+    application.state.maintenance_analyzer = None
 
     def runtime_submission_reviewer() -> SubmissionReviewer:
         current: SubmissionReviewer | None = application.state.submission_reviewer
@@ -144,7 +156,87 @@ def create_api(
     ) -> JSONResponse:
         if request.url.path == "/v1/submission-reviews":
             return JSONResponse(status_code=422, content={"detail": "Invalid submission source"})
+        if request.url.path == "/v2/maintenance-analyses":
+            return JSONResponse(status_code=422, content={"detail": "Invalid maintenance evidence"})
         return await request_validation_exception_handler(request, error)
+
+    def runtime_maintenance() -> MaintenanceAnalyze:
+        current: MaintenanceAnalyze | None = application.state.maintenance_analyzer
+        if current is None:
+            if maintenance_factory is None:
+                raise HTTPException(
+                    status_code=503, detail="Maintenance analysis provider is unavailable"
+                )
+            try:
+                current = maintenance_factory()
+            except ValueError:
+                raise HTTPException(
+                    status_code=503, detail="Maintenance analysis provider is unavailable"
+                ) from None
+            application.state.maintenance_analyzer = current
+        return current
+
+    @application.post(
+        "/v1/maintenance-analyses",
+        response_model=MaintenanceAnalysisResponse,
+        response_model_by_alias=True,
+        tags=["maintenance"],
+        dependencies=[Depends(authorize_service)],
+    )
+    async def analyze_maintenance(
+        request: MaintenanceAnalysisRequest,
+    ) -> MaintenanceAnalysisResponse:
+        return controlled_maintenance_analysis(request)
+
+    @application.post(
+        "/v2/maintenance-analyses",
+        response_model=MaintenanceProviderResponse,
+        response_model_by_alias=True,
+        dependencies=[Depends(authorize_service)],
+        tags=["maintenance"],
+    )
+    async def analyze_maintenance_evidence(
+        request: MaintenanceProviderRequest,
+        analyze: Annotated[MaintenanceAnalyze, Depends(runtime_maintenance)],
+    ) -> MaintenanceProviderResponse:
+        started = time.monotonic()
+        try:
+            async with asyncio.timeout(24):
+                result = MaintenanceProviderFindings.model_validate(await analyze(request.sources))
+            sources = {source.version_id: source for source in request.sources}
+            if any(
+                finding.version_id not in sources
+                or not finding.summary.strip()
+                or not finding.quote.strip()
+                or finding.quote not in sources[finding.version_id].text
+                for finding in result.findings
+            ):
+                raise ValueError("Unverifiable maintenance citation")
+            return MaintenanceProviderResponse.model_validate({
+                "contractVersion": 2,
+                "state": "succeeded",
+                "findings": [
+                    {
+                        **finding.model_dump(by_alias=True),
+                        "textHash": sources[finding.version_id].text_hash,
+                    }
+                    for finding in result.findings
+                ],
+            })
+        except Exception as error:
+            code = summary_failure(error)
+            logger.warning(
+                json.dumps(
+                    {
+                        "event": "maintenance_analysis_failed",
+                        "operationId": str(request.request_id) if request.request_id else None,
+                        "caseId": str(request.case_id),
+                        "code": code,
+                        "durationMs": round((time.monotonic() - started) * 1_000),
+                    }
+                )
+            )
+            raise HTTPException(status_code=502, detail="Maintenance analysis failed") from None
 
     @application.post(
         "/v1/submission-reviews",

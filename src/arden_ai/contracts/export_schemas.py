@@ -15,6 +15,10 @@ from arden_ai.contracts.governed_v3 import (
     GenerationV3Response,
 )
 from arden_ai.contracts.indexing import IndexGenerationManifest, IndexGenerationRequest
+from arden_ai.contracts.maintenance_analysis import (
+    MaintenanceProviderRequest,
+    MaintenanceProviderResponse,
+)
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
 from arden_ai.contracts.submission_review import (
@@ -43,6 +47,14 @@ def build_schemas() -> dict[str, dict[str, object]]:
         title="Arden answer contract v1",
     )
     return {
+        "maintenance-analysis-v2.schema.json": models_json_schema(
+            [
+                (MaintenanceProviderRequest, "validation"),
+                (MaintenanceProviderResponse, "validation"),
+            ],
+            by_alias=True,
+            title="Arden maintenance evidence contract v2",
+        )[1],
         "submission-review-v2.schema.json": models_json_schema(
             [(SubmissionReviewRequestV2, "validation"), (SubmissionReviewResponseV2, "validation")],
             by_alias=True,

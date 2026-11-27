@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     chroma_url: str = "http://chroma:8000"
     chroma_collection: str = Field(default="arden_knowledge_v1", pattern=r"^[a-z0-9_-]{3,63}$")
     service_token: SecretStr | None = None
+    maintenance_provider_enabled: bool = False
     langfuse_host: str = "http://langfuse:3000"
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
