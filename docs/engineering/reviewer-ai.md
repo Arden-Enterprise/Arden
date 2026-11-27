@@ -2,7 +2,7 @@
 
 BM04 F-06 and DS-02a cover assistance before publication. The reviewer opens the pending submission under Reviews → Publications and chooses **Review with AI**. The panel gives one to three summary points and up to three checks about clarity, consistency, missing context or potentially sensitive content. Each point can cite up to four passages from the submitted snapshot. A PDF source button opens a cited page and highlights all cited passages on that page. Points spanning several pages show one button for each cited page. The reader tells the reviewer when it can highlight only part of the cited text or finds no match. The reviewer can continue with the regular decision controls during AI processing or after a failure.
 
-When a PDF table or layout inserts other text between the cited lines, the reader can highlight unique, ordered matches covering most of the excerpt. The intervening text stays unmarked and matching stays on the original page.
+When PDF extraction and display disagree on the order of headings or columns, the reader highlights the longest ordered group of unique, exact lines that covers most of the excerpt. Other lines stay unmarked and the reader reports a partial match on the original page.
 
 Core accepts only the snapshot version ID and content hash from the renderer. The authenticated route `POST /api/v1/organizations/:organizationId/knowledge/reviews/:submissionId/ai-review` reuses the current assigned-review check. It resolves and integrity-checks the stored content, revalidates access before delegating and withholds results if the grant or pending submission changes during inference. Only content submissions are eligible.
 
