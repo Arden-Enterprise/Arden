@@ -10,6 +10,10 @@ from arden_ai.contracts.governed import (
     RetrievalRequest,
     RetrievalResponse,
 )
+from arden_ai.contracts.governed_v3 import (
+    GenerationV3Request,
+    GenerationV3Response,
+)
 from arden_ai.contracts.indexing import IndexGenerationManifest, IndexGenerationRequest
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
@@ -64,6 +68,14 @@ def build_schemas() -> dict[str, dict[str, object]]:
             by_alias=True,
             title="Arden reader source contract v1",
         )[1],
+        "answer-v3.schema.json": models_json_schema(
+            [
+                (GenerationV3Request, "validation"),
+                (GenerationV3Response, "validation"),
+            ],
+            by_alias=True,
+            title="Arden governed answer contract v3",
+        )[1],
         "answer-v2.schema.json": models_json_schema(
             [
                 (RetrievalRequest, "validation"),
@@ -89,4 +101,5 @@ def main() -> None:
         target.write_text(
             json.dumps(schema, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
+            newline="\n",
         )

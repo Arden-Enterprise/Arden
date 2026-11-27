@@ -58,7 +58,7 @@ Arden core submits approved immutable snapshots to `POST /v1/index-generations` 
 manifest only after every chunk has been embedded and acknowledged by ChromaDB. Arden core remains
 responsible for validating that manifest and atomically activating the generation.
 
-The governed caller uses **two separate v2 operations**. Core calls
+The governed caller uses separate retrieval and generation operations. Core calls
 `POST /v2/retrievals` with its organization/generation allow-list, bounded authorized
 dialogue and canonical labels. AI combines filtered Chroma semantic search and
 BM25 using deterministic RRF. Core validates raw text/hash/spans against its
@@ -67,6 +67,15 @@ with the fixed evidence. Generation uses strict structured output, temporary E
 identifiers and exact quotations. Core rechecks every input, including uncited and
 conversational evidence, persists the private turn atomically and then returns it.
 The old `/v1/answers` remains for deployment compatibility; new Core never falls back.
+
+Company Ask Arden can use `POST /v3/generations` for `PUBLISHED_CHAT`. Core sends
+verified evidence and a bounded catalog with opaque document handles. The service
+returns a standalone answer, exact citations and an optional typed UI surface.
+The provider adapter validates the answer and citations independently of the
+surface. If surface validation fails, the answer and citations remain available with
+`uiSurfaceStatus: OMITTED_INVALID`. Core validates the binding, rechecks access
+and hydrates the UI. Retrieval and other generation purposes continue on v2.
+[Versioned answer contract](schemas/answer-v3.schema.json)
 
 Reader AI source preparation is additive at `POST /v1/reader-sources`, protected by
 the same service authentication. Purpose `READER_SUMMARY` carries Core's exact

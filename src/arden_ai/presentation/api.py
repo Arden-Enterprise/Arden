@@ -15,6 +15,7 @@ from pydantic import SecretStr
 from arden_ai import __version__
 from arden_ai.application import GenerationIndexer, PermissionAwareAnswerer
 from arden_ai.application.governed import GovernedAnswerer
+from arden_ai.application.governed_v3 import GovernedV3Answerer
 from arden_ai.application.reader_question import UnsupportedReaderQuestion
 from arden_ai.application.reader_sources import prepare_reader_source
 from arden_ai.application.reader_summary import ReaderSummarizer, UnsupportedSummary
@@ -36,6 +37,7 @@ from arden_ai.contracts.governed import (
     RetrievalRequest,
     RetrievalResponse,
 )
+from arden_ai.contracts.governed_v3 import GenerationV3Request, GenerationV3Response
 from arden_ai.contracts.reader import ReaderSourceRequest, ReaderSourceResponse
 from arden_ai.contracts.reader_summary import ReaderSummaryResponse
 from arden_ai.contracts.submission_review import (
@@ -59,6 +61,8 @@ def create_api(
     answerer_factory: Callable[[], PermissionAwareAnswerer] | None = None,
     governed: GovernedAnswerer | None = None,
     governed_factory: Callable[[], GovernedAnswerer] | None = None,
+    governed_v3: GovernedV3Answerer | None = None,
+    governed_v3_factory: Callable[[], GovernedV3Answerer] | None = None,
     summaries: ReaderSummarizer | None = None,
     summaries_factory: Callable[[], ReaderSummarizer] | None = None,
     writer: Writer | None = None,
@@ -74,6 +78,7 @@ def create_api(
     application.state.generation_indexer = indexer
     application.state.permission_aware_answerer = answerer
     application.state.governed_answerer = governed
+    application.state.governed_v3_answerer = governed_v3
     application.state.reader_summarizer = summaries
     application.state.writer = writer
     application.state.submission_reviewer = submission_reviewer
@@ -293,6 +298,40 @@ def create_api(
         except Exception as error:
             logger.warning(
                 "Governed generation failed",
+                extra={"request_id": str(request.request_id), "error_type": type(error).__name__},
+            )
+            raise HTTPException(status_code=502, detail="Grounded generation failed") from error
+
+    def runtime_governed_v3() -> GovernedV3Answerer:
+        current: GovernedV3Answerer | None = application.state.governed_v3_answerer
+        if current is None:
+            if governed_v3_factory is None:
+                raise HTTPException(status_code=503, detail="Governed v3 answering is unavailable")
+            try:
+                current = governed_v3_factory()
+            except ValueError as error:
+                raise HTTPException(
+                    status_code=503, detail="Governed v3 answering is unavailable"
+                ) from error
+            application.state.governed_v3_answerer = current
+        return current
+
+    @application.post(
+        "/v3/generations",
+        response_model=GenerationV3Response,
+        response_model_by_alias=True,
+        dependencies=[Depends(authorize_service)],
+        tags=["answers-v3"],
+    )
+    async def generate_answer_v3(
+        request: GenerationV3Request,
+        service: Annotated[GovernedV3Answerer, Depends(runtime_governed_v3)],
+    ) -> GenerationV3Response:
+        try:
+            return await service.generate_v3(request)
+        except Exception as error:
+            logger.warning(
+                "Governed v3 generation failed",
                 extra={"request_id": str(request.request_id), "error_type": type(error).__name__},
             )
             raise HTTPException(status_code=502, detail="Grounded generation failed") from error

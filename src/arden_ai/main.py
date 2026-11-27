@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from arden_ai.application import GenerationIndexer, PermissionAwareAnswerer
 from arden_ai.application.governed import GovernedAnswerer
+from arden_ai.application.governed_v3 import GovernedV3Answerer
 from arden_ai.application.reader_summary import ReaderSummarizer
 from arden_ai.application.submission_review import SubmissionReviewer
 from arden_ai.application.writing import Writer
@@ -25,6 +26,7 @@ def create_app(
     indexer: GenerationIndexer | None = None,
     answerer: PermissionAwareAnswerer | None = None,
     governed: GovernedAnswerer | None = None,
+    governed_v3: GovernedV3Answerer | None = None,
     summaries: ReaderSummarizer | None = None,
     writer: Writer | None = None,
     submission_reviewer: SubmissionReviewer | None = None,
@@ -37,6 +39,7 @@ def create_app(
         indexer_factory=lambda: GenerationIndexer(ChromaCandidateGenerationStore(service_settings)),
         answerer=answerer,
         governed=governed,
+        governed_v3=governed_v3,
         summaries=summaries,
         writer=writer,
         writer_factory=lambda: Writer(OpenAIWritingProvider(service_settings)),
@@ -47,6 +50,9 @@ def create_app(
         summaries_factory=lambda: ReaderSummarizer(OpenAISummaryGenerator(service_settings)),
         governed_factory=lambda: GovernedAnswerer(
             HybridRetriever(ChromaPermissionAwareRetriever(service_settings)),
+            OpenAIGroundedAnswerGenerator(service_settings),
+        ),
+        governed_v3_factory=lambda: GovernedV3Answerer(
             OpenAIGroundedAnswerGenerator(service_settings),
         ),
         answerer_factory=lambda: PermissionAwareAnswerer(
