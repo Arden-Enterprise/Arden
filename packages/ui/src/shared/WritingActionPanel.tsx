@@ -168,7 +168,7 @@ export function WritingActionPanel({
       <button type="button" disabled={Boolean(pending) || clipboardPending} onClick={() => void run("EXPLAIN")}><AiIcon action="EXPLAIN" />Explain</button>
     </div>}
     {canWrite && scope === "PAGE" && !editable("IMPROVE") && !editable("REFORMAT")
-      && <p role="status">To edit with AI, select plain text in one paragraph.</p>}
+      && <p role="status">To edit with AI, select text in one paragraph with a single style and no links.</p>}
     {aiEnabled && text.length > 12_000 && <p role="status">Select up to 12,000 characters to use AI writing.</p>}
     {pending && <p role="status">{pending === "EXPLAIN" ? "Explaining…" : "Preparing suggestion…"}</p>}
     {error && <p role="alert">{error}</p>}
@@ -182,6 +182,6 @@ export function WritingActionPanel({
           onClick={() => onApply(result.text, result.action)}>Replace {scope === "SELECTION" ? "selection" : "page"}</button>
         <button type="button" className="secondary-button" onClick={() => setResult(null)}>Dismiss</button>
       </div>{!editable(result.action)
-        && <p role="status">This selection cannot be replaced safely. Select plain text in one paragraph and try again.</p>}</div>}
+        && <p role="status">This selection cannot be replaced safely. Select text in one paragraph with a single style and no links, then try again.</p>}</div>}
   </section>;
 }
