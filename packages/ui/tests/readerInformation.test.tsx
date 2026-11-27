@@ -46,6 +46,39 @@ describe("reader document information (15 Nov 2026 layout)", () => {
     show({ ...base, versions: [{ id: "v2", label: "2.0", status: "EFFECTIVE" }, { id: "v1", label: "1.0", status: "EXPIRED" }], activeVersionId: "v2" }, () => undefined);
     expect(screen.getByRole("combobox", { name: "Document version" })).toBeTruthy();
   });
+
+  it("omits empty <mark> in the focus banner when focusTarget has an empty or whitespace excerpt", () => {
+    const view = render(createElement(KnowledgeDocumentDetail, {
+      metadata: base,
+      content: createElement("p", null, "Body"),
+      onBack: () => undefined,
+      focusTarget: { documentId: "doc-1", versionId: "v1", page: 3, excerpt: "" },
+    }));
+    const banner = screen.getByRole("status");
+    expect(banner.textContent).toContain("Page 3");
+    expect(banner.textContent).not.toContain("Cited passage");
+    expect(banner.querySelector("mark")).toBeNull();
+
+    view.rerender(createElement(KnowledgeDocumentDetail, {
+      metadata: base,
+      content: createElement("p", null, "Body"),
+      onBack: () => undefined,
+      focusTarget: { documentId: "doc-1", versionId: "v1", blockId: "b-2", excerpt: "   " },
+    }));
+    expect(screen.getByRole("status").textContent).toContain("Focused section");
+    expect(screen.getByRole("status").querySelector("mark")).toBeNull();
+
+    view.rerender(createElement(KnowledgeDocumentDetail, {
+      metadata: base,
+      content: createElement("p", null, "Body"),
+      onBack: () => undefined,
+      focusTarget: { documentId: "doc-1", versionId: "v1", page: 3, excerpt: "Keep receipts for 14 days." },
+    }));
+    const citedBanner = screen.getByRole("status");
+    expect(citedBanner.textContent).toContain("Cited passage");
+    expect(citedBanner.querySelector("mark")?.textContent).toBe("Keep receipts for 14 days.");
+    expect(citedBanner.textContent).toContain("Page 3");
+  });
 });
 
 describe("Home validity labels and PDF chrome", () => {

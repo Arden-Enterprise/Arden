@@ -40,9 +40,13 @@ describe("Ask Arden panel width", () => {
   });
 });
 
-function Harness({ onCommit, onReset }: { onCommit: (width: number) => void; onReset: () => void }) {
+function Harness({ onCommit, onReset, onDraggingChange }: {
+  onCommit: (width: number) => void;
+  onReset: () => void;
+  onDraggingChange?: (dragging: boolean) => void;
+}) {
   const [width, setWidth] = useState(360);
-  return <AskPanelResizeHandle width={width} max={600} onChange={setWidth} onCommit={onCommit} onReset={onReset} />;
+  return <AskPanelResizeHandle width={width} max={600} onChange={setWidth} onCommit={onCommit} onReset={onReset} onDraggingChange={onDraggingChange} />;
 }
 
 describe("Ask Arden resize handle", () => {
@@ -83,6 +87,22 @@ describe("Ask Arden resize handle", () => {
     expect(commit).toHaveBeenCalledWith(600);
     fireEvent.doubleClick(handle);
     expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports dragging start/end via onDraggingChange on pointerDown, pointerUp, pointerCancel, and unmount", () => {
+    const onDraggingChange = vi.fn();
+    const view = render(<Harness onCommit={vi.fn()} onReset={vi.fn()} onDraggingChange={onDraggingChange} />);
+    const handle = screen.getByRole("separator", { name: "Resize Ask Arden" });
+
+    fireEvent.pointerDown(handle, { pointerId: 1, button: 0, clientX: 900 });
+    expect(onDraggingChange).toHaveBeenLastCalledWith(true);
+    fireEvent.pointerCancel(handle, { pointerId: 1, clientX: 850 });
+    expect(onDraggingChange).toHaveBeenLastCalledWith(false);
+
+    fireEvent.pointerDown(handle, { pointerId: 2, button: 0, clientX: 900 });
+    expect(onDraggingChange).toHaveBeenLastCalledWith(true);
+    view.unmount();
+    expect(onDraggingChange).toHaveBeenLastCalledWith(false);
   });
 });
 

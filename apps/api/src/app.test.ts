@@ -2700,7 +2700,7 @@ describe("API auth and private draft routes", () => {
     repository.authorDecisionWindow = false;
   });
 
-  it("hides an expired publication from readers and explains an old link instead of serving it (0032 A)", async () => {
+  it.each(["on initial read", "before delivery"])("hides an expired publication %s and explains the link (0032 A)", async (when) => {
     const owner = await desktopSession(app, "owner@example.test");
     const headers = { cookie: owner, origin: "http://localhost:5180" };
     const root = `/api/v1/organizations/${organizationId}/knowledge`;
@@ -2715,7 +2715,11 @@ describe("API auth and private draft routes", () => {
     const listed = await app.inject({ method: "GET", url: `${root}/published`, headers });
     expect(listed.statusCode).toBe(200);
     expect(listed.json().items).toEqual([]);
+    const read = when === "before delivery"
+      ? vi.spyOn(repository, "getPublishedKnowledge").mockResolvedValueOnce({ ...repository.publication, expired: false })
+      : undefined;
     const opened = await app.inject({ method: "GET", url: `${root}/published/${publicationId}`, headers });
+    read?.mockRestore();
     expect(opened.statusCode).toBe(410);
     expect(opened.json().error).toMatchObject({ code: "DOCUMENT_EXPIRED", expiredOn: "2026-11-01", ownerDepartmentName: "Sales",
       message: "This document expired on Nov 1, 2026. Contact Sales." });
@@ -2769,6 +2773,26 @@ describe("API auth and private draft routes", () => {
       headers: { cookie: owner, origin: "http://localhost:5180" } });
     expect(state.statusCode).toBe(200);
     expect(state.json().items).toEqual(repository.renewalState);
+    const exactState = await app.inject({
+      method: "GET",
+      url: `/api/v1/organizations/${organizationId}/knowledge/renewals?documentId=${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180" },
+    });
+    expect(exactState.statusCode).toBe(200);
+    expect(exactState.json().items).toEqual(repository.renewalState);
+    const missingExactState = await app.inject({
+      method: "GET",
+      url: `/api/v1/organizations/${organizationId}/knowledge/renewals?documentId=11111111-1111-4111-8111-111111111111`,
+      headers: { cookie: owner, origin: "http://localhost:5180" },
+    });
+    expect(missingExactState.statusCode).toBe(200);
+    expect(missingExactState.json().items).toEqual([]);
+    const invalidExactState = await app.inject({
+      method: "GET",
+      url: `/api/v1/organizations/${organizationId}/knowledge/renewals?documentId=not-a-uuid`,
+      headers: { cookie: owner, origin: "http://localhost:5180" },
+    });
+    expect(invalidExactState.statusCode).toBe(400);
   });
 
   it("routes desktop-compatible sign-in through the same HttpOnly Supabase session", async () => {
@@ -3511,9 +3535,10 @@ class MemoryRepository implements ArdenDataRepository {
   renewalResult: RequestPublicationRenewalResult["kind"] = "requested";
   renewalInputs: PublicationRenewalInput[] = [];
   reminderRuns = 0;
-  async listPublicationRenewalState(userId: string, requestedOrganization: string): Promise<PublicationRenewalState[] | null> {
+  async listPublicationRenewalState(userId: string, requestedOrganization: string, documentId?: string): Promise<PublicationRenewalState[] | null> {
     if (requestedOrganization !== organizationId) return null;
-    return userId === ownerId ? this.renewalState : [];
+    if (userId !== ownerId) return [];
+    return documentId ? this.renewalState.filter((item) => item.documentId === documentId) : this.renewalState;
   }
 
   async requestPublicationRenewal(userId: string, requestedOrganization: string, documentId: string,

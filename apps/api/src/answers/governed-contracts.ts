@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import type { GraphReaderScope, KnowledgeType } from "@arden/domain";
 import type { AuthorizedAiSource } from "../db/repository.js";
 import { keysWithoutUsageEnvelope, readUsageEnvelope, type ProviderUsageEvent } from "./usage-contracts.js";
 
@@ -18,6 +19,40 @@ export type GenerationRequest = Omit<RetrievalRequest, "allowedGenerationIds" | 
 export type GenerationResponse = { contractVersion: 2; requestId: string; status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
   answer: string; citations: Array<{ chunkId: string; quote: string }>; usedEvidence: string[];
   usageContractVersion: 1; usageEvents: ProviderUsageEvent[] };
+export type UiSurfaceMode = "AUTO" | "DISABLED";
+export type UiSurfaceStatus = "GENERATED" | "OMITTED_INSUFFICIENT" | "OMITTED_INVALID" | "DISABLED";
+export type SourceCatalogEntry = {
+  docRef: string;
+  title: string;
+  type: KnowledgeType | null;
+  ownerDepartment: string;
+  version: string;
+  readerScope: GraphReaderScope;
+  hasDirectRelationships: boolean;
+  departmentRef: string;
+  collectionRef: string | null;
+};
+export type GenerationV3Request = {
+  contractVersion: 3;
+  purpose: "PUBLISHED_CHAT";
+  requestId: string;
+  organizationId: string;
+  query: string;
+  history: DialogueTurn[];
+  evidence: Evidence[];
+  sourceCatalog: SourceCatalogEntry[];
+  uiSurfaceMode: UiSurfaceMode;
+};
+export type GenerationV3Response = {
+  contractVersion: 3;
+  requestId: string;
+  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE";
+  answer: string;
+  citations: Array<{ chunkId: string; quote: string }>;
+  usedEvidence: string[];
+  uiSurface: unknown;
+  uiSurfaceStatus: UiSurfaceStatus;
+};
 export type PublicCitation = { documentId: string; versionId: string; blockId?: string; page?: number;
   excerpt: string; title: string; version: string; scope: string; classification: string;
   /** Decision 0021: always null. The key stays because installed clients still require it. */
@@ -101,6 +136,46 @@ export function parseGenerationResponse(value: unknown, request: GenerationReque
     providerCallRequired: true });
   return { contractVersion: 2, usageContractVersion: 1, usageEvents, requestId: request.requestId,
     status: row.status, answer: text(row.answer, 12_000), citations, usedEvidence };
+}
+const uiSurfaceStatuses = new Set<UiSurfaceStatus>(["GENERATED", "OMITTED_INSUFFICIENT", "OMITTED_INVALID", "DISABLED"]);
+export function parseGenerationV3Response(value: unknown, request: GenerationV3Request):
+  GenerationV3Response & Pick<GenerationResponse, "usageContractVersion" | "usageEvents"> {
+  const row = response(value, [
+    "contractVersion", "requestId", "status", "answer", "citations", "usedEvidence", "uiSurface", "uiSurfaceStatus",
+  ]);
+  if (row.contractVersion !== 3 || row.requestId !== request.requestId
+    || (row.status !== "ANSWERED" && row.status !== "INSUFFICIENT_EVIDENCE")) return invalid();
+  if (typeof row.uiSurfaceStatus !== "string" || !uiSurfaceStatuses.has(row.uiSurfaceStatus as UiSurfaceStatus)) {
+    return invalid();
+  }
+  const uiSurfaceStatus = row.uiSurfaceStatus as UiSurfaceStatus;
+  const usedEvidence = array(row.usedEvidence, 8).map((id) => text(id, 64, hash));
+  if (usedEvidence.length !== request.evidence.length || new Set(usedEvidence).size !== usedEvidence.length
+    || request.evidence.some((chunk) => !usedEvidence.includes(chunk.chunkId))) return invalid();
+  const citations = array(row.citations, 12).map((entry) => {
+    const citation = record(entry, ["chunkId", "quote"]);
+    const chunkId = text(citation.chunkId, 64, hash), quote = text(citation.quote, 1_200);
+    if (!request.evidence.find((chunk) => chunk.chunkId === chunkId)?.content.includes(quote)) return invalid();
+    return { chunkId, quote };
+  });
+  if ((row.status === "ANSWERED") !== Boolean(citations.length)) return invalid();
+  // Pass uiSurface raw when GENERATED so malformed surface payloads degrade to fallback instead of failing chat delivery.
+  const uiSurface = row.status === "ANSWERED" && uiSurfaceStatus === "GENERATED" ? row.uiSurface : null;
+  const usageEvents = readUsageEnvelope(row, {
+    scopeId: request.requestId, allowed: ["CHAT_GENERATION"], fallback: "CHAT_GENERATION", providerCallRequired: true,
+  });
+  return {
+    contractVersion: 3,
+    requestId: request.requestId,
+    status: row.status,
+    answer: text(row.answer, 12_000),
+    citations,
+    usedEvidence,
+    uiSurface,
+    uiSurfaceStatus,
+    usageContractVersion: 1,
+    usageEvents,
+  };
 }
 export function evidenceMatchesManifest(evidence: Evidence, source: Pick<AuthorizedAiSource,
   "generationId" | "snapshotVersionId" | "snapshotContentHash" | "chunks">): boolean {

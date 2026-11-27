@@ -56,9 +56,31 @@ export const iconGlyphs = {
   unarchive: "\uf800",
 } as const;
 
-export type IconName = keyof typeof iconGlyphs;
+export type IconName = keyof typeof iconGlyphs | "graph";
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
+  if (name === "graph") {
+    return (
+      <svg
+        className="arden-icon"
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.85}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <circle cx="5.5" cy="12" r="2.5" />
+        <circle cx="18.5" cy="6.5" r="2.5" />
+        <circle cx="18.5" cy="17.5" r="2.5" />
+        <path d="M7.9 11.1 16.1 7.4M7.9 12.9l8.2 3.7" />
+      </svg>
+    );
+  }
   return (
     <svg
       className="arden-icon"

@@ -50,7 +50,7 @@ describe.skipIf(!pool)("governed AI published sources and private history with r
         await client.query("SET LOCAL search_path TO arden, public");
         // Synthetic fixture only; no production cleanup path uses trigger suppression.
         await client.query("SET LOCAL session_replication_role = replica");
-        for (const table of ["ai_turn_evidence", "ai_conversation_turn", "ai_conversation"])
+        for (const table of ["ai_turn_surface_binding", "ai_turn_evidence", "ai_conversation_turn", "ai_conversation"])
           await client.query(`DELETE FROM ${table} WHERE organization_id = $1`, [org]);
         await client.query("DELETE FROM knowledge_index_job WHERE generation_id IN (SELECT generation_id FROM knowledge_index_generation WHERE organization_id=$1)", [org]);
         await client.query("DELETE FROM review_decision WHERE submission_id IN (SELECT submission_id FROM shared_submission WHERE organization_id=$1)", [org]);

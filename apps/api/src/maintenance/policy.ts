@@ -25,7 +25,9 @@ export function projectCase(row: CaseRecord, actor: ActorRecord, access: CaseAcc
   if (!access.isAdmin && !(assignee && access.hasGrant)) {
     return {
       kind: "queue", caseId: row.caseId, reporterStatus: row.reporterStatus, revision: row.revision,
-      title: access.canReadDocument ? row.title : null, unread: false, ...(assignee ? { needsReassignment: true } : {}),
+      title: access.canReadDocument ? row.title : null, unread: false,
+      ...(access.canReadDocument ? { documentId: row.documentId } : {}),
+      ...(assignee ? { needsReassignment: true } : {}),
     };
   }
   return {

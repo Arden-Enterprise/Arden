@@ -444,6 +444,24 @@
       "filename": "0074_system_admin_isolated_lifecycle.sql",
       "sha256": "31a40b18b50ac2d9ee2ce1d2b53a17cefb7d2256accd6bb49d1bc417cff13e8e",
       "rollout": "operator"
+    },
+    {
+      "id": "0075",
+      "filename": "0075_ai_turn_ui_surface.sql",
+      "sha256": "80f815c9ae38d35c8691810ac5b2e5d968c4c41e5850aca30ee0be528107a79b",
+      "rollout": "operator"
+    },
+    {
+      "id": "0076",
+      "filename": "0076_graph_document_relationships.sql",
+      "sha256": "67e7a19a394b1d59877e86c855599ca900b067d2d7bf1344fc22ebcbbbb28db1",
+      "rollout": "operator"
+    },
+    {
+      "id": "0077",
+      "filename": "0077_graph_monitor_projection.sql",
+      "sha256": "4a671f9d37266a892310ef33dad2ea98f9481e5915ebe33fd7b56a4adf2fddbc",
+      "rollout": "operator"
     }
   ]
 }

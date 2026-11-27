@@ -111,6 +111,169 @@ describe("desktop API request allowlist", () => {
     }
     assert.equal(validateDesktopApiRequest({ path: `${list}/not-a-uuid`, method: "GET" }), false);
     assert.equal(validateDesktopApiRequest({ path: `${list}/${sourcePrivateVersionId}/turns`, method: "GET" }), false);
+    assert.equal(desktopApiResponseLimit({ path: list, method: "GET" }), 1024 * 1024);
+  });
+  it("allows paginated conversation detail queries and raises only conversation detail response limit to 2 MiB", () => {
+    const list = `/api/v1/organizations/${organizationId}/ai/conversations`;
+    const detail = `${list}/${sourcePrivateVersionId}`;
+    for (const path of [
+      detail,
+      `${detail}?limit=1`,
+      `${detail}?limit=20`,
+      `${detail}?limit=50`,
+      `${detail}?beforeSequence=1`,
+      `${detail}?beforeSequence=2147483647`,
+      `${detail}?limit=20&beforeSequence=40`,
+    ]) {
+      assert.equal(validateDesktopApiRequest({ path, method: "GET" }), true, path);
+      assert.equal(desktopApiResponseLimit({ path, method: "GET" }), 2 * 1024 * 1024, path);
+    }
+    for (const path of [
+      `${list}?limit=20`,
+      `${list}?beforeSequence=10`,
+      `${detail}?limit=0`,
+      `${detail}?limit=51`,
+      `${detail}?limit=01`,
+      `${detail}?limit=-5`,
+      `${detail}?limit=abc`,
+      `${detail}?limit=20&limit=10`,
+      `${detail}?beforeSequence=0`,
+      `${detail}?beforeSequence=-1`,
+      `${detail}?beforeSequence=01`,
+      `${detail}?beforeSequence=1.5`,
+      `${detail}?beforeSequence=2147483648`,
+      `${detail}?beforeSequence=10&beforeSequence=20`,
+      `${detail}?limit=20&owner=all`,
+    ]) {
+      assert.equal(validateDesktopApiRequest({ path, method: "GET" }), false, path);
+    }
+    assert.equal(desktopApiResponseLimit({ path: list, method: "GET" }), 1024 * 1024);
+    assert.equal(desktopApiResponseLimit({ path: "/api/v1/me", method: "GET" }), 1024 * 1024);
+  });
+  it("validates POST /ai/answers strictly with optional scopeFilter and a main-owned 120s deadline", () => {
+    const path = `/api/v1/organizations/${organizationId}/ai/answers`;
+    const makeUuid = (index: number) => `dddddddd-dddd-4ddd-8ddd-${String(index).padStart(12, "0")}`;
+    const fiftyUuids = Array.from({ length: 50 }, (_, index) => makeUuid(index + 1));
+    const minimal = { path, method: "POST" as const, body: JSON.stringify({ query: "What is our MFA policy?" }) };
+    const full = {
+      path,
+      method: "POST" as const,
+      body: JSON.stringify({
+        query: "Compare these documents",
+        conversationId: sourcePrivateVersionId,
+        requestId: idempotencyKey,
+        expectedRevision: 0,
+        scopeFilter: { documentIds: fiftyUuids },
+      }),
+    };
+    assert.equal(validateDesktopApiRequest(minimal), true);
+    assert.equal(validateDesktopApiRequest(full), true);
+    assert.equal(validateDesktopApiRequest({
+      path,
+      method: "POST",
+      body: JSON.stringify({ query: "😀".repeat(4_000), expectedRevision: 1_000_000, scopeFilter: { documentIds: [makeUuid(1)] } }),
+    }), true);
+    assert.equal(desktopApiTimeout(minimal), 120_000);
+    assert.equal(desktopApiTimeout({ ...minimal, timeoutMs: 15_000 }), 120_000);
+    assert.equal(desktopApiResponseLimit(minimal), 1024 * 1024);
+
+    const paddedExact = JSON.stringify({ query: "ok" });
+    assert.equal(validateDesktopApiRequest({
+      path,
+      method: "POST",
+      body: `${" ".repeat(32_768 - Buffer.byteLength(paddedExact, "utf8"))}${paddedExact}`,
+    }), true);
+    assert.equal(validateDesktopApiRequest({
+      path,
+      method: "POST",
+      body: `${" ".repeat(32_769 - Buffer.byteLength(paddedExact, "utf8"))}${paddedExact}`,
+    }), false);
+
+    const invalidBodies = [
+      undefined,
+      "",
+      "not-json",
+      "null",
+      "[]",
+      "{}",
+      JSON.stringify({ query: "" }),
+      JSON.stringify({ query: "   \n\t  " }),
+      JSON.stringify({ query: 123 }),
+      JSON.stringify({ query: "x".repeat(4_001) }),
+      JSON.stringify({ query: "😀".repeat(4_001) }),
+      JSON.stringify({ query: "ok", extra: true }),
+      '{"query":"ok","__proto__":{"polluted":true}}',
+      JSON.stringify({ query: "ok", conversationId: "not-a-uuid" }),
+      JSON.stringify({ query: "ok", conversationId: null }),
+      JSON.stringify({ query: "ok", requestId: "not-a-uuid" }),
+      JSON.stringify({ query: "ok", expectedRevision: -1 }),
+      JSON.stringify({ query: "ok", expectedRevision: 1_000_001 }),
+      JSON.stringify({ query: "ok", expectedRevision: 1.5 }),
+      JSON.stringify({ query: "ok", expectedRevision: "0" }),
+      JSON.stringify({ query: "ok", scopeFilter: null }),
+      JSON.stringify({ query: "ok", scopeFilter: [] }),
+      JSON.stringify({ query: "ok", scopeFilter: {} }),
+      JSON.stringify({ query: "ok", scopeFilter: { documentIds: [] } }),
+      JSON.stringify({ query: "ok", scopeFilter: { documentIds: [makeUuid(1), makeUuid(1)] } }),
+      JSON.stringify({ query: "ok", scopeFilter: { documentIds: [...fiftyUuids, makeUuid(51)] } }),
+      JSON.stringify({ query: "ok", scopeFilter: { documentIds: ["not-a-uuid"] } }),
+      JSON.stringify({ query: "ok", scopeFilter: { documentIds: [makeUuid(1)], extra: true } }),
+      `{"query":"ok","scopeFilter":{"documentIds":["${makeUuid(1)}"],"__proto__":{}}}`,
+    ];
+    for (const body of invalidBodies) {
+      assert.equal(validateDesktopApiRequest({ path, method: "POST", body }), false, `body=${String(body).slice(0, 80)}`);
+    }
+    for (const change of [
+      { method: "GET" as const },
+      { path: `${path}?scope=all` },
+      { ifMatch: '"1"' },
+      { idempotencyKey },
+      { timeoutMs: 30_000 },
+    ]) {
+      assert.equal(validateDesktopApiRequest({ ...minimal, ...change }), false);
+    }
+  });
+  it("allows only exact renewal list and document renewal request shapes", () => {
+    const renewalsPath = `/api/v1/organizations/${organizationId}/knowledge/renewals`;
+    const renewalRequestPath = `/api/v1/organizations/${organizationId}/knowledge/documents/${sourcePrivateVersionId}/renewal`;
+    const validDatedBody = JSON.stringify({ expirationDate: "2027-06-30", reason: "Verified current for FY27" });
+    const validIndefiniteBody = JSON.stringify({ expirationDate: null, reason: "Evergreen standard" });
+
+    assert.equal(validateDesktopApiRequest({ path: renewalsPath, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalsPath}?documentId=${sourcePrivateVersionId}`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalsPath}?documentId=not-a-uuid`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalsPath}?documentId=${sourcePrivateVersionId}&documentId=${sourcePrivateVersionId}`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalsPath}?documentId=${sourcePrivateVersionId}&all=1`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: renewalsPath, method: "POST", body: "{}", idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ path: renewalsPath, method: "GET", body: "{}" }), false);
+    assert.equal(validateDesktopApiRequest({ path: renewalsPath, method: "GET", ifMatch: '"1"' }), false);
+    assert.equal(validateDesktopApiRequest({ path: renewalsPath, method: "GET", idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalsPath}?all=1`, method: "GET" }), false);
+
+    assert.equal(validateDesktopApiRequest({ path: renewalRequestPath, method: "POST", body: validDatedBody, idempotencyKey }), true);
+    assert.equal(validateDesktopApiRequest({ path: renewalRequestPath, method: "POST", body: validIndefiniteBody, idempotencyKey }), true);
+    assert.equal(validateDesktopApiRequest({ path: renewalRequestPath, method: "POST", body: validDatedBody }), false);
+    assert.equal(validateDesktopApiRequest({ path: renewalRequestPath, method: "POST", idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({ path: renewalRequestPath, method: "POST", body: validDatedBody, idempotencyKey, ifMatch: '"1"' }), false);
+    assert.equal(validateDesktopApiRequest({ path: renewalRequestPath, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalRequestPath}?force=1`, method: "POST", body: validDatedBody, idempotencyKey }), false);
+    assert.equal(validateDesktopApiRequest({
+      path: renewalRequestPath.replace(sourcePrivateVersionId, "not-a-uuid"),
+      method: "POST",
+      body: validDatedBody,
+      idempotencyKey,
+    }), false);
+    for (const badBody of [
+      "{}",
+      JSON.stringify({ expirationDate: "2027-06-30" }),
+      JSON.stringify({ reason: "Missing date field" }),
+      JSON.stringify({ expirationDate: "2027-06-30", reason: "" }),
+      JSON.stringify({ expirationDate: "2027-06-30", reason: "x".repeat(4_001) }),
+      JSON.stringify({ expirationDate: "2027-06-30T00:00:00Z", reason: "Too long date" }),
+      JSON.stringify({ expirationDate: "2027-06-30", reason: "Ok", extra: true }),
+    ]) {
+      assert.equal(validateDesktopApiRequest({ path: renewalRequestPath, method: "POST", body: badBody, idempotencyKey }), false, badBody);
+    }
   });
   it("allows an exact Company turn feedback update", () => {
     const path = `/api/v1/organizations/${organizationId}/ai/conversations/${sourcePrivateVersionId}/turns/${idempotencyKey}/feedback`;
@@ -474,5 +637,166 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${reports}?disposition=open`, method: "GET" }), false);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/knowledge/maintenance/imports`, method: "POST" }), true);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/knowledge/maintenance/imports`, method: "POST", body: "{}" }), false);
+  });
+
+  it("allows GET /knowledge/graph only with strictly validated query parameters and 1 MiB response budget", () => {
+    const graph = `/api/v1/organizations/${organizationId}/knowledge/graph`;
+    const deptId = "44444444-4444-4444-8444-444444444444";
+    const colId = "55555555-5555-4555-8555-555555555555";
+    const focusId = "66666666-6666-4666-8666-666666666666";
+
+    const validPaths = [
+      graph,
+      `${graph}?view=accountability`,
+      `${graph}?view=collections`,
+      `${graph}?q=MFA%20Policy`,
+      `${graph}?q=${encodeURIComponent("😀".repeat(120))}`,
+      `${graph}?ownerDepartmentId=${deptId}`,
+      `${graph}?typeCode=POLICY_AND_STANDARD`,
+      `${graph}?typeCode=PROCEDURE`,
+      `${graph}?typeCode=GUIDE`,
+      `${graph}?typeCode=REFERENCE`,
+      `${graph}?typeCode=LESSONS_LEARNED`,
+      `${graph}?typeCode=UNCATEGORIZED`,
+      `${graph}?collectionId=${colId}`,
+      `${graph}?collectionId=UNASSIGNED`,
+      `${graph}?readerScope=ORGANIZATION`,
+      `${graph}?readerScope=DEPARTMENT`,
+      `${graph}?readerScope=SELECTED_MEMBERS`,
+      `${graph}?readerScope=LEGACY_AUDIENCE`,
+      `${graph}?validity=CURRENT`,
+      `${graph}?validity=EXPIRING_SOON`,
+      `${graph}?validity=EXPIRED`,
+      `${graph}?includeLinks=true`,
+      `${graph}?includeLinks=false`,
+      `${graph}?relationshipTypes=REFERENCES`,
+      `${graph}?relationshipTypes=REFERENCES,RELATED,SUPERSEDES`,
+      `${graph}?monitor=true&onlyOpenCases=true&onlyUnassignedOrg=false&includeExpired=true`,
+      `${graph}?focusDocumentId=${focusId}`,
+      `${graph}?limit=1`,
+      `${graph}?limit=500`,
+      `${graph}?view=collections&q=handbook&ownerDepartmentId=${deptId}&typeCode=POLICY_AND_STANDARD&collectionId=UNASSIGNED&readerScope=ORGANIZATION&validity=EXPIRING_SOON&includeLinks=true&relationshipTypes=REFERENCES,SUPERSEDES&monitor=true&onlyOpenCases=false&onlyUnassignedOrg=true&includeExpired=false&focusDocumentId=${focusId}&limit=250`,
+    ];
+    for (const path of validPaths) {
+      assert.equal(validateDesktopApiRequest({ path, method: "GET" }), true, path);
+    }
+    assert.equal(validateDesktopApiRequest({ path: graph, method: "GET", timeoutMs: 15_000 }), true);
+    assert.equal(desktopApiResponseLimit({ path: graph, method: "GET" }), 1024 * 1024);
+
+    const invalidRequests = [
+      { path: graph, method: "POST" as const, body: "{}" },
+      { path: graph, method: "PATCH" as const, body: "{}" },
+      { path: graph, method: "PUT" as const, body: "{}" },
+      { path: graph, method: "GET" as const, body: "{}" },
+      { path: graph, method: "GET" as const, ifMatch: '"1"' },
+      { path: graph, method: "GET" as const, idempotencyKey },
+      { path: `/api/v1/organizations/not-a-uuid/knowledge/graph`, method: "GET" as const },
+      { path: `${graph}#section`, method: "GET" as const },
+      { path: `${graph}?unknown=1`, method: "GET" as const },
+      { path: `${graph}?view=accountability&view=collections`, method: "GET" as const },
+      { path: `${graph}?view=tree`, method: "GET" as const },
+      { path: `${graph}?q=${"a".repeat(121)}`, method: "GET" as const },
+      { path: `${graph}?q=${encodeURIComponent("😀".repeat(121))}`, method: "GET" as const },
+      { path: `${graph}?ownerDepartmentId=not-a-uuid`, method: "GET" as const },
+      { path: `${graph}?typeCode=Policy%20%26%20Standard`, method: "GET" as const },
+      { path: `${graph}?typeCode=OTHER`, method: "GET" as const },
+      { path: `${graph}?collectionId=not-a-uuid`, method: "GET" as const },
+      { path: `${graph}?collectionId=ALL`, method: "GET" as const },
+      { path: `${graph}?readerScope=PRIVATE`, method: "GET" as const },
+      { path: `${graph}?validity=PAST`, method: "GET" as const },
+      { path: `${graph}?includeLinks=1`, method: "GET" as const },
+      { path: `${graph}?includeLinks=yes`, method: "GET" as const },
+      { path: `${graph}?relationshipTypes=`, method: "GET" as const },
+      { path: `${graph}?relationshipTypes=UNKNOWN`, method: "GET" as const },
+      { path: `${graph}?relationshipTypes=REFERENCES,REFERENCES`, method: "GET" as const },
+      { path: `${graph}?relationshipTypes=REFERENCES,`, method: "GET" as const },
+      { path: `${graph}?relationshipTypes=,RELATED`, method: "GET" as const },
+      { path: `${graph}?monitor=1`, method: "GET" as const },
+      { path: `${graph}?onlyOpenCases=yes`, method: "GET" as const },
+      { path: `${graph}?onlyUnassignedOrg=0`, method: "GET" as const },
+      { path: `${graph}?includeExpired=2`, method: "GET" as const },
+      { path: `${graph}?focusDocumentId=not-a-uuid`, method: "GET" as const },
+      { path: `${graph}?limit=0`, method: "GET" as const },
+      { path: `${graph}?limit=01`, method: "GET" as const },
+      { path: `${graph}?limit=501`, method: "GET" as const },
+      { path: `${graph}?limit=-1`, method: "GET" as const },
+      { path: `${graph}?limit=1.5`, method: "GET" as const },
+      { path: `${graph}?limit=abc`, method: "GET" as const },
+      { path: `${graph}?limit=10&limit=20`, method: "GET" as const },
+    ];
+    for (const req of invalidRequests) {
+      assert.equal(validateDesktopApiRequest(req), false, `${req.method} ${req.path}`);
+    }
+  });
+
+  it("allows governed document relationship create and remove POST routes only with UUID idempotencyKey and strict bodies", () => {
+    const docId = sourcePrivateVersionId;
+    const targetDocumentId = "44444444-4444-4444-8444-444444444444";
+    const relationshipId = "55555555-5555-4555-8555-555555555555";
+    const createPath = `/api/v1/organizations/${organizationId}/knowledge/documents/${docId}/relationships`;
+    const removePath = `${createPath}/${relationshipId}/remove`;
+
+    for (const relationshipType of ["REFERENCES", "RELATED", "SUPERSEDES"]) {
+      const req = {
+        path: createPath,
+        method: "POST" as const,
+        body: JSON.stringify({ targetDocumentId, relationshipType }),
+        idempotencyKey,
+      };
+      assert.equal(validateDesktopApiRequest(req), true, relationshipType);
+      assert.equal(desktopApiResponseLimit(req), 1024 * 1024);
+    }
+
+    const validRemove = {
+      path: removePath,
+      method: "POST" as const,
+      body: "{}",
+      idempotencyKey,
+    };
+    assert.equal(validateDesktopApiRequest(validRemove), true);
+    assert.equal(desktopApiResponseLimit(validRemove), 1024 * 1024);
+
+    const invalidCreate = [
+      { path: createPath, method: "GET" as const, idempotencyKey },
+      { path: createPath, method: "PATCH" as const, body: JSON.stringify({ targetDocumentId, relationshipType: "RELATED" }), idempotencyKey },
+      { path: createPath, method: "POST" as const, body: JSON.stringify({ targetDocumentId, relationshipType: "RELATED" }) },
+      { path: createPath, method: "POST" as const, body: JSON.stringify({ targetDocumentId, relationshipType: "RELATED" }), idempotencyKey: "not-a-uuid" },
+      { path: createPath, method: "POST" as const, body: JSON.stringify({ targetDocumentId, relationshipType: "RELATED" }), idempotencyKey, ifMatch: '"1"' },
+      { path: `${createPath}?force=1`, method: "POST" as const, body: JSON.stringify({ targetDocumentId, relationshipType: "RELATED" }), idempotencyKey },
+      { path: `${createPath}#hash`, method: "POST" as const, body: JSON.stringify({ targetDocumentId, relationshipType: "RELATED" }), idempotencyKey },
+      { path: createPath.replace(docId, "not-a-uuid"), method: "POST" as const, body: JSON.stringify({ targetDocumentId, relationshipType: "RELATED" }), idempotencyKey },
+      { path: createPath, method: "POST" as const, idempotencyKey },
+      { path: createPath, method: "POST" as const, body: "{}", idempotencyKey },
+      { path: createPath, method: "POST" as const, body: "null", idempotencyKey },
+      { path: createPath, method: "POST" as const, body: "[]", idempotencyKey },
+      { path: createPath, method: "POST" as const, body: "not-json", idempotencyKey },
+      { path: createPath, method: "POST" as const, body: JSON.stringify({ targetDocumentId }), idempotencyKey },
+      { path: createPath, method: "POST" as const, body: JSON.stringify({ relationshipType: "RELATED" }), idempotencyKey },
+      { path: createPath, method: "POST" as const, body: JSON.stringify({ targetDocumentId: "not-a-uuid", relationshipType: "RELATED" }), idempotencyKey },
+      { path: createPath, method: "POST" as const, body: JSON.stringify({ targetDocumentId, relationshipType: "PARENT" }), idempotencyKey },
+      { path: createPath, method: "POST" as const, body: JSON.stringify({ targetDocumentId, relationshipType: "RELATED", extra: true }), idempotencyKey },
+      { path: createPath, method: "POST" as const, body: `{"targetDocumentId":"${targetDocumentId}","relationshipType":"RELATED","__proto__":{}}`, idempotencyKey },
+    ];
+    for (const req of invalidCreate) {
+      assert.equal(validateDesktopApiRequest(req), false, `create invalid: ${JSON.stringify(req)}`);
+    }
+
+    const invalidRemove = [
+      { path: removePath, method: "GET" as const, idempotencyKey },
+      { path: removePath, method: "POST" as const, body: "{}" },
+      { path: removePath, method: "POST" as const, body: "{}", idempotencyKey: "bad" },
+      { path: removePath, method: "POST" as const, body: "{}", idempotencyKey, ifMatch: '"1"' },
+      { path: `${removePath}?force=1`, method: "POST" as const, body: "{}", idempotencyKey },
+      { path: removePath.replace(relationshipId, "not-a-uuid"), method: "POST" as const, body: "{}", idempotencyKey },
+      { path: removePath, method: "POST" as const, idempotencyKey },
+      { path: removePath, method: "POST" as const, body: "", idempotencyKey },
+      { path: removePath, method: "POST" as const, body: "[]", idempotencyKey },
+      { path: removePath, method: "POST" as const, body: "null", idempotencyKey },
+      { path: removePath, method: "POST" as const, body: JSON.stringify({ force: true }), idempotencyKey },
+      { path: removePath, method: "POST" as const, body: '{"__proto__":{}}', idempotencyKey },
+    ];
+    for (const req of invalidRemove) {
+      assert.equal(validateDesktopApiRequest(req), false, `remove invalid: ${JSON.stringify(req)}`);
+    }
   });
 });

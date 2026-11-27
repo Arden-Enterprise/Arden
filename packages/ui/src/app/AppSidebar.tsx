@@ -44,6 +44,7 @@ export type NavigationItem = {
 /** Home is the published-knowledge start page (requested 15 Nov 2026); it replaced the sample My Work dashboard. */
 export const workNavigation: NavigationItem[] = [
   { label: "Home", shortLabel: "Home", icon: "home", view: "knowledge" },
+  { label: "Graph", shortLabel: "Graph", icon: "graph", view: "graph" },
   { label: "Ask Arden", shortLabel: "Ask", icon: "chat", view: "ask-arden" },
   { label: "Private", shortLabel: "Private", icon: "lock", view: "personal-workspace" },
 ];

@@ -1,21 +1,27 @@
 import { randomUUID } from "node:crypto";
+import { CONTEXT_BASKET_MAX_DOCUMENTS, type AnswerScopeFilter } from "@arden/domain";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { ArdenDataRepository } from "../db/repository.js";
 import type { AskArdenClient } from "./ai-client.js";
 import type { AnswerFeedback } from "./conversation-store.js";
 import { GovernedAnswering } from "./governed-answering.js";
 import { GovernedAnswerError } from "./governed-contracts.js";
-import { recordUsageBestEffort } from "./usage-contracts.js";
 
 type Actor = (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>;
 type Params = { organizationId: string; conversationId: string };
-type Body = { query: string; conversationId?: string; requestId?: string; expectedRevision?: number };
+type ConversationQuery = { limit?: number; beforeSequence?: number };
+type Body = { query: string; conversationId?: string; requestId?: string; expectedRevision?: number; scopeFilter?: AnswerScopeFilter };
 export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenDataRepository, ai: AskArdenClient | null,
-  actor: Actor, uuidPattern: string): void {
+  actor: Actor, uuidPattern: string, options: { useUiSurfaceV3?: boolean } = {}): void {
   const base = "/api/v1/organizations/:organizationId/ai";
   const usageFailure = (operation: string) => (error: unknown) => app.log.warn({ operation,
     errorType: error instanceof Error ? error.name : "Unknown" }, "AI telemetry write failed");
-  const engine = new GovernedAnswering(repository, ai, usageFailure("CHAT_USAGE"));
+  const engine = new GovernedAnswering(repository, ai, {
+    useUiSurfaceV3: options.useUiSurfaceV3,
+    onUsageFailure: usageFailure("CHAT_USAGE"),
+    onResultFailure: usageFailure("CHAT_RESULT"),
+    onSurfaceFallback: (fallbackReason) => app.log.info({ fallbackReason }, "UiSurface degraded to fallback"),
+  });
   const params = { type: "object", required: ["organizationId"], additionalProperties: false,
     properties: { organizationId: { type: "string", pattern: uuidPattern } } };
   const fail = (reply: FastifyReply, error: unknown, request: FastifyRequest) => {
@@ -35,6 +41,10 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
       query: { type: "string", minLength: 1, maxLength: 4_000 },
       conversationId: { type: "string", pattern: uuidPattern }, requestId: { type: "string", pattern: uuidPattern },
       expectedRevision: { type: "integer", minimum: 0, maximum: 1_000_000 },
+      scopeFilter: { type: "object", required: ["documentIds"], additionalProperties: false, properties: {
+        documentIds: { type: "array", minItems: 1, maxItems: CONTEXT_BASKET_MAX_DOCUMENTS, uniqueItems: true,
+          items: { type: "string", pattern: uuidPattern } },
+      } },
     } } } }, async (request, reply) => {
     const context = await actor(request, reply);
     if (!context) return;
@@ -47,9 +57,7 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
       const requestId = request.body.requestId ?? randomUUID();
       const answer = await engine.answer(context.userId, request.params.organizationId, { query,
         conversationId: request.body.conversationId ?? randomUUID(), requestId,
-        expectedRevision: request.body.expectedRevision ?? 0 });
-      await recordUsageBestEffort(() => repository.recordAiAnswerResult(context.userId, request.params.organizationId,
-        requestId, "CHAT", answer.status, answer.citations.length), usageFailure("CHAT_RESULT"));
+        expectedRevision: request.body.expectedRevision ?? 0, scopeFilter: request.body.scopeFilter });
       return { ...answer, requestId };
     } catch (error) { return fail(reply, error, request); }
   });
@@ -77,15 +85,32 @@ export function registerAnswerRoutes(app: FastifyInstance, repository: ArdenData
       return { items: await repository.conversations.list(context.userId, request.params.organizationId) };
     } catch (error) { return fail(reply, error, request); }
   });
-  app.get<{ Params: Params }>(`${base}/conversations/:conversationId`, { schema: { params: {
-    ...params, required: ["organizationId", "conversationId"], properties: {
-      ...params.properties, conversationId: { type: "string", pattern: uuidPattern } },
-  } } }, async (request, reply) => {
+  app.get<{ Params: Params; Querystring: ConversationQuery }>(`${base}/conversations/:conversationId`, {
+    schema: {
+      params: {
+        ...params, required: ["organizationId", "conversationId"], properties: {
+          ...params.properties, conversationId: { type: "string", pattern: uuidPattern } },
+      },
+      querystring: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          limit: { type: "integer", minimum: 1, maximum: 50 },
+          beforeSequence: { type: "integer", minimum: 1, maximum: 2_147_483_647 },
+        },
+      },
+    },
+  }, async (request, reply) => {
     const context = await actor(request, reply);
     if (!context) return;
     reply.header("Cache-Control", "no-store");
     try {
-      const found = await engine.load(context.userId, request.params.organizationId, request.params.conversationId);
+      const found = await engine.load(
+        context.userId,
+        request.params.organizationId,
+        request.params.conversationId,
+        { limit: request.query.limit, beforeSequence: request.query.beforeSequence },
+      );
       if (!found) throw new GovernedAnswerError("NOT_FOUND");
       return found;
     } catch (error) { return fail(reply, error, request); }

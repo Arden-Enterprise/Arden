@@ -73,4 +73,50 @@ describe("PDF reader failure and teardown", () => {
     expect(await screen.findByText(/Opened page 3. Passage not found/)).toBeTruthy();
     expect(marks()).toHaveLength(0);
   });
+
+  it("scrolls to a page-only open_reader anchor when excerpt is empty without painting citation marks", async () => {
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly callback: (entries: { contentRect: { width: number } }[]) => void) {}
+      observe() { this.callback([{ contentRect: { width: 800 } }]); }
+      disconnect() {}
+    });
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as unknown as CanvasRenderingContext2D);
+    const getPage = vi.fn(async (page: number) => ({
+      getViewport: () => ({ width: 600, height: 800 }),
+      render: () => ({ promise: Promise.resolve(), cancel() {} }),
+      streamTextContent: () => `Page ${page} content`,
+    }));
+    runtime.getDocument.mockReturnValue({
+      promise: Promise.resolve({ numPages: 4, getPage }),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    });
+
+    const view = render(createElement(PdfReader, {
+      base64: "cGRm",
+      title: "Page Anchor PDF",
+    }));
+
+    const scroller = await screen.findByRole("document", { name: "PDF: Page Anchor PDF" });
+    await waitFor(() => expect(view.container.querySelector('[data-page-number="3"]')).toBeTruthy());
+
+    // Simulate layout geometry for scroller and page 3, then trigger a page-only focus request.
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({
+      top: 100, bottom: 700, left: 0, right: 800, width: 800, height: 600, x: 0, y: 100, toJSON: () => ({}),
+    });
+    const page3 = view.container.querySelector<HTMLElement>('[data-page-number="3"]')!;
+    vi.spyOn(page3, "getBoundingClientRect").mockReturnValue({
+      top: 1716, bottom: 2516, left: 0, right: 600, width: 600, height: 800, x: 0, y: 1716, toJSON: () => ({}),
+    });
+    scroller.scrollTop = 0;
+
+    view.rerender(createElement(PdfReader, {
+      base64: "cGRm",
+      title: "Page Anchor PDF",
+      focus: { page: 3, excerpt: "" },
+    }));
+
+    // Expected scrollTop delta: page3.top (1716) - scroller.top (100) - pagePadding (16) = 1600.
+    await waitFor(() => expect(scroller.scrollTop).toBe(1600));
+    expect(view.container.querySelectorAll("mark.pdf-citation-mark")).toHaveLength(0);
+  });
 });

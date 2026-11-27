@@ -37,8 +37,17 @@ describe("maintenance projections", () => {
   it("keeps only queue facts for an assignee who lost the grant", () => {
     const assigned = { ...row, assigneeMembershipId: "reviewer", reporterStatus: "In Progress" as const, revision: 2 };
     const view = projectCase(assigned, { ...actor, membershipId: "reviewer" }, { hasGrant: false, isAdmin: false, canReadDocument: true });
-    expect(view).toMatchObject({ kind: "queue", needsReassignment: true, title: "IT Support Guide" });
+    expect(view).toMatchObject({ kind: "queue", documentId: "doc", needsReassignment: true, title: "IT Support Guide" });
     expect(view).not.toHaveProperty("description");
     expect(view).not.toHaveProperty("reviewerRationale");
+  });
+
+  it("includes documentId in the queue view only when the reviewer can read the document", () => {
+    const readable = projectCase(row, { ...actor, membershipId: "reviewer" }, { hasGrant: true, isAdmin: false, canReadDocument: true });
+    expect(readable).toMatchObject({ kind: "queue", documentId: "doc", title: "IT Support Guide" });
+
+    const unreadable = projectCase(row, { ...actor, membershipId: "reviewer" }, { hasGrant: true, isAdmin: false, canReadDocument: false });
+    expect(unreadable).toMatchObject({ kind: "queue", title: null });
+    expect(unreadable).not.toHaveProperty("documentId");
   });
 });

@@ -62,6 +62,23 @@ describe("decision 0023 Administration → Documents", () => {
     expect(within(viewer).getByText("Reported leak")).toBeTruthy();
   });
 
+  it("opens the document-specific audited-inspection reason dialog requested by Graph Monitor routing", async () => {
+    vi.spyOn(api, "listGovernancePublications").mockResolvedValue([item()]);
+    vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
+    const handled = vi.fn();
+    render(createElement(GovernanceDocumentsPanel, {
+      platform: "web",
+      organizationId: "org",
+      departmentName,
+      requestedInspection: { documentId: "doc", title: "Salary bands" },
+      onInspectionRequestHandled: handled,
+    }));
+    const dialog = await screen.findByRole("dialog", { name: "Inspect document" });
+    expect(within(dialog).getByText("Salary bands")).toBeTruthy();
+    expect(within(dialog).getByRole("textbox", { name: /Reason/ })).toBeTruthy();
+    expect(handled).toHaveBeenCalledTimes(1);
+  });
+
   it("offers no inspection for a document the Admin already reads, and withdraws with a reason", async () => {
     const list = renderPanel([item({ readable: true, openReports: 2 })]);
     const row = (await screen.findByText("Salary bands")).closest("[role=row]") as HTMLElement;

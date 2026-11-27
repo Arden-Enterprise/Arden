@@ -100,7 +100,7 @@ export type CaseProjection =
   | { kind: "minimal"; caseId: string; reporterStatus: ReporterStatus; unread: boolean }
   | { kind: "reporter"; caseId: string; documentId: string; publishedVersionId: string; title: string;
       description: string; reporterStatus: ReporterStatus; reporterExplanation: string | null; revision: number; unread: boolean }
-  | { kind: "queue"; caseId: string; reporterStatus: ReporterStatus; title: string | null; revision: number; unread: boolean;
+  | { kind: "queue"; caseId: string; documentId?: string; reporterStatus: ReporterStatus; title: string | null; revision: number; unread: boolean;
       needsReassignment?: boolean }
   | { kind: "assigned"; caseId: string; documentId: string; publishedVersionId: string; title: string;
       description: string; reporterStatus: ReporterStatus; reporterExplanation: string | null;

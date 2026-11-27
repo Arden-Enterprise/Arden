@@ -18,7 +18,7 @@ Release automation status updated 28 October 2026; hosted identity inventory ret
 | Identity | Supabase Auth email/password and Google PKCE through server-only Fastify adapters; verified user UUID maps to `user_account.user_id`; Arden-owned organization bootstrap and hashed-token email invitation lifecycle; link-based password reset through the BFF; SMTP through Nodemailer 10.0.10. Fenced test adapters support loopback-only local sign-in and the historical SSH-only dev-2 no-login target; the latter is inactive in the current four Supabase-authenticated hosted slots. Arden System Admin has no organization/content bypass | Complete account lifecycle and live recovery-email/browser verification |
 | Editor | React textarea for private notes; BlockNote core/react/Ariakit 0.55.0 behind a versioned Arden document interface for server-backed shared knowledge | Expand only when supported document capabilities require it |
 | PDF reader | pdf.js (`pdfjs-dist` 5.4.624, Apache-2.0) renders published PDFs in the governed reader with a selectable text layer so a cited passage is highlighted in place; it loads on demand in its own chunk and worker, with `isEvalSupported: false`. Review and draft-history dialogs keep the browser PDF viewer. Its optional `@napi-rs/canvas` (MIT) prebuilt Node binaries serve only Node use and are not bundled | Packaged-desktop worker/CSP verification; annotation layer if links inside PDFs are needed |
-| Graph | Local decorative Figma SVGs; no graph view or authorized graph data | Sigma.js + Graphology on authorized API projections |
+| Graph | No graph view or authorized graph API implemented yet | `@xyflow/react` + `d3-hierarchy` / lazy `elkjs` on authorized API projections ([ADR 0036](../decisions/0036-knowledge-graph-and-modular-typed-ui-blocks.md), planned; supersedes Sigma.js + Graphology) |
 | Jobs | Durable PostgreSQL generation/outbox state and a Node.js orchestration worker that leases jobs, calls `Arden-AI`, validates manifests and atomically activates completed publications | Separate Python `Arden-AI` worker for compilation, chunking, embeddings and ChromaDB writes |
 | Storage | Protected local note-content volume via `LocalPrivateContentStorage`; opaque UUID `source_uri`, SHA-256 integrity check, production persistent mount required | Broader attachment/document storage; optional S3-compatible backend later |
 | AI | Separate Python 3.11 `Arden-AI` service with deterministic compiler/source maps, OpenAI embeddings/generation, LangChain standalone packages, self-hosted ChromaDB indexing/retrieval, Core-owned generation allow-lists and evidence rechecks | Langfuse tracing/evaluation and advanced retrieval optimization |
@@ -147,7 +147,7 @@ References: [Supabase Auth](https://supabase.com/docs/guides/auth), [server-side
 
 - Migration `0017_audience_and_instance_admin_foundation.sql` introduces canonical managed and group audiences, audience-group membership, instance-level System Admin records, audit events, and the enforceable-snapshot helper. It backfills legacy role audiences and temporarily retains role-backed write projection for staged cutover. New product/API work must use audience terminology and [decision 0010](../decisions/0010-audiences-and-system-administration.md). Run a rollback-only migration/RLS rehearsal before any shared deployment.
 
-- PostgreSQL is the canonical system of record for organization-scoped content, immutable versions, permissions, publications, source revisions, explicit edges, and audit metadata. An SVG/Graphology object, embedding, or client cache is not canonical storage.
+- PostgreSQL is the canonical system of record for organization-scoped content, immutable versions, permissions, publications, source revisions, explicit edges, and audit metadata. A client graph projection, embedding, or client cache is not canonical storage.
 - Use constraints, foreign keys, unique keys, indexes, and transactions to enforce invariants as well as domain checks. Make organization ownership explicit and prevent cross-organization references. IDs are identifiers, not access controls.
 - Separate migration/owner, application, and worker roles. The local Compose user/password is development-only; it is not the least-privilege production role design.
 - Apply RLS as defense in depth on sensitive tables. PostgreSQL superusers/`BYPASSRLS` always bypass it and owners normally do; use non-bypass/non-owner runtime roles and review `FORCE ROW LEVEL SECURITY` where appropriate. Test the actual roles and policies. See [PostgreSQL 17 row security](https://www.postgresql.org/docs/17/ddl-rowsecurity.html).
@@ -188,18 +188,19 @@ References: [Drizzle migration workflows](https://orm.drizzle.team/docs/migratio
 
 Reference: [BlockNote documentation](https://www.blocknotejs.org/docs).
 
-## 9. Sigma.js and Graphology
+## 9. `@xyflow/react`, `d3-hierarchy`, and `elkjs`
 
-- Sigma renders and Graphology manages a **derived client projection**. PostgreSQL/API own entities, canonical edges, permissions, and version provenance.
-- Preserve the current sample graph until a real authorized slice is implemented. Do not describe the existing SVG renderer as Sigma or add Sigma only to satisfy a stack list.
-- Request bounded authorized neighborhoods with scope/search/filter/pagination. Do not download the entire organizational graph and hide forbidden nodes locally.
-- Server authorization covers both endpoints and the edge. Layout, degree/counts, labels, suggestions, and cluster metadata must be computed only from permitted information.
-- Isolate layout computation, keep camera/selection state intentionally, and measure representative graph sizes. Use workers for heavy layout when justified; prevent layout/network work from blocking interaction.
-- Own the Sigma instance in a lifecycle boundary; dispose it and listeners/workers on replacement/unmount. Do not recreate the entire renderer on every React update or mutate a shared graph unsafely during rendering.
-- Provide accessible lists/details and keyboard search/selection because a WebGL canvas alone is not a usable document browser for everyone. Match `DESIGN.md` neutral shape/status grammar and reduced motion.
-- Test selection, search, fit/pan/zoom, empty/disconnected graphs, revoked nodes, long labels, resize, low-end/GPU-limited environments, and web/desktop parity. Do not assume WebGL availability or fixed sample coordinates establish production scalability.
+*(Supersedes Sigma.js + Graphology per [ADR 0036](../decisions/0036-knowledge-graph-and-modular-typed-ui-blocks.md), accepted 2026-11-26; planned — packages not yet installed.)*
 
-References: [Sigma documentation](https://www.sigmajs.org/docs/), [Graphology documentation](https://graphology.github.io/).
+- `@xyflow/react` renders and `d3-hierarchy` / `elkjs` lay out a **derived client projection**. PostgreSQL/API own entities, canonical edges, permissions, and version provenance.
+- Lazy-load `@xyflow/react` on the `/graph` route and dynamically import `elkjs/lib/elk.bundled.js` on demand only when cross-document links are enabled (do not use `blob:` Web Workers under Electron's `script-src 'self'` CSP, and keep bundled `elkjs` within bounded node/edge thresholds).
+- Request bounded authorized projections (capped at 500 documents and 1,000 relationships) with server-side truncation metadata. Do not download an unbounded organizational graph or hide forbidden nodes locally.
+- Server authorization covers both endpoints and the edge (`FORCE RLS`). Layout, counts, labels, and cluster metadata must be computed strictly from permitted information.
+- Isolate layout computation in a pure side-effect-free module so both React Flow canvas and the accessible Outline Treegrid (`role="treegrid"`) consume the exact same projection.
+- Preserve viewport zoom, pan, selection, and active chat when docking, floating, or resizing `AgentPanel`; match `DESIGN.md` Island tokens, interruptible camera transitions, and `prefers-reduced-motion` / `prefers-reduced-transparency` fallbacks.
+- Test selection, deep filtering, fit/pan/zoom, empty/disconnected/truncated graphs, revoked nodes, long labels, resize, Outline keyboard parity, and web/Electron parity.
+
+References: [React Flow documentation](https://reactflow.dev/), [d3-hierarchy](https://d3js.org/d3-hierarchy), [elkjs](https://github.com/kieler/elkjs).
 
 ## 10. Durable jobs, files, and connector processing
 

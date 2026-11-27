@@ -14,11 +14,17 @@ export type WorkspaceRoute =
   | { view: "knowledge"; at: KnowledgeHomeLocation }
   | { view: "review-queue"; at: KnowledgeReviewLocation }
   | { view: "ask-arden"; conversationId: string | null }
+  | { view: "graph"; search: string }
   | { view: "personal-workspace"; at: PrivateLocation }
   | { view: "organization-access" };
 
 /** What every routed feature currently shows, as reported to the shell. */
-export type FeatureLocations = { knowledge: KnowledgeRoute; conversationId: string | null; private: PrivateLocation };
+export type FeatureLocations = {
+  knowledge: KnowledgeRoute;
+  conversationId: string | null;
+  private: PrivateLocation;
+  graphSearch?: string;
+};
 
 export type RouteCapabilities = { admin: boolean; privateNotes: boolean; reviews: boolean };
 
@@ -26,14 +32,34 @@ export const homeRoute: WorkspaceRoute = { view: "knowledge", at: { kind: "home"
 
 const identifier = /^[A-Za-z0-9_-]{1,128}$/;
 
+/** Normalizes a URL query string (keeping the leading `?`, or returning `""` when empty). */
+export function normalizeSearch(search?: string | null): string {
+  if (!search) return "";
+  const hashIndex = search.indexOf("#");
+  const trimmed = (hashIndex === -1 ? search : search.slice(0, hashIndex)).trim();
+  if (!trimmed || trimmed === "?") return "";
+  return trimmed.startsWith("?") ? trimmed : `?${trimmed}`;
+}
+
+/** Returns pathname + normalized query string from a browser Location. */
+export function currentBrowserPath(location: Pick<Location, "pathname" | "search">): string {
+  return `${location.pathname}${normalizeSearch(location.search)}`;
+}
+
 /**
- * Reads a workspace route from a URL path.
+ * Reads a workspace route from a URL path (and optional query string).
  *
- * @param pathname Browser location pathname
+ * @param pathname Browser location pathname (may include `?query`)
+ * @param search Optional browser location search string
  * @returns The route, or null when the path is not a workspace address
  */
-export function parseWorkspacePath(pathname: string): WorkspaceRoute | null {
-  const segments = pathname.replace(/\/+$/, "").split("/").slice(1);
+export function parseWorkspacePath(pathname: string, search?: string): WorkspaceRoute | null {
+  const queryIndex = pathname.indexOf("?");
+  const rawPath = queryIndex === -1 ? pathname : pathname.slice(0, queryIndex);
+  if (!rawPath.startsWith("/") || rawPath.startsWith("//")) return null;
+  const inlineSearch = queryIndex === -1 ? "" : pathname.slice(queryIndex);
+  const normalizedSearch = search !== undefined && search !== "" ? normalizeSearch(search) : normalizeSearch(inlineSearch);
+  const segments = rawPath.replace(/\/+$/, "").split("/").slice(1);
   if (segments.length > 3) return null;
   const [section = "", first, second] = segments;
   const id = (value: string | undefined) => value !== undefined && identifier.test(value) ? value : null;
@@ -55,6 +81,7 @@ export function parseWorkspacePath(pathname: string): WorkspaceRoute | null {
     case "ask":
       if (first === undefined) return { view: "ask-arden", conversationId: null };
       return second === undefined && id(first) ? { view: "ask-arden", conversationId: first } : null;
+    case "graph": return only({ view: "graph", search: normalizedSearch });
     case "private":
       if (first === undefined) return { view: "personal-workspace", at: { kind: "root" } };
       if (second === undefined && (first === "trash" || first === "archive")) return { view: "personal-workspace", at: { kind: first } };
@@ -67,7 +94,7 @@ export function parseWorkspacePath(pathname: string): WorkspaceRoute | null {
 }
 
 /**
- * Builds the URL path for a workspace route.
+ * Builds the URL path (including query string for `/graph`) for a workspace route.
  *
  * @param route Workspace route
  * @returns Absolute URL path
@@ -77,6 +104,7 @@ export function workspacePath(route: WorkspaceRoute): string {
     case "knowledge": return homePath(route.at);
     case "review-queue": return reviewsPath(route.at);
     case "ask-arden": return route.conversationId ? `/ask/${encodeURIComponent(route.conversationId)}` : "/ask";
+    case "graph": return `/graph${normalizeSearch(route.search)}`;
     case "personal-workspace": return privatePath(route.at);
     case "organization-access": return "/admin";
   }
@@ -124,6 +152,7 @@ export function routeForView(view: WorkspaceView, features: FeatureLocations): W
     case "knowledge": return { view, at: features.knowledge.home };
     case "review-queue": return { view, at: features.knowledge.reviews };
     case "ask-arden": return { view, conversationId: features.conversationId };
+    case "graph": return { view, search: normalizeSearch(features.graphSearch) };
     case "personal-workspace": return { view, at: features.private };
     case "organization-access": return { view };
     default: return homeRoute;
@@ -147,10 +176,13 @@ export function allowedRoute(route: WorkspaceRoute, capabilities: RouteCapabilit
 
 const returnPathKey = "arden.returnPath";
 
-/** Keeps the workspace address across a sign-in redirect (Google returns to `/`). */
-export function rememberReturnPath(pathname: string): void {
-  if (pathname === "/" || !parseWorkspacePath(pathname)) return;
-  try { window.sessionStorage.setItem(returnPathKey, pathname); } catch {}
+/** Keeps the workspace address (including `/graph` query params) across a sign-in redirect (Google returns to `/`). */
+export function rememberReturnPath(pathname: string, search?: string): void {
+  const parsed = parseWorkspacePath(pathname, search);
+  if (!parsed) return;
+  const canonical = workspacePath(parsed);
+  if (canonical === "/") return;
+  try { window.sessionStorage.setItem(returnPathKey, canonical); } catch {}
 }
 
 /** Reads and forgets the address kept before a sign-in redirect. */
@@ -158,7 +190,8 @@ export function takeReturnPath(): string | null {
   try {
     const path = window.sessionStorage.getItem(returnPathKey);
     window.sessionStorage.removeItem(returnPathKey);
-    return path && parseWorkspacePath(path) ? path : null;
+    const parsed = path ? parseWorkspacePath(path) : null;
+    return parsed ? workspacePath(parsed) : null;
   } catch { return null; }
 }
 

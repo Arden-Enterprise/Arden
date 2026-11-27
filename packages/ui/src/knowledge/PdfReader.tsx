@@ -93,7 +93,13 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
   }, [document]);
 
   useEffect(() => {
-    if (!document || !focus?.excerpt) { setTarget(null); return; }
+    if (!document || (!focus?.excerpt && !focus?.page)) { setTarget(null); return; }
+    if (!focus.excerpt.trim()) {
+      const page = focus.page && focus.page >= 1 && focus.page <= document.numPages ? focus.page : null;
+      setTarget(page ? { page, excerpt: "", request: focus } : null);
+      if (!page && focus.samePage) setMatch({ request: focus, found: false, complete: false });
+      return;
+    }
     let present = true;
     void locateQuote(document, focus).then((page) => {
       if (!present) return;
@@ -103,11 +109,17 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
     return () => { present = false; };
   }, [document, focus]);
 
+  const scrolledRequest = useRef<PdfReaderFocus | null>(null);
   useEffect(() => {
-    if (!visibleTarget || width === 0) return;
+    if (!visibleTarget) {
+      scrolledRequest.current = null;
+      return;
+    }
+    if (width === 0 || scrolledRequest.current === visibleTarget.request) return;
     const container = scroller.current;
     const page = container?.querySelector<HTMLElement>(`[data-page-number="${visibleTarget.page}"]`);
     if (container && page) {
+      scrolledRequest.current = visibleTarget.request;
       container.scrollTop += page.getBoundingClientRect().top - container.getBoundingClientRect().top - pagePadding;
     }
   }, [visibleTarget, width]);
@@ -211,7 +223,7 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
     const layer = text.current;
     if (!layer || rendered === 0) return;
     clearMarks(layer, markClass);
-    if (!highlight) return;
+    if (!highlight || !highlight.excerpt.trim()) return;
     const { marks, complete } = markQuotes(layer, [highlight.excerpt, ...(highlight.request.additionalExcerpts ?? [])],
       markClass, highlight.request.samePage);
     onHighlight(marks[0] ?? null, highlight, complete);

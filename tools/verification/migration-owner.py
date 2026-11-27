@@ -10,12 +10,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy" / "release
 from management import migration_role_name, migration_role_probe_sql, valid_migration_role_probe
 
 
-REVIEWED_BASELINE_DEFINER_COUNT = 44
+REVIEWED_BASELINE_DEFINER_COUNT = 50
 # Isolated System Admin executors (0072/0074). They stay superuser-owned and outside the transfer.
 REVIEWED_SYSTEM_DEFINERS = {
     "console_report(uuid, text, uuid, timestamp with time zone, timestamp with time zone, text, text, integer, integer)",
     "installation_setup_status()",
     "protect_last_administrator()",
+}
+REVIEWED_GRAPH_DEFINERS = {
+    "current_readable_document_ids()",
+    "actor_can_manage_relationship_source(uuid, uuid)",
+    "enforce_document_relationship_invariants()",
+    "remove_governed_document_relationship(uuid, uuid)",
+    "list_graph_monitor_documents(boolean)",
+    "get_publication_renewal_state(uuid)",
 }
 REVIEWED_MAINTENANCE_DEFINERS = {
     "enqueue_maintenance_submission_notices()",
@@ -47,7 +55,7 @@ def verify_full_schema(container):
             raise RuntimeError("Full-schema ownership rehearsal failed")
         return result.stdout.strip()
 
-    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "74":
+    if sql("SELECT count(*) FROM public.arden_schema_migrations") != "77":
         raise ValueError("Review the full-schema ownership fixture when migrations change")
     sql(f"CREATE ROLE {role} NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS "
         "NOCREATEDB NOCREATEROLE NOREPLICATION")
@@ -61,8 +69,9 @@ def verify_full_schema(container):
                         "FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
                         "WHERE n.nspname='arden' AND p.prosecdef AND "
                         "p.proowner='postgres'::regrole").splitlines())
+    reviewed = REVIEWED_MAINTENANCE_DEFINERS | REVIEWED_GRAPH_DEFINERS
     if (len(preserved) != REVIEWED_BASELINE_DEFINER_COUNT + len(REVIEWED_MAINTENANCE_DEFINERS)
-            or not REVIEWED_MAINTENANCE_DEFINERS.issubset(preserved)
+            or not reviewed.issubset(preserved)
             or "notify_arden_publication_share()" not in preserved):
         raise AssertionError("Reviewed SECURITY DEFINER execution identities were not preserved")
     system_definers = set(sql("SELECT format('%s(%s)', p.proname, oidvectortypes(p.proargtypes)) "
