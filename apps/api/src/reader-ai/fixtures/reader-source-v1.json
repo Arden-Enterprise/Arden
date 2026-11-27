@@ -71,6 +71,8 @@
   },
   "manifest": {
     "contractVersion": 1,
+    "usageContractVersion": 1,
+    "usageEvents": [],
     "generationId": "10000000-0000-4000-8000-000000000004",
     "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
     "snapshotContentHash": "769d46b73da4ff9fde3db5d83a84caba8ec9701b531bc889221c0a4ba098fc75",
@@ -115,6 +117,8 @@
         ],
         "parentSectionBlockId": "s2h"
       }
-    ]
+    ],
+    "usageContractVersion": 1,
+    "usageEvents": []
   }
 }

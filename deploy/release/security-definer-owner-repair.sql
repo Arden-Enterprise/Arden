@@ -9,7 +9,8 @@ SELECT pg_advisory_xact_lock(hashtext('arden:migrations'));
 DO $repair_internal_execution$
 DECLARE
     item record;
-    -- Exact inventory after migrations 0001-0070 (54 routines). Any other count or name refuses.
+    -- Exact `arden` inventory after migrations 0001-0074 (57 routines). Any other count or name refuses.
+    -- `arden_system` routines are never transferred to the migration role (see the owner template).
     expected_names text[] := ARRAY[
         -- Reviewed baseline (0001-0022).
         'audience_snapshot_enforceable', 'claim_knowledge_index_job',
@@ -32,7 +33,7 @@ DECLARE
         'responsible_publication_view', 'withdraw_publication_directly', 'list_publication_reports',
         'close_publication_report',
         -- 0039 notification fan-out; 0040 trigger-only placement validator;
-        -- 0061 approved reader-change share fan-out.
+        -- 0061 approved reader-change share fan-out; 0063 least-privilege System Console.
         'notify_arden_notification', 'notify_arden_publication_share',
         'validate_collection_placement',
         -- 0068 renewal requests, renewal state and expiry reminders (decision 0032).
@@ -43,7 +44,10 @@ DECLARE
         -- 0068 change-request target check for reviewers who are not readers.
         'publication_change_target_state',
         -- 0070 direct-share notice (decision 0034).
-        'notify_private_item_share'];
+        'notify_private_item_share',
+        -- 0071 least-privilege System Console (0074 removed `system_console_report`).
+        'record_index_ai_usage', 'system_admin_lifecycle_counts',
+        'guard_system_admin_membership'];
     -- Flow 4 includes overloaded routines: match their exact signatures.
     expected_maintenance_signatures text[] := ARRAY[
         'enqueue_maintenance_submission_notices()',

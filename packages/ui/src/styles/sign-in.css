@@ -140,14 +140,6 @@
 }
 
 .auth-card-main { margin: 7px; padding: 27px 28px 29px; border: 0; border-radius: 18px; background: transparent; }
-.workspace-system-feedback { margin-top: 16px; }
-.system-feedback-description { margin: 8px 0 16px; text-align: center; }
-.system-feedback-data { overflow: auto; max-height: min(52dvh, 28rem); }
-.system-feedback-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
-.system-feedback-table :is(th, td) { padding: 9px 6px; border-bottom: 1px solid var(--arden-border); text-align: right; }
-.system-feedback-table :is(th, td):first-child { text-align: left; white-space: nowrap; }
-.system-feedback-table tbody th { font-weight: 500; }
-.system-feedback-actions { justify-content: center; margin-top: 16px; }
 .auth-card h1 { margin: 0; color: var(--arden-warm); font-size: 22px; font-weight: 560; line-height: 1.35; letter-spacing: -.025em; text-align: center; }
 .auth-new-account { margin: 9px 0 25px; color: var(--arden-text-muted); font-family: "Sora", sans-serif; font-size: 9px; font-weight: 600; letter-spacing: .08em; text-align: center; text-transform: uppercase; }
 .auth-new-account button { padding: 0; border: 0; color: var(--arden-accent); background: transparent; font: inherit; letter-spacing: inherit; text-decoration: underline; text-underline-offset: 3px; }

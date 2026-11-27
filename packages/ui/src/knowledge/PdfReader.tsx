@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "../shared/Icon";
-import { clearMarks, markQuote } from "./citationHighlight";
+import { clearMarks, markQuotes } from "./citationHighlight";
 import { findQuoteInSegments } from "./citationTextMatch";
 import type { PDFDocumentProxy } from "./pdfRuntime";
 
 type PdfRuntime = typeof import("./pdfRuntime");
 
 /** A passage to show: the quote is highlighted on its page, which defaults to `page` when the quote is not found. */
-export type PdfReaderFocus = { page?: number; excerpt: string; samePage?: boolean };
+export type PdfReaderFocus = { page?: number; excerpt: string; additionalExcerpts?: readonly string[]; samePage?: boolean };
 
 type PageSize = { width: number; height: number };
 type Target = { page: number; excerpt: string; request: PdfReaderFocus };
@@ -57,7 +57,7 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
   const [width, setWidth] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [target, setTarget] = useState<Target | null>(null);
-  const [match, setMatch] = useState<{ request: PdfReaderFocus; found: boolean } | null>(null);
+  const [match, setMatch] = useState<{ request: PdfReaderFocus; found: boolean; complete: boolean } | null>(null);
   const visibleTarget = target?.request === focus ? target : null;
 
   useEffect(() => {
@@ -98,7 +98,7 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
     void locateQuote(document, focus).then((page) => {
       if (!present) return;
       setTarget(page ? { page, excerpt: focus.excerpt, request: focus } : null);
-      if (!page && focus.samePage) setMatch({ request: focus, found: false });
+      if (!page && focus.samePage) setMatch({ request: focus, found: false, complete: false });
     }).catch(() => { if (present) setTarget(null); });
     return () => { present = false; };
   }, [document, focus]);
@@ -117,8 +117,8 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
   const scale = Math.round(fitScale * zoom * 100) / 100;
   const zoomIndex = zoomSteps.indexOf(zoom);
 
-  const revealMark = (mark: HTMLElement | null, citation: Target) => {
-    if (citation.request.samePage) setMatch({ request: citation.request, found: Boolean(mark) });
+  const revealMark = (mark: HTMLElement | null, citation: Target, complete: boolean) => {
+    if (citation.request.samePage) setMatch({ request: citation.request, found: Boolean(mark), complete });
     if (!mark) return;
     const container = scroller.current;
     if (!container) return;
@@ -131,8 +131,9 @@ export function PdfReader({ base64, title, focus }: { base64: string; title: str
   return <div className="pdf-reader">
     <div className="pdf-reader-toolbar">
       <span className="island-meta">{document ? `${sizes.length} ${sizes.length === 1 ? "page" : "pages"}` : "Loading PDF…"}
-        {focus?.samePage && match?.request === focus && <span role="status" className={match.found ? "sr-only" : ""}>
-          {match.found ? `Passage highlighted on page ${visibleTarget?.page}.`
+        {focus?.samePage && match?.request === focus && <span role="status" className={match.found && match.complete ? "sr-only" : ""}>
+          {match.complete ? `Cited text highlighted on page ${visibleTarget?.page}.`
+            : match.found ? ` · Part of the cited text could not be highlighted on page ${visibleTarget?.page}.`
             : visibleTarget ? ` · Opened page ${visibleTarget.page}. Passage not found.` : " · Cited page unavailable."}
         </span>}
       </span>
@@ -161,7 +162,7 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
   scale: number;
   root: HTMLElement | null;
   highlight: Target | null;
-  onHighlight: (mark: HTMLElement | null, citation: Target) => void;
+  onHighlight: (mark: HTMLElement | null, citation: Target, complete: boolean) => void;
 }) {
   const element = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -211,8 +212,9 @@ function PdfPage({ runtime, document, pageNumber, size, scale, root, highlight, 
     if (!layer || rendered === 0) return;
     clearMarks(layer, markClass);
     if (!highlight) return;
-    const { marks } = markQuote(layer, highlight.excerpt, markClass, highlight.request.samePage);
-    onHighlight(marks[0] ?? null, highlight);
+    const { marks, complete } = markQuotes(layer, [highlight.excerpt, ...(highlight.request.additionalExcerpts ?? [])],
+      markClass, highlight.request.samePage);
+    onHighlight(marks[0] ?? null, highlight, complete);
     // Re-run only for a finished render or a new citation request, not for a new callback identity.
   }, [rendered, highlight]);
 

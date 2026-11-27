@@ -500,7 +500,7 @@ describe("bounded analysis", () => {
       if (request.versionIds.includes(versionId) && memory.analyses.some((item) => item.state === "running")) {
         await serviceFor(memory, reviewer).cancelAnalysis(reviewer.userId, org, created.caseId, randomUUID());
       }
-      return { contractVersion: 1, state: "succeeded", findings: request.versionIds.map((id) => ({ versionId: id, summary: "The selected version was compared with the reported evidence." })) };
+      return { contractVersion: 1, state: "succeeded", usageEvents: [], findings: request.versionIds.map((id) => ({ versionId: id, summary: "The selected version was compared with the reported evidence." })) };
     });
     const queued = await service.startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
     expect(queued.state).toBe("queued");
@@ -511,7 +511,7 @@ describe("bounded analysis", () => {
     expect(withheld.findings).toEqual([]);
     const retry = serviceFor(memory, reviewer, async (request) => ({
       contractVersion: 1 as const, state: "succeeded" as const,
-      findings: request.versionIds.map((id) => ({ versionId: id, summary: "The selected version was compared with the reported evidence." })),
+      usageEvents: [], findings: request.versionIds.map((id) => ({ versionId: id, summary: "The selected version was compared with the reported evidence." })),
     }));
     const again = await retry.startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
     expect(again.attempt).toBe(2);
@@ -524,11 +524,11 @@ describe("bounded analysis", () => {
     memory.grants.delete(reviewer.membershipId);
     await retry.startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID()).catch(() => undefined);
     memory.grants.add(reviewer.membershipId);
-    const lost = await serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }] }))
+    const lost = await serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }], usageEvents: [] }))
       .startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
     expect(lost.state).toBe("queued");
     memory.grants.delete(reviewer.membershipId);
-    await expect(serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }] }))
+    await expect(serviceFor(memory, reviewer, async () => ({ contractVersion: 1, state: "succeeded", findings: [{ versionId, summary: "Late." }], usageEvents: [] }))
       .readAnalysis(reviewer.userId, org, created.caseId)).rejects.toMatchObject({ code: "DENIED" });
     expect(() => serviceFor(memory, reviewer).startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID()))
       .toThrow("UNAVAILABLE");
@@ -548,7 +548,7 @@ describe("bounded analysis", () => {
     }, randomUUID());
     await serviceFor(memory, reviewer).claimCase(reviewer.userId, org, created.caseId, 1, randomUUID());
     const adapter: import("./analysis.js").AnalysisAdapter = async (request) => ({
-      contractVersion: 1, state: "succeeded", findings: request.versionIds.map((id) => ({ versionId: id, summary: "Compared." })),
+      contractVersion: 1, state: "succeeded", usageEvents: [], findings: request.versionIds.map((id) => ({ versionId: id, summary: "Compared." })),
     });
     await serviceFor(memory, reviewer, adapter).startAnalysis(reviewer.userId, org, created.caseId, [versionId], randomUUID());
     // The second poll reads the run as queued; the first poll finishes it before the second one advances.

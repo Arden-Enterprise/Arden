@@ -45,13 +45,12 @@ export type OrganizationMembership = {
   canReview?: boolean;
 };
 export type CurrentSession = {
-  actor: { id: string; email?: string; fullName?: string | null };
+  actor: { id: string; email?: string; fullName?: string | null; emailVerified?: boolean };
   account: { passwordSetupRequired: boolean };
   sessionExpiresAt?: string;
   pendingInvitationToken?: string | null;
   memberships: OrganizationMembership[];
   testMode?: boolean;
-  systemAdmin?: boolean;
 };
 export type OrganizationAdministration = {
   departments: Array<{ id: string; name: string; code?: string; isBase?: boolean; defaultRoleId: string; defaultRoleName: string }>;
@@ -244,6 +243,7 @@ export type ReviewerGrant = {
 };
 export type AnswerFeedback = "GOOD" | "BAD" | null;
 export type AskArdenAnswer = {
+  requestId?: string;
   conversationId?: string;
   revision?: number;
   turnId?: string;
@@ -273,6 +273,82 @@ export type AiConversation = AiConversationSummary & { turns: Array<{
   citations: AskArdenAnswer["citations"];
   feedback?: AnswerFeedback;
 }> };
+
+export type SystemConsoleQuery = { from: string; to: string; search?: string; status?: string; page?: number; pageSize?: number; organizationId?: string };
+export type SystemConsoleReport = Record<string, unknown>;
+export type SystemSetupStatus = { needsInitialSetup: boolean; hasOrganizations: boolean };
+export type SystemAdminSession = {
+  administrator: {
+    id: string;
+    email: string;
+    fullName: string;
+    canManageSystemAdmins: boolean;
+  };
+  sessionExpiresAt: string;
+};
+
+export function getSystemSetupStatus(platform: Platform): Promise<SystemSetupStatus> {
+  return request(platform, "/api/v1/system/setup/status");
+}
+
+export function completeSystemSetup(
+  platform: Platform,
+  input: { setupToken: string; email: string; fullName: string; password: string },
+): Promise<SystemAdminSession> {
+  return request(platform, "/api/v1/system/setup", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function systemSignIn(platform: Platform, email: string, password: string): Promise<SystemAdminSession> {
+  return request(platform, "/api/v1/system/auth/sign-in", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+}
+
+export type SystemConsoleReportName = "overview" | "organizations" | "knowledge" | "ai-usage" | "contributions"
+  | "feedback" | "quality" | "health" | "private-feedback";
+
+/** Revokes the server-side System Admin session; on desktop the persisted cookies are always cleared. */
+export async function systemSignOut(platform: Platform): Promise<void> {
+  if (platform !== "desktop") {
+    await request<void>(platform, "/api/v1/system/auth/sign-out", { method: "POST" });
+    return;
+  }
+  const bridge = requireDesktopBridge();
+  try { await request<void>(platform, "/api/v1/system/auth/sign-out", { method: "POST" }); }
+  finally { await bridge.clearSession(); }
+}
+
+export async function restoreSystemSession(platform: Platform): Promise<SystemAdminSession | null> {
+  try {
+    return await request<SystemAdminSession>(platform, "/api/v1/system/auth/me");
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) return null;
+    throw error;
+  }
+}
+
+const systemConsoleReportPath: Record<SystemConsoleReportName, string> = {
+  overview: "overview", organizations: "organizations", health: "health", knowledge: "reports/knowledge",
+  "ai-usage": "reports/ai-usage", contributions: "reports/contributions", feedback: "reports/feedback",
+  quality: "reports/quality", "private-feedback": "analytics/private-feedback",
+};
+
+export function getSystemConsoleReport(platform: Platform, report: SystemConsoleReportName,
+  query: SystemConsoleQuery): Promise<SystemConsoleReport> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return request(platform, `/api/v1/system/${systemConsoleReportPath[report]}?${params}`);
+}
+export function getSystemConsoleOrganization(platform: Platform, organizationId: string,
+  query: SystemConsoleQuery): Promise<SystemConsoleReport> {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+  return request(platform, `/api/v1/system/organizations/${organizationId}?${params}`);
+}
 
 function knowledgePath(organizationId: string): string {
   return `/api/v1/organizations/${organizationId}/knowledge`;
@@ -577,6 +653,12 @@ export function askArden(platform: Platform, organizationId: string, query: stri
     method: "POST", body: JSON.stringify({ query, ...conversation }),
   });
 }
+export function submitAiAnswerFeedback(platform: Platform, organizationId: string, requestId: string,
+  rating: "POSITIVE" | "NEGATIVE"): Promise<void> {
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/feedback`, {
+    method: "POST", body: JSON.stringify({ requestId, rating }),
+  });
+}
 export async function listAiConversations(platform: Platform, organizationId: string): Promise<AiConversationSummary[]> {
   const result = await request<{ items: AiConversationSummary[] }>(platform,
     `/api/v1/organizations/${organizationId}/ai/conversations`);
@@ -593,10 +675,6 @@ export function rateAiAnswer(platform: Platform, organizationId: string, convers
   });
 }
 
-export type PrivateFeedbackWeek = { weekStart: string; good: number; bad: number };
-export function loadPrivateFeedbackAnalytics(platform: Platform): Promise<{ weeks: PrivateFeedbackWeek[] }> {
-  return request(platform, "/api/v1/system/analytics/private-feedback");
-}
 
 export async function listReviewerGrants(platform: Platform, organizationId: string): Promise<ReviewerGrant[]> {
   const result = await request<{ items: ReviewerGrant[] }>(platform, `${knowledgePath(organizationId)}/reviewer-grants`);
@@ -705,10 +783,17 @@ export async function signOut(platform: Platform): Promise<void> {
  * Retrieves the current authenticated user session and organizations from the server.
  */
 export async function currentSession(platform: Platform): Promise<CurrentSession> {
-  const session = await request<Omit<CurrentSession, "account"> & {
+  const load = () => request<Omit<CurrentSession, "account"> & {
     account?: { passwordSetupRequired?: boolean };
     pendingInvitationToken?: string | null;
   }>(platform, "/api/v1/me");
+  let session = await load();
+  // A member account already has its profile; only a verified account with no organization
+  // yet registers it, so ordinary sign-in and reload make one request.
+  if (session.actor.emailVerified === true && session.memberships.length === 0) {
+    await request(platform, "/api/v1/account/profile", { method: "POST", body: "{}" });
+    session = await load();
+  }
   return {
     ...session,
     account: { passwordSetupRequired: session.account?.passwordSetupRequired === true },

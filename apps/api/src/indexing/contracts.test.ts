@@ -6,6 +6,7 @@ import {
   parseIndexGenerationManifest,
   type IndexGenerationJob,
 } from "./contracts.js";
+import { incompleteUsageMarker } from "../answers/usage-contracts.js";
 
 const job: IndexGenerationJob = {
   jobId: "10000000-0000-4000-8000-000000000001",
@@ -32,6 +33,8 @@ function manifest() {
   }];
   return {
     contractVersion: 1,
+    usageContractVersion: 1,
+    usageEvents: [],
     jobId: job.jobId,
     generationId: job.generationId,
     snapshotVersionId: job.snapshotVersionId,
@@ -73,6 +76,16 @@ describe("index generation manifest contract", () => {
       embeddingDimensions: 1536,
       chunks: [{ ordinal: 0, sourceBlockIds: ["body"] }],
     });
+  });
+
+  it("keeps manifests stored before usage accounting readable and marks their usage incomplete", () => {
+    const { usageContractVersion: _version, usageEvents: _events, ...stored } = manifest();
+    const parsed = parseIndexGenerationManifest(stored, job);
+    expect(parsed.chunks).toHaveLength(1);
+    expect(parsed.usageEvents).toEqual([incompleteUsageMarker(job.jobId, "INDEX_EMBEDDING")]);
+    // A malformed envelope is also incomplete usage, not a failed generation.
+    expect(parseIndexGenerationManifest({ ...manifest(), usageEvents: [{ bad: true }] }, job).usageEvents)
+      .toEqual([incompleteUsageMarker(job.jobId, "INDEX_EMBEDDING")]);
   });
 
   it("rejects identity drift, unknown fields and invalid chunk digests", () => {

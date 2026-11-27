@@ -29,6 +29,11 @@ export class IndexingWorker {
           : (() => { throw new WorkerFailure("UNSUPPORTED_SNAPSHOT_MIME_TYPE", false); })();
       const request = buildIndexGenerationRequest(job, snapshot);
       const manifest = await this.ai.index(request, job);
+      // Usage is telemetry: a failed write is logged and never blocks index activation.
+      await this.store.recordUsage(job, this.workerId, manifest.usageEvents).catch((error: unknown) => {
+        this.logger.error({ jobId: job.jobId, generationId: job.generationId, errorCode: "INDEX_USAGE_NOT_RECORDED",
+          errorType: error instanceof Error ? error.name : "Unknown" }, "Knowledge index usage was not recorded");
+      });
       const publishedVersionId = await this.store.complete(job, this.workerId, manifest);
       this.logger.info({ jobId: job.jobId, generationId: job.generationId, publishedVersionId },
         "Knowledge index generation activated");

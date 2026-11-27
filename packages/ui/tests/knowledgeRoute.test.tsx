@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { createElement } from "react";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/shared/api-client";
 import { ServerKnowledgeFeaturePage } from "../src/knowledge/ServerKnowledgeFeaturePage";
 import type { KnowledgeLocation } from "../src/knowledge/knowledgeRoute";
+import { deferred } from "./readerSummary.test-support";
 
 vi.mock("../src/knowledge/ArdenRichTextEditor", () => ({ ArdenDocumentView: () => null, ArdenRichTextEditor: () => null }));
 vi.mock("../src/shared/WorkspaceTopbar", () => ({ WorkspaceTopbar: () => null }));
@@ -23,6 +24,7 @@ function mockWorkspace() {
   vi.spyOn(api, "listPublicationReports").mockResolvedValue([]);
   vi.spyOn(api, "listClosedPublicationReports").mockResolvedValue({ items: [], nextCursor: null });
   vi.spyOn(api, "listKnowledgeReviewBoard").mockResolvedValue({ items: [], decided: [] });
+  vi.spyOn(api, "listPublicationRenewals").mockResolvedValue([]);
   vi.spyOn(api, "loadKnowledgeOptions").mockResolvedValue({ departments: [], audiences: [] });
   vi.spyOn(api, "loadKnowledgeCatalog").mockResolvedValue({ canManage: false, collections: [] });
 }
@@ -67,5 +69,58 @@ describe("Knowledge address reporting", () => {
     await waitFor(() => expect(onRouteChange).toHaveBeenLastCalledWith(
       { home: { kind: "home" }, reviews: { kind: "maintenance" } }, { replace: false }));
     expect(onRouteSettled).toHaveBeenCalled();
+  });
+});
+
+describe("Reviews loading", () => {
+  it.each(["web", "desktop"] as const)("loads the board on %s and resumes it while Contributions is stalled", async platform => {
+    mockWorkspace();
+    const stalled = deferred<api.KnowledgeSubmission[]>();
+    vi.mocked(api.listKnowledgeSubmissions).mockReturnValue(stalled.promise);
+    vi.mocked(api.loadKnowledgeOptions).mockReturnValue(deferred<api.KnowledgeOptions>().promise);
+    const props = { platform, organizationId: "org", organizationName: "Test", active: true,
+      view: "review-queue" as const, createdDraftId: null, contextOpen: false, onToggleContext: vi.fn() };
+    const page = render(createElement(ServerKnowledgeFeaturePage, props));
+
+    await screen.findByRole("heading", { name: /^Reviews$/ });
+    expect(api.listKnowledgeReviewBoard).toHaveBeenCalledExactlyOnceWith(platform, "org");
+    expect(api.listKnowledgeDrafts).not.toHaveBeenCalled();
+    expect(api.listKnowledgeSubmissions).not.toHaveBeenCalled();
+    expect(api.listPublishedKnowledge).not.toHaveBeenCalled();
+    expect(api.loadKnowledgeCatalog).not.toHaveBeenCalled();
+    expect(api.listPublicationRenewals).not.toHaveBeenCalled();
+
+    page.rerender(createElement(ServerKnowledgeFeaturePage, { ...props, view: "knowledge" }));
+    fireEvent.click(await screen.findByRole("tab", { name: /My Contributions/ }));
+    await screen.findByText("Loading contributions…");
+    expect(api.listKnowledgeSubmissions).toHaveBeenCalledExactlyOnceWith(platform, "org");
+    page.rerender(createElement(ServerKnowledgeFeaturePage, props));
+    await screen.findByRole("heading", { name: /^Reviews$/ });
+    await act(async () => { stalled.resolve([]); });
+    expect(api.listKnowledgeReviewBoard).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("No contributions yet")).toBeNull();
+    expect(api.listKnowledgeSubmissions).toHaveBeenCalledTimes(1);
+  });
+
+  it("discards a late board response across workspaces and retries a denied board", async () => {
+    mockWorkspace();
+    const stale = deferred<Awaited<ReturnType<typeof api.listKnowledgeReviewBoard>>>();
+    vi.mocked(api.listKnowledgeReviewBoard).mockReturnValueOnce(stale.promise)
+      .mockRejectedValueOnce(new api.ApiError(403, "Reviews unavailable", "FORBIDDEN"));
+    const onAssignedReviewCount = vi.fn();
+    const props = { platform: "web" as const, organizationId: "old", organizationName: "Test",
+      active: true, view: "review-queue" as const, createdDraftId: null, contextOpen: false,
+      onToggleContext: vi.fn(), onAssignedReviewCount };
+    const page = render(createElement(ServerKnowledgeFeaturePage, props));
+    page.rerender(createElement(ServerKnowledgeFeaturePage, { ...props, organizationId: "new" }));
+    await screen.findByText("Reviews unavailable");
+    const row: api.AssignedKnowledgeReview = { submissionId: "old", snapshotId: "old-version", title: "Old workspace",
+      departmentId: "old-department", classification: "INTERNAL", submittedAt: "2026-11-27T00:00:00Z", approvalBlocked: false };
+    await act(async () => { stale.resolve({ items: [row], decided: [] }); });
+    expect(onAssignedReviewCount).not.toHaveBeenCalledWith(1);
+    expect(screen.queryByText("Old workspace")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByRole("heading", { name: /^Reviews$/ });
+    expect(api.listKnowledgeReviewBoard).toHaveBeenLastCalledWith("web", "new");
   });
 });

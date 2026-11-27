@@ -7,11 +7,12 @@ import { ReaderSourceError } from "./contracts.js";
 import { ReaderSourcePreparation } from "./source-preparation.js";
 import { ReaderSummary, type ReaderAiClient, type SummaryStage } from "./summary.js";
 import { ReaderSummaryError } from "./summary-contracts.js";
+import { recordUsageBestEffort } from "../answers/usage-contracts.js";
 
 type Actor = (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>;
 type Params = { organizationId: string; publishedVersionId: string };
 export function registerReaderSummaryRoutes(app: FastifyInstance,
-  repository: Pick<ArdenDataRepository, "getTargetReaderActor" | "getPublishedKnowledge" | "readerSources">,
+  repository: Pick<ArdenDataRepository, "getTargetReaderActor" | "getPublishedKnowledge" | "readerSources" | "recordAiUsageEvents">,
   storage: Pick<PrivateContentStorage, "read" | "readPdf">, ai: ReaderAiClient | null, actor: Actor, uuidPattern: string): void {
   const sources = repository.readerSources ? new ReaderSourcePreparation(repository, repository.readerSources, storage, ai) : null;
   const engine = ai && sources ? new ReaderSummary(sources, ai) : null;
@@ -51,8 +52,12 @@ export function registerReaderSummaryRoutes(app: FastifyInstance,
         if (!engine) throw new ReaderSummaryError("UNAVAILABLE");
         const result = await engine.summarize(context.userId, request.params.organizationId, request.params.publishedVersionId,
           operationId, (value, joined) => { stage = value; joinedOperationId = joined; });
+        await recordUsageBestEffort(() => repository.recordAiUsageEvents(context.userId, request.params.organizationId,
+          result.usageRequestId, result.usageEvents), (error) => request.log.warn({ operationId,
+          errorType: error instanceof Error ? error.name : "Unknown" }, "AI telemetry write failed"));
         request.log.info({ operationId, joinedOperationId, stage, code: "SUMMARY_COMPLETED", durationMs: Math.round(performance.now() - started) }, "Reader Summary operation");
-        return result;
+        const { usageRequestId: _usageRequestId, usageEvents: _usageEvents, ...publicSummary } = result;
+        return publicSummary;
       } catch (error) { return fail(reply, error, request, { operationId, joinedOperationId, stage, durationMs: Math.round(performance.now() - started) }); }
     });
 }

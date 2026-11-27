@@ -1,6 +1,10 @@
 import type { Pool, PoolClient } from "pg";
 import type { IndexGenerationJob, IndexGenerationManifest } from "./contracts.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { assertIndexGenerationJob, IndexGenerationSupersededError } from "./contracts.js";
+
+/** Matches the per-call cap enforced by `record_index_ai_usage`. */
+export const indexUsageBatchSize = 32;
 
 type ClaimedJobRow = {
   job_id: string;
@@ -17,6 +21,7 @@ type ClaimedJobRow = {
 
 export interface IndexGenerationStore {
   claim(workerId: string, leaseSeconds: number): Promise<IndexGenerationJob | null>;
+  recordUsage(job: IndexGenerationJob, workerId: string, events: ProviderUsageEvent[]): Promise<void>;
   complete(job: IndexGenerationJob, workerId: string, manifest: IndexGenerationManifest): Promise<string>;
   fail(job: IndexGenerationJob, workerId: string, errorCode: string, retryable: boolean): Promise<"PENDING" | "FAILED">;
 }
@@ -57,6 +62,18 @@ export class PgIndexGenerationStore implements IndexGenerationStore {
       const id = result.rows[0]?.published_version_id;
       if (!id) throw new Error("Index activation returned no publication id");
       return id;
+    });
+  }
+
+  async recordUsage(job: IndexGenerationJob, workerId: string, events: ProviderUsageEvent[]): Promise<void> {
+    if (!events.length) return;
+    // The manifest accepts up to 64 events; the database gate accepts 32 per call. All batches
+    // share one transaction so a failed batch leaves no partial usage for the job.
+    await this.transaction(async client => {
+      for (let start = 0; start < events.length; start += indexUsageBatchSize) {
+        await client.query("SELECT record_index_ai_usage($1, $2, $3::jsonb)",
+          [job.jobId, workerId, JSON.stringify(events.slice(start, start + indexUsageBatchSize))]);
+      }
     });
   }
 

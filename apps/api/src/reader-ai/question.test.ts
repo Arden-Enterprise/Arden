@@ -12,6 +12,7 @@ import { registerReaderQuestionRoutes } from "./question-routes.js";
 import { ArdenAiAnswerError } from "../answers/ai-client.js";
 
 const id = (n: number) => `10000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+const usageContract = { usageContractVersion: 1 as const, usageEvents: [] };
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/reader-source-v1.json", import.meta.url), "utf8")) as {
   request: ReaderSourceRequest; manifest: IndexGenerationManifest; response: { markdown: string } };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -26,6 +27,7 @@ function harness() {
     targetReaders: { mode: "ORGANIZATION", departmentId: null, memberIds: [] } };
   const repo = { getTargetReaderActor: vi.fn(async () => ({ membershipId: id(11), organizationId: record.source.organizationId,
     status: "ACTIVE" as const, departmentIds: [] })), getPublishedKnowledge: vi.fn(async () => metadata as PublishedKnowledge | null),
+    recordAiAnswerResult: vi.fn(async () => true), recordAiUsageEvents: vi.fn(async () => true),
     readerSources: { resolve: vi.fn(async () => record as ReaderSourceRecord | null) } };
   const storage = { read: vi.fn(), readPdf: vi.fn() };
   const gate = new ReaderSourcePreparation(repo, repo.readerSources, storage, null);
@@ -36,8 +38,10 @@ function harness() {
     snapshotContentHash: record.source.snapshotContentHash,
     content: Array.from(fixture.response.markdown).slice(chunk.startOffset, chunk.endOffset).join(""), label: "untrusted label" };
   const retrieve = vi.fn(async (input: { requestId: string; query: string }): Promise<RetrievalResponse> => ({
-    contractVersion: 2, requestId: input.requestId, standaloneQuery: input.query, retrievalMode: "HYBRID", evidence: [structuredClone(evidence)] }));
+    contractVersion: 2, ...usageContract, requestId: input.requestId, standaloneQuery: input.query,
+    retrievalMode: "HYBRID", evidence: [structuredClone(evidence)] }));
   const generate = vi.fn(async (input: GenerationRequest): Promise<GenerationResponse> => ({ contractVersion: 2,
+    ...usageContract,
     requestId: input.requestId, status: "ANSWERED", answer: "Only approved readers may read this version.",
     usedEvidence: input.evidence.map(e => e.chunkId), citations: [{ chunkId: evidence.chunkId, quote: "Only approved readers may read this version" }] }));
   const ai = { retrieve, generate, answer: vi.fn() };
@@ -69,7 +73,8 @@ describe("stateless exact-document questions", () => {
       if (mode === "generation") h.record.source.generationId = id(99);
       const chunk = { ...h.evidence, ...(mode === "foreign-evidence" ? { generationId: id(99) } : {}),
         ...(mode === "manifest" ? { sourceBlockIds: ["forged"] } : {}) };
-      return { contractVersion: 2, requestId: input.requestId, standaloneQuery: mode === "changed-query" ? "different" : input.query,
+      return { contractVersion: 2, ...usageContract, requestId: input.requestId,
+        standaloneQuery: mode === "changed-query" ? "different" : input.query,
         retrievalMode: "HYBRID", evidence: [chunk] };
     });
     const generated = h.ai.generate.getMockImplementation()!;
@@ -88,9 +93,9 @@ describe("stateless exact-document questions", () => {
   });
   it.each(["empty", "insufficient"])("uses fixed document-specific insufficient copy for %s evidence", async mode => {
     const h = harness();
-    if (mode === "empty") h.ai.retrieve.mockImplementation(async input => ({ contractVersion: 2, requestId: input.requestId,
+    if (mode === "empty") h.ai.retrieve.mockImplementation(async input => ({ contractVersion: 2, ...usageContract, requestId: input.requestId,
       standaloneQuery: input.query, retrievalMode: "HYBRID", evidence: [] }));
-    else h.ai.generate.mockImplementation(async input => ({ contractVersion: 2, requestId: input.requestId,
+    else h.ai.generate.mockImplementation(async input => ({ contractVersion: 2, ...usageContract, requestId: input.requestId,
       status: "INSUFFICIENT_EVIDENCE", answer: "Untrusted unsupported prose", citations: [], usedEvidence: input.evidence.map(e => e.chunkId) }));
     const result = await h.run(); expect(result.answer).toBe(insufficientDocumentEvidence); expect(result.citations).toEqual([]);
     if (mode === "empty") expect(h.ai.generate).not.toHaveBeenCalled();
@@ -100,7 +105,8 @@ describe("stateless exact-document questions", () => {
     await expect(h.run()).rejects.toMatchObject({ code: "NOT_FOUND" });
     const other = harness(); other.ai.retrieve.mockImplementation(async input => {
       other.repo.getPublishedKnowledge.mockResolvedValue(null);
-      return { contractVersion: 2, requestId: input.requestId, standaloneQuery: input.query, retrievalMode: "HYBRID", evidence: [] };
+      return { contractVersion: 2, ...usageContract, requestId: input.requestId,
+        standaloneQuery: input.query, retrievalMode: "HYBRID", evidence: [] };
     });
     await expect(other.run()).rejects.toMatchObject({ code: "NOT_FOUND" });
   });

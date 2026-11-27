@@ -5,6 +5,8 @@ import type {
 import { publicationProofFromPointer, type PublicationPointer } from "./publication-proof.js";
 import type { AnalysisFinding, AnalysisRun, AnalysisState } from "./analysis.js";
 import type { MaintenancePort, MaintenanceTx } from "./case-service.js";
+import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
+import { insertAiUsageEvents } from "../db/ai-usage.js";
 import { visibleVersionText } from "./version-text.js";
 
 type MemberTransaction = <T>(userId: string, organizationId: string, work: (client: PoolClient) => Promise<T>) => Promise<T>;
@@ -412,6 +414,11 @@ class PgMaintenanceTx implements MaintenanceTx {
       RETURNING run_id, state, findings, version_ids, started_by_membership_id, fence, attempt`,
     [this.organizationId, caseId, fence]);
     return result.rows[0] ? mapAnalysis(result.rows[0]) : null;
+  }
+
+  async recordAiUsageEvents(requestId: string, events: ProviderUsageEvent[]): Promise<boolean> {
+    if (events.some((event) => event.operation !== "MAINTENANCE_ANALYSIS")) return false;
+    return insertAiUsageEvents(this.client, this.organizationId, requestId, events);
   }
 
   async commitAnalysis(caseId: string, fence: string, state: "succeeded" | "failed", findings: Array<{ versionId: string; summary: string }>): Promise<boolean> {

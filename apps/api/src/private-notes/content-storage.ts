@@ -4,7 +4,7 @@ import { dirname, join, resolve, sep } from "node:path";
 
 const objectUriPattern = /^arden-private-object:\/\/([0-9a-f-]{36})(\.pdf)?$/i;
 
-export type StoredContent = { sourceUri: string; contentHash: string; mimeType: "text/plain" | "application/pdf" };
+export type StoredContent = { sourceUri: string; contentHash: string; mimeType: "text/plain" | "application/pdf"; contentSizeBytes: number };
 
 export interface PrivateContentStorage {
   write(body: string): Promise<StoredContent>;
@@ -44,6 +44,7 @@ export class LocalPrivateContentStorage implements PrivateContentStorage {
       sourceUri: `arden-private-object://${objectId}`,
       contentHash: createHash("sha256").update(body, "utf8").digest("hex"),
       mimeType: "text/plain",
+      contentSizeBytes: Buffer.byteLength(body, "utf8"),
     };
   }
 
@@ -67,7 +68,8 @@ export class LocalPrivateContentStorage implements PrivateContentStorage {
       try { await directory.sync(); }
       finally { await directory.close(); }
     }
-    return { sourceUri, contentHash: createHash("sha256").update(bytes).digest("hex"), mimeType: "application/pdf" };
+    return { sourceUri, contentHash: createHash("sha256").update(bytes).digest("hex"), mimeType: "application/pdf",
+      contentSizeBytes: bytes.byteLength };
   }
 
   async read(sourceUri: string, expectedHash: string): Promise<string> {

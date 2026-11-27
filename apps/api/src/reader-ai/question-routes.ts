@@ -5,10 +5,11 @@ import { ArdenAiAnswerError, type AskArdenClient } from "../answers/ai-client.js
 import { ReaderSourcePreparation } from "./source-preparation.js";
 import { ReaderSourceError } from "./contracts.js";
 import { ReaderSummaryError } from "./summary-contracts.js";
+import { recordUsageBestEffort } from "../answers/usage-contracts.js";
 import { ReaderQuestion } from "./question.js";
 
 export function registerReaderQuestionRoutes(app: FastifyInstance,
-  repository: Pick<ArdenDataRepository, "getTargetReaderActor" | "getPublishedKnowledge" | "readerSources">,
+  repository: Pick<ArdenDataRepository, "getTargetReaderActor" | "getPublishedKnowledge" | "readerSources" | "recordAiAnswerResult" | "recordAiUsageEvents">,
   storage: Pick<PrivateContentStorage, "read" | "readPdf">, ai: AskArdenClient | null,
   actor: (request: FastifyRequest, reply: FastifyReply) => Promise<{ userId: string } | null>, uuidPattern: string) {
   const sources = repository.readerSources ? new ReaderSourcePreparation(repository, repository.readerSources, storage, null) : null;
@@ -29,8 +30,17 @@ export function registerReaderQuestionRoutes(app: FastifyInstance,
       if (!context) return;
       try {
         if (!engine) throw new ReaderSummaryError("UNAVAILABLE");
-        return await engine.answer(context.userId, request.params.organizationId, request.params.publishedVersionId,
+        const answer = await engine.answer(context.userId, request.params.organizationId, request.params.publishedVersionId,
           request.body.requestId, request.body.query);
+        // Telemetry is best-effort: a failed write is logged and never fails the delivered answer.
+        const telemetryFailure = (operation: string) => (error: unknown) => request.log.warn({ requestId: request.id, operation,
+          errorType: error instanceof Error ? error.name : "Unknown" }, "AI telemetry write failed");
+        await recordUsageBestEffort(() => repository.recordAiUsageEvents(context.userId, request.params.organizationId,
+          answer.requestId, answer.usageEvents), telemetryFailure("READER_QUESTION_USAGE"));
+        await recordUsageBestEffort(() => repository.recordAiAnswerResult(context.userId, request.params.organizationId,
+          answer.requestId, "READER_QUESTION", answer.status, answer.citations.length), telemetryFailure("READER_QUESTION_RESULT"));
+        const { usageEvents: _usageEvents, ...publicAnswer } = answer;
+        return publicAnswer;
       } catch (error) {
         const missing = error instanceof ReaderSourceError && error.code === "NOT_FOUND";
         const unsupported = error instanceof ArdenAiAnswerError && error.code === "AI_SERVICE_HTTP_422";

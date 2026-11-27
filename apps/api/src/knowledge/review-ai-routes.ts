@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { submissionCheckCategories, type SubmissionReviewResult } from "@arden/domain";
+import { submissionCheckCategories, type SubmissionReviewCitation, type SubmissionReviewResult } from "@arden/domain";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ArdenAiAnswerError, type AskArdenClient } from "../answers/ai-client.js";
 import type { ArdenDataRepository } from "../db/repository.js";
@@ -22,17 +22,24 @@ function boundedText(value: unknown, max: number): boolean {
 function reviewResult(value: unknown, expected: ReviewIdentity, pdf: boolean): value is SubmissionReviewResult {
   if (!record(value) || Object.keys(value).sort().join() !==
     "checks,contractVersion,requestId,snapshotContentHash,snapshotVersionId,summary"
-    || value.contractVersion !== 1 || value.requestId !== expected.requestId
+    || value.contractVersion !== 2 || value.requestId !== expected.requestId
     || value.snapshotVersionId !== expected.snapshotVersionId || value.snapshotContentHash !== expected.snapshotContentHash
     || !Array.isArray(value.summary) || value.summary.length < 1 || value.summary.length > 3
     || !Array.isArray(value.checks) || value.checks.length > 3) return false;
+  const validCitation = (citation: unknown): citation is SubmissionReviewCitation => {
+    if (!record(citation) || Object.keys(citation).sort().join() !== "excerpt,page"
+      || !boundedText(citation.excerpt, 360)) return false;
+    const page = citation.page;
+    return pdf ? typeof page === "number" && Number.isInteger(page) && page >= 1 && page <= 500 : page === null;
+  };
   const validPoint = (point: unknown, check: boolean) => {
-    if (!record(point) || Object.keys(point).sort().join() !== (check ? "category,citation,text" : "citation,text")
-      || !boundedText(point.text, 240) || !record(point.citation)
-      || Object.keys(point.citation).sort().join() !== "excerpt,page"
-      || !boundedText(point.citation.excerpt, 360)) return false;
-    const page = point.citation.page;
-    return (pdf ? typeof page === "number" && Number.isInteger(page) && page >= 1 && page <= 500 : page === null)
+    if (!record(point) || Object.keys(point).sort().join() !== (check
+      ? "additionalCitations,category,citation,text" : "additionalCitations,citation,text")
+      || !boundedText(point.text, 240) || !Array.isArray(point.additionalCitations)
+      || point.additionalCitations.length > 3) return false;
+    const citations: unknown[] = [point.citation, ...point.additionalCitations];
+    return citations.every(validCitation)
+      && new Set(citations.map(citation => JSON.stringify([citation.page, citation.excerpt]))).size === citations.length
       && (!check || submissionCheckCategories.some(category => category === point.category));
   };
   return value.summary.every(point => validPoint(point, false)) && value.checks.every(point => validPoint(point, true));
@@ -54,6 +61,7 @@ export function registerReviewerAiRoutes(app: FastifyInstance, repository: Pick<
         properties: { snapshotVersionId: uuid, snapshotContentHash: { type: "string", pattern: "^[0-9a-f]{64}$" } } },
     },
   }, async (request, reply) => {
+    const started = performance.now();
     const context = await actor(request, reply);
     if (!context) return;
     const { organizationId, submissionId } = request.params;
@@ -85,11 +93,16 @@ export function registerReviewerAiRoutes(app: FastifyInstance, repository: Pick<
         if (!await findSnapshot()) return unavailableReview();
         const identity = { ...snapshot, requestId: randomUUID() };
         lease.dispatch();
-        const result = await ai.reviewSubmission({ contractVersion: 1, ...identity, mimeType, ...source });
+        const dispatched = performance.now();
+        const result = await ai.reviewSubmission({ contractVersion: 2, ...identity, mimeType, ...source });
+        const completed = performance.now();
         if (!await findSnapshot()) return unavailableReview();
         if (!reviewResult(result, identity, mimeType === "application/pdf")) {
           return fail(502, "REVIEW_AI_INVALID_RESULT", "Arden could not verify the AI review. Try again.");
         }
+        request.log.info({ requestId: request.id, operationId: identity.requestId,
+          preparationMs: Math.round(dispatched - started), serviceMs: Math.round(completed - dispatched),
+          durationMs: Math.round(performance.now() - started) }, "Submission AI review completed");
         return result;
       } finally { lease.release(); }
     } catch (error) {

@@ -68,6 +68,11 @@ Version-matched official docs, repository code/tests, and authorized decisions.
 
 ## Status and synchronization
 
+[0010](0010-audiences-and-system-administration.md) remains the audience and authorization source;
+its System Admin scope was explicitly refined on 2026-11-23 to a no-membership, read-only
+System Console with separate `MANAGE_SYSTEM_ADMINS` authority. PostgreSQL rehearsal and rollout
+remain pending for the implementation branch.
+
 [0026: Flat Organization Collection placement](0026-flat-organization-collection-placement.md)
 records the accepted one-folder/Admin/Allowed types/version/Archive rules.
 P3B.1 is a local schema checkpoint only; new API/UI and legacy mapping remain.

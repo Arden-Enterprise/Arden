@@ -117,6 +117,7 @@
 .review-ai-checks li > strong { color: var(--arden-text-primary); font-size: 12px; }
 .review-ai .review-ai-hint { color: var(--arden-text-muted); font-size: 12px; }
 .review-ai .review-ai-source-message { margin-top: 8px; }
+.review-ai-sources { display: flex; flex-wrap: wrap; gap: 6px; }
 .review-ai-source { display: inline-flex; align-items: center; justify-self: start; gap: 5px; min-height: 25px;
   padding: 3px 7px; border: 1px solid var(--arden-border); border-radius: 6px; color: var(--arden-text-secondary);
   background: transparent; font: inherit; font-size: 11px; cursor: pointer; }

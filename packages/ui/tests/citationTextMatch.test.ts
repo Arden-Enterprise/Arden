@@ -46,6 +46,20 @@ describe("cited quote matching", () => {
       "The designated coordinator approves extensions.",
     ], quote)).toEqual([]);
   });
+
+  it("keeps the full procedure when a trailing section heading renders before it", () => {
+    const steps = [
+      "Identify the problem before you choose a design pattern.",
+      "Understand how the proposed pattern solves the problem.",
+      "Draw the class diagram and implement it independently.",
+      "Practice the pattern on an example you create yourself.",
+    ];
+    const heading = "Suggested study schedule for the next three weeks";
+    const citation = [...steps, heading].join("\n");
+    const matches = findPageQuoteMatches([heading, ...steps], citation);
+    expect(matches.map(match => match.start.segment)).toEqual([1, 2, 3, 4]);
+    expect(matches.every(match => !match.complete)).toBe(true);
+  });
 });
 
 describe("text-layer marks", () => {
