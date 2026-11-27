@@ -64,7 +64,7 @@ There are three ways to create a draft. Each requires a UUID `Idempotency-Key` h
   - It requires `If-Match: "<current version>"`: missing → 428 `PRECONDITION_REQUIRED`; stale → 412 `VERSION_CONFLICT`.
   - A PDF draft's body cannot be edited (400).
   - Invalid metadata returns 400 `INVALID_METADATA`.
-- The author chooses **who can read it**: the organization audience, their department's audience, and/or audience groups. Per-person audiences and "deny" entries do not exist (0010).
+- The author chooses **who can read it**: the organization audience, their department's audience, and/or audience groups. Per-person audiences and "deny" entries do not exist (0010). Historical: Target Readers replaced this choice, and [decision 0039](../decisions/0039-remove-reader-group-management.md) removed reader group management.
 - The UI derives the **target scope** from those readers and sends it with the draft; the server validates the scope/audience pairing:
 
   | Readers | Scope |

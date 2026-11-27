@@ -74,6 +74,8 @@ Exit criteria:
 
 ## Phase 3 - Audience administration API and UI
 
+Superseded on 2026-11-28 by [decision 0039](../decisions/0039-remove-reader-group-management.md): the `/audience-groups` routes and Audience Groups UI described below were removed.
+
 - Replace `/roles`, `/permissions` and role-assignment APIs with `/audience-groups` and explicit group
   membership routes.
 - Replace Roles & Permissions UI with Audience Groups. Remove the permission toggle and assignment
