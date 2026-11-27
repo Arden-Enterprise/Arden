@@ -1,6 +1,9 @@
 import { desktopApiResponseLimit, desktopApiTimeout, type DesktopApiRequest } from "./apiRequestPolicy.ts";
 import { createDesktopRequestScheduler, createSerialLock } from "./requestScheduler.ts";
 
+// Decision 0038: invitation registration signs the new account in, like an explicit sign-in.
+const invitationAccountPath = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}\/account$/;
+
 export type CookieJar = Map<string, string>;
 export type DesktopApiResponse = { status: number; body: string; etag?: string; location?: string };
 
@@ -131,7 +134,8 @@ export function createDesktopApi(storage: DesktopSessionStorage, fetchResponse: 
         assertCurrent(epoch);
         const setCookies = response.headers.getSetCookie();
         const changesSession = request.method === "POST" && (
-          (request.path === "/api/v1/auth/sign-in" && response.ok) || request.path === "/api/v1/auth/sign-out"
+          ((request.path === "/api/v1/auth/sign-in" || invitationAccountPath.test(request.path)) && response.ok)
+          || request.path === "/api/v1/auth/sign-out"
         );
         if (setCookies.length > 0 || changesSession) {
           epoch = await withJarLock(async () => {

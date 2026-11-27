@@ -96,6 +96,7 @@ const systemAuthSignInPath = /^\/api\/v1\/system\/auth\/sign-in$/;
 const systemAuthSignOutPath = /^\/api\/v1\/system\/auth\/sign-out$/;
 const aiAnswerFeedback = new RegExp(`^/api/v1/organizations/${uuid}/ai/feedback$`);
 const invitationPreview = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}$/;
+const invitationAccount = /^\/api\/v1\/invitations\/[A-Za-z0-9_-]{43}\/account$/;
 const notificationCollection = new RegExp(`^/api/v1/organizations/${uuid}/notifications$`);
 const notificationRead = new RegExp(`^/api/v1/organizations/${uuid}/notifications/${uuid}/read$`);
 const notificationReadAll = new RegExp(`^/api/v1/organizations/${uuid}/notifications/read-all$`);
@@ -407,7 +408,8 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && request.method === "POST" && !request.ifMatch && !request.idempotencyKey;
   const accountPost = (url.pathname === "/api/v1/auth/sign-up" || url.pathname === "/api/v1/organizations"
     || url.pathname === "/api/v1/invitations/accept" || url.pathname === "/api/v1/auth/password"
-    || url.pathname === "/api/v1/auth/change-password" || url.pathname === "/api/v1/account/profile") && request.method === "POST"
+    || url.pathname === "/api/v1/auth/change-password" || url.pathname === "/api/v1/account/profile"
+    || invitationAccount.test(url.pathname)) && request.method === "POST"
     && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const invitationGet = invitationPreview.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
