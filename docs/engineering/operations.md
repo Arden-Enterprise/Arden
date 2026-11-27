@@ -114,6 +114,7 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `ARDEN_MIGRATION_DATABASE_URL` | Unset | Optional locally; production migration connection when the API `DATABASE_URL` is restricted. Never expose it to the running API or client |
 | `SUPABASE_URL` | Unset locally | Supabase project Auth/API URL reachable from the API container |
 | `SUPABASE_PUBLISHABLE_KEY` | Unset locally | Project publishable/anon key used by the server-side Supabase Auth adapter; never substitute a service-role key |
+| `SUPABASE_SECRET_KEY` | Unset | Optional API-only Supabase secret/service-role key, used only for invitation account lookup and confirmed creation ([decision 0038](../decisions/0038-invitation-account-routing-and-direct-setup.md)). When unset, the invitation page keeps the shared sign-in/registration screen. Add it to the protected environment template and compose mapping; never to client configuration |
 | `SUPABASE_REALTIME_PUBLIC_URL` | Unset | Public HTTPS Realtime endpoint ending in `/realtime/v1`; loopback HTTP is local-only |
 | `SUPABASE_REALTIME_API_KEY` | Unset | Optional gateway key when an API gateway in front of Realtime inspects `apikey` separately from `ARDEN_NOTIFICATION_JWT_SECRET`; when unset, Core mints a narrow transport-only HS256 socket token |
 | `ARDEN_NOTIFICATION_JWT_SECRET` | Unset | API-only 64-character HS256 signing value; must exactly match the target Realtime verifier's accepted key. Never place it in client configuration |

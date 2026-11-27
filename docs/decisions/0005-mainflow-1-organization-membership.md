@@ -4,7 +4,7 @@ Status: accepted
 Date: 2026-10-05  
 Decision owner/approval: task owner confirmed the organization creation, invitation, department, and role direction  
 Implementation: partial; organization bootstrap, administration reads, department/custom-role creation and assignment, SMTP invitation lifecycle, and generic invitation acceptance are implemented in code; migration 0002 and live integration remain unverified  
-Supersedes / superseded by: none
+Supersedes / superseded by: invitation entry account disclosure and confirmation are superseded by [0038](0038-invitation-account-routing-and-direct-setup.md)
 
 ## Context and requirement
 
@@ -16,9 +16,9 @@ Mainflow 1 establishes organization ownership, departments, member invitations, 
 - Org Admins manage their organization's members, departments, and roles. Org Admin is a protected management capability, separate from user-created content-audience roles; an Org Admin role tag alone never opens private content.
 - Each organization department has one default role. A member has one primary department in this flow and receives that department's default role. Org Admins may additionally create organization-scoped custom roles and assign them to members.
 - Custom roles are organization-local. A role grant is server-authoritative and immediately affects future requests. Published-content audience matching is separately specified in [decision 0004](0004-role-tagged-published-audiences.md).
-- Invitations are addressed to email. The email contains an opaque, expiring, single-use invitation link. Existing account holders sign in; people without accounts can create one through the invitation page. The page does not reveal whether an email has a Supabase account. A membership is created only after authentication, verified-email equality, and explicit acceptance.
+- Invitations are addressed to email. The email contains an opaque, expiring, single-use invitation link. Existing account holders sign in; people without accounts can create one through the invitation page. The page does not reveal whether an email has a Supabase account. (Superseded for holders of a valid invitation token by [0038](0038-invitation-account-routing-and-direct-setup.md), which routes them to sign-in or registration.) A membership is created only after authentication, verified-email equality, and explicit acceptance.
 - Invitation email is sent through a configurable third-party SMTP service. Credentials are runtime secrets, not source or client configuration. SMTP delivery errors must not report a successful invitation; the persisted invitation remains retryable/revocable under a controlled retry action.
-- Supabase Auth continues to own passwords, confirmation, and sessions. Arden owns invitation tokens, membership, department and role policy.
+- Supabase Auth continues to own passwords, confirmation, and sessions. [0038](0038-invitation-account-routing-and-direct-setup.md) lets registration through a valid invitation create an already-confirmed account, because the invitation token proves control of the mailbox. Arden owns invitation tokens, membership, department and role policy.
 
 ## Boundaries and consequences
 
