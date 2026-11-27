@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "chromaServerVersion": "1.5.9",
+  "fixturePairs": [
+    {
+      "name": "governed-v3",
+      "core": "apps/api/src/answers/fixtures/governed-v3.json",
+      "ai": "services/ai/tests/fixtures/governed-v3.json",
+      "ignoreKeys": []
+    },
+    {
+      "name": "governed-v2",
+      "core": "apps/api/src/answers/fixtures/governed-v2.json",
+      "ai": "services/ai/tests/fixtures/governed-v2.json",
+      "ignoreKeys": ["usageContractVersion", "usageEvents"],
+      "note": "Usage telemetry fields from Core PR #96 pending AI telemetry port."
+    },
+    {
+      "name": "reader-source-v1",
+      "core": "apps/api/src/reader-ai/fixtures/reader-source-v1.json",
+      "ai": "services/ai/tests/fixtures/reader-source-v1.json",
+      "ignoreKeys": ["usageContractVersion", "usageEvents"],
+      "note": "Usage telemetry fields from Core PR #96 pending AI telemetry port."
+    },
+    {
+      "name": "reader-summary-v1",
+      "core": "apps/api/src/reader-ai/fixtures/reader-summary-v1.json",
+      "ai": "services/ai/tests/fixtures/reader-summary-v1.json",
+      "ignoreKeys": ["usageContractVersion", "usageEvents"],
+      "note": "Usage telemetry fields from Core PR #96 pending AI telemetry port."
+    }
+  ]
+}
