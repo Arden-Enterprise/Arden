@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyKnowledgeMetadata } from "@arden/domain";
 import * as api from "../src/shared/api-client";
@@ -38,7 +38,10 @@ async function open(value: api.KnowledgeDraftRecord, catalogUnavailable = false)
   vi.spyOn(api, "loadKnowledgeDraft").mockResolvedValue(value);
   render(createElement(ServerKnowledgeFeaturePage, { platform: "web", organizationId: "org", organizationName: "Synthetic organization",
     active: true, view: "knowledge", createdDraftId: "draft", contextOpen: false, onToggleContext: vi.fn() }));
-  return screen.findByRole("button", { name: "Submit for review", exact: true });
+  const button = await screen.findByRole("button", { name: "Submit for review", exact: true });
+  await waitFor(() => expect(api.listKnowledgeSubmissions).toHaveBeenCalled());
+  await act(async () => { await vi.mocked(api.listKnowledgeSubmissions).mock.results[0]?.value; });
+  return button;
 }
 
 describe("Topic-free contribution readiness", () => {
