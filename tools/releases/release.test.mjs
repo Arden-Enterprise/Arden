@@ -234,3 +234,45 @@ test("preflight accepts the operator's non-promotable manual baseline format", a
   status.active.manifest.images.api.id = "unverified";
   await assert.rejects(() => release.checkReadiness(environment, async () => status));
 });
+
+test("production dual-preflight checks status and plan-migrations read-only without mutating", async () => {
+  const main = { ...environment, GITHUB_REF_NAME: "main" };
+  const source = inventorySource(main.GITHUB_SHA, "b".repeat(40));
+  const calls = [];
+  const plan = await release.checkProductionPromotionReadiness(main, source, async request => {
+    calls.push(request.op);
+    if (request.op === "status") {
+      return { active: { manifest: { schema: 2, commit: "b".repeat(40) } }, pending: null };
+    }
+    return { status: "NO_PENDING", migration_ids: [] };
+  }, async () => main.GITHUB_SHA);
+  assert.deepEqual(plan, { status: "NO_PENDING", migration_ids: [] });
+  assert.deepEqual(calls, ["status", "plan-migrations"]);
+});
+
+test("production dual-preflight blocks REQUIRES_OPERATOR, RECOVERY_REQUIRED, and staging calls without reconciling", async () => {
+  const main = { ...environment, GITHUB_REF_NAME: "main" };
+  const source = inventorySource(main.GITHUB_SHA, "b".repeat(40));
+  await assert.rejects(() => release.checkProductionPromotionReadiness(environment, source, async () => {
+    throw new Error("should not call transport on staging");
+  }, async () => environment.GITHUB_SHA), /Production promotion preflight/i);
+
+  for (const blocked of [
+    { status: "REQUIRES_OPERATOR", migration_ids: ["0071_system_console_least_privilege"] },
+    { status: "RECOVERY_REQUIRED", migration_ids: [] },
+    { status: "OUTCOME_UNKNOWN", migration_ids: [] },
+  ]) {
+    const calls = [];
+    await assert.rejects(
+      () => release.checkProductionPromotionReadiness(main, source, async request => {
+        calls.push(request.op);
+        if (request.op === "status") {
+          return { active: { manifest: { schema: 2, commit: "b".repeat(40) } }, pending: null };
+        }
+        return blocked;
+      }, async () => main.GITHUB_SHA),
+      err => err.code === "ARDEN_MIGRATION_BLOCKED" && err.status === blocked.status,
+    );
+    assert.deepEqual(calls, ["status", "plan-migrations"]);
+  }
+});

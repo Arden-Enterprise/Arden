@@ -275,10 +275,65 @@ jobs:
       - name: Build and scan without retained cache or registry publication
         run: node tools/releases/build.mjs
 
+  preflight-production:
+    name: Preflight Core production promotion before AI
+    needs: [check, database, ai-check]
+    if: >-
+      github.repository == 'Arden-Enterprise/Arden' &&
+      github.event.repository.visibility == 'public' &&
+      github.event_name == 'push' &&
+      github.ref_name == 'main' &&
+      needs.ai-check.outputs.ai_changed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    environment:
+      name: production
+    steps:
+      - name: Check explicit AI release enablement gate
+        id: gate
+        shell: bash
+        env:
+          ENABLED: ${{ vars.ARDEN_AI_RELEASE_ENABLED }}
+        run: |
+          if [ "$ENABLED" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "AI release automation is disabled for production; skipping dual preflight."
+          fi
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+      - name: Verify Core production promotion readiness (read-only) before mutating AI
+        if: steps.gate.outputs.enabled == 'true'
+        timeout-minutes: 3
+        run: node tools/releases/release.mjs preflight-plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_PORT: ${{ secrets.DEPLOY_SSH_PORT }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+
   release-ai:
     name: Deploy verified AI release
-    needs: [check, ai-check]
+    needs: [check, database, ai-check, preflight-production]
     if: >-
+      always() && !cancelled() &&
+      needs.check.result == 'success' &&
+      needs.database.result == 'success' &&
+      needs.ai-check.result == 'success' &&
+      (needs.preflight-production.result == 'success' || needs.preflight-production.result == 'skipped') &&
       github.repository == 'Arden-Enterprise/Arden' &&
       github.event.repository.visibility == 'public' &&
       (
@@ -297,11 +352,12 @@ jobs:
 
   release:
     name: Deploy verified app release
-    needs: [check, database, release-ai]
+    needs: [check, database, preflight-production, release-ai]
     if: >-
       always() && !cancelled() &&
       needs.check.result == 'success' &&
       needs.database.result == 'success' &&
+      (needs.preflight-production.result == 'success' || needs.preflight-production.result == 'skipped') &&
       (needs.release-ai.result == 'success' || needs.release-ai.result == 'skipped') &&
       github.repository == 'Arden-Enterprise/Arden' &&
       github.event.repository.visibility == 'public' &&
