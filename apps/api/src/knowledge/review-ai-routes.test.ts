@@ -33,8 +33,9 @@ function harness(enabled = true, mimeType = "text/plain") {
   };
   const ai = vi.fn(async (payload: unknown): Promise<unknown> => {
     const input = payload as { requestId: string };
-    return { contractVersion: 1, requestId: input.requestId, ...snapshot,
-      summary: [{ text: "This is a guide.", citation: { excerpt: "Frozen text.", page: mimeType === "text/plain" ? null : 2 } }],
+    return { contractVersion: 2, requestId: input.requestId, ...snapshot,
+      summary: [{ text: "This is a guide.", citation: { excerpt: "Frozen text.", page: mimeType === "text/plain" ? null : 2 },
+        additionalCitations: [{ excerpt: "A second passage.", page: mimeType === "text/plain" ? null : 3 }] }],
       checks: [] };
   });
   registerReviewerAiRoutes(app, { getAssignedReview: assigned }, storage, { reviewSubmission: ai },
@@ -75,10 +76,10 @@ it.each(["text/plain", "application/pdf"])("reviews only the frozen %s snapshot"
   expect(result.headers["cache-control"]).toBe("no-store");
   expect(h.assigned).toHaveBeenCalledTimes(3);
   expect(h.ai).toHaveBeenCalledWith({
-    contractVersion: 1, requestId: expect.any(String), ...h.snapshot, mimeType,
+    contractVersion: 2, requestId: expect.any(String), ...h.snapshot, mimeType,
     ...(mimeType === "text/plain" ? { content: "Frozen text." } : { pdfBase64: Buffer.from("%PDF-1.7").toString("base64") }),
   });
-  expect(result.json()).toMatchObject({ ...h.snapshot, checks: [] });
+  expect(result.json()).toMatchObject({ ...h.snapshot, summary: [{ additionalCitations: [{ excerpt: "A second passage." }] }], checks: [] });
   expect((await h.run()).statusCode).toBe(429);
 });
 
