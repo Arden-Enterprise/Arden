@@ -15,7 +15,7 @@ describe("reviewer grant labels", () => {
 
 describe("reviewer grant coverage (decision 0015)", () => {
   it("describes department and organization scopes", () => {
-    expect(grantCoverageLabel("DEPARTMENT")).toBe("Department and group documents");
+    expect(grantCoverageLabel("DEPARTMENT")).toBe("Department and selected-member documents");
     expect(grantCoverageLabel("ORGANIZATION")).toBe("Organization-wide documents");
   });
 });

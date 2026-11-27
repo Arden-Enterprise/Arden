@@ -1,0 +1,117 @@
+name: AI Service Release
+
+on:
+  workflow_call:
+    inputs:
+      target_environment:
+        description: "Target deployment environment (staging or production)"
+        required: true
+        type: string
+      tooling_changed:
+        description: "Whether AI release tooling or workflow files changed"
+        required: false
+        type: boolean
+        default: false
+      force_ai_deploy:
+        description: "Force staging AI rebuild and deploy even when ai_tree matches"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  ARDEN_REPOSITORY_VISIBILITY: ${{ github.event.repository.visibility }}
+
+jobs:
+  deploy-ai:
+    name: Deploy verified AI service (${{ inputs.target_environment }})
+    if: >-
+      github.repository == 'Arden-Enterprise/Arden' &&
+      github.event.repository.visibility == 'public' &&
+      (inputs.target_environment == 'staging' || inputs.target_environment == 'production')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: arden-shared-host-activation
+      cancel-in-progress: false
+      queue: max
+    environment:
+      name: ${{ inputs.target_environment }}
+    steps:
+      - name: Check explicit AI release enablement gate
+        id: gate
+        shell: bash
+        env:
+          TARGET_ENV: ${{ inputs.target_environment }}
+          ENABLED: ${{ vars.ARDEN_AI_RELEASE_ENABLED }}
+        run: |
+          if [ "$ENABLED" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "AI release automation is disabled for ${TARGET_ENV} (vars.ARDEN_AI_RELEASE_ENABLED != 'true'); skipping cleanly."
+          fi
+
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        if: steps.gate.outputs.enabled == 'true'
+        with:
+          node-version: 24.22.1
+          package-manager-cache: false
+
+      - name: Check restricted AI deployment connection and target state
+        id: preflight
+        if: steps.gate.outputs.enabled == 'true'
+        timeout-minutes: 3
+        run: node tools/releases/ai-release.mjs preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_AI_SSH_HOST: ${{ secrets.DEPLOY_AI_SSH_HOST }}
+          DEPLOY_AI_SSH_PORT: ${{ secrets.DEPLOY_AI_SSH_PORT }}
+          DEPLOY_AI_SSH_USER: ${{ secrets.DEPLOY_AI_SSH_USER }}
+          DEPLOY_AI_SSH_KEY: ${{ secrets.DEPLOY_AI_SSH_KEY }}
+          DEPLOY_AI_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_AI_SSH_KNOWN_HOSTS }}
+          ARDEN_AI_TOOLING_CHANGED: ${{ inputs.tooling_changed }}
+          ARDEN_AI_FORCE_DEPLOY: ${{ inputs.force_ai_deploy }}
+
+      - name: Build, Trivy-scan, and smoke-test staging AI image on temporary disk
+        if: >-
+          steps.gate.outputs.enabled == 'true' &&
+          inputs.target_environment == 'staging' &&
+          steps.preflight.outputs.deploy_action == 'deploy'
+        run: node tools/releases/ai-build.mjs
+        env:
+          ARDEN_AI_SKIP_BUNDLE_CHECK: "1"
+
+      - name: Prepare bounded temporary staging AI image archive
+        if: >-
+          steps.gate.outputs.enabled == 'true' &&
+          inputs.target_environment == 'staging' &&
+          steps.preflight.outputs.deploy_action == 'deploy'
+        run: node tools/releases/ai-release.mjs bundle
+
+      - name: Upload staging AI image or promote verified staging AI image to production
+        if: >-
+          steps.gate.outputs.enabled == 'true' &&
+          (steps.preflight.outputs.deploy_action == 'deploy' || steps.preflight.outputs.deploy_action == 'promote')
+        run: node tools/releases/ai-release.mjs deploy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEPLOY_AI_SSH_HOST: ${{ secrets.DEPLOY_AI_SSH_HOST }}
+          DEPLOY_AI_SSH_PORT: ${{ secrets.DEPLOY_AI_SSH_PORT }}
+          DEPLOY_AI_SSH_USER: ${{ secrets.DEPLOY_AI_SSH_USER }}
+          DEPLOY_AI_SSH_KEY: ${{ secrets.DEPLOY_AI_SSH_KEY }}
+          DEPLOY_AI_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_AI_SSH_KNOWN_HOSTS }}
+
+      - name: Remove only this job's temporary AI archive and SSH key files
+        if: always() && steps.gate.outputs.enabled == 'true'
+        run: node tools/releases/ai-release.mjs cleanup

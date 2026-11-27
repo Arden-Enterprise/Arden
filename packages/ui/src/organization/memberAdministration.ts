@@ -6,16 +6,6 @@ export function isOrganizationAdminMember(member: Member): boolean {
   return member.isOrganizationAdmin;
 }
 
-type ReaderGroupCandidate = Pick<Member, "id" | "status" | "departmentId" | "isOrganizationAdmin">;
-
-export function assignableReaderGroupMembers<T extends ReaderGroupCandidate>(
-  members: T[], existingMembershipIds: ReadonlySet<string>,
-): T[] {
-  return members.filter(member => member.status === "ACTIVE"
-    && (Boolean(member.departmentId) || member.isOrganizationAdmin)
-    && !existingMembershipIds.has(member.id));
-}
-
 export function filterOrganizationMembers(
   members: Member[],
   filters: { query: string; status: string; department: string },

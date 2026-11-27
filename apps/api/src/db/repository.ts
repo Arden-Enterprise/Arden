@@ -6,7 +6,6 @@ import { PgSurfaceHydrator, type UiSurfaceHydrator } from "../answers/ui-surface
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
 import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { insertAiUsageEvents } from "./ai-usage.js";
-import { PgAudienceGroupStore, type AudienceGroupStore } from "../audiences/store.js";
 import { departmentAudienceName } from "./department-audience-name.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
@@ -709,7 +708,6 @@ export interface ArdenDataRepository {
   readonly notifications?: NotificationStore;
   readonly readerSources?: ReaderSourceStore;
   readonly knowledgeCatalog?: KnowledgeCatalogStore;
-  readonly audienceGroups?: AudienceGroupStore;
   ratePrivateAnswer?(userId: string, organizationId: string, voteKey: string, feedback: AnswerFeedback): Promise<boolean>;
   readonly maintenance?: MaintenancePort;
   readonly privateOrganization: PrivateOrganizationStore;
@@ -865,7 +863,6 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly readerSources: ReaderSourceStore;
   readonly conversations: ConversationStore;
   readonly knowledgeCatalog: KnowledgeCatalogStore;
-  readonly audienceGroups: AudienceGroupStore;
   readonly maintenance: MaintenancePort;
   readonly privateOrganization: PgPrivateOrganizationStore;
   readonly directShares: PgDirectShareStore;
@@ -883,7 +880,6 @@ export class ArdenRepository implements ArdenDataRepository {
     this.conversations = new PgConversationStore((user, org, work) => this.withActorContext(user, org, work));
     this.knowledgeCatalog = new PgKnowledgeCatalogStore((user, org, work) => this.withActorContext(user, org, work),
       (user, org, work) => this.withOrganizationAdmin(user, org, work));
-    this.audienceGroups = new PgAudienceGroupStore((user, org, work) => this.withOrganizationAdmin(user, org, work));
     this.maintenance = new PgMaintenanceStore((user, org, work) => this.withActorContext(user, org, work), content);
     this.privateOrganization = new PgPrivateOrganizationStore((user, org, work) => this.withActorContext(user, org, work),
       (work) => this.withPrivateTrashRetention(work));
@@ -1281,6 +1277,8 @@ export class ArdenRepository implements ArdenDataRepository {
             )
           )
         ORDER BY d.name`, [organizationId, membershipId]);
+      // Decision 0039: GROUP rows are returned only so legacy drafts and submissions can name the
+      // groups they already carry; groups cannot be managed or newly attached.
       const audiences = await client.query<{ id: string; name: string; department_id: string | null;
         kind: "ORGANIZATION_ALL" | "DEPARTMENT_ALL" | "GROUP" }>(`SELECT audience_id AS id,
         name, department_id, kind FROM audience WHERE organization_id = $1 AND status = 'ACTIVE'
@@ -1961,12 +1959,15 @@ export class ArdenRepository implements ArdenDataRepository {
         return { kind: "invalid-metadata" };
       }
       if (next.audienceRoleIds.length > 0) {
+        // Decision 0039: reader groups can no longer be added. A legacy draft may keep the GROUP
+        // audiences it already had, so saving it does not fail, but no new group can be attached.
         const audiences = await client.query(`SELECT audience_id FROM audience
           WHERE organization_id = $1 AND audience_id = ANY($2::uuid[]) AND status = 'ACTIVE'
             AND ((kind = 'ORGANIZATION_ALL' AND $3 = 'ORGANIZATION')
               OR (kind = 'DEPARTMENT_ALL' AND $3 = 'DEPARTMENT' AND department_id = $4)
-              OR kind = 'GROUP')`,
-        [organizationId, next.audienceRoleIds, next.targetScopeType, next.responsibleDepartmentId]);
+              OR (kind = 'GROUP' AND audience_id = ANY($5::uuid[])))`,
+        [organizationId, next.audienceRoleIds, next.targetScopeType, next.responsibleDepartmentId,
+          current.audienceRoleIds]);
         if (audiences.rowCount !== next.audienceRoleIds.length) return { kind: "invalid-metadata" };
       }
       let draftSelectionId: string | null = null;

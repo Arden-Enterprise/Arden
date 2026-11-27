@@ -6,14 +6,11 @@ import { IslandConfirm } from "../shared/IslandConfirm";
 import {
   ApiError, changePrimaryDepartment, createDepartment, createReviewerGrant, deactivateReviewerGrant,
   deleteDepartment,
-  inviteOrganizationMember, listReviewerGrants, loadAudienceGroups, loadOrganizationAdministration,
-  removeAudienceGroupMember, resendOrganizationInvitation, revokeOrganizationInvitation,
+  inviteOrganizationMember, listReviewerGrants, loadOrganizationAdministration,
+  resendOrganizationInvitation, revokeOrganizationInvitation,
   type OrganizationAdministration, type ReviewerGrant,
 } from "../shared/api-client";
 import type { Platform } from "../shared/types";
-import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
-import { ServerAudienceGroupPanel } from "./ServerAudienceGroupPanel";
-import { KnowledgeDialog } from "../knowledge/KnowledgeDialog";
 import { libraryDateLabel } from "../knowledge/libraryDisplay";
 import { Icon } from "../shared/Icon";
 import { IslandFilterMenu } from "../shared/IslandFilterMenu";
@@ -25,13 +22,16 @@ import { departmentDeletionSummary, filterOrganizationMembers, isOrganizationAdm
 import { GovernanceDocumentsPanel } from "../knowledge/PublicationGovernance";
 import { MAX_INVITATIONS_PER_BATCH, planInvitationBatch, sendInvitationBatch, type InvitationBatchPlan, type InvitationSendResult } from "./invitationBatch";
 
-type Props = { platform: Platform; organizationId: string; organizationName: string; initialTab?: AdminTab; onDirtyChange?: (dirty: boolean) => void;
+type Props = { platform: Platform; organizationId: string; organizationName: string; initialTab?: AdminTab;
+  /** Shell unsaved-change guard. No Administration form reports unsaved state since reader groups were removed (decision 0039). */
+  onDirtyChange?: (dirty: boolean) => void;
   requestedInspection?: { documentId: string; title: string } | null; onInspectionRequestHandled?: () => void;
   onSendingInvitationsChange?: (sending: boolean) => void } & ContextControlProps;
-type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers" | "documents" | "sharing";
+// Decision 0039: Org Admins no longer manage reader groups, so there is no Readers tab.
+type AdminTab = "members" | "departments" | "invitations" | "reviewers" | "documents" | "sharing";
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
 const tabNames: Record<AdminTab, string> = {
-  members: "Members", departments: "Departments", audiences: "Readers", invitations: "Invitations", reviewers: "Review permissions",
+  members: "Members", departments: "Departments", invitations: "Invitations", reviewers: "Review permissions",
   documents: "Documents", sharing: "Sharing",
 };
 const invitationTone: Record<InvitationState, string> = { PENDING: "tone-info", ACCEPTED: "tone-success", EXPIRED: "", REVOKED: "" };
@@ -51,19 +51,16 @@ function invitationResultLabel(result: InvitationSendResult): string {
 }
 
 export function OrganizationAdminPage({ platform, organizationId, organizationName, initialTab, contextOpen, onToggleContext,
-  requestedInspection, onInspectionRequestHandled, onDirtyChange, onSendingInvitationsChange }: Props) {
+  requestedInspection, onInspectionRequestHandled, onSendingInvitationsChange }: Props) {
   const [data, setData] = useState<OrganizationAdministration | null>(null);
   const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
   const [tab, setTab] = useState<AdminTab>(initialTab ?? "members");
   useEffect(() => {
     if (initialTab) setTab(initialTab);
   }, [initialTab]);
-  const [audienceDirty, setAudienceDirty] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null);
   const [invitationFilter, setInvitationFilter] = useState<InvitationFilter>("ALL");
-  const [memberAudienceGroups, setMemberAudienceGroups] = useState<AudienceGroupRecord[]>([]);
-  const [memberGroupsLoading, setMemberGroupsLoading] = useState(false);
   const [memberQuery, setMemberQuery] = useState("");
   const [memberStatus, setMemberStatus] = useState("ALL");
   const [memberDepartment, setMemberDepartment] = useState("ALL");
@@ -81,8 +78,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const [departmentError, setDepartmentError] = useState("");
   const [grantSubmitted, setGrantSubmitted] = useState(false);
   const [lastCreatedGrantId, setLastCreatedGrantId] = useState<string | null>(null);
-  const [audienceCreateSignal, setAudienceCreateSignal] = useState(0);
-  const [pendingTab, setPendingTab] = useState<AdminTab | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -94,11 +89,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     departmentFocusPending.current = false;
     if (!confirmation && tab === "departments") document.getElementById("admin-department-name")?.focus();
   }, [departmentError, busy, confirmation, tab]);
-  const reportAudienceDirty = useCallback((dirty: boolean) => {
-    setAudienceDirty(dirty);
-    onDirtyChange?.(dirty);
-  }, [onDirtyChange]);
-
   const reload = useCallback(async () => {
     const [administration, grants] = await Promise.all([
       loadOrganizationAdministration(platform, organizationId), listReviewerGrants(platform, organizationId),
@@ -129,16 +119,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     return () => clearInterval(interval);
   }, [data?.invitations, reload]);
 
-  useEffect(() => {
-    if (!selectedMemberId) return;
-    let active = true;
-    setMemberAudienceGroups([]); setMemberGroupsLoading(true);
-    void loadAudienceGroups(platform, organizationId).then((groups) => { if (active) setMemberAudienceGroups(groups); })
-      .catch(() => { if (active) setError("Audience group memberships could not be loaded. Try reopening this member."); })
-      .finally(() => { if (active) setMemberGroupsLoading(false); });
-    return () => { active = false; };
-  }, [platform, organizationId, selectedMemberId]);
-
   const perform = async (action: () => Promise<string | void>, successMessage: string,
     onError?: (message: string) => void) => {
     setBusy(true); setError(""); setMessage("");
@@ -156,7 +136,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const selectTab = (next: AdminTab) => {
     if (inviteProgress) return;
-    if (tab === "audiences" && next !== "audiences" && audienceDirty) { setPendingTab(next); return; }
     setError(""); setMessage(""); setTab(next);
     document.querySelector(".organization-live-admin .workspace-scroll-region")?.scrollTo(0, 0);
   };
@@ -189,7 +168,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
       title: `Delete department “${department.name}”?`,
       description: inDepartment.length > 0
         ? `${departmentDeletionSummary(inDepartment.length)} Deleting it will revoke their access to “Everyone in ${department.name}”.`
-        : `The “Everyone in ${department.name}” reader group will be removed.`,
+        : `Readership “Everyone in ${department.name}” will be removed.`,
       action: inDepartment.length > 0 ? `Delete and unassign ${inDepartment.length} member${inDepartment.length > 1 ? "s" : ""}` : "Delete department",
       run: async () => {
         await deleteDepartment(platform, organizationId, department.id);
@@ -237,7 +216,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const tabCount: Record<AdminTab, number> = {
     members: members.length, departments: data?.departments.length ?? 0,
-    audiences: memberAudienceGroups.length,
     invitations: data?.invitations.filter((item) => item.status === "PENDING" && new Date(item.expiresAt).getTime() > Date.now()).length ?? 0,
     reviewers: reviewerGrants.filter((grant) => grant.status === "ACTIVE").length,
     documents: 0,
@@ -245,7 +223,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   };
   const focusTabForm = (targetTab: AdminTab, selector: string) => {
     selectTab(targetTab);
-    if (targetTab === tab || !(tab === "audiences" && audienceDirty)) window.setTimeout(() => document.querySelector<HTMLElement>(selector)?.focus(), 0);
+    window.setTimeout(() => document.querySelector<HTMLElement>(selector)?.focus(), 0);
   };
   const overlappingGrant = reviewerGrants.some((grant) => grant.status === "ACTIVE" && grant.reviewerMembershipId === reviewerId
     && grant.scope === reviewScope
@@ -267,8 +245,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
   const selectedDepartment = data?.departments.find((item) => item.id === selectedDepartmentId);
   const headerAction = tab === "members" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => focusTabForm("invitations", "#admin-invite-email")}><Icon name="plus" size={14} />Invite member</button>
     : tab === "departments" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => focusTabForm("departments", "#admin-department-name")}><Icon name="plus" size={14} />New department</button>
-      : tab === "audiences" ? <button type="button" className="primary-button" disabled={busy || loading} onClick={() => setAudienceCreateSignal((value) => value + 1)}><Icon name="plus" size={14} />New reader group</button>
-        : undefined;
+      : undefined;
 
   return <main id="arden-main" className="workspace-page organization-live-admin" aria-labelledby="organization-live-admin-title" tabIndex={-1}>
     <WorkspaceTopbar breadcrumb={`${organizationName} / Administration / ${tabNames[tab]}`} contextOpen={contextOpen} onToggleContext={onToggleContext} />
@@ -277,7 +254,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
         titleId="organization-live-admin-title" action={headerAction} />
       <div className="island-seg admin-tabs" role="tablist" aria-label="Administration sections">{(Object.keys(tabNames) as AdminTab[]).map((name) => <button key={name}
         type="button" role="tab" aria-selected={tab === name} disabled={Boolean(inviteProgress)} onClick={() => selectTab(name)}>{tabNames[name]}
-        {name !== "audiences" && name !== "documents" && name !== "sharing" && <span className="island-badge">{tabCount[name]}</span>}</button>)}</div>
+        {name !== "documents" && name !== "sharing" && <span className="island-badge">{tabCount[name]}</span>}</button>)}</div>
     </div>}>
       {loading ? <div role="status" className="admin-loading island"><span className="sr-only">Loading organization data…</span>{[0, 1, 2].map((index) => <div key={index} className="admin-skeleton-row" aria-hidden="true"><span /><div><span /><span /></div></div>)}</div> : error && !data ? <div className="organization-notice is-danger" role="alert"><strong>Couldn’t load members.</strong><span>Try again.</span><button type="button" className="secondary-button" onClick={() => { setLoading(true); setError(""); void reload().catch(() => setError("Organization data could not be refreshed.")).finally(() => setLoading(false)); }}>Try again</button></div> : data && <>
         {error && !selectedMember && <p className="admin-feedback is-error" role="alert">{error}</p>}
@@ -311,7 +288,7 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             </IslandTable> : <div className="island island-empty"><h3>{members.length ? "No matching members" : "No members yet"}</h3><p>{members.length ? "Try a different search or clear the filters." : "Invite a member to start building your organization."}</p><button type="button" className="secondary-button" onClick={() => { setMemberQuery(""); setMemberStatus("ALL"); setMemberDepartment("ALL"); }}>{members.length ? "Clear filters" : "Reset"}</button></div>}
           </div>
           {selectedMember && <MemberDetailIsland key={selectedMember.id} member={selectedMember} organizationName={organizationName} isAdmin={isOrgAdmin(selectedMember)}
-            departmentName={departmentName} departments={data.departments} audienceGroups={memberAudienceGroups} groupsLoading={memberGroupsLoading}
+            departmentName={departmentName} departments={data.departments}
             feedback={message} feedbackError={error} busy={busy}
             grants={reviewerGrants.filter((grant) => grant.reviewerMembershipId === selectedMember.id && grant.status === "ACTIVE")}
             onClose={() => setSelectedMemberId(null)}
@@ -330,11 +307,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
                 run: () => changePrimaryDepartment(platform, organizationId, selectedMember.id, targetDepartmentId),
               });
             }}
-            onManageAudiences={() => { setSelectedMemberId(null); selectTab("audiences"); }}
-            onRemoveFromAudience={(group, groupMembershipId) => setConfirmation({
-              title: `Remove ${selectedMember.name} from ${group.name}?`, description: "Access through this group will be removed.", action: "Remove member",
-              run: async () => { const updated = await removeAudienceGroupMember(platform, organizationId, group.id, groupMembershipId); setMemberAudienceGroups((current) => current.map((item) => item.id === updated.id ? updated : item)); },
-            })}
             onGrant={() => { setReviewerId(selectedMember.id); setReviewDepartmentId(selectedMember.departmentId ?? ""); setSelectedMemberId(null); focusTabForm("reviewers", "#admin-reviewer-select"); }} />}
           </div>
         </div>}
@@ -366,9 +338,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
             onViewMembers={() => { setMemberDepartment(selectedDepartment.id); setSelectedDepartmentId(null); selectTab("members"); }}
             onDelete={() => handleDeleteDepartment(selectedDepartment)} />}
         </div>}
-        {tab === "audiences" && <div role="tabpanel" aria-label="Audiences" className="admin-roles"><ServerAudienceGroupPanel platform={platform} organizationId={organizationId} organizationName={organizationName}
-          members={data.members} departments={data.departments}
-          onDirtyChange={reportAudienceDirty} onGroupsChanged={() => void reload().catch(() => setError("Audiences changed, but organization data could not refresh."))} createSignal={audienceCreateSignal} /></div>}
         {tab === "invitations" && <div role="tabpanel" aria-label="Invitations" className="admin-tabpanel">
           <div className="island-seg is-filter" role="group" aria-label="Filter by status">{invitationFilters.map((filter) => <button key={filter} type="button"
             aria-pressed={invitationFilter === filter} onClick={() => setInvitationFilter(filter)}>{filter === "ALL" ? "All" : titleCase(filter)}<span className="island-badge">{invitationCounts[filter]}</span></button>)}</div>
@@ -472,11 +441,6 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
     </WorkspacePageContent>
     {confirmation && <IslandConfirm title={confirmation.title} description={confirmation.description} actionLabel={confirmation.action}
       busy={busy} error={error} onCancel={() => setConfirmation(null)} onConfirm={confirmAction} />}
-    {pendingTab && <KnowledgeDialog confirmation title="Discard unsaved audience changes?" onClose={() => setPendingTab(null)}>
-      <p>Changes to this audience group have not been saved. Discard them and open {tabNames[pendingTab]}?</p>
-      <div className="dialog-actions"><button type="button" className="secondary-button" autoFocus onClick={() => setPendingTab(null)}>Keep editing</button>
-        <button type="button" className="admin-danger-button" onClick={() => { setTab(pendingTab); setPendingTab(null); }}>Discard changes</button></div>
-    </KnowledgeDialog>}
     <ActionToast message={message} onDismiss={() => setMessage("")} />
   </main>;
 }

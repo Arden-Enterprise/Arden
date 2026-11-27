@@ -4,14 +4,12 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../src/shared/api-client";
 import { OrganizationAdminPage } from "../src/organization/OrganizationAdminPage";
-import { ServerAudienceGroupPanel } from "../src/organization/ServerAudienceGroupPanel";
 import { ServerKnowledgeFeaturePage } from "../src/knowledge/ServerKnowledgeFeaturePage";
 import { installTestDialogs } from "./dialogTestSupport";
 
 vi.mock("../src/shared/api-client", async (importOriginal) => ({
   ...await importOriginal<typeof import("../src/shared/api-client")>(),
-  loadOrganizationAdministration: vi.fn(), listReviewerGrants: vi.fn(), loadAudienceGroups: vi.fn(),
-  deactivateAudienceGroup: vi.fn(),
+  loadOrganizationAdministration: vi.fn(), listReviewerGrants: vi.fn(),
   createReviewerGrant: vi.fn(), listKnowledgeDrafts: vi.fn(), listKnowledgeSubmissions: vi.fn(),
   listPublishedKnowledge: vi.fn(), listKnowledgeReviewBoard: vi.fn(), loadKnowledgeOptions: vi.fn(),
   listKnowledgeDraftVersions: vi.fn(), loadKnowledgeDraftVersion: vi.fn(),
@@ -40,7 +38,6 @@ beforeEach(() => {
       expiresAt: "2099-01-01T00:00:00.000Z" }],
   });
   vi.mocked(api.listReviewerGrants).mockResolvedValue([grant]);
-  vi.mocked(api.loadAudienceGroups).mockResolvedValue([]);
 });
 afterEach(() => {
   cleanup(); restoreDialogs(); vi.restoreAllMocks();
@@ -72,35 +69,6 @@ describe("organization administration fixes", () => {
     expect((screen.getByRole("button", { name: "Assign reviewer" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("places inactive reader groups in their own section", async () => {
-    vi.mocked(api.loadAudienceGroups).mockResolvedValue([
-      { id: "active", name: "Active readers", description: "", version: 1, status: "ACTIVE", members: [] },
-      { id: "inactive", name: "Former readers", description: "", version: 2, status: "INACTIVE", members: [] },
-    ]);
-    render(createElement(ServerAudienceGroupPanel, { platform: "web", organizationId: "org",
-      organizationName: "Example", members: [], departments: [] }));
-    const active = await screen.findByRole("region", { name: "Reader groups" });
-    const inactive = screen.getByRole("region", { name: "Inactive reader groups" });
-    expect(within(active).getByRole("button", { name: /Active readers/ })).toBeTruthy();
-    expect(within(active).queryByRole("button", { name: /Former readers/ })).toBeNull();
-    expect(within(inactive).getByRole("button", { name: /Former readers/ })).toBeTruthy();
-  });
-
-  it("moves a group to Inactive immediately after deactivation", async () => {
-    const activeGroup = { id: "group", name: "Former readers", description: "", version: 1,
-      status: "ACTIVE" as const, members: [] };
-    vi.mocked(api.loadAudienceGroups).mockResolvedValue([activeGroup]);
-    vi.mocked(api.deactivateAudienceGroup).mockResolvedValue({ ...activeGroup, version: 2, status: "INACTIVE" });
-    render(createElement(ServerAudienceGroupPanel, { platform: "web", organizationId: "org",
-      organizationName: "Example", members: [], departments: [] }));
-    await screen.findByRole("button", { name: /Former readers/ });
-    fireEvent.click(screen.getByRole("button", { name: "Details" }));
-    fireEvent.click(screen.getByRole("button", { name: "Deactivate reader group" }));
-    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Deactivate group" }));
-    const inactive = await screen.findByRole("region", { name: "Inactive reader groups" });
-    expect(within(inactive).getByRole("button", { name: /Former readers/ })).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Reader groups" })).queryByRole("button", { name: /Former readers/ })).toBeNull();
-  });
 });
 
 describe("contribution version history", () => {

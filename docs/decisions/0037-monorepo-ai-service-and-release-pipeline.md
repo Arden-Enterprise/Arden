@@ -5,7 +5,7 @@ Date: 2026-11-27
 Decision owner/approval: requesting project maintainer / Flow 4 owner (explicitly approved after Q1-Q13 design review and dual-model adversarial review)
 Brainstorm originator / record author: requesting maintainer; authored with Antigravity
 Approval evidence and exact source/spec revision: approved on 2026-11-27 against `Arden` `staging` `06e2ae0d`, `Arden` `main` `b4fcd49` (tree `fa4d6fe`), and `Arden-AI` `main` `d534c7f`; see [V1 specification](../features/ai-monorepo-cicd/SPEC.md)
-Implementation: partial — Phase 1 (monorepo import into `services/ai/`, hardened multi-stage Dockerfile, allowlist `.dockerignore`, unprivileged Python CI, Trivy scan, offline smoke, and contract-parity checks) implemented on branch `feat/consolidate-arden-ai-monorepo`; Phase 2 (isolated staging AI CD receiver) and Phase 3 (isolated production AI + ChromaDB provisioning, `main` promotion, and read-only archival of `Arden-Enterprise/Arden-AI`) planned in [PLAN.md](../features/ai-monorepo-cicd/PLAN.md).
+Implementation: partial — Phase 1 (monorepo import into `services/ai/`, hardened Debian 13 multi-stage Dockerfile, allowlist `.dockerignore`, unprivileged Python CI, Trivy scan, offline smoke, and contract-parity checks) merged into `staging` at `9ca26ac2` (PR #106); Phase 2 pipeline code (`deploy/release-ai/`, dedicated Coolify AI bridge + token helper, `tools/releases/ai-{identity,release}.mjs`, reusable `.github/workflows/release-ai.yml`, and CI wiring) implemented on `feat/ai-isolated-release-pipeline`; Phase 2 operator server install/staging AI cutover and Phase 3 (isolated production AI + ChromaDB provisioning, `main` promotion, and read-only archival of `Arden-Enterprise/Arden-AI`) remain pending in [PLAN.md](../features/ai-monorepo-cicd/PLAN.md).
 Supersedes / superseded by: supersedes only the separate-Git-repository and manual-AI-deployment portions of [0012: Separate Python AI service and ChromaDB retrieval index](0012-separate-python-ai-service-and-chromadb.md); retains all ADR 0012 runtime, database, network, and ChromaDB isolation invariants intact.
 
 ## Context and requirement
@@ -50,6 +50,7 @@ Adopt Option 3:
 - [Nested services/ai/AGENTS.md](../../services/ai/AGENTS.md)
 - [Technology guide](../engineering/technology-guide.md)
 - [Implementation status](../engineering/implementation-status.md)
+- [Staging and production release guide](../engineering/release-pipeline.md)
 - [ADR index](README.md)
 - [V1 Specification](../features/ai-monorepo-cicd/SPEC.md) and [Phased Plan](../features/ai-monorepo-cicd/PLAN.md)
 

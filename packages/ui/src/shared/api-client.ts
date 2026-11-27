@@ -42,8 +42,6 @@ export type KnowledgeCatalog = { canManage: boolean; collections: KnowledgeColle
 export type KnowledgeCatalogWrite = { name: string; description: string; status: "ACTIVE" | "INACTIVE";
   cover?: "handbook" | "production"; documentIds?: string[]; allowedTypes?: KnowledgeType[] };
 export type CollectionPlacement = { documentId: string; collectionId: string | null; revision: number };
-import { parseAudienceGroup, parseAudienceGroupList, type AudienceGroupRecord,
-  type AudienceGroupWrite } from "./audience-group-contracts";
 import type {} from "./desktop-session";
 import { isKnowledgeClassification, type KnowledgeClassification } from "./knowledge-classification";
 
@@ -956,38 +954,6 @@ export async function deleteDepartment(platform: Platform, organizationId: strin
     method: "POST",
     body: "{}",
   });
-}
-
-export async function loadAudienceGroups(platform: Platform, organizationId: string): Promise<AudienceGroupRecord[]> {
-  return parseAudienceGroupList(await request<unknown>(platform, `/api/v1/organizations/${organizationId}/audience-groups`));
-}
-export async function saveAudienceGroup(platform: Platform, organizationId: string,
-  existing: AudienceGroupRecord | null, write: AudienceGroupWrite): Promise<AudienceGroupRecord> {
-  return parseAudienceGroup(await request<unknown>(platform,
-    `/api/v1/organizations/${organizationId}/audience-groups${existing ? "/" + existing.id : ""}`, {
-    method: existing ? "PATCH" : "POST", body: JSON.stringify(write),
-    headers: existing ? { "If-Match": `"audience-group-${existing.version}"` } : {},
-  }));
-}
-export async function addAudienceGroupMember(platform: Platform, organizationId: string,
-  audienceGroupId: string, membershipId: string): Promise<AudienceGroupRecord> {
-  return parseAudienceGroup(await request<unknown>(platform,
-    `/api/v1/organizations/${organizationId}/audience-groups/${audienceGroupId}/members`, {
-    method: "POST", body: JSON.stringify({ membershipId }),
-  }));
-}
-export async function removeAudienceGroupMember(platform: Platform, organizationId: string,
-  audienceGroupId: string, groupMembershipId: string): Promise<AudienceGroupRecord> {
-  return parseAudienceGroup(await request<unknown>(platform,
-    `/api/v1/organizations/${organizationId}/audience-groups/${audienceGroupId}/members/${groupMembershipId}/remove`,
-    { method: "POST", body: "{}" }));
-}
-export async function deactivateAudienceGroup(platform: Platform, organizationId: string,
-  group: AudienceGroupRecord): Promise<AudienceGroupRecord> {
-  return parseAudienceGroup(await request<unknown>(platform,
-    `/api/v1/organizations/${organizationId}/audience-groups/${group.id}/deactivate`, {
-    method: "POST", body: "{}", headers: { "If-Match": `"audience-group-${group.version}"` },
-  }));
 }
 
 export async function changePrimaryDepartment(platform: Platform, organizationId: string, membershipId: string, departmentId: string): Promise<void> {

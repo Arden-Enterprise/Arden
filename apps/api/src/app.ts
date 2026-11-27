@@ -11,7 +11,6 @@ import { newSessionExpiry, readSessionExpiry, sealSession } from "./auth/session
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
 import type { InvitationMailer } from "./email/smtp-mailer.js";
 import { allKnowledgeClassifications, defaultKnowledgeClassification, type KnowledgeClassification } from "./knowledge/policy.js";
-import { registerAudienceGroupRoutes } from "./audiences/routes.js";
 import { registerSystemAdministrationRoutes } from "./system-administration/routes.js";
 import { registerSystemConsoleRoutes } from "./system-console/routes.js";
 import { createSystemActorResolver, registerSystemAuthRoutes } from "./system-auth/routes.js";
@@ -131,7 +130,6 @@ export function buildApp(dependencies: AppDependencies) {
   });
   const requestActor = (request: FastifyRequest, reply: FastifyReply) =>
     requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, sessionKey, dependencies.testActor);
-  registerAudienceGroupRoutes(app, dependencies.repository.audienceGroups, requestActor, uuidPattern);
   registerKnowledgeCatalogRoutes(app, dependencies.repository.knowledgeCatalog, requestActor, uuidPattern);
   registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern,
     { useUiSurfaceV3: dependencies.useUiSurfaceV3 });

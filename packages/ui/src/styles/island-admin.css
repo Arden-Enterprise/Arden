@@ -87,42 +87,6 @@
 @media (prefers-reduced-motion: reduce) { .island-filter-list { animation: none; } }
 .organization-live-admin .admin-new-tag { color: var(--arden-success); font-size: 11px; font-weight: 600; text-transform: uppercase; }
 
-/* Audiences */
-.audience-list { display: grid; gap: 2px; padding: 6px; }
-.audience-row {
-  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 0 12px; border: 0; border-radius: 10px;
-  color: var(--arden-text-primary); background: transparent; text-align: left; cursor: pointer;
-}
-.audience-row:hover:not(:disabled) { background: var(--arden-surface-hover); }
-.audience-row[aria-pressed="true"], .audience-row.is-pending { background: var(--arden-accent-subtle); }
-.audience-row:disabled { cursor: default; }
-.audience-row-copy { display: grid; flex: 1; min-width: 0; line-height: 1.35; }
-.audience-row-copy strong { font-weight: 600; overflow-wrap: anywhere; }
-.audience-row-copy small { overflow: hidden; color: var(--arden-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.audience-list .island-empty { justify-items: start; padding: 12px; text-align: left; }
-.audience-feedback { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
-.audience-details { display: grid; gap: 14px; }
-.audience-add { display: flex; gap: 8px; }
-.audience-add .organization-field { flex: 1; min-width: 0; }
-.audience-members { display: grid; margin: 0; padding: 0; list-style: none; }
-.audience-members li { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 4px 0 6px; border-radius: 8px; }
-.audience-members li:hover { background: var(--arden-surface-hover); }
-.audience-members li > span:nth-child(2) { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
-.audience-members strong { font-size: 13px; }
-.audience-members small { overflow: hidden; color: var(--arden-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.audience-members .island-icon-button { width: 28px; height: 28px; border-color: transparent; }
-.audience-save { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; border: 1px solid var(--arden-accent-border); border-radius: 12px; background: var(--arden-accent-subtle); }
-.audience-save strong { flex: 1; font-size: 13px; }
-.admin-roles .role-config-danger-zone,
-.audience-details .role-config-danger-zone {
-  border-color: var(--arden-danger-border);
-  border-radius: 12px;
-}
-.role-config-danger-zone .secondary-button.is-danger {
-  justify-self: stretch;
-  margin-top: 4px;
-}
-
 /* Sample (preview) administration keeps its structure but uses the segmented island tabs. */
 .arden-app-shell .organization-tabs { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 4px; border: 1px solid var(--arden-border); border-radius: 12px; background: var(--arden-bg-sidebar); }
 .arden-app-shell .organization-tabs button { min-height: var(--arden-control-sm); padding: 0 12px; border: 0; border-radius: 8px; color: var(--arden-text-secondary); background: transparent; font-size: 13px; font-weight: 600; transform: none; box-shadow: none; }
@@ -143,6 +107,4 @@
 .organization-live-admin .admin-tabpanel { display: grid; gap: 12px; min-width: 0; }
 .organization-live-admin .island-split > .island-side { flex: 1 1 300px; max-width: 340px; }
 .island-seg.is-filter > button[aria-pressed="true"] { background: var(--arden-surface-raised); box-shadow: inset 0 0 0 1px var(--arden-border); }
-.audience-row .island-badge { min-width: 28px; }
-.audience-row .island-chip { justify-content: center; min-width: 76px; }
 .organization-live-admin .island-detail-section > .secondary-button.is-danger { justify-self: stretch; }

@@ -1,7 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../shared/Icon";
 import type { OrganizationAdministration, ReviewerGrant } from "../shared/api-client";
-import type { AudienceGroupRecord } from "../shared/audience-group-contracts";
 import { departmentDeletionSummary } from "./memberAdministration";
 
 type Member = OrganizationAdministration["members"][number];
@@ -22,7 +21,7 @@ export function memberStatus(status: string, departmentId?: string | null, isOrg
 
 /** What a grant may review under decision 0015. */
 export function grantCoverageLabel(scope: ReviewerGrant["scope"]): string {
-  return scope === "ORGANIZATION" ? "Organization-wide documents" : "Department and group documents";
+  return scope === "ORGANIZATION" ? "Organization-wide documents" : "Department and selected-member documents";
 }
 
 /** A grant with an end date shows when it ends; an open-ended grant shows when it started. */
@@ -41,21 +40,17 @@ function useDetailFocus() {
   return heading;
 }
 
-export function MemberDetailIsland({ member, organizationName, isAdmin, departmentName, departments, grants, audienceGroups, groupsLoading,
-  busy, feedback, feedbackError, onClose, onDepartmentChange, onGrant, onManageAudiences, onRemoveFromAudience }: {
+export function MemberDetailIsland({ member, organizationName, isAdmin, departmentName, departments, grants,
+  busy, feedback, feedbackError, onClose, onDepartmentChange, onGrant }: {
   member: Member; organizationName: string; isAdmin: boolean; departmentName: (id: string | null) => string; departments: Department[];
-  grants: ReviewerGrant[]; audienceGroups: AudienceGroupRecord[]; groupsLoading: boolean; busy: boolean; feedback: string; feedbackError: string;
-  onClose: () => void; onDepartmentChange: (id: string) => void; onGrant: () => void; onManageAudiences: () => void;
-  onRemoveFromAudience: (group: AudienceGroupRecord, groupMembershipId: string) => void;
+  grants: ReviewerGrant[]; busy: boolean; feedback: string; feedbackError: string;
+  onClose: () => void; onDepartmentChange: (id: string) => void; onGrant: () => void;
 }) {
   const heading = useDetailFocus();
   const titleId = useId();
   const [moving, setMoving] = useState(false);
   const status = memberStatus(member.status, member.departmentId, isAdmin);
   const otherDepartments = (member.departmentIds ?? []).filter((id) => id !== member.departmentId);
-  const groupMemberships = audienceGroups.flatMap((group) => group.members
-    .filter((groupMember) => groupMember.membershipId === member.id && groupMember.status === "ACTIVE")
-    .map((groupMember) => ({ group, groupMember })));
   return <aside className="island island-panel island-side" aria-labelledby={titleId}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <div className="island-side-header">
@@ -91,15 +86,12 @@ export function MemberDetailIsland({ member, organizationName, isAdmin, departme
       <span>{grantCoverageLabel(grant.scope)}</span></li>)}</ul>}
     <section className="island-detail-section" aria-label="Readers">
       <h3>Readers</h3>
-      {groupsLoading ? <p className="island-meta" role="status">Loading reader groups…</p> : <div className="island-chip-row">
-        {member.status === "ACTIVE" && <span className="island-chip">Everyone in {organizationName}</span>}
-        {member.status === "ACTIVE" && member.departmentId && <span className="island-chip">Everyone in {departmentName(member.departmentId)}</span>}
-        {groupMemberships.map(({ group, groupMember }) => <span className="island-chip" key={groupMember.id}>{group.name}
-          <button type="button" className="island-chip-remove" disabled={busy} aria-label={`Remove ${member.name} from ${group.name}`}
-            onClick={() => onRemoveFromAudience(group, groupMember.id)}><Icon name="close" size={12} /></button></span>)}
-        {member.status !== "ACTIVE" && !groupMemberships.length && <span className="island-meta">No reader groups</span>}
-      </div>}
-      <button type="button" className="secondary-button" onClick={onManageAudiences}>Manage reader groups</button>
+      <div className="island-chip-row">
+        {member.status === "ACTIVE" ? <>
+          <span className="island-chip">Everyone in {organizationName}</span>
+          {member.departmentId && <span className="island-chip">Everyone in {departmentName(member.departmentId)}</span>}
+        </> : <span className="island-meta">Not a reader until active</span>}
+      </div>
     </section>
     <div className="island-detail-section">
       <button type="button" className="secondary-button is-danger" disabled>Remove from organization</button>

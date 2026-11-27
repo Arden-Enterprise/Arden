@@ -5,7 +5,6 @@ import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrganizationAdminPage } from "../src/organization/OrganizationAdminPage";
 import { ApiError, type OrganizationAdministration } from "../src/shared/api-client";
-import type { AudienceGroupRecord } from "../src/shared/audience-group-contracts";
 import * as apiClient from "../src/shared/api-client";
 import { installTestDialogs } from "./dialogTestSupport";
 
@@ -13,7 +12,7 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/shared/api-client")>();
   return { ...actual,
     loadOrganizationAdministration: vi.fn(), listReviewerGrants: vi.fn(),
-    createDepartment: vi.fn(), deleteDepartment: vi.fn(), loadAudienceGroups: vi.fn(), saveAudienceGroup: vi.fn(),
+    createDepartment: vi.fn(), deleteDepartment: vi.fn(),
   };
 });
 
@@ -26,9 +25,6 @@ const administration: OrganizationAdministration = {
       departmentId: "department", isOrganizationAdmin: false, roleIds: [], roleNames: [] },
   ],
 };
-const group: AudienceGroupRecord = {
-  id: "group", name: "Operations readers", description: "Original", status: "ACTIVE", version: 1, members: [],
-};
 
 let restoreDialogs: () => void;
 beforeEach(() => {
@@ -36,7 +32,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(apiClient.loadOrganizationAdministration).mockResolvedValue(administration);
   vi.mocked(apiClient.listReviewerGrants).mockResolvedValue([]);
-  vi.mocked(apiClient.loadAudienceGroups).mockResolvedValue([group]);
   Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
 });
 afterEach(() => { cleanup(); restoreDialogs(); Reflect.deleteProperty(HTMLElement.prototype, "scrollTo"); });
@@ -94,21 +89,15 @@ describe("organization admin manual findings", () => {
     expect(screen.getByRole("alertdialog")).toBe(dialog);
   });
 
-  it("makes custom group renaming visible and omits unassigned members from Add", async () => {
-    vi.mocked(apiClient.saveAudienceGroup).mockResolvedValue({ ...group, name: "Renamed readers", version: 2 });
+  it("offers no reader group management (decision 0039)", async () => {
     openAdmin();
-    fireEvent.click(await screen.findByRole("tab", { name: /Readers/i }));
-    fireEvent.click(await screen.findByRole("button", { name: /Operations readers/i }));
-    const addMembers = screen.getByRole("combobox", { name: "Add an active member" });
-    expect(within(addMembers).queryByRole("option", { name: /Waiting/i })).toBeNull();
-    expect(within(addMembers).getByRole("option", { name: /Ready/i })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Edit name" }));
-    const name = screen.getByRole("textbox", { name: "Group name" });
-    fireEvent.change(name, { target: { value: "Renamed readers" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save group" }));
-    await waitFor(() => expect(apiClient.saveAudienceGroup).toHaveBeenCalledWith(
-      "web", "org", group, { name: "Renamed readers", description: "Original" },
-    ));
+    const tabs = await screen.findAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent?.replace(/\d+$/, ""))).toEqual(
+      ["Members", "Departments", "Invitations", "Review permissions", "Documents", "Sharing"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Open details for Ready" }));
+    const readers = await screen.findByRole("region", { name: "Readers" });
+    expect(within(readers).getByText("Everyone in Test Org")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /reader group/i })).toBeNull();
   });
 
   it("no longer points admins to Topic management (decision 0025)", async () => {
