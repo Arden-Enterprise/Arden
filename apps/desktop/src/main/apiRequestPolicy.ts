@@ -80,11 +80,6 @@ const adminCreatePath = new RegExp(`^/api/v1/organizations/${uuid}/(departments|
 const adminMemberDepartmentPath = new RegExp(`^/api/v1/organizations/${uuid}/members/${uuid}/department$`);
 const adminInvitationActionPath = new RegExp(`^/api/v1/organizations/${uuid}/invitations/${uuid}/(resend|revoke)$`);
 const adminDepartmentActionPath = new RegExp(`^/api/v1/organizations/${uuid}/departments/${uuid}/delete$`);
-const audienceGroupReadPath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups(?:/${uuid})?$`);
-const audienceGroupItemPath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}$`);
-const audienceGroupMemberPath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/members$`);
-const audienceGroupRemovePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/members/${uuid}/remove$`);
-const audienceGroupDeactivatePath = new RegExp(`^/api/v1/organizations/${uuid}/audience-groups/${uuid}/deactivate$`);
 const systemAdministratorCollection = /^\/api\/v1\/system\/administrators$/;
 const systemAdministratorRevoke = new RegExp(`^/api/v1/system/administrators/${uuid}/revoke$`);
 const systemAdministratorCapability = new RegExp(`^/api/v1/system/administrators/${uuid}$`);
@@ -371,16 +366,6 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
   const adminGet = administrationPath.test(url.pathname) && request.method === "GET"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
-  const audienceGroupGet = audienceGroupReadPath.test(url.pathname) && request.method === "GET"
-    && !request.body && !request.ifMatch && !request.idempotencyKey;
-  const audienceGroupPatch = audienceGroupItemPath.test(url.pathname) && request.method === "PATCH"
-    && Boolean(request.body) && typeof request.ifMatch === "string" && /^"audience-group-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
-  const audienceGroupAddMember = audienceGroupMemberPath.test(url.pathname) && request.method === "POST"
-    && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
-  const audienceGroupRemoveMember = audienceGroupRemovePath.test(url.pathname) && request.method === "POST"
-    && request.body === "{}" && !request.ifMatch && !request.idempotencyKey;
-  const audienceGroupDeactivate = audienceGroupDeactivatePath.test(url.pathname) && request.method === "POST"
-    && request.body === "{}" && typeof request.ifMatch === "string" && /^"audience-group-[1-9][0-9]*"$/.test(request.ifMatch) && !request.idempotencyKey;
   const systemAdministrationGet = systemAdministratorCollection.test(url.pathname) && request.method === "GET"
     && !url.search && !request.body && !request.ifMatch && !request.idempotencyKey;
   const systemAdministrationGrant = systemAdministratorCollection.test(url.pathname) && request.method === "POST"
@@ -464,8 +449,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
   return (privateOrganizationRequest || placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeGraphGet || knowledgeDocumentRelationshipCreate || knowledgeDocumentRelationshipRemove || knowledgeCreate || knowledgePdfCreate || knowledgePatch
     || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || knowledgeRenewalsGet || knowledgeRenewalPost || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || writingAction || reviewAi || aiConversationListGet || aiConversationItemGet || aiFeedback || readerSummary || adminGet
-    || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
-    || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
+    || adminPost || adminAction || accountPost || invitationGet
     || maintenanceImportPost || maintenanceList || maintenanceCreate || maintenanceRead || maintenanceWrite
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke || systemAdministrationCapability
     || systemConsoleGet || systemAuthRequest || systemAiFeedback
