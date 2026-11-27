@@ -12,7 +12,6 @@ import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
 import { MemoryPrivateOrganizationStore } from "./private-notes/organization.test-support.js";
 import type { InvitationEmail, InvitationMailer } from "./email/smtp-mailer.js";
 import { LocalFlow1TestInvitationMailer } from "./email/local-flow1-test-mailer.js";
-import { AudienceGroupError, type AudienceGroup, type AudienceGroupStore } from "./audiences/store.js";
 import { parseSemanticDocument } from "@arden/domain";
 import type { AskArdenClient } from "./answers/ai-client.js";
 import { evidenceManifest, evidenceText, MemoryConversationStore } from "./answers/conversation.test-support.js";
@@ -787,21 +786,15 @@ describe("API auth and private draft routes", () => {
     });
   });
 
-  it("exposes organization administration and audience/department mutations only to the Org Admin", async () => {
+  it("exposes organization administration and department mutations only to the Org Admin", async () => {
     const adminSession = await desktopSession(app, "owner@example.test");
     const adminData = await app.inject({ method: "GET", url: `/api/v1/organizations/${organizationId}/administration`, headers: { cookie: adminSession } });
     expect(adminData.statusCode).toBe(200);
     expect(adminData.json().departments[0].name).toBe("Product");
     expect(adminData.json().members[0]).toMatchObject({ isOrganizationAdmin: true });
 
-    const createdAudience = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Operations readers", description: "Operations knowledge audience" } });
-    expect(createdAudience.statusCode).toBe(201);
-    expect(createdAudience.json()).toMatchObject({ name: "Operations readers", members: [] });
-    expect(createdAudience.headers.etag).toBe('"audience-group-1"');
     const createdDepartment = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/departments`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Operations" } });
     expect(createdDepartment.statusCode).toBe(201);
-    const assigned = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups/${createdAudience.json().id}/members`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { membershipId: "77777777-7777-4777-8777-777777777777" } });
-    expect(assigned.statusCode).toBe(201);
 
     const changedDepartment = await app.inject({
       method: "POST",
@@ -846,9 +839,24 @@ describe("API auth and private draft routes", () => {
       headers: { cookie: memberSession, origin: "http://localhost:5180" },
     });
     expect(deniedDelete.statusCode).toBe(404);
-    const deniedAudienceWrite = await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/audience-groups`, headers: { cookie: memberSession, origin: "http://localhost:5180" }, payload: { name: "Forged audience", description: "" } });
-    expect(deniedAudienceWrite.statusCode).toBe(404);
     expect((await app.inject({ method: "POST", url: `/api/v1/organizations/${organizationId}/roles`, headers: { cookie: adminSession, origin: "http://localhost:5180" }, payload: { name: "Legacy role" } })).statusCode).toBe(404);
+  });
+
+  it("no longer serves reader group management to anyone (decision 0039)", async () => {
+    const adminSession = await desktopSession(app, "owner@example.test");
+    const groupId = "99999999-9999-4999-8999-999999999990";
+    const base = `/api/v1/organizations/${organizationId}/audience-groups`;
+    const headers = { cookie: adminSession, origin: "http://localhost:5180" };
+    const responses = await Promise.all([
+      app.inject({ method: "GET", url: base, headers }),
+      app.inject({ method: "GET", url: `${base}/${groupId}`, headers }),
+      app.inject({ method: "POST", url: base, headers, payload: { name: "Operations readers", description: "" } }),
+      app.inject({ method: "PATCH", url: `${base}/${groupId}`, headers, payload: { name: "Renamed", description: "" } }),
+      app.inject({ method: "POST", url: `${base}/${groupId}/members`, headers, payload: { membershipId: "77777777-7777-4777-8777-777777777777" } }),
+      app.inject({ method: "POST", url: `${base}/${groupId}/members/77777777-7777-4777-8777-777777777777/remove`, headers, payload: {} }),
+      app.inject({ method: "POST", url: `${base}/${groupId}/deactivate`, headers, payload: {} }),
+    ]);
+    expect(responses.map((response) => response.statusCode)).toEqual([404, 404, 404, 404, 404, 404, 404]);
   });
 
   it("requires a signed-in verified email and validates organization setup input", async () => {
@@ -2898,75 +2906,6 @@ class FakeAuthProvider implements AuthProvider {
   }
 }
 
-class MemoryAudienceGroupStore implements AudienceGroupStore {
-  private groups: AudienceGroup[] = [];
-
-  private authorize(userId: string, requestedOrganization: string) {
-    if (userId !== ownerId || requestedOrganization !== organizationId) {
-      throw new AudienceGroupError("AUDIENCE_GROUP_UNAVAILABLE");
-    }
-  }
-
-  async list(userId: string, requestedOrganization: string) {
-    this.authorize(userId, requestedOrganization);
-    return this.groups;
-  }
-
-  async get(userId: string, requestedOrganization: string, audienceGroupId: string) {
-    this.authorize(userId, requestedOrganization);
-    const group = this.groups.find(item => item.id === audienceGroupId);
-    if (!group) throw new AudienceGroupError("AUDIENCE_GROUP_UNAVAILABLE");
-    return group;
-  }
-
-  async create(userId: string, requestedOrganization: string,
-    input: { name: string; description: string }) {
-    this.authorize(userId, requestedOrganization);
-    const group: AudienceGroup = {
-      id: "88888888-8888-4888-8888-888888888888", name: input.name.trim(),
-      description: input.description, status: "ACTIVE", version: 1, members: [],
-    };
-    this.groups = [group];
-    return group;
-  }
-
-  async update(userId: string, requestedOrganization: string, audienceGroupId: string,
-    version: number, input: { name: string; description: string }) {
-    const group = await this.get(userId, requestedOrganization, audienceGroupId);
-    if (group.version !== version) throw new AudienceGroupError("AUDIENCE_GROUP_CONFLICT");
-    Object.assign(group, input, { version: version + 1 });
-    return group;
-  }
-
-  async addMember(userId: string, requestedOrganization: string, audienceGroupId: string,
-    membershipId: string) {
-    const group = await this.get(userId, requestedOrganization, audienceGroupId);
-    group.members.push({ id: createKey, membershipId, status: "ACTIVE",
-      validFrom: "2026-10-20T00:00:00.000Z", validUntil: null });
-    group.version += 1;
-    return group;
-  }
-
-  async removeMember(userId: string, requestedOrganization: string, audienceGroupId: string,
-    groupMembershipId: string) {
-    const group = await this.get(userId, requestedOrganization, audienceGroupId);
-    const member = group.members.find(item => item.id === groupMembershipId);
-    if (!member) throw new AudienceGroupError("AUDIENCE_GROUP_CONFLICT");
-    member.status = "REVOKED";
-    group.version += 1;
-    return group;
-  }
-
-  async deactivate(userId: string, requestedOrganization: string, audienceGroupId: string,
-    version: number) {
-    const group = await this.get(userId, requestedOrganization, audienceGroupId);
-    if (group.version !== version) throw new AudienceGroupError("AUDIENCE_GROUP_CONFLICT");
-    group.status = "INACTIVE";
-    group.version += 1;
-    return group;
-  }
-}
-
 class FakeAskArdenClient implements AskArdenClient {
   lastRequest: RetrievalRequest | null = null;
   onAnswer: (() => void) | null = null;
@@ -2993,7 +2932,6 @@ class FakeAskArdenClient implements AskArdenClient {
 
 class MemoryRepository implements ArdenDataRepository {
   readonly conversations = new MemoryConversationStore();
-  readonly audienceGroups: AudienceGroupStore = new MemoryAudienceGroupStore();
   readonly privateOrganization = new MemoryPrivateOrganizationStore({ organizationId, ownerId, memberIds: [otherId] });
   constructor() {
     this.privateOrganization.addNote({ id: draftId, title: "Review notes",
