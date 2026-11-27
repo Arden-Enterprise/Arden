@@ -18,6 +18,7 @@ describe("Google account password setup", () => {
     fireEvent.change(password, { target: { value: "short" } });
     expect(screen.getByText("At least 8 characters").closest("li")?.textContent).toContain("Not met:");
     expect(screen.getByText("At least 1 uppercase letter").closest("li")?.textContent).toContain("Not met:");
+    expect(screen.getByText("At least 1 lowercase letter").closest("li")?.textContent).toContain("Met:");
     expect(screen.getByText("At least 1 special character").closest("li")?.textContent).toContain("Not met:");
     fireEvent.change(password, { target: { value: "ABCDEFGH!" } });
     expect(screen.getByText("At least 1 lowercase letter").closest("li")?.textContent).toContain("Not met:");
