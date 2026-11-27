@@ -13,7 +13,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    environment: Literal["development", "test", "production"] = "development"
+    environment: Literal["development", "test", "staging", "production"] = "development"
     log_level: str = "INFO"
     openai_api_key: SecretStr | None = None
     openai_embedding_model: str = "text-embedding-3-small"
