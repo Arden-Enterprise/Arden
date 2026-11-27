@@ -110,6 +110,7 @@ export function GraphPage({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [focusNodeIds, setFocusNodeIds] = useState<string[]>([]);
   const [focusNonce, setFocusNonce] = useState(0);
+  const [isolateFitNonce, setIsolateFitNonce] = useState(0);
   const [serverFocusDocumentId, setServerFocusDocumentId] = useState<string | null>(() => filterState.focusDocumentId);
 
   const [payload, setPayload] = useState<KnowledgeGraphPayload | null>(null);
@@ -128,7 +129,7 @@ export function GraphPage({
   const lastSyncedSearch = useRef<string>(shellBridge?.graphSearch ?? "");
   const requestIdRef = useRef(0);
   const layoutIdRef = useRef(0);
-  const isolateFitPending = useRef(false);
+  const lastHandledIsolateNonce = useRef(0);
 
   const pinnedSet = useMemo<ReadonlySet<string>>(() => {
     if (!rawPinnedIds) return new Set();
@@ -256,7 +257,7 @@ export function GraphPage({
         break;
       }
       case "isolate_branch": {
-        isolateFitPending.current = true;
+        setIsolateFitNonce((nonce) => nonce + 1);
         setSelectedNodeId(null);
         setFocusNodeIds([]);
         setServerFocusDocumentId(null);
@@ -434,9 +435,9 @@ export function GraphPage({
     }).then((computed) => {
       if (active && layoutIdRef.current === runId) {
         setLayout(computed);
-        if (isolateFitPending.current) {
-          isolateFitPending.current = false;
-          if (filterState.isolateMatching) setFocusNonce((nonce) => nonce + 1);
+        if (isolateFitNonce > lastHandledIsolateNonce.current && filterState.isolateMatching) {
+          lastHandledIsolateNonce.current = isolateFitNonce;
+          setFocusNonce((nonce) => nonce + 1);
         }
       }
     });
@@ -451,6 +452,7 @@ export function GraphPage({
     layoutFocusIds,
     effectiveCrossLinksOn,
     elkLayoutFn,
+    isolateFitNonce,
   ]);
 
   const handleSelectNode = useCallback((nodeId: string | null) => {

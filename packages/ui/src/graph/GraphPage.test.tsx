@@ -484,6 +484,52 @@ describe("GraphPage", () => {
     });
   });
 
+  it("still calls fitView for isolate_branch when an earlier layout computation settles right before isolate renders", async () => {
+    const rel: GraphRelationshipEdge = {
+      relationshipId: "rel-race",
+      sourceDocumentId: "doc-1" as DocumentId,
+      targetDocumentId: "doc-2" as DocumentId,
+      relationshipType: "REFERENCES",
+      createdAt: "2026-11-21T00:00:00Z",
+    };
+    let resolveSlowLayout: (() => void) | null = null;
+    let elkCalls = 0;
+    const elkLayoutFn = vi.fn(async (graph: { children: Array<{ id: string }> }) => {
+      elkCalls += 1;
+      if (elkCalls === 1) {
+        await new Promise<void>((resolve) => { resolveSlowLayout = resolve; });
+      }
+      return { children: graph.children.map((child, idx) => ({ id: child.id, x: idx * 280, y: 0 })) };
+    });
+    vi.spyOn(apiClient, "getKnowledgeGraph").mockResolvedValue(makePayload({
+      appliedMode: { view: "accountability", monitorActive: false, includeExpiredActive: true, includeLinksActive: true },
+      relationships: [rel],
+    }));
+    const { bridge, bus } = createBridge("?includeLinks=true");
+
+    render(createElement(
+      ShellBridgeContext.Provider,
+      { value: bridge },
+      createElement(GraphPage, {
+        platform: "web",
+        organizationId: "org-1",
+        contextOpen: false,
+        onToggleContext: vi.fn(),
+        elkLayoutFn,
+      }),
+    ));
+
+    await waitFor(() => expect(elkLayoutFn).toHaveBeenCalledTimes(1));
+    fitView.mockClear();
+    bus.dispatch({ type: "isolate_branch", branchKind: "department", branchId: "dept-eng" });
+    resolveSlowLayout?.();
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Isolate matching" }).getAttribute("aria-pressed")).toBe("true");
+      expect(fitView).toHaveBeenCalled();
+    });
+  });
+
   it("opens GraphRelationshipDialog from floating toolbar, creates/removes links, and surfaces 409 conflicts cleanly", async () => {
     const existingEdge: GraphRelationshipEdge = {
       relationshipId: "rel-existing",
