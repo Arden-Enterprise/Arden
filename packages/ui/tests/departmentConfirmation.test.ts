@@ -16,7 +16,6 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
     ...actual,
     loadOrganizationAdministration: vi.fn(),
     listReviewerGrants: vi.fn(),
-    loadAudienceGroups: vi.fn(),
     changePrimaryDepartment: vi.fn(),
   };
 });
@@ -59,7 +58,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(apiClient.loadOrganizationAdministration).mockResolvedValue(mockAdminData);
   vi.mocked(apiClient.listReviewerGrants).mockResolvedValue([]);
-  vi.mocked(apiClient.loadAudienceGroups).mockResolvedValue([]);
 });
 
 afterEach(() => {

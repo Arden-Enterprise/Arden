@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assignableReaderGroupMembers, departmentDeletionSummary, filterOrganizationMembers, membersInDepartment } from "../src/organization/memberAdministration";
+import { departmentDeletionSummary, filterOrganizationMembers, membersInDepartment } from "../src/organization/memberAdministration";
 import type { OrganizationAdministration } from "../src/shared/api-client";
 
 type Member = OrganizationAdministration["members"][number];
@@ -37,15 +37,6 @@ describe("organization member administration", () => {
       .toEqual([unassignedMember]);
     expect(filterOrganizationMembers([unassignedMember], { query: "", status: "ACTIVE", department: "ALL" }))
       .toEqual([]);
-  });
-
-  it("offers assigned members and organization admins for reader groups, excluding awaiting assignment", () => {
-    const unassignedMember = { ...member, id: "unassigned", departmentId: null, departmentIds: [] };
-    const unassignedAdmin = { ...admin, departmentId: null, departmentIds: [] };
-    const invitedMember = { ...member, id: "invited", status: "INVITED" };
-    expect(assignableReaderGroupMembers(
-      [unassignedMember, unassignedAdmin, member, invitedMember], new Set([member.id]),
-    ).map(candidate => candidate.id)).toEqual([admin.id]);
   });
 
   it("does not treat a custom role named Department Administrator as an organization admin", () => {
