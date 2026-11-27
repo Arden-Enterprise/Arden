@@ -149,11 +149,11 @@ describe("invitation page feedback", () => {
     const password = screen.getByLabelText("Password");
     const form = screen.getByRole("button", { name: "Create account and accept" }).closest("form")!;
 
-    for (const invalidPassword of ["abcdefgh!", "Abcdefgh"]) {
+    for (const invalidPassword of ["abcdefgh!", "LGK032005#", "Abcdefgh"]) {
       fireEvent.change(password, { target: { value: invalidPassword } });
       fireEvent.submit(form);
       expect(signUp).not.toHaveBeenCalled();
-      expect(screen.getByRole("alert").textContent).toContain("one uppercase letter, and one special character");
+      expect(screen.getByRole("alert").textContent).toContain("one uppercase letter, one lowercase letter, and one special character");
     }
   });
 
