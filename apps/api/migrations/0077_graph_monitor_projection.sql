@@ -18,10 +18,11 @@ SET search_path TO arden, public;
 --     exact-version grant test; Org Admin rows are metadata-only and open through
 --     decision 0023 audited inspection rather than becoming reader/AI sources.
 --
--- Operator rollout: adds one reviewed SECURITY DEFINER routine
--- (list_graph_monitor_documents; 62 in the owner inventory). Apply as the trusted
--- superuser so it keeps its postgres owner; register it in release-policy.json and
--- deploy/release/security-definer-owner-repair.sql in the same change.
+-- Operator rollout: adds two reviewed SECURITY DEFINER routines
+-- (list_graph_monitor_documents, get_publication_renewal_state; 63 in the owner
+-- inventory). Apply as the trusted superuser so they keep their postgres owner;
+-- register them in release-policy.json and deploy/release/security-definer-owner-repair.sql
+-- in the same change.
 
 DO $$
 BEGIN
@@ -293,3 +294,52 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = arden, pg_temp AS $$
 $$;
 REVOKE ALL ON FUNCTION list_graph_monitor_documents(boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION list_graph_monitor_documents(boolean) TO arden_runtime;
+
+-- Decision 0032 / 0036: exact single-document renewal state lookup without
+-- list_publication_renewal_state()'s 1,000-row cap, preserving identical
+-- authorization (author, Org Admin, or responsible reviewer) and metadata-only projection.
+CREATE FUNCTION get_publication_renewal_state(p_document_id uuid)
+RETURNS TABLE (document_id uuid, published_version_id uuid, title text, responsible_department_id uuid,
+    expiration_date date, renewal_pending boolean, author_active boolean, is_author boolean, can_renew boolean,
+    pending_submission_id uuid, pending_snapshot_version_id uuid, pending_content_hash text,
+    pending_on_behalf boolean, pending_requested_by text, pending_reason text, pending_expiration_date date,
+    pending_requested_at timestamptz, author_window_until timestamptz, can_decide boolean, author_name text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = arden, pg_temp AS $$
+DECLARE
+    org uuid := NULLIF(current_setting('arden.organization_id', true), '')::uuid;
+    actor uuid := governance_actor_membership(NULLIF(current_setting('arden.organization_id', true), '')::uuid);
+    admin boolean;
+    today date := (now() AT TIME ZONE 'UTC')::date;
+BEGIN
+    IF actor IS NULL OR p_document_id IS NULL THEN RETURN; END IF;
+    admin := governance_is_org_admin(actor, org);
+    RETURN QUERY
+    WITH visible AS (
+        SELECT g.shared_draft_id, g.published_version_id, g.title, g.responsible_department_id,
+               publication_expiration_date(g.published_version_id, pv.management) AS expires_on,
+               renewal_member_active(g.submitted_by_membership_id) AS author_is_active,
+               g.submitted_by_membership_id = actor AS mine,
+               CASE WHEN renewal_member_active(g.submitted_by_membership_id)
+                    THEN renewal_member_name(g.submitted_by_membership_id) END AS author_display_name
+          FROM governance_current_publication g
+          JOIN published_knowledge_version pv ON pv.published_version_id = g.published_version_id
+         WHERE g.organization_id = org
+           AND g.shared_draft_id = p_document_id
+           AND (g.submitted_by_membership_id = actor OR admin
+             OR governance_is_responsible_reviewer(actor, org, g.responsible_department_id, g.reader_mode)))
+    SELECT v.shared_draft_id, v.published_version_id, v.title, v.responsible_department_id, v.expires_on,
+           p.submission_id IS NOT NULL, v.author_is_active, v.mine,
+           v.expires_on IS NOT NULL AND p.submission_id IS NULL
+             AND (v.mine OR NOT v.author_is_active OR v.expires_on <= today + 7),
+           p.submission_id, p.shared_draft_version_id, p.content_hash, p.on_behalf_of_author,
+           CASE WHEN p.submission_id IS NOT NULL THEN renewal_member_name(p.submitted_by_membership_id) END,
+           p.request_reason, p.renewal_expiration_date, p.submitted_at,
+           (SELECT w.window_until FROM renewal_author_window(p.submission_id) w WHERE w.author_active),
+           COALESCE(p.on_behalf_of_author AND v.mine, false), v.author_display_name
+      FROM visible v
+      LEFT JOIN LATERAL (SELECT c.* FROM shared_submission c WHERE c.shared_draft_id = v.shared_draft_id
+                           AND c.request_type = 'RENEWAL' AND c.status = 'PENDING_REVIEW' LIMIT 1) p ON true;
+END;
+$$;
+REVOKE ALL ON FUNCTION get_publication_renewal_state(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION get_publication_renewal_state(uuid) TO arden_runtime;

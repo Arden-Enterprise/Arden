@@ -460,7 +460,7 @@
     {
       "id": "0077",
       "filename": "0077_graph_monitor_projection.sql",
-      "sha256": "fe9770983c85b93fedbee27c74e8f2fdace80cfe5e6dd9cbb2c6e3fe57d9d290",
+      "sha256": "4a671f9d37266a892310ef33dad2ea98f9481e5915ebe33fd7b56a4adf2fddbc",
       "rollout": "operator"
     }
   ]

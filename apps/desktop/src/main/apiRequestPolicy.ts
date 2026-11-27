@@ -327,9 +327,14 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   // T6.1/T6.4: an author's reader-change or withdrawal request carries a body and an idempotency key.
   const knowledgeChange = knowledgeChangeRequest.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
-  // Decision 0032: renewal validity list and reviewed renewal request with idempotency key.
+  // Decision 0032: renewal validity list (optional exact documentId lookup) and reviewed renewal request with idempotency key.
+  const renewalsDocumentIds = url.searchParams.getAll("documentId");
+  const knowledgeRenewalsQuery = !url.search
+    || ([...url.searchParams.keys()].every((key) => key === "documentId")
+      && renewalsDocumentIds.length === 1
+      && uuidPattern.test(renewalsDocumentIds[0] ?? ""));
   const knowledgeRenewalsGet = knowledgeRenewals.test(url.pathname) && request.method === "GET"
-    && !url.search && !request.body && !request.ifMatch && !request.idempotencyKey;
+    && knowledgeRenewalsQuery && !request.body && !request.ifMatch && !request.idempotencyKey;
   const knowledgeRenewalPost = knowledgeRenewalRequest.test(url.pathname) && request.method === "POST"
     && !url.search && renewalBody(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
   const reportCursors = url.searchParams.getAll("cursor");
@@ -465,7 +470,7 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     || systemConsoleGet || systemAuthRequest || systemAiFeedback
     || notificationsGet || notificationReadRequest || notificationReadAllRequest)
     && (!url.search || queryAllowed || catalogQuery || notificationsGet || publicationScopeQuery || maintenanceList || maintenanceRead
-      || closedReports || aiConversationItemGet || knowledgeGraphGet || systemConsoleGet);
+      || closedReports || aiConversationItemGet || knowledgeGraphGet || knowledgeRenewalsGet || systemConsoleGet);
 }
 
 const graphViewModes = new Set(["accountability", "collections"]);

@@ -2773,6 +2773,26 @@ describe("API auth and private draft routes", () => {
       headers: { cookie: owner, origin: "http://localhost:5180" } });
     expect(state.statusCode).toBe(200);
     expect(state.json().items).toEqual(repository.renewalState);
+    const exactState = await app.inject({
+      method: "GET",
+      url: `/api/v1/organizations/${organizationId}/knowledge/renewals?documentId=${sharedDraftId}`,
+      headers: { cookie: owner, origin: "http://localhost:5180" },
+    });
+    expect(exactState.statusCode).toBe(200);
+    expect(exactState.json().items).toEqual(repository.renewalState);
+    const missingExactState = await app.inject({
+      method: "GET",
+      url: `/api/v1/organizations/${organizationId}/knowledge/renewals?documentId=11111111-1111-4111-8111-111111111111`,
+      headers: { cookie: owner, origin: "http://localhost:5180" },
+    });
+    expect(missingExactState.statusCode).toBe(200);
+    expect(missingExactState.json().items).toEqual([]);
+    const invalidExactState = await app.inject({
+      method: "GET",
+      url: `/api/v1/organizations/${organizationId}/knowledge/renewals?documentId=not-a-uuid`,
+      headers: { cookie: owner, origin: "http://localhost:5180" },
+    });
+    expect(invalidExactState.statusCode).toBe(400);
   });
 
   it("routes desktop-compatible sign-in through the same HttpOnly Supabase session", async () => {
@@ -3515,9 +3535,10 @@ class MemoryRepository implements ArdenDataRepository {
   renewalResult: RequestPublicationRenewalResult["kind"] = "requested";
   renewalInputs: PublicationRenewalInput[] = [];
   reminderRuns = 0;
-  async listPublicationRenewalState(userId: string, requestedOrganization: string): Promise<PublicationRenewalState[] | null> {
+  async listPublicationRenewalState(userId: string, requestedOrganization: string, documentId?: string): Promise<PublicationRenewalState[] | null> {
     if (requestedOrganization !== organizationId) return null;
-    return userId === ownerId ? this.renewalState : [];
+    if (userId !== ownerId) return [];
+    return documentId ? this.renewalState.filter((item) => item.documentId === documentId) : this.renewalState;
   }
 
   async requestPublicationRenewal(userId: string, requestedOrganization: string, documentId: string,

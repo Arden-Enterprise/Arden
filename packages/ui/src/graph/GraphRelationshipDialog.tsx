@@ -83,6 +83,7 @@ export function GraphRelationshipDialog({
   const [relationships, setRelationships] = useState<readonly GraphRelationshipEdge[]>(providedRelationships ?? []);
   const [loading, setLoading] = useState(!providedDocuments || !providedRelationships);
   const [loadError, setLoadError] = useState("");
+  const [incompleteResults, setIncompleteResults] = useState(false);
   const [targetDocumentId, setTargetDocumentId] = useState("");
   const [relationshipType, setRelationshipType] = useState<DocumentRelationshipType>("REFERENCES");
   const [busy, setBusy] = useState(false);
@@ -123,6 +124,7 @@ export function GraphRelationshipDialog({
       if (!mountedRef.current || loadRequestIdRef.current !== requestId) return;
       setDocuments(payload.documents);
       setRelationships(payload.relationships);
+      setIncompleteResults(Boolean(payload.truncation.truncated || payload.truncation.relationshipsTruncated));
     } catch (caught) {
       if (!mountedRef.current || loadRequestIdRef.current !== requestId) return;
       setLoadError(formatRelationshipError(caught, "Couldn’t load document links."));
@@ -336,6 +338,15 @@ export function GraphRelationshipDialog({
               <p className="graph-rel-status" role="status" aria-live="polite">
                 {statusMessage}
               </p>
+            )}
+
+            {incompleteResults && (
+              <div className="island-note is-warning graph-banner" role="status">
+                <Icon name="warning" size={14} />
+                <span>
+                  Showing links across up to 500 documents and 1,000 links. Some target choices or links in large organizations may be omitted.
+                </span>
+              </div>
             )}
 
             <section className="graph-rel-section" aria-labelledby="graph-rel-outgoing-title">

@@ -671,21 +671,31 @@ export function GraphPage({
         ) : null}
       </div>
 
-      {relationshipDialogDoc && (
-        <GraphRelationshipDialog
-          platform={platform}
-          organizationId={organizationId}
-          sourceDocument={{
-            documentId: relationshipDialogDoc.documentId,
-            title: relationshipDialogDoc.title,
-            version: relationshipDialogDoc.version,
-          }}
-          documents={payload?.documents}
-          relationships={payload?.appliedMode.includeLinksActive ? payload.relationships : undefined}
-          onChanged={() => setRefreshTick((tick) => tick + 1)}
-          onClose={() => setRelationshipDialogDoc(null)}
-        />
-      )}
+      {relationshipDialogDoc && (() => {
+        const canReuseSnapshot = Boolean(
+          payload
+          && payload.appliedMode.includeLinksActive
+          && !payload.truncation.truncated
+          && !payload.truncation.relationshipsTruncated
+          && !hasActiveFacetFilters(filterState)
+          && filterState.relationshipTypes.length === documentRelationshipTypes.length,
+        );
+        return (
+          <GraphRelationshipDialog
+            platform={platform}
+            organizationId={organizationId}
+            sourceDocument={{
+              documentId: relationshipDialogDoc.documentId,
+              title: relationshipDialogDoc.title,
+              version: relationshipDialogDoc.version,
+            }}
+            documents={canReuseSnapshot ? payload?.documents : undefined}
+            relationships={canReuseSnapshot ? payload?.relationships : undefined}
+            onChanged={() => setRefreshTick((tick) => tick + 1)}
+            onClose={() => setRelationshipDialogDoc(null)}
+          />
+        );
+      })()}
 
       {responsibleDoc && <GovernanceActionDialog key={responsibleDoc.publishedVersionId}
         target={{ ...responsibleDoc, kind: "responsible" }} platform={platform} organizationId={organizationId}

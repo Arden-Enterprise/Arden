@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "deploy" / "release
 from management import migration_role_name, migration_role_probe_sql, valid_migration_role_probe
 
 
-REVIEWED_BASELINE_DEFINER_COUNT = 49
+REVIEWED_BASELINE_DEFINER_COUNT = 50
 # Isolated System Admin executors (0072/0074). They stay superuser-owned and outside the transfer.
 REVIEWED_SYSTEM_DEFINERS = {
     "console_report(uuid, text, uuid, timestamp with time zone, timestamp with time zone, text, text, integer, integer)",
@@ -23,6 +23,7 @@ REVIEWED_GRAPH_DEFINERS = {
     "enforce_document_relationship_invariants()",
     "remove_governed_document_relationship(uuid, uuid)",
     "list_graph_monitor_documents(boolean)",
+    "get_publication_renewal_state(uuid)",
 }
 REVIEWED_MAINTENANCE_DEFINERS = {
     "enqueue_maintenance_submission_notices()",

@@ -9,7 +9,7 @@ SELECT pg_advisory_xact_lock(hashtext('arden:migrations'));
 DO $repair_internal_execution$
 DECLARE
     item record;
-    -- Exact `arden` inventory after migrations 0001-0077 (62 routines).
+    -- Exact `arden` inventory after migrations 0001-0077 (63 routines).
     -- `arden_system` routines are never transferred to the migration role (see the owner template).
     expected_names text[] := ARRAY[
         -- Reviewed baseline (0001-0022).
@@ -51,8 +51,8 @@ DECLARE
         -- 0076 governed document relationships (decision 0036).
         'current_readable_document_ids', 'actor_can_manage_relationship_source',
         'enforce_document_relationship_invariants', 'remove_governed_document_relationship',
-        -- 0077 Governance Monitor projection (decision 0036).
-        'list_graph_monitor_documents'];
+        -- 0077 Governance Monitor projection & exact renewal lookup (decision 0036).
+        'list_graph_monitor_documents', 'get_publication_renewal_state'];
     -- Flow 4 includes overloaded routines: match their exact signatures.
     expected_maintenance_signatures text[] := ARRAY[
         'enqueue_maintenance_submission_notices()',

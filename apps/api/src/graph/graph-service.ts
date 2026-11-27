@@ -115,9 +115,14 @@ export interface GraphStore {
       monitorRequested: boolean;
       includeExpired: boolean;
       includeLinks: boolean;
+      focusDocumentId?: string;
+      limit: number;
       relationshipTypes: readonly DocumentRelationshipType[] | null;
       relationshipsLimitPlusOne: number;
-      selectDocumentIdsForLinks: (loaded: Omit<GraphLoadedBundle, "relationships">) => readonly string[];
+      selectDocumentIdsForLinks: (
+        loaded: Omit<GraphLoadedBundle, "relationships">,
+        focusPeerDocumentIds?: readonly string[],
+      ) => readonly string[];
     },
   ): Promise<GraphLoadedBundle | null>;
 }
@@ -595,6 +600,28 @@ export class PgGraphStore implements GraphStore {
     return { documents, hasAuthoredPublishedDoc };
   }
 
+  private async listFocusPeerDocumentIdsInTx(
+    client: PoolClient,
+    organizationId: string,
+    focusDocumentId: string,
+    relationshipTypes: readonly DocumentRelationshipType[] | null,
+    limit: number,
+  ): Promise<string[]> {
+    if (limit <= 0) return [];
+    const result = await client.query<{ peer_id: string }>(`
+      SELECT DISTINCT
+             CASE
+               WHEN r.source_document_id = $2 THEN r.target_document_id
+               ELSE r.source_document_id
+             END AS peer_id
+        FROM document_relationship r
+       WHERE r.organization_id = $1
+         AND (r.source_document_id = $2 OR r.target_document_id = $2)
+         AND ($3::text[] IS NULL OR r.relationship_type = ANY($3::text[]))
+       LIMIT $4`, [organizationId, focusDocumentId, relationshipTypes, limit]);
+    return result.rows.map((row) => row.peer_id);
+  }
+
   private async listRelationshipsInTx(
     client: PoolClient,
     organizationId: string,
@@ -707,9 +734,14 @@ export class PgGraphStore implements GraphStore {
       monitorRequested: boolean;
       includeExpired: boolean;
       includeLinks: boolean;
+      focusDocumentId?: string;
+      limit: number;
       relationshipTypes: readonly DocumentRelationshipType[] | null;
       relationshipsLimitPlusOne: number;
-      selectDocumentIdsForLinks: (loaded: Omit<GraphLoadedBundle, "relationships">) => readonly string[];
+      selectDocumentIdsForLinks: (
+        loaded: Omit<GraphLoadedBundle, "relationships">,
+        focusPeerDocumentIds?: readonly string[],
+      ) => readonly string[];
     },
   ): Promise<GraphLoadedBundle | null> {
     return this.withActor(userId, organizationId, async (client) => {
@@ -830,7 +862,16 @@ export class PgGraphStore implements GraphStore {
         }
       }
 
-      const returnedIds = input.selectDocumentIdsForLinks(loaded);
+      const focusPeerIds = input.includeLinks && input.focusDocumentId && loaded.entries.length > input.limit
+        ? await this.listFocusPeerDocumentIdsInTx(
+          client,
+          organizationId,
+          input.focusDocumentId,
+          input.relationshipTypes,
+          Math.max(1, input.limit - 1),
+        )
+        : undefined;
+      const returnedIds = input.selectDocumentIdsForLinks(loaded, focusPeerIds);
       const relationships = input.includeLinks && returnedIds.length > 0
         ? await this.listRelationshipsInTx(
           client,
@@ -868,6 +909,7 @@ function projectGraphSelection(
   loaded: Omit<GraphLoadedBundle, "relationships">,
   query: KnowledgeGraphQuery,
   limit: number,
+  focusPeerDocumentIds?: readonly string[],
 ): ProjectedGraphSelection {
   const { organization, actor, utcToday, monitorActive, includeExpiredActive } = loaded;
   const rawEntries = monitorActive
@@ -963,16 +1005,55 @@ function projectGraphSelection(
 
   // F3G-05a: focusDocumentId is guaranteed to be included whenever authorized, even alongside
   // active facets or beyond the 500-document cap.
-  if (query.focusDocumentId && !selectedEntries.some((entry) => entry.node.documentId === query.focusDocumentId)) {
-    const focusEntry = authorizedEntries.find((entry) => entry.node.documentId === query.focusDocumentId);
-    if (focusEntry) {
-      if (selectedEntries.length >= limit) {
-        selectedEntries[selectedEntries.length - 1] = focusEntry;
-      } else {
-        selectedEntries.push(focusEntry);
+  let promoted = false;
+  const protectedIds = new Set<string>();
+  if (query.focusDocumentId) {
+    protectedIds.add(query.focusDocumentId);
+    if (!selectedEntries.some((entry) => entry.node.documentId === query.focusDocumentId)) {
+      const focusEntry = authorizedEntries.find((entry) => entry.node.documentId === query.focusDocumentId);
+      if (focusEntry) {
+        if (selectedEntries.length >= limit) {
+          selectedEntries[selectedEntries.length - 1] = focusEntry;
+        } else {
+          selectedEntries.push(focusEntry);
+        }
+        promoted = true;
       }
-      sortProjectedEntries(selectedEntries);
     }
+    // When truncated with links enabled (e.g. Manage Links dialog in >500-doc orgs), promote
+    // authorized 1-hop relationship peers of focusDocumentId into the bounded slice so outgoing
+    // and incoming links stay visible with peer titles.
+    if (truncated && focusPeerDocumentIds && focusPeerDocumentIds.length > 0) {
+      const selectedIdSet = new Set<string>(selectedEntries.map((entry) => entry.node.documentId));
+      const matchingById = new Map<string, ProjectedEntry>(
+        matchingEntries.map((entry) => [entry.node.documentId, entry]),
+      );
+      for (const peerId of focusPeerDocumentIds) {
+        protectedIds.add(peerId);
+        if (selectedIdSet.has(peerId)) continue;
+        const peerEntry = matchingById.get(peerId);
+        if (!peerEntry) continue;
+        if (selectedEntries.length < limit) {
+          selectedEntries.push(peerEntry);
+          selectedIdSet.add(peerId);
+          promoted = true;
+        } else {
+          let replaceIdx = -1;
+          for (let idx = selectedEntries.length - 1; idx >= 0; idx -= 1) {
+            if (!protectedIds.has(selectedEntries[idx]!.node.documentId)) {
+              replaceIdx = idx;
+              break;
+            }
+          }
+          if (replaceIdx === -1) break;
+          selectedIdSet.delete(selectedEntries[replaceIdx]!.node.documentId);
+          selectedEntries[replaceIdx] = peerEntry;
+          selectedIdSet.add(peerId);
+          promoted = true;
+        }
+      }
+    }
+    if (promoted) sortProjectedEntries(selectedEntries);
   }
 
   const departmentMap = new Map<string, string>();
@@ -1050,10 +1131,12 @@ export class GraphProjectionService {
         monitorRequested: query.monitor === true,
         includeExpired: query.includeExpired === true,
         includeLinks,
+        focusDocumentId: query.focusDocumentId,
+        limit,
         relationshipTypes,
         relationshipsLimitPlusOne: GRAPH_MAX_RELATIONSHIPS + 1,
-        selectDocumentIdsForLinks: (loaded) => {
-          cachedProjection = projectGraphSelection(loaded, query, limit);
+        selectDocumentIdsForLinks: (loaded, focusPeerDocumentIds) => {
+          cachedProjection = projectGraphSelection(loaded, query, limit, focusPeerDocumentIds);
           return cachedProjection.documents.map((doc) => doc.documentId);
         },
       });

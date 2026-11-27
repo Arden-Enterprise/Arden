@@ -37,7 +37,7 @@ export function GovernanceActionDialog({ target, platform, organizationId, onClo
             if (active) setError("This version is no longer available.");
           } else if (active) setDocument(loaded);
         } else {
-          const states = await listPublicationRenewals(platform, organizationId);
+          const states = await listPublicationRenewals(platform, organizationId, documentId);
           const current = states.find((state) => state.documentId === documentId
             && state.publishedVersionId === publishedVersionId && state.canRenew && !state.renewalPending);
           if (current) {

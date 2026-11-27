@@ -1003,4 +1003,97 @@ describe("GraphPage", () => {
     })));
   });
 
+  it("loads unfiltered links in GraphRelationshipDialog when GraphPage is filtered or truncated and warns on incomplete results", async () => {
+    const crossDeptDoc: GraphDocumentNode = {
+      ...makePayload().documents[0]!,
+      documentId: "doc-hr" as DocumentId,
+      publishedVersionId: "pv-hr" as PublishedVersionId,
+      title: "HR Policy",
+      ownerDepartmentId: "dept-hr",
+      ownerDepartmentName: "Human Resources",
+      canEditRelationships: false,
+    };
+    const crossDeptEdge: GraphRelationshipEdge = {
+      relationshipId: "rel-cross-dept",
+      sourceDocumentId: "doc-1" as DocumentId,
+      targetDocumentId: "doc-hr" as DocumentId,
+      relationshipType: "REFERENCES",
+      createdAt: "2026-11-22T00:00:00Z",
+    };
+    const filteredSlice = makePayload({
+      appliedMode: { view: "accountability", monitorActive: false, includeExpiredActive: false, includeLinksActive: true },
+      truncation: { limit: 500, returnedCount: 1, truncated: true, relationshipsLimit: 1000, relationshipsTruncated: false },
+      departments: [{ id: "dept-eng", name: "Engineering" }],
+      documents: [makePayload().documents[0]!],
+      relationships: [],
+    });
+    const unfilteredForDialog = makePayload({
+      appliedMode: { view: "accountability", monitorActive: false, includeExpiredActive: false, includeLinksActive: true },
+      truncation: { limit: 500, returnedCount: 2, truncated: true, relationshipsLimit: 1000, relationshipsTruncated: false },
+      departments: [{ id: "dept-eng", name: "Engineering" }, { id: "dept-hr", name: "Human Resources" }],
+      documents: [makePayload().documents[0]!, crossDeptDoc],
+      relationships: [crossDeptEdge],
+    });
+    const getGraph = vi.spyOn(apiClient, "getKnowledgeGraph").mockImplementation(async (_platform, _org, query) => (
+      query?.focusDocumentId === "doc-1" && !query.ownerDepartmentId ? unfilteredForDialog : filteredSlice
+    ));
+    const { bridge } = createBridge("?includeLinks=true&ownerDepartmentId=dept-eng");
+
+    render(createElement(
+      ShellBridgeContext.Provider,
+      { value: bridge },
+      createElement(GraphPage, {
+        platform: "web",
+        organizationId: "org-1",
+        contextOpen: false,
+        onToggleContext: vi.fn(),
+        elkLayoutFn: async (graph) => ({
+          children: graph.children.map((child, idx) => ({ id: child.id, x: idx * 280, y: 0 })),
+        }),
+      }),
+    ));
+
+    await screen.findByText("Security Policy");
+    fireEvent.click(screen.getByText("Security Policy"));
+    const toolbar = await screen.findByRole("toolbar", { name: /Actions for Security Policy/i });
+    fireEvent.click(within(toolbar).getByRole("button", { name: /Manage links/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /Manage links/i, hidden: true });
+    await waitFor(() => expect(getGraph).toHaveBeenLastCalledWith("web", "org-1", {
+      includeLinks: true,
+      focusDocumentId: "doc-1",
+    }));
+    expect(await within(dialog).findByText("HR Policy")).toBeTruthy();
+    expect(within(dialog).getByRole("button", { name: /Remove link to HR Policy/i, hidden: true })).toBeTruthy();
+    expect(within(dialog).getByRole("status", { hidden: true }).textContent).toContain("up to 500 documents");
+  });
+
+  it("GovernanceActionDialog queries exact documentId renewal state instead of scanning the capped list", async () => {
+    const { GovernanceActionDialog } = await import("../knowledge/GovernanceActionDialog");
+    const listRenewals = vi.spyOn(apiClient, "listPublicationRenewals").mockResolvedValue([{
+      documentId: "doc-1005",
+      publishedVersionId: "pv-1005",
+      title: "Policy 1005",
+      responsibleDepartmentId: "dept-eng",
+      expirationDate: "2099-12-31",
+      renewalPending: false,
+      authorActive: true,
+      isAuthor: true,
+      canRenew: true,
+      authorName: "Alice Author",
+      pending: null,
+    }]);
+
+    render(createElement(GovernanceActionDialog, {
+      platform: "web",
+      organizationId: "org-1",
+      target: { kind: "renewal", documentId: "doc-1005", publishedVersionId: "pv-1005", title: "Policy 1005" },
+      onClose: vi.fn(),
+    }));
+
+    await waitFor(() => expect(listRenewals).toHaveBeenCalledWith("web", "org-1", "doc-1005"));
+    expect(await screen.findByText(/Policy 1005/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send for review" })).toBeTruthy();
+  });
+
 });

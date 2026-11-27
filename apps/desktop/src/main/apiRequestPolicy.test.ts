@@ -240,6 +240,10 @@ describe("desktop API request allowlist", () => {
     const validIndefiniteBody = JSON.stringify({ expirationDate: null, reason: "Evergreen standard" });
 
     assert.equal(validateDesktopApiRequest({ path: renewalsPath, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalsPath}?documentId=${sourcePrivateVersionId}`, method: "GET" }), true);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalsPath}?documentId=not-a-uuid`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalsPath}?documentId=${sourcePrivateVersionId}&documentId=${sourcePrivateVersionId}`, method: "GET" }), false);
+    assert.equal(validateDesktopApiRequest({ path: `${renewalsPath}?documentId=${sourcePrivateVersionId}&all=1`, method: "GET" }), false);
     assert.equal(validateDesktopApiRequest({ path: renewalsPath, method: "POST", body: "{}", idempotencyKey }), false);
     assert.equal(validateDesktopApiRequest({ path: renewalsPath, method: "GET", body: "{}" }), false);
     assert.equal(validateDesktopApiRequest({ path: renewalsPath, method: "GET", ifMatch: '"1"' }), false);

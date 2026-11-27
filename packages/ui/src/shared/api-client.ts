@@ -645,8 +645,13 @@ export function decidePublicationRenewal(platform: Platform, organizationId: str
   });
 }
 
-export async function listPublicationRenewals(platform: Platform, organizationId: string): Promise<PublicationRenewalState[]> {
-  const result = await request<{ items: PublicationRenewalState[] }>(platform, `${knowledgePath(organizationId)}/renewals`);
+export async function listPublicationRenewals(
+  platform: Platform,
+  organizationId: string,
+  documentId?: string,
+): Promise<PublicationRenewalState[]> {
+  const query = documentId ? `?documentId=${encodeURIComponent(documentId)}` : "";
+  const result = await request<{ items: PublicationRenewalState[] }>(platform, `${knowledgePath(organizationId)}/renewals${query}`);
   return result.items;
 }
 

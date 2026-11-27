@@ -919,14 +919,7 @@ describe("T-07 Governance Monitor Mode projection", () => {
     const loadMonitorProjectionSpy = vi.fn();
     store.loadMonitorProjection = loadMonitorProjectionSpy;
 
-    const loadGraphBundleSpy = vi.fn(async (_u: string, _o: string, input: {
-      monitorRequested: boolean;
-      includeExpired: boolean;
-      includeLinks: boolean;
-      relationshipTypes: readonly DocumentRelationshipType[] | null;
-      relationshipsLimitPlusOne: number;
-      selectDocumentIdsForLinks: (loaded: unknown) => readonly string[];
-    }) => {
+    const loadGraphBundleSpy = vi.fn<NonNullable<GraphStore["loadGraphBundle"]>>(async (_u, _o, input) => {
       const base = {
         organization: { id: orgId, name: "Acme Corp" },
         actor: {
@@ -983,5 +976,71 @@ describe("T-07 Governance Monitor Mode projection", () => {
     expect(payload?.documents.map((d) => d.documentId)).toContain(docFocus.documentId);
     expect(payload?.relationships).toHaveLength(1);
     expect(payload?.relationships[0]?.relationshipId).toBe(edge.relationshipId);
+  });
+
+  it("promotes authorized 1-hop relationship peers of focusDocumentId when truncated with links enabled", async () => {
+    const store = new FakeGraphStore();
+    const doc1 = makeDoc({ documentId: makeUuid("10000000", 1), publishedAt: new Date("2026-11-25T00:00:00Z") });
+    const doc2 = makeDoc({ documentId: makeUuid("10000000", 2), publishedAt: new Date("2026-11-24T00:00:00Z") });
+    const doc3 = makeDoc({ documentId: makeUuid("10000000", 3), publishedAt: new Date("2026-11-23T00:00:00Z") });
+    const docPeer = makeDoc({
+      documentId: makeUuid("10000000", 4),
+      ownerDepartmentId: salesDeptId,
+      ownerDepartmentName: "Sales",
+      publishedAt: new Date("2026-11-20T00:00:00Z"),
+    });
+    const edge: GraphRawRelationship = {
+      relationshipId: makeUuid("80000000", 42),
+      sourceDocumentId: doc1.documentId,
+      targetDocumentId: docPeer.documentId,
+      relationshipType: "REFERENCES",
+      createdAt: new Date("2026-11-26T00:00:00Z"),
+    };
+
+    const loadGraphBundle: NonNullable<GraphStore["loadGraphBundle"]> = async (_u, _o, input) => {
+      const base = {
+        organization: { id: orgId, name: "Acme Corp" },
+        actor: {
+          membershipId,
+          organizationId: orgId,
+          status: "ACTIVE" as const,
+          departmentIds: [engDeptId, salesDeptId],
+          isOrgAdmin: false,
+          hasAuthoredPublishedDoc: true,
+        },
+        utcToday: "2026-11-26",
+        canUseMonitorMode: true,
+        canIncludeExpired: true,
+        monitorActive: false,
+        includeExpiredActive: false,
+        entries: [doc1, doc2, doc3, docPeer].map((raw) => ({
+          raw,
+          isCurrentlyReadable: true,
+          openTarget: "READER" as const,
+          monitorSignals: null,
+        })),
+      };
+      const returnedIds = input.selectDocumentIdsForLinks(base, [docPeer.documentId]);
+      return {
+        ...base,
+        relationships: input.includeLinks && returnedIds.includes(doc1.documentId) && returnedIds.includes(docPeer.documentId)
+          ? [edge]
+          : [],
+      };
+    };
+    (store as GraphStore).loadGraphBundle = loadGraphBundle;
+
+    const service = new GraphProjectionService(store);
+    const payload = await service.getGraph(userId, orgId, {
+      limit: 2,
+      includeLinks: true,
+      focusDocumentId: doc1.documentId,
+    });
+
+    expect(payload?.truncation.truncated).toBe(true);
+    expect(payload?.documents).toHaveLength(2);
+    expect(payload?.documents.map((d) => d.documentId)).toEqual([doc1.documentId, docPeer.documentId]);
+    expect(payload?.relationships).toHaveLength(1);
+    expect(payload?.relationships[0]?.targetDocumentId).toBe(docPeer.documentId);
   });
 });

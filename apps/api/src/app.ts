@@ -1823,15 +1823,24 @@ export function buildApp(dependencies: AppDependencies) {
     });
 
   // Decision 0032 A4: validity of the current publications the caller is responsible for (metadata only).
-  app.get<{ Params: { organizationId: string } }>("/api/v1/organizations/:organizationId/knowledge/renewals", {
-    schema: { params: { type: "object", required: ["organizationId"], properties: {
-      organizationId: { type: "string", pattern: uuidPattern },
-    } } },
+  app.get<{ Params: { organizationId: string }; Querystring: { documentId?: string } }>("/api/v1/organizations/:organizationId/knowledge/renewals", {
+    schema: {
+      params: { type: "object", required: ["organizationId"], properties: {
+        organizationId: { type: "string", pattern: uuidPattern },
+      } },
+      querystring: { type: "object", additionalProperties: false, properties: {
+        documentId: { type: "string", pattern: uuidPattern },
+      } },
+    },
   }, async (request, reply) => {
     const context = await requestActor(request, reply);
     if (!context) return;
     try {
-      const items = await dependencies.repository.listPublicationRenewalState(context.userId, request.params.organizationId);
+      const items = await dependencies.repository.listPublicationRenewalState(
+        context.userId,
+        request.params.organizationId,
+        request.query.documentId,
+      );
       if (!items) return reply.code(404).send(resourceNotAvailable(request.id));
       reply.header("Cache-Control", "no-store");
       return { items };

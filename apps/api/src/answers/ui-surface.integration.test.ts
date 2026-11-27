@@ -724,6 +724,19 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
       const authorGraph = await graphService.getGraph(ids.author, ids.org, { focusDocumentId: ids.docPrimary });
       expect(authorGraph?.documents.find((d) => d.documentId === ids.docPrimary)?.canRenew).toBe(true);
 
+      // Exact single-document renewal lookup (GovernanceActionDialog path) MUST succeed beyond row 1,000
+      // even though the uncapped list_publication_renewal_state() omits docPrimary due to LIMIT 1000.
+      const cappedList = await repository.listPublicationRenewalState(ids.author, ids.org);
+      expect(cappedList?.some((row) => row.documentId === ids.docPrimary)).toBe(false);
+      const exactAuthorRenewal = await repository.listPublicationRenewalState(ids.author, ids.org, ids.docPrimary);
+      expect(exactAuthorRenewal).toHaveLength(1);
+      expect(exactAuthorRenewal?.[0]?.documentId).toBe(ids.docPrimary);
+      expect(exactAuthorRenewal?.[0]?.publishedVersionId).toBe(primaryVersionId);
+      expect(exactAuthorRenewal?.[0]?.canRenew).toBe(true);
+      expect(exactAuthorRenewal?.[0]?.renewalPending).toBe(false);
+      const exactReaderRenewal = await repository.listPublicationRenewalState(ids.reader, ids.org, ids.docPrimary);
+      expect(exactReaderRenewal).toEqual([]);
+
       // 2. Ordinary reader never gets canRenew, even within 7 days.
       const readerHydrated = await repository.uiSurfaceHydrator.loadDocuments(ids.reader, ids.org, [primaryVersionId, soonVersionId]);
       expect(readerHydrated.get(primaryVersionId)?.canRenew).toBe(false);
@@ -773,6 +786,10 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
         expect((await repository.uiSurfaceHydrator.loadDocuments(ids.reviewer, ids.org, [primaryVersionId])).get(primaryVersionId)?.canRenew).toBe(true);
         const reviewerGraph = await graphService.getGraph(ids.reviewer, ids.org, { focusDocumentId: ids.docPrimary });
         expect(reviewerGraph?.documents.find((d) => d.documentId === ids.docPrimary)?.canRenew).toBe(true);
+        const exactReviewerRenewal = await repository.listPublicationRenewalState(ids.reviewer, ids.org, ids.docPrimary);
+        expect(exactReviewerRenewal).toHaveLength(1);
+        expect(exactReviewerRenewal?.[0]?.canRenew).toBe(true);
+        expect(exactReviewerRenewal?.[0]?.authorActive).toBe(false);
       } finally {
         await asSuperuser((client) => client.query(
           "UPDATE organization_membership SET status = 'ACTIVE' WHERE membership_id = $1",
@@ -791,5 +808,5 @@ describe.skipIf(!databaseUrl)("UiSurface v3 persistence, hydration & 4-path revo
         await client.query("DELETE FROM shared_draft WHERE shared_draft_id = ANY($1::uuid[])", [extraDocs]);
       });
     }
-  }, 60_000);
+  }, 120_000);
 });

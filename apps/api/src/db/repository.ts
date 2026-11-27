@@ -811,7 +811,7 @@ export interface ArdenDataRepository {
     expectedSnapshotVersionId: string, expectedContentHash: string, comment: string | null,
     idempotencyKey: string, requestId: string, approvedReaders?: TargetReadersInput): Promise<DecideReviewResult>;
   listPublishedKnowledge(userId: string, organizationId: string): Promise<PublishedKnowledge[] | null>;
-  listPublicationRenewalState(userId: string, organizationId: string): Promise<PublicationRenewalState[] | null>;
+  listPublicationRenewalState(userId: string, organizationId: string, documentId?: string): Promise<PublicationRenewalState[] | null>;
   requestPublicationRenewal(userId: string, organizationId: string, documentId: string,
     input: PublicationRenewalInput, requestId: string): Promise<RequestPublicationRenewalResult>;
   enqueuePublicationExpiryReminders(): Promise<number>;
@@ -2728,9 +2728,11 @@ export class ArdenRepository implements ArdenDataRepository {
   }
 
   /** Decision 0032: renewal state of current publications the caller is responsible for (author, Admin, reviewer). */
-  async listPublicationRenewalState(userId: string, organizationId: string): Promise<PublicationRenewalState[] | null> {
+  async listPublicationRenewalState(userId: string, organizationId: string, documentId?: string): Promise<PublicationRenewalState[] | null> {
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
+      const sourceSql = documentId ? "get_publication_renewal_state($1)" : "list_publication_renewal_state()";
+      const params = documentId ? [documentId] : [];
       const result = await client.query<{ document_id: string; published_version_id: string; title: string;
         responsible_department_id: string | null; expiration_date: string | null; renewal_pending: boolean;
         author_active: boolean; is_author: boolean; can_renew: boolean; pending_submission_id: string | null;
@@ -2742,7 +2744,9 @@ export class ArdenRepository implements ArdenDataRepository {
                 is_author, can_renew, pending_submission_id, pending_snapshot_version_id, pending_content_hash,
                 pending_on_behalf, pending_requested_by, pending_reason,
                 to_char(pending_expiration_date, 'YYYY-MM-DD') AS pending_expiration_date, pending_requested_at,
-                author_window_until, can_decide, author_name FROM list_publication_renewal_state()`);
+                author_window_until, can_decide, author_name FROM ${sourceSql}`,
+        params,
+      );
       return result.rows.map((row) => ({ documentId: row.document_id, publishedVersionId: row.published_version_id,
         title: row.title, responsibleDepartmentId: row.responsible_department_id, expirationDate: row.expiration_date,
         renewalPending: row.renewal_pending, authorActive: row.author_active, isAuthor: row.is_author,
