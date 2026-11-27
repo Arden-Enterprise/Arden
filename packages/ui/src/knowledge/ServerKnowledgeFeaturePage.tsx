@@ -1298,10 +1298,9 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
                     <div><dt>Version</dt><dd>{review.management.version}</dd></div>
                     {review.management.expirationDate && <div><dt>Expiration Date</dt><dd>{review.management.expirationDate}</dd></div>}
                     {review.management.changeNote && <div><dt>Change Note</dt><dd>{review.management.changeNote}</dd></div>}
-                  </> : <>
+                  </> : (
                     <div><dt>Within</dt><dd>{review.targetScopeType === "DEPARTMENT" ? departmentName(review.targetDepartmentId ?? review.responsibleDepartmentId) : "Across departments"}</dd></div>
-                    <div><dt>Team / project</dt><dd>{review.teamTag || "All teams"} · {review.projectTag || "All projects"}</dd></div>
-                  </>}
+                  )}
                 </dl>
               </section>
               {review.reviewAiAvailable && <SubmissionReviewAi key={reviewKey}

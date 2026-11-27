@@ -65,6 +65,20 @@ describe("T2.2 reviewer approves fewer readers", () => {
     return dialog;
   }
 
+  it.each([
+    { teamTag: "Legacy team", projectTag: "Legacy project" },
+    { teamTag: null, projectTag: null },
+  ])("omits team and project metadata from older submissions ($teamTag / $projectTag)", async (legacyTags) => {
+    const readers: api.TargetReaders = { mode: "ORGANIZATION", departmentId: null, memberIds: [] };
+    await openReview({ ...reviewDetail(readers), ...legacyTags });
+
+    const details = within(screen.getByRole("region", { name: "SUBMITTED DETAILS" }));
+    expect(details.getByText("Everyone in organization")).toBeTruthy();
+    expect(details.getByText("Across departments")).toBeTruthy();
+    expect(details.queryByText("Team / project")).toBeNull();
+    expect(details.queryByText(/Legacy team|Legacy project|All teams|All projects/)).toBeNull();
+  });
+
   it("shows AI evidence on demand and keeps the decision manual", async () => {
     const detail = { ...reviewDetail(null, "CONTENT"), reviewAiAvailable: true };
     const ai = vi.spyOn(api, "runSubmissionReview").mockResolvedValue({
