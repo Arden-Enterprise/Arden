@@ -1,11 +1,17 @@
 import { useId, useState, type CSSProperties } from "react";
+import { pdfFileName, usePdfObjectUrl } from "../knowledge/PdfDocument";
+import { PdfReader } from "../knowledge/PdfReader";
 import { Icon } from "../shared/Icon";
 import { Expand } from "./Expand";
 import type { VersionPair } from "./version-pair";
 
 export type VersionRow = { kind: "added" | "removed" | "context" | "collapsed"; text: string; hidden?: string[] };
 type Comparison = { unavailable: true } | { unavailable: false; rows: VersionRow[] } | null;
-type Original = { unavailable: true; label: string } | { unavailable: false; label: string; text: string } | null;
+export type MaintenanceOriginalView =
+  | { unavailable: true; label: string }
+  | { unavailable: false; label: string; text: string; mimeType?: string; pdfBase64?: undefined }
+  | { unavailable: false; label: string; mimeType: "application/pdf"; pdfBase64: string; text?: undefined }
+  | null;
 
 const changeLabel = { added: "+ Added", removed: "− Removed" } as const;
 
@@ -61,9 +67,25 @@ function DiffRow({ row, index, onOpenOriginal }: { row: VersionRow; index: numbe
   </li>;
 }
 
-export function VersionChanges({ comparison, original = null, onOpenOriginal, pair = null, onVersionPair, onOpenReported }: {
+function MaintenancePdfOriginal({ base64, label, documentTitle }: { base64: string; label: string; documentTitle?: string | null }) {
+  const url = usePdfObjectUrl(base64);
+  const title = documentTitle ? `${documentTitle} - ${label}` : label;
+  const fileName = pdfFileName(title);
+  return <>
+    <div className="maintenance-original-head">
+      <h4>{label}</h4>
+      {url && <a className="maintenance-text-button" href={url} download={fileName}>Download PDF</a>}
+    </div>
+    <div className="maintenance-original-pdf">
+      <PdfReader key={`${label}:${base64.slice(0, 24)}`} base64={base64} title={title} />
+    </div>
+  </>;
+}
+
+export function VersionChanges({ comparison, original = null, documentTitle = null, onOpenOriginal, pair = null, onVersionPair, onOpenReported }: {
   comparison: Comparison;
-  original?: Original;
+  original?: MaintenanceOriginalView;
+  documentTitle?: string | null;
   onOpenOriginal?: (which: "earlier" | "later") => void;
   pair?: VersionPair | null;
   onVersionPair?: (action: "previous" | "next" | "current") => void;
@@ -87,8 +109,12 @@ export function VersionChanges({ comparison, original = null, onOpenOriginal, pa
     {single && !original && <p className="maintenance-card-note">This document has one published version, so there is nothing to compare yet.</p>}
     {pair && <VersionPager pair={pair} onVersionPair={onVersionPair} />}
     {original && <article className="maintenance-original" aria-label={`${original.label} original`}>
-      <h4>{original.label}</h4>
-      <p>{original.unavailable ? "This original is unavailable." : original.text}</p>
+      {!original.unavailable && original.mimeType === "application/pdf" && original.pdfBase64
+        ? <MaintenancePdfOriginal base64={original.pdfBase64} label={original.label} documentTitle={documentTitle} />
+        : <>
+          <h4>{original.label}</h4>
+          <p>{original.unavailable ? "This original is unavailable." : original.text}</p>
+        </>}
     </article>}
     {!comparison && pair && <p className="maintenance-card-note" role="status">Comparing {pair.earlierLabel} to {pair.laterLabel}…</p>}
     {comparison?.unavailable && <p className="maintenance-card-note is-warning">Comparison is unavailable. Open the original versions and review them manually.</p>}

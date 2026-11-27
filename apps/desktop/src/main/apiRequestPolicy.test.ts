@@ -148,6 +148,14 @@ describe("desktop API request allowlist", () => {
       assert.equal(validateDesktopApiRequest({ path, method: "GET" }), false, path);
     }
     assert.equal(desktopApiResponseLimit({ path: list, method: "GET" }), 1024 * 1024);
+    assert.equal(desktopApiResponseLimit({
+      path: `/api/v1/organizations/${organizationId}/knowledge/maintenance/cases/${sourcePrivateVersionId}/versions`,
+      method: "GET",
+    }), 1024 * 1024);
+    assert.equal(desktopApiResponseLimit({
+      path: `/api/v1/organizations/${organizationId}/knowledge/maintenance/cases/${sourcePrivateVersionId}/versions/${idempotencyKey}`,
+      method: "GET",
+    }), 7_100_000);
     assert.equal(desktopApiResponseLimit({ path: "/api/v1/me", method: "GET" }), 1024 * 1024);
   });
   it("validates POST /ai/answers strictly with optional scopeFilter and a main-owned 120s deadline", () => {

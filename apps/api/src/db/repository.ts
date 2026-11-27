@@ -874,7 +874,10 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly uiSurfaceHydrator: UiSurfaceHydrator;
   /** System-only retention capability for the in-process 30-day purge loop. */
   readonly privateTrashRetention: PrivateTrashRetentionStore;
-  constructor(private readonly pool: Pool, content?: { read(sourceUri: string, expectedHash: string): Promise<string> }) {
+  constructor(private readonly pool: Pool, content?: {
+    read(sourceUri: string, expectedHash: string): Promise<string>;
+    readPdf?(sourceUri: string, expectedHash: string): Promise<Buffer>;
+  }) {
     this.notifications = new PgNotificationStore((user, org, work) => this.withActorContext(user, org, work));
     this.readerSources = new PgReaderSourceStore((user, org, work) => this.withActorContext(user, org, work));
     this.conversations = new PgConversationStore((user, org, work) => this.withActorContext(user, org, work));

@@ -3,7 +3,8 @@ import { Icon } from "../shared/Icon";
 import { CaseJourney } from "./CaseJourney";
 import { CaseRail, type CaseRailProps } from "./CaseRail";
 import { Findings } from "./Findings";
-import { VersionChanges, type VersionRow } from "./VersionChanges";
+import { VersionChanges, type MaintenanceOriginalView, type VersionRow } from "./VersionChanges";
+export type { MaintenanceOriginalView };
 import { MaintenanceStatus } from "./MaintenanceStatus";
 import type { VersionPair } from "./version-pair";
 
@@ -17,7 +18,7 @@ export type MaintenanceCaseScreenProps = Omit<CaseRailProps, "item" | "reviewers
   comparison?: { unavailable: true } | { unavailable: false; rows: VersionRow[] } | null;
   versionPair?: VersionPair | null;
   onVersionPair?: (action: "previous" | "next" | "current") => void;
-  original?: { unavailable: true; label: string } | { unavailable: false; label: string; text: string } | null;
+  original?: MaintenanceOriginalView;
   onOpenOriginal?: (which: "earlier" | "later") => void;
   onOpenReported?: () => void;
   relatedCases?: CaseRailProps["relatedCases"];
@@ -87,7 +88,7 @@ export function MaintenanceCaseScreen({ item, loading, error, onBack, comparison
         <blockquote>{item.description}</blockquote>
         <figcaption>{item.kind === "reporter" ? "Your report" : "Reader report"}</figcaption>
       </figure>}
-      <VersionChanges comparison={comparison} original={original} onOpenOriginal={onOpenOriginal} pair={versionPair} onVersionPair={onVersionPair}
+      <VersionChanges comparison={comparison} original={original} documentTitle={item.title} onOpenOriginal={onOpenOriginal} pair={versionPair} onVersionPair={onVersionPair}
         onOpenReported={item.kind === "reporter" ? undefined : onOpenReported} />
       {item.kind === "assigned" && <Findings run={analysis} onOpenCitation={onOpenCitation}
         action={canAnalyze && <AnalysisAction run={analysis} busy={rail.busy} onStart={onStartAnalysis} onCancel={onCancelAnalysis} />}
