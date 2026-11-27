@@ -57,8 +57,20 @@ export function SubmissionReviewAi({ platform, organizationId, review, disabled,
     </button>;
   };
 
+  const canRun = !result && !unavailable;
   return <section className="review-ai" aria-labelledby={title}>
-    <h3 id={title} className="review-ai-title"><span><Icon name="review" size={15} /></span>AI review</h3>
+    {/* One row: what it is, what it gives, and the action, each said once. */}
+    <div className="review-ai-head">
+      <span className="review-ai-mark" aria-hidden="true"><Icon name="review" size={15} /></span>
+      <div className="review-ai-heading">
+        <h3 id={title} className="review-ai-title">AI review</h3>
+        <p className="review-ai-hint">Summary and checks, linked to pages</p>
+      </div>
+      {canRun && <button type="button" className="secondary-button review-ai-run" disabled={disabled || pending}
+        aria-label={pending ? undefined : error ? "Retry AI review" : "Review with AI"} onClick={() => void run()}>
+        {pending ? "Reviewing…" : error ? "Retry" : "Run"}
+      </button>}
+    </div>
     {result ? <div role="region" aria-label="AI review results">
       <p className="review-ai-hint">Verify AI findings against the submission.</p>
       <h4>Summary</h4>
@@ -72,10 +84,6 @@ export function SubmissionReviewAi({ platform, organizationId, review, disabled,
       </li>)}</ul> : <p className="review-ai-hint">AI found no specific checks to flag.</p>}
       {sourceMessage && <p className="review-ai-hint review-ai-source-message" role="status">{sourceMessage}</p>}
     </div> : <>
-      {!unavailable && <button type="button" className="secondary-button" disabled={disabled || pending}
-        onClick={() => void run()}><Icon name="review" size={14} />
-        {pending ? "Reviewing…" : error ? "Retry AI review" : "Review with AI"}
-      </button>}
       {pending && <p role="status" className="review-ai-hint">Analyzing the submitted version…</p>}
       {error && <p role="alert" className="field-error">{error}</p>}
     </>}

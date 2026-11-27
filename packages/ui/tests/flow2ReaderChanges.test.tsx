@@ -75,7 +75,11 @@ describe("T2.2 reviewer approves fewer readers", () => {
     });
     const decide = await openReview(detail);
     expect(ai).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Review with AI" }));
+    const runAi = screen.getByRole("button", { name: "Review with AI" });
+    // The card names itself once; its action is a short Run beside the title.
+    expect(runAi.textContent).toBe("Run");
+    fireEvent.click(runAi);
+    expect(screen.queryByRole("button", { name: /Review with AI|Run/ })).toBeNull();
     const result = await screen.findByRole("region", { name: "AI review results" });
     expect(within(result).getByText("Describes the reimbursement process.")).toBeTruthy();
     const open = within(result).getByRole("button", { name: "Open check 1 source" });

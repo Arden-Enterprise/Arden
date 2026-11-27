@@ -98,14 +98,17 @@
 .review-frozen dt { color: var(--arden-text-muted); }
 .review-frozen dd { min-width: 0; margin: 0; overflow: hidden; color: var(--arden-text-primary); text-overflow: ellipsis; white-space: nowrap; }
 .island-note.review-blocked-note { margin: 0; padding: 10px 12px; font-size: 12px; }
-.review-ai { padding: 12px; border: 1px solid var(--arden-border); border-inline-start: 2px solid var(--arden-violet);
-  border-radius: 9px; background: var(--arden-surface-base); font-size: 13px; line-height: 1.45; }
-.arden-app-shell .review-ai-title { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 14px; }
-.review-ai-title > span { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 6px;
+.review-ai { padding: 12px; border: 1px solid var(--arden-border); border-radius: 9px;
+  background: var(--arden-surface-base); font-size: 13px; line-height: 1.45; }
+.review-ai-head { display: flex; align-items: center; gap: 10px; }
+.review-ai-mark { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: 7px;
   color: var(--arden-violet-hover); background: color-mix(in srgb, var(--arden-violet) 15%, transparent); }
-.review-ai > button { display: inline-flex; align-items: center; gap: 7px; }
+.review-ai-heading { flex: 1; min-width: 0; }
+.arden-app-shell .review-ai-title { margin: 0; font-size: 14px; }
+.review-ai .review-ai-run { flex: none; min-height: 30px; padding: 4px 12px; }
 .review-ai p { margin: 0; }
 .review-ai > p { margin-top: 8px; }
+.review-ai > [role="region"] { margin-top: 10px; }
 .review-ai h4 { margin: 14px 0 6px; font-size: 13px; }
 .review-ai ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
 .review-ai li { display: grid; gap: 5px; padding: 7px 0; overflow-wrap: anywhere; }
