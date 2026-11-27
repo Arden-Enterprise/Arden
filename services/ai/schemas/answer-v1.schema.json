@@ -1,0 +1,158 @@
+{
+  "$defs": {
+    "AnswerCitation": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkId": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunkid",
+          "type": "string"
+        },
+        "excerpt": {
+          "maxLength": 1200,
+          "minLength": 1,
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "parentSectionBlockId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parentsectionblockid"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        },
+        "sourceBlockIds": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Sourceblockids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "generationId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "chunkId",
+        "sourceBlockIds",
+        "parentSectionBlockId",
+        "excerpt"
+      ],
+      "title": "AnswerCitation",
+      "type": "object"
+    },
+    "AnswerRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "allowedGenerationIds": {
+          "items": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "maxItems": 500,
+          "minItems": 1,
+          "title": "Allowedgenerationids",
+          "type": "array"
+        },
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "organizationId": {
+          "format": "uuid",
+          "title": "Organizationid",
+          "type": "string"
+        },
+        "query": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "organizationId",
+        "query",
+        "allowedGenerationIds"
+      ],
+      "title": "AnswerRequest",
+      "type": "object"
+    },
+    "AnswerResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Answer",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/AnswerCitation"
+          },
+          "maxItems": 12,
+          "title": "Citations",
+          "type": "array"
+        },
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ANSWERED",
+            "INSUFFICIENT_EVIDENCE"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "status",
+        "answer",
+        "citations"
+      ],
+      "title": "AnswerResponse",
+      "type": "object"
+    }
+  },
+  "title": "Arden answer contract v1"
+}

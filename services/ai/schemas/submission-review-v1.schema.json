@@ -1,0 +1,208 @@
+{
+  "$defs": {
+    "ReviewCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "enum": [
+            "CLARITY",
+            "CONSISTENCY",
+            "MISSING_CONTEXT",
+            "SENSITIVE_CONTENT"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "citation": {
+          "$ref": "#/$defs/ReviewCitation"
+        },
+        "text": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "citation",
+        "category"
+      ],
+      "title": "ReviewCheck",
+      "type": "object"
+    },
+    "ReviewCitation": {
+      "additionalProperties": false,
+      "properties": {
+        "excerpt": {
+          "maxLength": 360,
+          "minLength": 1,
+          "title": "Excerpt",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Page"
+        }
+      },
+      "required": [
+        "excerpt",
+        "page"
+      ],
+      "title": "ReviewCitation",
+      "type": "object"
+    },
+    "ReviewPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "citation": {
+          "$ref": "#/$defs/ReviewCitation"
+        },
+        "text": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "citation"
+      ],
+      "title": "ReviewPoint",
+      "type": "object"
+    },
+    "SubmissionReviewRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "anyOf": [
+            {
+              "maxLength": 1500000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        },
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "mimeType": {
+          "enum": [
+            "text/plain",
+            "application/pdf"
+          ],
+          "title": "Mimetype",
+          "type": "string"
+        },
+        "pdfBase64": {
+          "anyOf": [
+            {
+              "maxLength": 16000000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdfbase64"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "mimeType"
+      ],
+      "title": "SubmissionReviewRequest",
+      "type": "object"
+    },
+    "SubmissionReviewResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/ReviewCheck"
+          },
+          "maxItems": 3,
+          "title": "Checks",
+          "type": "array"
+        },
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        },
+        "summary": {
+          "items": {
+            "$ref": "#/$defs/ReviewPoint"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Summary",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requestId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "summary",
+        "checks"
+      ],
+      "title": "SubmissionReviewResponse",
+      "type": "object"
+    }
+  },
+  "title": "Arden submission review contract v1"
+}

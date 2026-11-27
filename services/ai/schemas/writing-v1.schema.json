@@ -1,0 +1,106 @@
+{
+  "$defs": {
+    "WritingRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "IMPROVE",
+            "REFORMAT",
+            "EXPLAIN"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "SELECTION",
+            "PAGE"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "action",
+        "scope",
+        "text"
+      ],
+      "title": "WritingRequest",
+      "type": "object"
+    },
+    "WritingResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "enum": [
+            "IMPROVE",
+            "REFORMAT",
+            "EXPLAIN"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "sourceQuote": {
+          "default": "",
+          "maxLength": 300,
+          "title": "Sourcequote",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "CHANGED",
+            "UNCHANGED",
+            "EXPLAINED"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 24000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "action",
+        "status",
+        "text"
+      ],
+      "title": "WritingResponse",
+      "type": "object"
+    }
+  },
+  "title": "Arden writing action contract v1"
+}

@@ -1,0 +1,36 @@
+{
+  "contractVersion": 1,
+  "purpose": "READER_SUMMARY",
+  "requestId": "10000000-0000-4000-8000-000000000007",
+  "organizationId": "10000000-0000-4000-8000-000000000002",
+  "publishedVersionId": "10000000-0000-4000-8000-000000000006",
+  "generationId": "10000000-0000-4000-8000-000000000004",
+  "snapshotVersionId": "10000000-0000-4000-8000-000000000005",
+  "snapshotContentHash": "769d46b73da4ff9fde3db5d83a84caba8ec9701b531bc889221c0a4ba098fc75",
+  "markdownContentHash": "649e501034a870fef2a733298f861fbb1e2ac5a159c2c3680bb52037818cabf7",
+  "chunksDigest": "a5bc49092729d8a6fec8392e3ef8fc81cced5a979e85b38be668ed8b2b42b6f4",
+  "status": "COMPLETED",
+  "coverage": [
+    {
+      "startOffset": 0,
+      "endOffset": 195
+    }
+  ],
+  "usedChunkIds": [
+    "73d850e8706ded36405cf03f08f3b862445bf6bb3026c43e3b12ac2025ed67bc",
+    "40897f2e6a63c58b9ba0ac9fea2f75ea41e8982eb59d6bbfe6461ca4f7d3bdb7",
+    "c7272e1a8164c4c19134bac282139f8db5c449dc616728792db9b5143326aa08"
+  ],
+  "points": [
+    {
+      "kind": "KEY_POINT",
+      "text": "Only approved readers may read this version.",
+      "citations": [
+        {
+          "chunkId": "73d850e8706ded36405cf03f08f3b862445bf6bb3026c43e3b12ac2025ed67bc",
+          "quote": "Only approved readers may read this version"
+        }
+      ]
+    }
+  ]
+}
