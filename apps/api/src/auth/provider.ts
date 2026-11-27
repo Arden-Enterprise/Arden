@@ -307,9 +307,9 @@ function isClientAuthFailure(error: { status?: number }): boolean {
   return typeof error.status === "number" && error.status >= 400 && error.status < 500 && error.status !== 429;
 }
 
-function isUserAlreadyRegistered(error: { code?: string; message?: string }): boolean {
-  if (error.code === "user_already_exists") return true;
-  if (typeof error.message === "string" && /user already (registered|exists)|already registered/i.test(error.message)) return true;
+export function isUserAlreadyRegistered(error: { code?: string; message?: string }): boolean {
+  if (error.code === "user_already_exists" || error.code === "email_exists") return true;
+  if (typeof error.message === "string" && /user already (registered|exists)|already (been )?registered/i.test(error.message)) return true;
   return false;
 }
 

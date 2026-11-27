@@ -2,6 +2,7 @@ import Fastify, { LogController, type FastifyError, type FastifyReply, type Fast
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, accountPasswordRequirementsMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText, matchesPublicationScope, publicationScopes, type PublicationScope } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
+import type { InvitationAccountAdmin, InvitationAccountStatus } from "./auth/invitation-account-admin.js";
 import { SignInThrottle } from "./auth/sign-in-throttle.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
   type DraftWrite, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type SharedDraftPatch,
@@ -59,6 +60,8 @@ const targetReadersSchema = { type: "object", additionalProperties: false, requi
 type AppDependencies = {
   checkDatabase: () => Promise<void>;
   auth: AuthProvider | null;
+  /** Decision 0038: server-only invitation account routing; absent keeps the combined invitation screen. */
+  invitationAccountAdmin?: InvitationAccountAdmin | null;
   authTrustedOrigins: string[];
   secureCookies: boolean;
   sessionSigningKey?: Buffer;
@@ -212,6 +215,7 @@ export function buildApp(dependencies: AppDependencies) {
       }
       if (passwordIssue?.keyword === "minLength" && route !== "/api/v1/auth/sign-in" && passwordIssue.instancePath !== "/currentPassword") {
         const message = route === "/api/v1/auth/sign-up" || route === "/api/v1/auth/password"
+          || route === "/api/v1/invitations/:token/account"
           ? accountPasswordRequirementsMessage : "Password must be at least 8 characters long.";
         return reply.code(400).send(safeError("INVALID_PASSWORD", message, request.id));
       }
@@ -965,16 +969,107 @@ export function buildApp(dependencies: AppDependencies) {
         reply.header("set-cookie", clearPendingInvitationCookie(dependencies.secureCookies));
         return reply.code(404).send(safeError("INVITATION_NOT_AVAILABLE", "This invitation is invalid, has expired, or has already been accepted.", request.id));
       }
+      let accountStatus: InvitationAccountStatus | undefined;
+      if (dependencies.invitationAccountAdmin) {
+        try {
+          accountStatus = await dependencies.invitationAccountAdmin.accountStatus(invitation.email);
+        } catch (error) {
+          // Fail open to the combined sign-in/registration screen rather than guessing.
+          request.log.warn({ errorType: safeErrorType(error), requestId: request.id }, "Invitation account lookup failed");
+        }
+      }
       reply.header("set-cookie", pendingInvitationCookie(request.params.token, dependencies.secureCookies));
       return reply.code(200).send({
         organizationName: invitation.organizationName,
         email: invitation.email,
         expiresAt: invitation.expiresAt.toISOString(),
+        ...(accountStatus ? { accountStatus } : {}),
       });
     } catch (error) {
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation lookup failed");
       return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
     }
+  });
+
+  app.post<{ Params: { token: string }; Body: { fullName: string; password: string } }>("/api/v1/invitations/:token/account", {
+    schema: {
+      params: {
+        type: "object", additionalProperties: false, required: ["token"],
+        properties: { token: { type: "string", minLength: 43, maxLength: 43, pattern: "^[A-Za-z0-9_-]+$" } },
+      },
+      body: {
+        type: "object", additionalProperties: false, required: ["fullName", "password"],
+        properties: {
+          fullName: { type: "string", minLength: 1, maxLength: 200 },
+          password: { type: "string", minLength: 8, maxLength: accountPasswordMaximumLength },
+        },
+      },
+    },
+  }, async (request, reply) => {
+    // Decision 0038: the pending invitation token proves control of the invited mailbox, so the
+    // account is created confirmed for the invitation's own address and accepted in this request.
+    const accountAdmin = dependencies.invitationAccountAdmin;
+    if (!dependencies.auth || !accountAdmin) return authUnavailable(reply, request);
+    const fullName = request.body.fullName.trim();
+    if (!fullName) return reply.code(400).send(safeError("INVALID_FULL_NAME", "Enter your name.", request.id));
+    if (!meetsAccountPasswordRequirements(request.body.password)) {
+      return reply.code(400).send(safeError("INVALID_PASSWORD", accountPasswordRequirementsMessage, request.id));
+    }
+    const tokenHash = hashInvitationToken(request.params.token);
+    let invitedEmail: string;
+    try {
+      const invitation = await dependencies.repository.getInvitationByToken(tokenHash);
+      if (!invitation) {
+        reply.header("set-cookie", clearPendingInvitationCookie(dependencies.secureCookies));
+        return reply.code(404).send(safeError("INVITATION_NOT_AVAILABLE", "This invitation is invalid, has expired, or has already been accepted.", request.id));
+      }
+      invitedEmail = invitation.email.trim().toLowerCase();
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation lookup failed");
+      return reply.code(500).send(safeError("INTERNAL_ERROR", "The request could not be completed.", request.id));
+    }
+    const locked = signInThrottle.state(invitedEmail);
+    if (locked) {
+      reply.header("Retry-After", String(locked.retryAfterSeconds));
+      return reply.code(429).send(safeError("TOO_MANY_ATTEMPTS", "Too many attempts. Wait a moment and try again.", request.id));
+    }
+    try {
+      await accountAdmin.createConfirmedAccount({ email: invitedEmail, password: request.body.password, fullName });
+    } catch (error) {
+      if (error instanceof Error && error.message === "USER_ALREADY_EXISTS") {
+        return reply.code(409).send(safeError("ACCOUNT_ALREADY_EXISTS", "An account already exists for this invitation. Sign in to accept it.", request.id));
+      }
+      if (error instanceof Error && error.message === "SIGNUP_REJECTED") {
+        signInThrottle.recordFailure(invitedEmail);
+        return reply.code(400).send(safeError("ACCOUNT_SETUP_UNAVAILABLE", "Account setup could not be completed. Try a different password.", request.id));
+      }
+      if (error instanceof Error && error.message === "ACCOUNT_SETUP_UNCONFIRMED") {
+        request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation account creation outcome unknown");
+        return reply.code(503).send(safeError("ACCOUNT_SETUP_UNCONFIRMED", "Account setup could not be confirmed. Try again; if the account was created, you will be asked to sign in.", request.id));
+      }
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation account creation failed");
+      return authUnavailable(reply, request);
+    }
+    let signedIn: Awaited<ReturnType<AuthProvider["signIn"]>>;
+    try {
+      signedIn = await dependencies.auth.signIn({ email: invitedEmail, password: request.body.password });
+      signInThrottle.clear(invitedEmail);
+    } catch (error) {
+      // The account exists now; the person can sign in from the invitation to accept it.
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation account sign-in failed");
+      return reply.code(503).send(safeError("ACCOUNT_CREATED_SIGN_IN_REQUIRED", "Your account was created. Sign in to accept the invitation.", request.id));
+    }
+    let accepted = false;
+    try {
+      accepted = signedIn.email === invitedEmail && await dependencies.repository.acceptInvitation(
+        signedIn.userId, signedIn.email, signedIn.fullName ?? fullName, true, tokenHash, request.id,
+      );
+    } catch (error) {
+      request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Invitation acceptance after account setup failed");
+    }
+    setAuthCookies(reply, signedIn.tokens, dependencies.secureCookies, sessionKey, newSessionExpiry(),
+      accepted ? [clearPendingInvitationCookie(dependencies.secureCookies)] : []);
+    return reply.code(201).send({ authenticated: true, accepted });
   });
 
   app.post<{ Body: { token: string } }>("/api/v1/invitations/accept", {
