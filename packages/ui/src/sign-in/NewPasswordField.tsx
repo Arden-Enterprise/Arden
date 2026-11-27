@@ -8,7 +8,7 @@ type NewPasswordFieldProps = {
   onChange: (value: string) => void;
 };
 
-export const accountPasswordRequirementMessage = "Password needs at least 8 characters, one uppercase letter, and one special character.";
+export const accountPasswordRequirementMessage = "Password needs at least 8 characters, one uppercase letter, one lowercase letter, and one special character.";
 
 /** Shows the account-creation checks beside the password entry. */
 export function NewPasswordField({
@@ -25,6 +25,7 @@ export function NewPasswordField({
   const requirements = [
     { label: "At least 8 characters", met: checks.minimumLength },
     { label: "At least 1 uppercase letter", met: checks.uppercaseLetter },
+    { label: "At least 1 lowercase letter", met: checks.lowercaseLetter },
     { label: "At least 1 special character", met: checks.specialCharacter },
   ];
 
@@ -56,7 +57,7 @@ export function NewPasswordField({
       <div id={`${id}-requirements`} className="auth-password-guidance">
         <p>Password requirements</p>
         <span className="sr-only" role="status" aria-live="polite">
-          {hasValue ? `${metCount} of 3 password requirements met.` : "No password entered."}
+          {hasValue ? `${metCount} of ${requirements.length} password requirements met.` : "No password entered."}
         </span>
         <ul>
           {requirements.map((requirement) => {

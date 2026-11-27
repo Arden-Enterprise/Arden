@@ -358,7 +358,7 @@ describe("API auth and private draft routes", () => {
 
     const before = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
     expect(before.json().account).toEqual({ passwordSetupRequired: true });
-    for (const password of ["Abcdef!", "abcdefgh!", "Abcdefgh"]) {
+    for (const password of ["Abcdef!", "abcdefgh!", "LGK032005#", "Abcdefgh"]) {
       const invalid = await app.inject({
         method: "POST", url: "/api/v1/auth/password",
         headers: { cookie: sessionCookie, origin: "http://localhost:5180" },
@@ -366,7 +366,7 @@ describe("API auth and private draft routes", () => {
       });
       expect(invalid.statusCode).toBe(400);
       expect(invalid.json().error.code).toBe("INVALID_PASSWORD");
-      expect(invalid.json().error.message).toBe("Password must have at least 8 characters, one uppercase letter, and one special character.");
+      expect(invalid.json().error.message).toBe("Password must have at least 8 characters, one uppercase letter, one lowercase letter, and one special character.");
     }
     const stillPending = await app.inject({ method: "GET", url: "/api/v1/me", headers: { cookie: sessionCookie } });
     expect(stillPending.json().account).toEqual({ passwordSetupRequired: true });
@@ -687,14 +687,14 @@ describe("API auth and private draft routes", () => {
 
   it("enforces the account-creation requirements and the 100-character password cap", async () => {
     const headers = { origin: "http://localhost:5180" };
-    for (const password of ["Abcdef!", "abcdefgh!", "Abcdefgh"]) {
+    for (const password of ["Abcdef!", "abcdefgh!", "LGK032005#", "Abcdefgh"]) {
       const signup = await app.inject({
         method: "POST", url: "/api/v1/auth/sign-up", headers,
         payload: { email: "owner@example.test", password, fullName: "Owner" },
       });
       expect(signup.statusCode).toBe(400);
       expect(signup.json().error.code).toBe("INVALID_PASSWORD");
-      expect(signup.json().error.message).toBe("Password must have at least 8 characters, one uppercase letter, and one special character.");
+      expect(signup.json().error.message).toBe("Password must have at least 8 characters, one uppercase letter, one lowercase letter, and one special character.");
       expect(authProvider.lastSignUpCredentials).toBeNull();
     }
     const signup = await app.inject({
@@ -1006,6 +1006,25 @@ describe("API auth and private draft routes", () => {
     const extraField = await app.inject({ method: "POST", url: "/api/v1/auth/sign-in", headers: { origin: "http://localhost:5180" }, payload: { email: "owner@example.test", password: "synthetic-password", userId: otherId } });
     expect(extraField.statusCode).toBe(400);
     expect(JSON.stringify(extraField.json())).not.toContain("userId");
+  });
+
+  it("locks sign-in after repeated wrong passwords for the same email", async () => {
+    const attempt = (email: string, password: string) => app.inject({
+      method: "POST",
+      url: "/api/v1/auth/sign-in",
+      headers: { origin: "http://localhost:5180" },
+      payload: { email, password },
+    });
+    for (let index = 0; index < 5; index++) {
+      expect((await attempt("locked@example.test", "wrong-password")).statusCode).toBe(401);
+    }
+    const locked = await attempt("locked@example.test", "wrong-password");
+    expect(locked.statusCode).toBe(429);
+    expect(locked.json().error.code).toBe("TOO_MANY_ATTEMPTS");
+    expect(Number(locked.headers["retry-after"])).toBeGreaterThan(0);
+
+    // Another email address is not affected by the first email's lockout.
+    expect((await attempt("owner@example.test", "synthetic-password")).statusCode).toBe(200);
   });
 
   it("keeps invitation account setup non-enumerating and never starts an authenticated session", async () => {

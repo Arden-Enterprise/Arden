@@ -2,6 +2,7 @@ import Fastify, { LogController, type FastifyError, type FastifyReply, type Fast
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, accountPasswordRequirementsMessage, meetsAccountPasswordRequirements, parseSemanticDocument, plainTextToSemanticDocument, serializeSemanticDocument, validateSemanticDocument, semanticDocumentHasText, matchesPublicationScope, publicationScopes, type PublicationScope } from "@arden/domain";
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
+import { SignInThrottle } from "./auth/sign-in-throttle.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
   type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
   type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type GovernanceDocumentView, type StoredContentFields } from "./db/repository.js";
@@ -85,6 +86,7 @@ type CreateSharedDraftBody = { sourcePrivateVersionId: string; classification?: 
 
 export function buildApp(dependencies: AppDependencies) {
   const sessionKey = dependencies.sessionSigningKey ?? randomBytes(32);
+  const signInThrottle = new SignInThrottle();
   const app = Fastify({
     // Explicit metadata-only operation events replace URL/IP-bearing automatic access logs.
     logController: new LogController({ disableRequestLogging: true }),
@@ -246,15 +248,26 @@ export function buildApp(dependencies: AppDependencies) {
     if (!isNormalizedEmail(normalizedEmail)) {
       return reply.code(400).send(safeError("INVALID_EMAIL", "Enter a valid email address.", request.id));
     }
+    const locked = signInThrottle.state(normalizedEmail);
+    if (locked) {
+      reply.header("Retry-After", String(locked.retryAfterSeconds));
+      return reply.code(429).send(safeError("TOO_MANY_ATTEMPTS", "Too many failed sign-in attempts. Wait a moment and try again.", request.id));
+    }
     try {
       const result = await dependencies.auth.signIn({ email: normalizedEmail, password: request.body.password });
+      signInThrottle.clear(normalizedEmail);
       setAuthCookies(reply, result.tokens, dependencies.secureCookies, sessionKey);
       return { authenticated: true };
     } catch (error) {
       if (error instanceof Error && error.message === "EMAIL_NOT_CONFIRMED") {
         return reply.code(403).send(safeError("EMAIL_NOT_CONFIRMED", "Your email address has not been confirmed yet. Please check your inbox for the confirmation link.", request.id));
       }
+      if (error instanceof Error && error.message === "RATE_LIMITED") {
+        reply.header("Retry-After", "30");
+        return reply.code(429).send(safeError("TOO_MANY_ATTEMPTS", "Too many failed sign-in attempts. Wait a moment and try again.", request.id));
+      }
       if (error instanceof Error && error.message === "INVALID_CREDENTIALS") {
+        signInThrottle.recordFailure(normalizedEmail);
         return reply.code(401).send(safeError("INVALID_CREDENTIALS", "Email or password is incorrect.", request.id));
       }
       request.log.error({ errorType: safeErrorType(error), requestId: request.id }, "Authentication provider sign-in failed");
