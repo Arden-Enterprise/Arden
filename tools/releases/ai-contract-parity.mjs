@@ -79,6 +79,7 @@ export function validateAiDockerfile(dockerfileText) {
     ["ANONYMIZED_TELEMETRY=FALSE", "runtime stage must disable ChromaDB telemetry"],
     ["TIKTOKEN_CACHE_DIR=/app/.tiktoken-cache", "runtime stage must use pre-baked TIKTOKEN_CACHE_DIR"],
     ['io.arden.release.ai_managed="1"', "runtime stage must carry distinct io.arden.release.ai_managed=\"1\" label"],
+    ["site-packages/setuptools*", "runtime stage must strip base-image pip/setuptools/wheel toolchains"],
     ["urllib.request", "runtime HEALTHCHECK must use Python urllib.request instead of curl"],
     ["/app/.venv/bin/uvicorn", "runtime CMD must invoke /app/.venv/bin/uvicorn directly"],
   ];

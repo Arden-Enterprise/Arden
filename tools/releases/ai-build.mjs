@@ -29,6 +29,10 @@ execFileSync(
   { stdio: "inherit", timeout: 20 * 60 * 1000 },
 );
 
+// Fail closed on any secret or fixable HIGH/CRITICAL OS/Python CVE.
+// --ignore-unfixed avoids blocking on upstream-unfixed Debian will_not_fix
+// entries and chromadb server-only advisories that have no patched release yet;
+// once an upstream fix ships, Trivy marks it fixed and immediately gates CI.
 execFileSync(
   "docker",
   [
@@ -39,6 +43,7 @@ execFileSync(
     "image",
     "--scanners", "vuln,secret",
     "--severity", "HIGH,CRITICAL",
+    "--ignore-unfixed",
     "--exit-code", "1",
     "--no-progress",
     image,

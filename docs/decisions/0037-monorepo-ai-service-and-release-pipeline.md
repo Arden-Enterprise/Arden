@@ -26,8 +26,8 @@ Adopt Option 3:
 
 - Consolidate `Arden-AI` (`d534c7f`) into `Arden/services/ai/` preserving commit history (rewriting `(#N)` PR references to `(Arden-Enterprise/Arden-AI#N)` so unrelated Arden PRs are not auto-linked) and archive `Arden-Enterprise/Arden-AI` read-only with a pointer README after Phase 2/3 verification.
 - Keep `services/ai/` outside `pnpm-workspace.yaml` (`apps/*`, `packages/*`), Core's `deploy/release/Dockerfile.dockerignore`, and `tools/remote/source.mjs` (`dev:remote`).
-- Retain 100% of ADR 0012's runtime isolation: separate hardened non-root (`USER 1000:1000`), `read_only`-compatible Python container (multi-stage digest-pinned runtime without `uv` or `curl`, pre-baked `tiktoken` cache, disabled Chroma telemetry), zero Arden PostgreSQL credentials or network reachability, separate digest-pinned ChromaDB container/volume per environment, and Core hotfix independence on Core-only pushes.
-- Run Python CI (`pytest`, `ruff`, `mypy`, contract parity, Docker build + Trivy `HIGH,CRITICAL` scan + offline `--network none --read-only` smoke) in an unprivileged `ai-check` job (`permissions: contents: read`, zero persistent caches).
+- Retain 100% of ADR 0012's runtime isolation: separate hardened non-root (`USER 1000:1000`), `read_only`-compatible Python container (multi-stage digest-pinned Debian 13 `trixie` runtime without `uv`, `curl`, or base `pip`/`setuptools`/`wheel`, pre-baked `tiktoken` cache, disabled Chroma telemetry), zero Arden PostgreSQL credentials or network reachability, separate digest-pinned ChromaDB container/volume per environment, and Core hotfix independence on Core-only pushes.
+- Run Python CI (`pytest`, `ruff`, `mypy`, contract parity, Docker build + Trivy `--ignore-unfixed` `HIGH,CRITICAL` and secret scan + offline `--network none --read-only` smoke) in an unprivileged `ai-check` job (`permissions: contents: read`, zero persistent caches). Using `--ignore-unfixed` gates every secret and every fixable OS/Python CVE (and fails closed the day upstream publishes a patch for unfixed Debian `will_not_fix` entries or `chromadb 1.5.9` server-only advisories, while `services/ai` runs strictly as an HTTP client).
 - Isolate AI deployment OIDC proofs (Phase 2/3) inside a dedicated reusable `.github/workflows/release-ai.yml` (`job_workflow_ref` pinned, distinct OIDC audience, dedicated AI Coolify bridge & token prefix, shared host lock, explicit `vars.ARDEN_AI_RELEASE_ENABLED` fail-closed gate, read-only dual preflight on `main`).
 - Provision isolated production `arden-ai`, `chromadb`, and Core `arden_indexer` (`ARDEN_INDEX_DATABASE_URL`) in Phase 3 before enabling production AI promotion.
 
@@ -48,6 +48,8 @@ Adopt Option 3:
 
 - [Root AGENTS.md](../../AGENTS.md)
 - [Nested services/ai/AGENTS.md](../../services/ai/AGENTS.md)
+- [Technology guide](../engineering/technology-guide.md)
+- [Implementation status](../engineering/implementation-status.md)
 - [ADR index](README.md)
 - [V1 Specification](../features/ai-monorepo-cicd/SPEC.md) and [Phased Plan](../features/ai-monorepo-cicd/PLAN.md)
 

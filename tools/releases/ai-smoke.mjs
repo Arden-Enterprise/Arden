@@ -39,6 +39,7 @@ const offlineScript = [
   "import os, shutil, tiktoken",
   "assert os.getuid() == 1000, f'expected uid 1000, got {os.getuid()}'",
   "assert shutil.which('uv') is None, 'uv must not exist in runtime image'",
+  "assert shutil.which('pip') is None, 'pip must not exist in runtime image'",
   "assert shutil.which('curl') is None, 'curl must not exist in runtime image'",
   "for name in ('cl100k_base', 'o200k_base'):",
   "    enc = tiktoken.get_encoding(name)",
@@ -68,6 +69,7 @@ try {
     "-e", "ARDEN_AI_ENVIRONMENT=staging",
     "-e", `ARDEN_AI_SERVICE_TOKEN=${token}`,
     "-e", "ARDEN_AI_MAINTENANCE_PROVIDER_ENABLED=true",
+    "-e", "ARDEN_AI_OPENAI_API_KEY=smoke-test-disposable-placeholder",
     image,
   );
 

@@ -15,9 +15,9 @@ Consolidate the Python AI service (`Arden-Enterprise/Arden-AI` `d534c7f`) into `
 ## Project Structure & Commands
 
 - `services/ai/` — Python 3.11 + `uv` AI service (intentionally outside `pnpm-workspace.yaml`, Core `deploy/release/Dockerfile.dockerignore`, and `tools/remote/source.mjs`).
-- `services/ai/Dockerfile` & `services/ai/Dockerfile.dockerignore` — multi-stage digest-pinned runtime (`USER 1000:1000`, `HOME=/tmp`, `ANONYMIZED_TELEMETRY=FALSE`, pre-baked `TIKTOKEN_CACHE_DIR=/app/.tiktoken-cache`, no `uv` or `curl` in runtime, distinct `io.arden.release.ai_managed="1"` label) with strict allowlist ignore file.
+- `services/ai/Dockerfile` & `services/ai/Dockerfile.dockerignore` — multi-stage digest-pinned Debian 13 (`trixie`) runtime (`USER 1000:1000`, `HOME=/tmp`, `ANONYMIZED_TELEMETRY=FALSE`, pre-baked `TIKTOKEN_CACHE_DIR=/app/.tiktoken-cache`, no `uv`, `curl`, or base `pip`/`setuptools`/`wheel` in runtime, distinct `io.arden.release.ai_managed="1"` label) with strict allowlist ignore file.
 - `services/ai/schemas/parity-manifest.json` — tracked Core↔AI golden fixture pairs and ChromaDB version pin (`1.5.9`).
-- `tools/releases/ai-contract-parity.mjs`, `ai-contract-parity.test.mjs`, `ai-build.mjs`, `ai-smoke.mjs` — parity verification, Trivy scan, and `--network none --read-only` offline `tiktoken` + HTTP `401`/redacted `422` smoke tests.
+- `tools/releases/ai-contract-parity.mjs`, `ai-contract-parity.test.mjs`, `ai-build.mjs`, `ai-smoke.mjs` — parity verification, Trivy `--ignore-unfixed` `HIGH,CRITICAL`/secret scan, and `--network none --read-only` offline `tiktoken` + HTTP `401`/redacted `422` smoke tests.
 - Phase 2 (planned): `deploy/release-ai/`, `tools/releases/ai-release.mjs`, and isolated reusable `.github/workflows/release-ai.yml` (`job_workflow_ref` pinned, distinct OIDC audience, dedicated AI Coolify bridge & token prefix, shared host lock).
 
 ```powershell
