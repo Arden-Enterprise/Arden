@@ -177,6 +177,7 @@ with synthetic API boundaries for all three request types.
 - `GET /reviews` returns metadata (not protected text) for pending submissions the actor may decide. Organization Admin sees every pending submission in the organization.
   - `items` also carry `versionNo` and `authorName`; `decided` lists the submissions this reviewer approved or rejected (newest first, up to 100, read-only) for the REV-02 Reviews list.
   - If the frozen audiences are no longer enforceable, the item is `approvalBlocked`: rejection remains possible, approval does not.
+  - The Reviews client shows the board when this request completes. It loads department labels separately and refreshes the queue after a decision. Home publications/catalog and the author's contribution history load on their own screens, outside the review board's loading path.
 - `GET /reviews/:submissionId` reauthorizes, loads the exact frozen content, and reauthorizes again before responding.
 - `POST /reviews/:submissionId/decisions`:
   - **Request:** `action` (`APPROVE` or `REJECT`), `expectedSnapshotVersionId`, `expectedContentHash`, an optional `comment`, and a UUID `Idempotency-Key`.

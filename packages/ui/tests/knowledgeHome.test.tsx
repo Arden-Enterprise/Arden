@@ -256,7 +256,7 @@ describe("connected Home composition", () => {
     await waitFor(() => expect(listReports).toHaveBeenCalledWith("web", "org", "mine"));
     fireEvent.keyDown(document.activeElement!, { key: "ArrowLeft" });
     expect(tab(/My Contributions/)).toBe(document.activeElement);
-    expect(screen.getByText("No contributions yet")).toBeTruthy(); expect(screen.queryByText("Only you")).toBeTruthy();
+    expect(await screen.findByText("No contributions yet")).toBeTruthy(); expect(screen.queryByText("Only you")).toBeTruthy();
     expect(read(common.title)).toBeNull(); expect(screen.queryByRole("combobox", { name: "Collection" })).toBeNull();
   });
   it("keeps All usable when catalog fails and never reports Unassigned as empty", async () => {
