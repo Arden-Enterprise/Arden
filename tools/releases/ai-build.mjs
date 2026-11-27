@@ -52,3 +52,17 @@ execFileSync(
 );
 
 execFileSync(process.execPath, ["tools/releases/ai-smoke.mjs"], { stdio: "inherit", timeout: 5 * 60 * 1000 });
+
+if (process.env.ARDEN_AI_SKIP_BUNDLE_CHECK !== "1") {
+  try {
+    execFileSync(process.execPath, ["tools/releases/ai-release.mjs", "check-bundle"], {
+      stdio: "inherit",
+      timeout: 10 * 60 * 1000,
+    });
+  } finally {
+    execFileSync(process.execPath, ["tools/releases/ai-release.mjs", "cleanup"], {
+      stdio: "inherit",
+      timeout: 60 * 1000,
+    });
+  }
+}
