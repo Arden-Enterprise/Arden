@@ -7,6 +7,8 @@ import { cleanup } from "@testing-library/react";
 import { InvitationLinkPage } from "../src/organization/InvitationLinkPage";
 import {
   acceptInvitation,
+  createInvitationAccount,
+  currentSession,
   getInvitationPreview,
   signIn,
   signUp,
@@ -21,6 +23,8 @@ vi.mock("../src/shared/api-client", async (importOriginal) => {
   return {
     ...actual,
     acceptInvitation: vi.fn(),
+    createInvitationAccount: vi.fn(),
+    currentSession: vi.fn(),
     getInvitationPreview: vi.fn(),
     signIn: vi.fn(),
     signUp: vi.fn(),
@@ -225,5 +229,115 @@ describe("invitation page feedback", () => {
 
     await screen.findByText("Invitation link unavailable");
     expect(screen.queryByRole("button", { name: "Accept invitation" })).toBeNull();
+  });
+});
+
+describe("invitation account routing (decision 0038)", () => {
+  it("shows only sign-in with the invited address fixed when the account exists", async () => {
+    vi.mocked(getInvitationPreview).mockResolvedValueOnce({ ...invitation, accountStatus: "existing" });
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token", onAccepted: vi.fn() }));
+    const email = await screen.findByRole("textbox", { name: "Email address" }) as HTMLInputElement;
+    expect(email.readOnly).toBe(true);
+    expect(email.value).toBe(invitation.email);
+    expect(screen.getByText("Sign in to your Arden account to accept")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Create account" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Sign in and accept invitation" })).toBeTruthy();
+  });
+
+  it("registers a new invited account without an email field or confirmation step", async () => {
+    const onAccepted = vi.fn();
+    vi.mocked(getInvitationPreview).mockResolvedValueOnce({ ...invitation, accountStatus: "new" });
+    vi.mocked(createInvitationAccount).mockResolvedValueOnce({ accepted: true });
+    vi.mocked(currentSession).mockResolvedValueOnce(session);
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token-abc", onAccepted }));
+
+    await screen.findByText("Create your Arden account to accept");
+    expect(screen.queryByRole("textbox", { name: "Email address" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: " New User " } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Secret123!" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
+
+    await waitFor(() => expect(onAccepted).toHaveBeenCalledWith(session));
+    expect(createInvitationAccount).toHaveBeenCalledWith("web", "invite-token-abc", "New User", "Secret123!");
+    expect(signUp).not.toHaveBeenCalled();
+  });
+
+  it("checks the password rules before creating a routed account", async () => {
+    vi.mocked(getInvitationPreview).mockResolvedValueOnce({ ...invitation, accountStatus: "new" });
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token-abc", onAccepted: vi.fn() }));
+    await screen.findByText("Create your Arden account to accept");
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "abcdefgh!" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
+    expect((await screen.findByRole("alert")).textContent).toContain("one uppercase letter");
+    expect(createInvitationAccount).not.toHaveBeenCalled();
+  });
+
+  it("switches to sign-in when the server finds an existing account", async () => {
+    vi.mocked(getInvitationPreview).mockResolvedValueOnce({ ...invitation, accountStatus: "new" });
+    vi.mocked(createInvitationAccount).mockRejectedValueOnce(new ApiError(409, "exists", "ACCOUNT_ALREADY_EXISTS"));
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token-abc", onAccepted: vi.fn() }));
+    await screen.findByText("Create your Arden account to accept");
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Secret123!" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
+
+    expect((await screen.findByRole("alert")).textContent).toBe("An account already exists for this email. Sign in to accept the invitation.");
+    expect(screen.getByRole("button", { name: "Sign in and accept invitation" })).toBeTruthy();
+    expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
+  });
+
+  it("offers acceptance when the account was created but acceptance did not complete", async () => {
+    const onAccepted = vi.fn();
+    vi.mocked(getInvitationPreview).mockResolvedValueOnce({ ...invitation, accountStatus: "new" });
+    vi.mocked(createInvitationAccount).mockResolvedValueOnce({ accepted: false });
+    vi.mocked(currentSession).mockResolvedValue(session);
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token-abc", onAccepted }));
+    await screen.findByText("Create your Arden account to accept");
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Secret123!" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
+
+    expect((await screen.findByText("Your account is ready. Accept the invitation to continue.")).getAttribute("role")).toBe("status");
+    expect(screen.getByRole("button", { name: "Accept invitation" })).toBeTruthy();
+    expect(onAccepted).not.toHaveBeenCalled();
+  });
+
+  it("keeps the combined screen when the server cannot report the account status", async () => {
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token", onAccepted: vi.fn() }));
+    const email = await screen.findByRole("textbox", { name: "Email address" }) as HTMLInputElement;
+    expect(email.readOnly).toBe(false);
+    expect(screen.getByRole("button", { name: "Create account" })).toBeTruthy();
+  });
+});
+
+describe("invitation account routing after account creation", () => {
+  it("stays signed in instead of reporting a failed creation when loading the session fails", async () => {
+    const onAccepted = vi.fn();
+    vi.mocked(getInvitationPreview).mockResolvedValueOnce({ ...invitation, accountStatus: "new" });
+    vi.mocked(createInvitationAccount).mockResolvedValueOnce({ accepted: true });
+    vi.mocked(currentSession).mockRejectedValueOnce(new ApiError(0, "Connection unavailable."));
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token-abc", onAccepted }));
+    await screen.findByText("Create your Arden account to accept");
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Secret123!" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
+
+    expect(await screen.findByText("Your account is ready and you joined the organization. Reload to open your workspace.")).toBeTruthy();
+    expect(screen.queryByText(/Couldn.t create account/)).toBeNull();
+    expect(onAccepted).not.toHaveBeenCalled();
+  });
+
+  it("explains an unconfirmed account setup outcome without claiming failure", async () => {
+    vi.mocked(getInvitationPreview).mockResolvedValueOnce({ ...invitation, accountStatus: "new" });
+    vi.mocked(createInvitationAccount).mockRejectedValueOnce(new ApiError(503, "unconfirmed", "ACCOUNT_SETUP_UNCONFIRMED"));
+    render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token-abc", onAccepted: vi.fn() }));
+    await screen.findByText("Create your Arden account to accept");
+    fireEvent.change(screen.getByLabelText("Full name"), { target: { value: "New User" } });
+    fireEvent.change(screen.getByLabelText("Password"), { target: { value: "Secret123!" } });
+    fireEvent.submit(screen.getByRole("button", { name: "Create account and accept" }).closest("form")!);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("if your account was created");
   });
 });
