@@ -54,7 +54,6 @@
 .arden-app-shell .organization-tabs button.is-active,
 .arden-app-shell .organization-tabs button.is-active:hover { color: var(--arden-info); border-color: var(--arden-info); background: #293846; }
 .arden-app-shell .organization-surface { background: var(--arden-surface); }
-.arden-app-shell .role-config-role-list > button.is-selected { color: var(--arden-text-primary); border-color: var(--arden-info); background: #283139; }
 @container workspace (max-width: 500px) {
   .arden-app-shell .preview-state { display: block; max-width: 140px; font-size: 9px; }
   .arden-app-shell .knowledge-row { gap: 10px; }

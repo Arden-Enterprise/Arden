@@ -7,7 +7,6 @@ import { AskArdenPage } from "../src/ask-arden/AskArdenPage";
 import { PersonalWorkspacePage } from "../src/personal-workspace/PersonalWorkspacePage";
 import { usePrivateNotes } from "../src/personal-workspace/usePrivateNotes";
 import { OrganizationAdminPage } from "../src/organization/OrganizationAdminPage";
-import { ServerAudienceGroupPanel } from "../src/organization/ServerAudienceGroupPanel";
 import { installTestDialogs } from "./dialogTestSupport";
 
 vi.mock("../src/knowledge/ArdenRichTextEditor", () => import("./richEditorStub"));
@@ -112,21 +111,6 @@ describe("explicit cancellation", () => {
     expect(result.current.hasUnsavedDrafts).toBe(false);
   });
 
-  it("cancels a new reader group without saving or leaving its dirty guard active", async () => {
-    vi.spyOn(api, "loadAudienceGroups").mockResolvedValue([]);
-    const save = vi.spyOn(api, "saveAudienceGroup");
-    const onDirtyChange = vi.fn();
-    render(createElement(ServerAudienceGroupPanel, { platform: "web", organizationId: "org", organizationName: "Example", members: [], departments: [], onDirtyChange }));
-    fireEvent.click(await screen.findByRole("button", { name: "Create reader group" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Group name" }), { target: { value: "Unsaved group" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(screen.queryByRole("textbox", { name: "Group name" })).toBeNull();
-    await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(false));
-    expect(save).not.toHaveBeenCalled();
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Create reader group" })));
-  });
-
   it("returns focus to creating a note when the last unsaved note is discarded", async () => {
     function Notes() {
       const controller = usePrivateNotes([]);
@@ -144,22 +128,6 @@ describe("explicit cancellation", () => {
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Discard changes" }));
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "New note" })));
     expect(screen.queryByRole("textbox", { name: "Note content" })).toBeNull();
-  });
-
-  it("returns focus to a reader-group row after closing or discarding its details", async () => {
-    vi.spyOn(api, "loadAudienceGroups").mockResolvedValue([
-      { id: "group", name: "Demo readers", description: "", version: 1, status: "ACTIVE", members: [] },
-    ]);
-    render(createElement(ServerAudienceGroupPanel, { platform: "web", organizationId: "org", organizationName: "Example", members: [], departments: [] }));
-    const row = await screen.findByRole("button", { name: /Demo readers/ });
-    fireEvent.click(screen.getByRole("button", { name: "Close reader group details" }));
-    await waitFor(() => expect(document.activeElement).toBe(row));
-    fireEvent.click(row);
-    fireEvent.click(screen.getByRole("button", { name: "Details", exact: true }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Group name" }), { target: { value: "Unsaved name" } });
-    fireEvent.click(screen.getByRole("button", { name: "Cancel", exact: true }));
-    fireEvent.click(screen.getByRole("button", { name: "Discard changes" }));
-    await waitFor(() => expect(document.activeElement).toBe(row));
   });
 
   it("clears department, invitation and reviewer forms without changing saved data", async () => {

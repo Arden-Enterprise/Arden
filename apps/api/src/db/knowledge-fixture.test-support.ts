@@ -41,3 +41,9 @@ export async function submitLegacyKnowledgeFixture(pool: Pool, organizationId: s
     RETURNING submission_id`, [organizationId, draftId]);
   return result.rows[0]!.submission_id;
 }
+
+/** A draft created before decision 0039 kept its GROUP audience; new drafts cannot attach one. */
+export async function seedLegacyGroupAudience(pool: Pool, organizationId: string, draftId: string, audienceId: string): Promise<void> {
+  await pool.query(`INSERT INTO arden.shared_draft_audience (shared_draft_id, organization_id, role_id) VALUES ($1, $2, $3)`,
+    [draftId, organizationId, audienceId]);
+}

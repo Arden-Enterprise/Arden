@@ -33,13 +33,9 @@
 .admin-confirm p { margin: 0 0 24px; color: var(--arden-text-secondary); }
 .admin-danger-button { min-height: 42px; padding: 9px 14px; border: 1px solid var(--arden-danger); border-radius: 6px; color: var(--arden-canvas); background: var(--arden-danger); font: inherit; font-weight: 600; }
 .admin-danger-button:disabled { opacity: .45; }
-.admin-roles .role-config { margin: 0; }
 .organization-field [aria-invalid='true'], .admin-grant-form [aria-invalid='true'] { border-color: var(--arden-danger) !important; }
 .field-error { color: var(--arden-danger) !important; }
 .admin-feedback.is-warning { border-left-color: var(--arden-accent); color: var(--arden-accent); }
-.role-config-danger-zone { display: grid; justify-items: start; gap: 6px; margin-top: 16px; padding: 14px; border: 1px solid #7e5051; border-radius: 6px; }
-.role-config-danger-zone strong { color: var(--arden-danger); font-size: 13px; }
-.role-config-danger-zone p { color: var(--arden-text-muted); font-size: 12px; }
 .admin-new-tag { color: var(--arden-success); font-size: 10px; text-transform: uppercase; }
 .admin-grant-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 @container workspace (max-width: 980px) {

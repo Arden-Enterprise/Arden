@@ -219,14 +219,14 @@ Out of scope: annotating PDFs, other file types, OCR, files over 5 MB.
 
 ## F04 Published audiences
 
-Scope: organization/department managed audiences and Org Admin-managed groups; readership remains distinct from administration and review. Main decision 0010 supersedes the older configurable role-based reader model.
+Scope: Target Readers (organization, department, selected members) and the frozen legacy audiences of older publications; readership remains distinct from administration and review. Main decision 0010 supersedes the older configurable role-based reader model, and [decision 0039](../decisions/0039-remove-reader-group-management.md) removed Org Admin-managed reader groups on 28 November 2026.
 
 | Acceptance ID | Complete path to verify | Evidence / remaining |
 | --- | --- | --- |
-| F04-AC1 | Authorized group management and membership updates result in correct effective published readers, scoped to the organization/department. | Canonical API/migration foundation exists; migration 0017 rehearsal remains a recorded gate. |
+| F04-AC1 | Superseded by [decision 0039](../decisions/0039-remove-reader-group-management.md): Org Admins no longer manage reader groups. The `/audience-groups` routes return 404 and Administration has no Readers tab. | Previously: group management and membership updates produced effective readers. API/desktop/UI removal tests on `refactor/remove-reader-group-management`. |
 | F04-AC2 | Authors select only permitted target audiences; invalid/removed audiences fail safely at submission and approval. | Cover actual server/RLS checks, not UI filtering alone. |
 | F04-AC3 | Removal/revocation immediately affects read, search, graph, agent context and citations wherever implemented; audience membership never grants review/admin/private-original access. | Future consumers inherit this invariant; do not claim they already exist. |
-| F04-AC4 | Deactivated reader groups appear under Inactive, outside the active Groups section, while retaining their read-only details. | Requested by the maintainer on 12 November 2026; group state remains server-owned. |
+| F04-AC4 | Superseded by [decision 0039](../decisions/0039-remove-reader-group-management.md); the Groups and Inactive group views were removed. | Previously requested by the maintainer on 12 November 2026. |
 
 ## F05 Reviewer and organization authority
 

@@ -364,19 +364,19 @@ describe("desktop API request allowlist", () => {
     assert.equal(validateDesktopApiRequest({ path: `${path}?type=all`, method: "POST", body, idempotencyKey }), false);
     assert.equal(validateDesktopApiRequest({ path: path.replace(sourcePrivateVersionId, "not-a-uuid"), method: "POST", body, idempotencyKey }), false);
   });
-  it("bounds audience-group routes and requires group-specific update preconditions", () => {
-    const group = `/api/v1/organizations/${organizationId}/audience-groups/${sourcePrivateVersionId}`;
-    assert.equal(validateDesktopApiRequest({ path: group, method: "GET" }), true);
-    assert.equal(validateDesktopApiRequest({ path: group, method: "PATCH", body: "{}", ifMatch: '"audience-group-2"' }), true);
-    assert.equal(validateDesktopApiRequest({ path: group, method: "PATCH", body: "{}" }), false);
-    assert.equal(validateDesktopApiRequest({ path: group, method: "PATCH", body: "{}", ifMatch: '"role-2"' }), false);
-    assert.equal(validateDesktopApiRequest({ path: `${group}/members`, method: "POST", body: "{}" }), true);
-    assert.equal(validateDesktopApiRequest({ path: `${group}/members/${idempotencyKey}/remove`, method: "POST", body: "{}" }), true);
-    assert.equal(validateDesktopApiRequest({ path: `${group}/deactivate`, method: "POST", body: "{}", ifMatch: '"audience-group-2"' }), true);
-    assert.equal(validateDesktopApiRequest({ path: `${group}/deactivate`, method: "POST", body: "{}" }), false);
-    assert.equal(validateDesktopApiRequest({ path: `${group}/deactivate`, method: "POST", body: '{"unexpected":true}', ifMatch: '"audience-group-2"' }), false);
-    assert.equal(validateDesktopApiRequest({ path: `${group}?next=1`, method: "GET" }), false);
-    assert.equal(validateDesktopApiRequest({ path: `${group}/permissions`, method: "POST", body: "{}" }), false);
+  it("rejects the removed reader group routes (decision 0039)", () => {
+    const groups = `/api/v1/organizations/${organizationId}/audience-groups`;
+    const group = `${groups}/${sourcePrivateVersionId}`;
+    const refused = [
+      { path: groups, method: "GET" },
+      { path: groups, method: "POST", body: "{}" },
+      { path: group, method: "GET" },
+      { path: group, method: "PATCH", body: "{}", ifMatch: '"audience-group-2"' },
+      { path: `${group}/members`, method: "POST", body: "{}" },
+      { path: `${group}/members/${idempotencyKey}/remove`, method: "POST", body: "{}" },
+      { path: `${group}/deactivate`, method: "POST", body: "{}", ifMatch: '"audience-group-2"' },
+    ];
+    for (const request of refused) assert.equal(validateDesktopApiRequest(request), false, `${request.method} ${request.path}`);
     assert.equal(validateDesktopApiRequest({ path: `/api/v1/organizations/${organizationId}/roles/${sourcePrivateVersionId}`, method: "GET" }), false);
   });
   it("permits a bounded shared-draft create with its idempotency key", () => {

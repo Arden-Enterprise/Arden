@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ArdenRepository, ReviewerGrantConflictError } from "./repository.js";
-import { prepareKnowledgeFixture, submitLegacyKnowledgeFixture } from "./knowledge-fixture.test-support.js";
+import { prepareKnowledgeFixture, seedLegacyGroupAudience, submitLegacyKnowledgeFixture } from "./knowledge-fixture.test-support.js";
 import { registerKnowledgeCatalogVerification } from "../knowledge/catalog.integration.verification.js";
 import { registerGovernedAnsweringVerification } from "../answers/governed.integration.verification.js";
 import { PgIndexGenerationStore } from "../indexing/store.js";
@@ -469,17 +469,6 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     }
   });
 
-  it("rejects adding an active member without a primary department to a reader group", async () => {
-    if (!repository) throw new Error("Test database is unavailable");
-    await expect(repository.audienceGroups.addMember(ids.owner, ids.organization, ids.readerAudience,
-      ids.organizationReviewerMembership, "unassigned-reader-group-test"))
-      .rejects.toMatchObject({ code: "AUDIENCE_GROUP_UNAVAILABLE" });
-    const groups = await repository.audienceGroups.list(ids.owner, ids.organization);
-    expect(groups.find(group => group.id === ids.readerAudience)?.members
-      .some(member => member.membershipId === ids.organizationReviewerMembership && member.status === "ACTIVE"))
-      .toBe(false);
-  });
-
   it("keeps organization and department reviewer scopes disjoint and exposes grant availability", async () => {
     if (!repository || !pool) throw new Error("Test database is unavailable");
 
@@ -619,6 +608,7 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
       expect(created.kind).toBe("created");
       if (created.kind !== "created") throw new Error("Knowledge draft was not created");
       await prepareKnowledgeFixture(pool, ids.organization, created.draft.id, [ids.ownerMembership, ids.organizationReviewerMembership]);
+      if (audienceId === ids.readerAudience) await seedLegacyGroupAudience(pool, ids.organization, created.draft.id, audienceId);
       const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization,
         created.draft.id, created.draft.currentVersion, {
           responsibleDepartmentId: ids.department,
@@ -736,6 +726,13 @@ describe.skipIf(!databaseUrl)("ArdenRepository with real PostgreSQL RLS", () => 
     });
     expect(created.kind).toBe("created");
     if (created.kind !== "created") return;
+
+    // Decision 0039: only a pre-existing legacy draft may still carry a GROUP audience.
+    const attached = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
+      responsibleDepartmentId: ids.department, targetScopeType: "ORGANIZATION", audienceRoleIds: [ids.readerAudience],
+    }, null, "integration-flow2-new-group");
+    expect(attached.kind).toBe("invalid-metadata");
+    await seedLegacyGroupAudience(pool, ids.organization, created.draft.id, ids.readerAudience);
 
     const configured = await repository.updateKnowledgeDraft(ids.owner, ids.organization, created.draft.id, 1, {
       // Legacy audience/reviewer fixture, upgraded with explicit reader metadata.

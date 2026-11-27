@@ -924,7 +924,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
         : snapshotAlreadySubmitted ? "Already submitted" : "Ready to submit";
   const chooseFile = (file: File | null) => { setNewFile(file); setNewFileError(file ? validatePdfFile(file) : ""); createRequestKey.current = null; };
 
-  const audienceNames = (ids?: string[] | null) => (Array.isArray(ids) ? ids : []).map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? "Unavailable group").join(", ") || "None";
+  const audienceNames = (ids?: string[] | null) => (Array.isArray(ids) ? ids : []).map((id) => options?.audiences.find((audience) => audience.id === id)?.name ?? "Unavailable readers").join(", ") || "None";
   const selectedContribution = drafts.find((item) => item.id === selectedContributionId) ?? null;
   const selectedContributionLatest = selectedContribution ? latestByDraft.get(selectedContribution.id) : undefined;
   // T6.4: only a document with a current publication and no open request can ask for a reader change or withdrawal.
