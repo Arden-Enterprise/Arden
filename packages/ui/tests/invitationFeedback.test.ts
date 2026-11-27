@@ -141,7 +141,7 @@ describe("invitation page feedback", () => {
     expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
   });
 
-  it("blocks invitation account setup when either new password check is missing", async () => {
+  it("blocks invitation account setup when a password character requirement is missing", async () => {
     render(createElement(InvitationLinkPage, { platform: "web", token: "invite-token-abc", onAccepted: vi.fn() }));
     await screen.findByText("Join Arden Demo");
     fireEvent.click(screen.getByRole("button", { name: "Create account" }));
@@ -149,7 +149,7 @@ describe("invitation page feedback", () => {
     const password = screen.getByLabelText("Password");
     const form = screen.getByRole("button", { name: "Create account and accept" }).closest("form")!;
 
-    for (const invalidPassword of ["abcdefgh!", "LGK032005#", "Abcdefgh"]) {
+    for (const invalidPassword of ["abcdefgh!", "ABCDEFGH!", "Abcdefgh"]) {
       fireEvent.change(password, { target: { value: invalidPassword } });
       fireEvent.submit(form);
       expect(signUp).not.toHaveBeenCalled();
