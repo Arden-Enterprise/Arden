@@ -141,6 +141,8 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
           await client.query("DELETE FROM publication_report WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM governance_inspection WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM arden_notification WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM document_relationship_idempotency WHERE organization_id = ANY($1::uuid[])", [orgs]);
+          await client.query("DELETE FROM document_relationship WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM publication_validity_renewal WHERE organization_id = ANY($1::uuid[])", [orgs]);
           await client.query("DELETE FROM knowledge_current_publication WHERE organization_id = ANY($1::uuid[])", [orgs]);
           // Change requests reference a published version; remove them before the publications.
@@ -414,23 +416,183 @@ describe.skipIf(!databaseUrl)("Target Readers with real PostgreSQL (migration 00
         WHERE shared_draft_id = $1`, [draftId, ids.orgB]))).resolves.toBe("23503");
     });
 
-    it("links documents of one organization only, and only by the source document's author", async () => {
+    it("links published documents of one organization only, enforces dual-endpoint RLS, and allows ghost-edge cleanup (0072)", async () => {
+      const publishDraftForLink = async (
+        draftId: string,
+        title: string,
+        options: {
+          readerMode?: "ORGANIZATION" | "SELECTED_MEMBERS";
+          selectedMembers?: string[];
+          expirationDate?: string | null;
+        } = {},
+      ) => {
+        const versionId = id();
+        const submissionId = id();
+        const draftVersionId = id();
+        const selectionId = id();
+        await asSuperuser(async (client) => {
+          await client.query(
+            `INSERT INTO reader_selection (selection_id, organization_id, reader_mode, department_id)
+             VALUES ($1, $2, $3, NULL)`,
+            [selectionId, ids.orgA, options.readerMode ?? "ORGANIZATION"],
+          );
+          if (options.readerMode === "SELECTED_MEMBERS") {
+            const members = options.selectedMembers ?? [ids.authorM, ids.engineerM];
+            for (let i = 0; i < members.length; i += 1) {
+              await client.query(
+                `INSERT INTO selected_reader (selection_id, organization_id, membership_id, ordinal)
+                 VALUES ($1, $2, $3, $4)`,
+                [selectionId, ids.orgA, members[i], i + 1],
+              );
+            }
+          }
+          const kb = await client.query<{ knowledge_base_id: string }>(
+            `INSERT INTO knowledge_base (organization_id, name, scope_type)
+             VALUES ($1, 'Link fixture ' || $2, 'ORGANIZATION')
+             RETURNING knowledge_base_id`,
+            [ids.orgA, draftId],
+          );
+          const management = options.expirationDate !== undefined
+            ? JSON.stringify({
+              type: "Guide",
+              version: "1.0",
+              expirationDate: options.expirationDate,
+              changeNote: "",
+            })
+            : null;
+          await client.query("SET LOCAL session_replication_role = replica");
+          await client.query(
+            `INSERT INTO shared_draft_version (shared_draft_version_id, shared_draft_id, version_no, content_uri, mime_type, content_hash)
+             VALUES ($1, $2, 2, $3, 'text/plain', $4)`,
+            [draftVersionId, draftId, `arden-private-object://${draftId}`, "d".repeat(64)],
+          );
+          await client.query(
+            `INSERT INTO shared_submission (
+               submission_id, organization_id, shared_draft_id, shared_draft_version_id, snapshot_version_no,
+               submitted_by_membership_id, target_scope_type, target_department_id, responsible_department_id,
+               title, classification, audience_role_ids, policy_version, review_rule, content_uri, mime_type,
+               content_hash, status, publication_state, submit_request_id, proposed_selection_id, approved_selection_id, management
+             ) VALUES (
+               $1, $2, $3, $4, 2, $5, 'ORGANIZATION', NULL, $6, $7, 'INTERNAL', $8::uuid[], 1, 'GRANT_SCOPE',
+               $9, 'text/plain', $10, 'APPROVED', 'ACTIVE', gen_random_uuid(), $11, $11, $12::jsonb
+             )`,
+            [
+              submissionId, ids.orgA, draftId, draftVersionId, ids.authorM, ids.sales, title,
+              [ids.allMembersA], `arden-private-object://${draftId}`, "d".repeat(64), selectionId, management,
+            ],
+          );
+          await client.query(
+            `INSERT INTO published_knowledge_version (
+               published_version_id, submission_id, knowledge_base_id, published_by_membership_id,
+               title, version_no, content_uri, content_hash, index_status, published_at,
+               shared_draft_id, classification, responsible_department_id, audience_role_ids,
+               valid_from, reader_selection_id, management, author_membership_id
+             ) VALUES (
+               $1, $2, $3, NULL, $5, 1, $6, $7, 'INDEXED', now(), $8, 'INTERNAL', $9, $10::uuid[],
+               now(), $11, $12::jsonb, $4
+             )`,
+            [
+              versionId, submissionId, kb.rows[0]!.knowledge_base_id, ids.authorM, title,
+              `arden-private-object://${draftId}`, "d".repeat(64), draftId, ids.sales,
+              [ids.allMembersA], selectionId, management,
+            ],
+          );
+          await client.query(
+            `INSERT INTO knowledge_current_publication (
+               shared_draft_id, organization_id, published_version_id, audience_role_ids,
+               target_scope_type, target_department_id, valid_from, reader_selection_id
+             ) VALUES ($1, $2, $3, $4::uuid[], 'ORGANIZATION', NULL, now(), $5)`,
+            [draftId, ids.orgA, versionId, [ids.allMembersA], selectionId],
+          );
+        });
+        return { versionId, selectionId };
+      };
+
       const source = await createDraft(ids.author, ids.orgA, ids.authorM, "Link source");
       const target = await createDraft(ids.author, ids.orgA, ids.authorM, "Link target");
+      const restrictedTarget = await createDraft(ids.author, ids.orgA, ids.authorM, "Restricted link target");
+      const expiredTarget = await createDraft(ids.author, ids.orgA, ids.authorM, "Expired link target");
       const foreign = await createDraft(ids.foreign, ids.orgB, ids.foreignM, "Foreign target");
       const link = (client: PoolClient, organizationId: string, to: string, by = ids.authorM) => client.query(`
         INSERT INTO document_relationship (organization_id, source_document_id, target_document_id, created_by_membership_id)
         VALUES ($1, $2, $3, $4)`, [organizationId, source, to, by]);
+
+      // Cross-org and self-link structural constraints stay enforced at schema level.
       await expect(sqlState((client) => link(client, ids.orgA, foreign))).resolves.toBe("23503");
       await expect(sqlState((client) => link(client, ids.orgB, foreign, ids.foreignM))).resolves.toBe("23503");
       await expect(sqlState((client) => link(client, ids.orgA, source))).resolves.toBe("23514");
+
+      // Under 0072, unpublished drafts cannot be linked at runtime even by their author.
+      await expect(asRuntime(ids.author, ids.orgA, (client) => link(client, ids.orgA, target)))
+        .rejects.toMatchObject({ code: "42501" });
+
+      // Publish source (org-readable), target (author + engineer only), restrictedTarget (engineer + outsider only), and expiredTarget.
+      await publishDraftForLink(source, "Link source", { readerMode: "ORGANIZATION" });
+      const publishedTarget = await publishDraftForLink(target, "Link target", {
+        readerMode: "SELECTED_MEMBERS",
+        selectedMembers: [ids.authorM, ids.engineerM],
+      });
+      await publishDraftForLink(restrictedTarget, "Restricted link target", {
+        readerMode: "SELECTED_MEMBERS",
+        selectedMembers: [ids.engineerM, ids.outsiderM],
+      });
+      await publishDraftForLink(expiredTarget, "Expired link target", {
+        readerMode: "ORGANIZATION",
+        expirationDate: "2020-01-01",
+      });
+
+      // Outsider (not author or org admin) is rejected.
       await expect(asRuntime(ids.outsider, ids.orgA, (client) => link(client, ids.orgA, target, ids.outsiderM)))
         .rejects.toMatchObject({ code: "42501" });
-      await expect(asRuntime(ids.author, ids.orgA, async (client) => {
-        await link(client, ids.orgA, target);
-        return (await client.query("SELECT target_document_id FROM document_relationship WHERE source_document_id = $1",
-          [source])).rows;
-      })).resolves.toEqual([{ target_document_id: target }]);
+      // Author/admin cannot link to an unreadable restricted target or an expired target.
+      await expect(asRuntime(ids.author, ids.orgA, (client) => link(client, ids.orgA, restrictedTarget)))
+        .rejects.toMatchObject({ code: "42501" });
+      await expect(asRuntime(ids.author, ids.orgA, (client) => link(client, ids.orgA, expiredTarget)))
+        .rejects.toMatchObject({ code: "42501" });
+
+      // Author can link published source -> readable published target; commit so other actors can test SELECT/ghost-delete.
+      const createdRelationshipId = await asSuperuser(async (client) => {
+        await client.query("SET LOCAL ROLE arden_runtime");
+        await client.query("SELECT set_config('arden.actor_id', $1, true), set_config('arden.organization_id', $2, true)",
+          [ids.author, ids.orgA]);
+        const inserted = await client.query<{ relationship_id: string; target_document_id: string }>(`
+          INSERT INTO document_relationship (organization_id, source_document_id, target_document_id, created_by_membership_id)
+          VALUES ($1, $2, $3, $4)
+          RETURNING relationship_id, target_document_id`, [ids.orgA, source, target, ids.authorM]);
+        expect(inserted.rows[0]?.target_document_id).toBe(target);
+        const visible = await client.query("SELECT target_document_id FROM document_relationship WHERE source_document_id = $1", [source]);
+        expect(visible.rows).toEqual([{ target_document_id: target }]);
+        return inserted.rows[0]!.relationship_id;
+      });
+
+      // Dual-endpoint SELECT RLS: engineer (reader of both) sees the edge; outsider (cannot read target) sees 0 rows.
+      await expect(asRuntime(ids.engineer, ids.orgA, (client) =>
+        client.query("SELECT target_document_id FROM document_relationship WHERE source_document_id = $1", [source])))
+        .resolves.toMatchObject({ rows: [{ target_document_id: target }] });
+      await expect(asRuntime(ids.outsider, ids.orgA, (client) =>
+        client.query("SELECT target_document_id FROM document_relationship WHERE source_document_id = $1", [source])))
+        .resolves.toMatchObject({ rowCount: 0 });
+
+      // Expire the target: SELECT now hides the ghost edge from everyone, but the source author can still clean it up.
+      await asSuperuser(async (client) => {
+        await client.query("SET LOCAL session_replication_role = replica");
+        await client.query(
+          `UPDATE published_knowledge_version
+              SET management = jsonb_build_object('type', 'Guide', 'version', '1.0', 'expirationDate', '2020-01-01', 'changeNote', '')
+            WHERE published_version_id = $1`,
+          [publishedTarget.versionId],
+        );
+      });
+      await expect(asRuntime(ids.author, ids.orgA, (client) =>
+        client.query("SELECT 1 FROM document_relationship WHERE relationship_id = $1", [createdRelationshipId])))
+        .resolves.toMatchObject({ rowCount: 0 });
+      await expect(asRuntime(ids.outsider, ids.orgA, (client) =>
+        client.query("SELECT * FROM remove_governed_document_relationship($1, $2)", [source, createdRelationshipId])))
+        .resolves.toMatchObject({ rowCount: 0 });
+      await expect(asRuntime(ids.author, ids.orgA, (client) =>
+        client.query("SELECT relationship_id, target_document_id FROM remove_governed_document_relationship($1, $2)",
+          [source, createdRelationshipId])))
+        .resolves.toMatchObject({ rows: [{ relationship_id: createdRelationshipId, target_document_id: target }] });
     });
   });
 

@@ -1,5 +1,8 @@
 import { useId, useRef, useState, useEffect } from "react";
+import type { ContextBasket } from "../graph/context-basket";
+import { ToastContent } from "../shared/ActionToast";
 import { Icon } from "../shared/Icon";
+import { useStatusIsland } from "../shared/StatusIslandContext";
 import { useWorkspaceNavigation } from "../shared/WorkspaceNavigationContext";
 import type { KnowledgeCitationReference } from "../knowledge/knowledgeCitation";
 import type { Platform } from "../shared/types";
@@ -9,15 +12,22 @@ import { ChatMessages } from "./ChatMessages";
 import { ChatHistoryPopover } from "./ChatHistoryPopover";
 import { CitationSourcesPanel } from "./CitationSourcesPanel";
 import { NewChatDialog } from "./NewChatDialog";
-import { useArdenChat } from "./useArdenChat";
+import { useArdenChat, type ArdenChat, type ChatSource } from "./useArdenChat";
+import type { SurfaceActionHandler } from "./surface/types";
 
 const ardenOrbSource = new URL("./assets/arden-orb-source.png", import.meta.url).href;
+const companySource: ChatSource = { kind: "company" };
 
 type AskArdenPageProps = {
   active?: boolean;
   platform: Platform;
   organizationId: string | null;
+  /** Shared Company chat instance hoisted by ArdenShell; omitted in standalone tests/usage. */
+  chat?: ArdenChat;
+  basket?: ContextBasket;
   onOpenCitation?: (citation: KnowledgeCitationReference) => void;
+  /** Optional seam for dispatching UiSurface actions (e.g., SurfaceActionDispatcher). */
+  onSurfaceAction?: SurfaceActionHandler;
   /** Opens a saved chat (or a new one for null) from the address bar, handled once per navigation. */
   routeRequest?: { conversationId: string | null; navigationId: string } | null;
   /** Reports the open saved chat; a first question turns the new chat into a saved one in place. */
@@ -26,14 +36,25 @@ type AskArdenPageProps = {
   onRouteSettled?: () => void;
 };
 
-export function AskArdenPage({ platform, organizationId, onOpenCitation, active = true, routeRequest, onConversationChange, onRouteSettled }: AskArdenPageProps) {
-  const chat = useArdenChat({ platform, organizationId, source: { kind: "company" } });
+export function AskArdenPage(props: AskArdenPageProps) {
+  if (props.chat) return <AskArdenPageContent {...props} chat={props.chat} />;
+  return <StandaloneAskArdenPage {...props} />;
+}
+
+function StandaloneAskArdenPage(props: Omit<AskArdenPageProps, "chat">) {
+  const chat = useArdenChat({ platform: props.platform, organizationId: props.organizationId, source: companySource });
+  return <AskArdenPageContent {...props} chat={chat} />;
+}
+
+function AskArdenPageContent({ chat, basket, onOpenCitation, onSurfaceAction, active = true, routeRequest, onConversationChange, onRouteSettled }: AskArdenPageProps & { chat: ArdenChat }) {
   const [examplesVisible, setExamplesVisible] = useState(true);
   const [resetting, setResetting] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const historyButton = useRef<HTMLButtonElement>(null);
   const historyId = useId(), sourcesId = useId();
   const navigation = useWorkspaceNavigation();
+  const island = useStatusIsland();
+  const toast = island?.toast ?? null;
   const focusComposer = () => requestAnimationFrame(() => composerRef.current?.focus());
 
   const openingSaved = useRef(false);
@@ -59,7 +80,24 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
 
   const ask = (prompt: string) => {
     chat.setDraft(prompt);
-    focusComposer();
+    if (composerRef.current) composerRef.current.focus();
+    else focusComposer();
+  };
+
+  const handleSurfaceAction: SurfaceActionHandler = (action, opener, documents) => {
+    if (onSurfaceAction) {
+      onSurfaceAction(action, opener, documents);
+      return;
+    }
+    if (action.kind === "open_reader" && onOpenCitation) {
+      onOpenCitation({
+        documentId: action.documentId,
+        versionId: action.publishedVersionId,
+        blockId: action.blockId,
+        page: action.page,
+        excerpt: "",
+      });
+    }
   };
 
   const reset = () => {
@@ -76,7 +114,9 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
     wasEmpty.current = chat.empty;
   }, [chat.empty]);
 
-  return <main id={active ? "arden-main" : undefined} className="workspace-page ask-arden-page" aria-labelledby="ask-arden-title" tabIndex={-1}>
+  if (!active) return null;
+
+  return <main id="arden-main" className="workspace-page ask-arden-page" aria-labelledby="ask-arden-title" tabIndex={-1}>
     <h1 id="ask-arden-title" className="sr-only">Ask Arden</h1>
     <div className={`ask-arden-stage${chat.empty ? " is-empty" : " is-thread"}${chat.sourcePanel ? " has-sources" : ""}`}
       onFocusCapture={(event) => { composerFocused.current = (event.target as Element) === composerRef.current; }}
@@ -100,11 +140,18 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
           onClick={chat.reloadConversation}>Reload chat</button>}
         {!chat.empty && <button type="button" className="island-link-button" onClick={() => setResetting(true)}>New chat</button>}
       </header>
+      {toast && <div className="status-island is-toast ask-status-island" role="region" aria-label="Status island">
+        <div className="status-island-live" role="status" aria-live="polite">
+          <div className="status-island-content status-island-toast">
+            <ToastContent message={toast.message} onDismiss={toast.onDismiss} action={toast.action} />
+          </div>
+        </div>
+      </div>}
 
       <div className="ask-thread-scroll" aria-live="polite">
         {chat.empty ? <section className="ask-empty-state" aria-labelledby="ask-arden-title">
           <img className="ask-brand-watermark" src={ardenOrbSource} alt="" aria-hidden="true" />
-          <ChatComposer chat={chat} placement="center" composerRef={composerRef} />
+          <ChatComposer chat={chat} basket={basket} placement="center" composerRef={composerRef} />
 
           {examplesVisible && <div className="ask-examples">
             <div className="ask-examples-heading"><span>Try asking</span><button type="button" aria-label="Hide examples" onClick={() => setExamplesVisible(false)}><Icon name="close" size={12} /></button></div>
@@ -117,10 +164,10 @@ export function AskArdenPage({ platform, organizationId, onOpenCitation, active 
             </div>
           </div>}
 
-        </section> : <ChatMessages chat={chat} sourcesId={sourcesId} />}
+        </section> : <ChatMessages chat={chat} sourcesId={sourcesId} onSurfaceAction={handleSurfaceAction} onPrefillPrompt={ask} />}
       </div>
 
-      {!chat.empty && <ChatComposer chat={chat} placement="dock" composerRef={composerRef} />}
+      {!chat.empty && <ChatComposer chat={chat} basket={basket} placement="dock" composerRef={composerRef} />}
       {chat.sourcePanel && <CitationSourcesPanel key={chat.sourcePanel.messageId} id={sourcesId} citations={chat.sourcePanel.citations}
         selected={chat.sourcePanel.selected} onOpenDocument={onOpenCitation} onClose={chat.closeSources} />}
     </div>

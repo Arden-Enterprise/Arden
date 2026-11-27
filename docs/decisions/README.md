@@ -121,3 +121,5 @@ Reviewer self-approval: [0033 — Reviewers with a matching grant may decide the
 Share button and direct sharing: [0034 — One Share button, unreviewed direct sharing with individuals and private PDF items](0034-share-button-direct-share-and-private-pdf.md) (accepted 26 November 2026) allows explicitly selected members to read a private item and lets Private store PDF files.
 
 Audit policy: [0035 — Audit only consequential actions](0035-audit-only-consequential-actions.md) (accepted 26 November 2026) supersedes the audit line of 0002. Permanent deletion and changes to share access are audited.
+
+Knowledge Graph and Modular Agent UI: [0036 — Knowledge Graph (`@xyflow/react`) and Modular Composable Typed UI Blocks](0036-knowledge-graph-and-modular-typed-ui-blocks.md) (accepted 26 November 2026; specification approved, implementation not started) supersedes Sigma.js in `technology-guide.md` Section 9, resolves navigation gap `G4` while keeping Home default (`0022`), and defines the A2UI-inspired Flat Adjacency `UiSurface` v1 contract over `/v3/generations` and ISO/IEC 38505-1:2026 Monitor Mode.

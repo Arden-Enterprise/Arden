@@ -90,6 +90,8 @@
 .arden-app-shell.is-nav-collapsed,
 .arden-app-shell.is-nav-collapsed.is-context-collapsed { grid-template-columns: 56px minmax(0, 1fr); }
 .arden-app-shell.is-nav-collapsed:not(.is-context-collapsed):not(.is-context-overlay) { grid-template-columns: 56px minmax(0, 1fr) var(--arden-context-width, 360px); }
+.arden-app-shell.is-context-resizing,
+.arden-app-shell:has(.agent-panel-resize.is-dragging) { transition: none; }
 .arden-app-shell .workspace-page {
   height: calc(var(--arden-shell-height) + var(--arden-shell-gap));
   margin-top: calc(-1 * var(--arden-shell-gap));

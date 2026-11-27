@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { assertBooleanEnvironmentValue, parseUiSurfaceV3Environment } from "../config/env.js";
 import {
   assertLocalFlow1TestTarget,
   LocalFlow1TestAuthProvider,
@@ -72,4 +73,27 @@ describe("Kiet Local no-login test mode", () => {
       String(target), String(environment), Boolean(supabaseConfigured),
     )).toBe(false);
   });
+});
+
+describe("strict boolean environment parsing", () => {
+  it("accepts undefined, 'true', and 'false' for ARDEN_AI_UI_SURFACE_V3", () => {
+    expect(() => assertBooleanEnvironmentValue("ARDEN_AI_UI_SURFACE_V3", undefined)).not.toThrow();
+    expect(() => assertBooleanEnvironmentValue("ARDEN_AI_UI_SURFACE_V3", "true")).not.toThrow();
+    expect(() => assertBooleanEnvironmentValue("ARDEN_AI_UI_SURFACE_V3", "false")).not.toThrow();
+    expect(parseUiSurfaceV3Environment(undefined)).toBe(true);
+    expect(parseUiSurfaceV3Environment("true")).toBe(true);
+    expect(parseUiSurfaceV3Environment("false")).toBe(false);
+  });
+
+  it.each(["0", "1", "yes", "no", "off", "FALSE", " false ", ""])(
+    "rejects non-strict boolean value %j for ARDEN_AI_UI_SURFACE_V3",
+    (raw) => {
+      expect(() => assertBooleanEnvironmentValue("ARDEN_AI_UI_SURFACE_V3", raw)).toThrow(
+        "ARDEN_AI_UI_SURFACE_V3 must be true or false",
+      );
+      expect(() => parseUiSurfaceV3Environment(raw)).toThrow(
+        "ARDEN_AI_UI_SURFACE_V3 must be true or false",
+      );
+    },
+  );
 });

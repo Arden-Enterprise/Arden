@@ -2,6 +2,7 @@ import type { Pool, PoolClient, QueryResult } from "pg";
 import { metadataSubmissionErrors, validKnowledgeMetadata, type KnowledgeMetadata } from "@arden/domain";
 import { PgKnowledgeCatalogStore, type KnowledgeCatalogStore } from "../knowledge/catalog-store.js";
 import { PgConversationStore, type AnswerFeedback, type ConversationStore } from "../answers/conversation-store.js";
+import { PgSurfaceHydrator, type UiSurfaceHydrator } from "../answers/ui-surface-hydrator.js";
 import { PgReaderSourceStore, type ReaderSourceStore } from "../reader-ai/source-store.js";
 import type { ProviderUsageEvent } from "../answers/usage-contracts.js";
 import { insertAiUsageEvents } from "./ai-usage.js";
@@ -10,6 +11,8 @@ import { departmentAudienceName } from "./department-audience-name.js";
 import { PgNotificationStore, type NotificationStore } from "../notifications/store.js";
 import { PgMaintenanceStore } from "../maintenance/case-store.js";
 import { PgDirectShareStore, type DirectShareStore } from "../private-notes/direct-share-store.js";
+import { PgGraphStore, type GraphStore } from "../graph/graph-service.js";
+import { PgDocumentRelationshipStore, type DocumentRelationshipStore } from "../graph/relationship-service.js";
 import { PgPrivateOrganizationStore, isActiveCollection, lockTree, type PrivateOrganizationStore,
   type PrivateTrashRetentionStore } from "../private-notes/organization-store.js";
 import type { MaintenancePort } from "../maintenance/case-service.js";
@@ -17,7 +20,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { canCreateSharedDraft, canRespondToSubmission, canSubmitSnapshot, resolveResponsibleDepartment, type KnowledgeClassification } from "../knowledge/policy.js";
 import { listAssignedReviews, type AssignedReview } from "../knowledge/review-queue.js";
 import { planReviewDecision, type ReviewAction, type ReviewDecisionPlan } from "../knowledge/review-decision.js";
-import { maxSelectedReaders, validateSelection, type ReaderActor, type ReaderMode, type ReaderSelection,
+import { canRead, maxSelectedReaders, validateSelection, type ReaderActor, type ReaderMode, type ReaderSelection,
   type SelectionFacts, type TargetReadersField, type TargetReadersInput } from "../target-readers/policy.js";
 import { sameReaders, type ApprovedReadersField } from "../target-readers/narrowing.js";
 
@@ -338,6 +341,8 @@ export type AuthorizedAiSource = {
   versionNo: number;
   classification: KnowledgeClassification;
   targetScopeType: "ORGANIZATION" | "DEPARTMENT";
+  /** Responsible department UUID for published versions (populated for Flow 2+ publications). */
+  responsibleDepartmentId?: string | null;
   /** Approved Target Readers; null keeps the legacy audience behaviour. */
   targetReaders: ReaderSelection | null;
 };
@@ -638,6 +643,7 @@ type AuthorizedAiSourceRow = ReaderSelectionColumns & {
   version_no: number;
   classification: KnowledgeClassification;
   target_scope_type: "ORGANIZATION" | "DEPARTMENT";
+  responsible_department_id: string | null;
 };
 const publishedKnowledgeSelect = `
   SELECT pv.published_version_id, pv.shared_draft_id, pv.title, pv.classification,
@@ -709,6 +715,12 @@ export interface ArdenDataRepository {
   readonly privateOrganization: PrivateOrganizationStore;
   /** Decision 0034: unreviewed, view-only sharing of private items with named members. */
   readonly directShares?: DirectShareStore;
+  /** Authorized Knowledge Graph projection store (GET /knowledge/graph). */
+  readonly graph?: GraphStore;
+  /** Governed document relationship mutation store (POST .../relationships & .../remove). */
+  readonly graphRelationships?: DocumentRelationshipStore;
+  /** Batched UiSurface metadata, capability, and live lineage hydrator (T-05a). */
+  readonly uiSurfaceHydrator?: UiSurfaceHydrator;
   listMemberships(userId: string): Promise<MembershipSummary[]>;
   requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null>;
   recordAiAnswerResult(userId: string, organizationId: string, requestId: string,
@@ -804,8 +816,11 @@ export interface ArdenDataRepository {
     input: PublicationRenewalInput, requestId: string): Promise<RequestPublicationRenewalResult>;
   enqueuePublicationExpiryReminders(): Promise<number>;
   getPublishedKnowledge(userId: string, organizationId: string, publishedVersionId: string): Promise<PublishedKnowledge | null>;
-  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null>;
+  listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[],
+    scopeDocumentIds?: readonly string[]): Promise<AuthorizedAiSource[] | null>;
   readonly conversations?: ConversationStore;
+  /** Dedicated publishedVersionIds-keyed availability check (eligible_ai_publications + canRead; bypasses 500-doc org cap). */
+  arePublishedVersionsAvailable?(userId: string, organizationId: string, publishedVersionIds: readonly string[]): Promise<boolean>;
   /** The caller as a TargetReaderPolicy actor, or null when they are not an active member. */
   getTargetReaderActor(userId: string, organizationId: string): Promise<ReaderActor | null>;
 }
@@ -854,6 +869,9 @@ export class ArdenRepository implements ArdenDataRepository {
   readonly maintenance: MaintenancePort;
   readonly privateOrganization: PgPrivateOrganizationStore;
   readonly directShares: PgDirectShareStore;
+  readonly graph: GraphStore;
+  readonly graphRelationships: DocumentRelationshipStore;
+  readonly uiSurfaceHydrator: UiSurfaceHydrator;
   /** System-only retention capability for the in-process 30-day purge loop. */
   readonly privateTrashRetention: PrivateTrashRetentionStore;
   constructor(private readonly pool: Pool, content?: { read(sourceUri: string, expectedHash: string): Promise<string> }) {
@@ -869,6 +887,9 @@ export class ArdenRepository implements ArdenDataRepository {
     this.privateTrashRetention = this.privateOrganization;
     this.directShares = new PgDirectShareStore((user, org, work) => this.withActorContext(user, org, work),
       (user, org, work) => this.withOrganizationAdmin(user, org, work));
+    this.graph = new PgGraphStore((user, org, work) => this.withActorContext(user, org, work));
+    this.graphRelationships = new PgDocumentRelationshipStore((user, org, work) => this.withActorContext(user, org, work));
+    this.uiSurfaceHydrator = new PgSurfaceHydrator((user, org, work) => this.withActorContext(user, org, work));
   }
 
   async requireActiveMembership(userId: string, organizationId: string): Promise<ActiveMembership | null> {
@@ -2803,14 +2824,15 @@ export class ArdenRepository implements ArdenDataRepository {
     });
   }
 
-  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[]): Promise<AuthorizedAiSource[] | null> {
+  async listAuthorizedAiSources(userId: string, organizationId: string, generationIds?: string[], chunkIds?: string[],
+    scopeDocumentIds?: readonly string[]): Promise<AuthorizedAiSource[] | null> {
     if ((generationIds && generationIds.length > 64) || (chunkIds && chunkIds.length > 64)) throw new Error("Too many evidence locations");
     return this.withActorContext(userId, organizationId, async (client) => {
       if (!await this.activeActorMembership(client, userId, organizationId)) return null;
       const result = await client.query<AuthorizedAiSourceRow>(`
         SELECT g.generation_id, g.snapshot_version_id, g.snapshot_content_hash,
                pv.published_version_id, pv.shared_draft_id, pv.title, pv.version_no,
-               pv.classification, kb.scope_type AS target_scope_type, pv.management,
+               pv.classification, kb.scope_type AS target_scope_type, pv.responsible_department_id, pv.management,
                ${readerSelectionColumns("pv.reader_selection_id")},
                CASE WHEN $2::uuid[] IS NULL THEN NULL ELSE
                  (SELECT jsonb_agg(chunk) FROM jsonb_array_elements(g.manifest_json->'chunks') chunk
@@ -2821,8 +2843,9 @@ export class ArdenRepository implements ArdenDataRepository {
             ON g.submission_id = pv.submission_id AND g.status = 'READY'
          WHERE g.organization_id = $1 AND pv.published_version_id IN (SELECT eligible_ai_publications())
            AND ($2::uuid[] IS NULL OR g.generation_id = ANY($2::uuid[]))
+           AND ($4::uuid[] IS NULL OR pv.shared_draft_id = ANY($4::uuid[]))
          ORDER BY pv.published_at DESC, pv.published_version_id DESC
-         LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null]);
+         LIMIT 501`, [organizationId, generationIds ?? null, chunkIds ?? null, scopeDocumentIds ?? null]);
       if (result.rows.length > 500) throw new Error("Authorized source count exceeds the request budget");
       return result.rows.map((row) => ({
         management: currentManagement(row.management),
@@ -2836,8 +2859,52 @@ export class ArdenRepository implements ArdenDataRepository {
         versionNo: row.version_no,
         classification: row.classification,
         targetScopeType: row.target_scope_type,
+        responsibleDepartmentId: row.responsible_department_id,
         targetReaders: mapReaderSelection(row),
       }));
+    });
+  }
+
+  async arePublishedVersionsAvailable(
+    userId: string,
+    organizationId: string,
+    publishedVersionIds: readonly string[],
+  ): Promise<boolean> {
+    const uniqueIds = [...new Set(publishedVersionIds)];
+    if (uniqueIds.length > 500) return false;
+    return this.withActorContext(userId, organizationId, async (client) => {
+      const actorResult = await client.query<{ membership_id: string; status: ReaderActor["status"]; department_ids: string[] }>(`
+        SELECT om.membership_id, om.status,
+               ARRAY(SELECT dm.department_id::text FROM department_membership dm
+                       JOIN department d ON d.department_id = dm.department_id
+                                        AND d.organization_id = om.organization_id AND d.status = 'ACTIVE'
+                      WHERE dm.membership_id = om.membership_id AND dm.status = 'ACTIVE'
+                      ORDER BY dm.department_id) AS department_ids
+          FROM organization_membership om
+          JOIN user_account ua ON ua.user_id = om.user_id AND ua.status = 'ACTIVE'
+          JOIN organization o ON o.organization_id = om.organization_id AND o.status = 'ACTIVE'
+         WHERE om.user_id = $1 AND om.organization_id = $2`, [userId, organizationId]);
+      const actorRow = actorResult.rows[0];
+      if (!actorRow || actorRow.status !== "ACTIVE") return false;
+      if (uniqueIds.length === 0) return true;
+      const actor: ReaderActor = {
+        membershipId: actorRow.membership_id,
+        organizationId,
+        status: actorRow.status,
+        departmentIds: actorRow.department_ids,
+      };
+      const result = await client.query<{ published_version_id: string } & ReaderSelectionColumns>(`
+        SELECT pv.published_version_id,
+               ${readerSelectionColumns("pv.reader_selection_id")}
+          FROM published_knowledge_version pv
+         WHERE pv.published_version_id = ANY($1::uuid[])
+           AND pv.published_version_id IN (SELECT eligible_ai_publications())`, [uniqueIds]);
+      const allowed = new Set(
+        result.rows
+          .filter((row) => canRead(actor, { organizationId, readers: mapReaderSelection(row) }))
+          .map((row) => row.published_version_id),
+      );
+      return allowed.size === uniqueIds.length;
     });
   }
 

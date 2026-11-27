@@ -37,6 +37,8 @@ const knowledgeDraftVersionItem = new RegExp(`^/api/v1/organizations/${uuid}/kno
 const knowledgeDraftSubmit = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/drafts/${uuid}/submit$`);
 const knowledgeSubmissionWithdraw = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/submissions/${uuid}/(withdraw|publication-retry)$`);
 const knowledgeChangeRequest = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/documents/${uuid}/change-requests$`);
+const knowledgeRenewals = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/renewals$`);
+const knowledgeRenewalRequest = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/documents/${uuid}/renewal$`);
 // Decision 0023 governance: reads, and actions that carry a reason or message body.
 const governanceRead = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/(governance/publications|governance/inspections/${uuid}|documents/${uuid}/responsible-view|reports)$`);
 const governanceWithBody = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/(governance/publications/${uuid}/inspections|documents/${uuid}/withdrawal|published/${uuid}/reports)$`);
@@ -52,6 +54,9 @@ const knowledgeCatalogRead = new RegExp(`^/api/v1/organizations/${uuid}/knowledg
 const knowledgeCatalogCreate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/collections$`);
 const knowledgeCatalogItem = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/collections/${uuid}$`);
 const knowledgePlacement = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/catalog/placements/${uuid}$`);
+const knowledgeGraphPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/graph$`);
+const knowledgeDocumentRelationshipsPath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/documents/${uuid}/relationships$`);
+const knowledgeDocumentRelationshipRemovePath = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/documents/${uuid}/relationships/${uuid}/remove$`);
 const maintenanceCollection = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases$`);
 const maintenanceCase = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}$`);
 const maintenanceHistory = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/maintenance/cases/${uuid}/history$`);
@@ -64,7 +69,8 @@ const maintenanceImport = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/m
 const closedReportQuery = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reports$`);
 const aiAnswerPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/answers$`);
 const writingActionPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/writing-actions$`);
-const aiConversationPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations(?:/${uuid})?$`);
+const aiConversationListPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations$`);
+const aiConversationItemPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations/${uuid}$`);
 const aiFeedbackPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/conversations/${uuid}/turns/${uuid}/feedback$`);
 const privateFeedbackPath = new RegExp(`^/api/v1/organizations/${uuid}/ai/private-feedback$`);
 const reviewerGrantDeactivate = new RegExp(`^/api/v1/organizations/${uuid}/knowledge/reviewer-grants/${uuid}/deactivate$`);
@@ -112,23 +118,39 @@ export function validateDesktopApiRequest(value: unknown): value is DesktopApiRe
   return isAllowedRequest(request as DesktopApiRequest);
 }
 
-export function desktopApiResponseLimit(request: DesktopApiRequest): number {
-  const pdfCreate = request.method === "POST" && pdfKnowledgeDraft.test(request.path);
-  const privatePdfRead = request.method === "GET" && (privatePdfFile.test(request.path) || sharedWithMePdf.test(request.path));
-  const knowledgeDetail = ((request.method === "GET" || request.method === "PATCH")
-    && (knowledgeDraftItem.test(request.path) || knowledgeDraftVersionItem.test(request.path)))
-    || (request.method === "GET" && (knowledgeReviewItem.test(request.path)
-      || publishedKnowledgeItem.test(request.path)));
-  return pdfCreate || knowledgeDetail || privatePdfRead ? 7_100_000 : 1024 * 1024;
+function parseRequestPathname(path: string): string | null {
+  try {
+    const url = new URL(path, "https://arden.invalid");
+    return url.origin === "https://arden.invalid" ? url.pathname : null;
+  } catch {
+    return null;
+  }
 }
 
-/** Reader deadlines are main-owned; other routes retain the validated renderer bound. */
+export function desktopApiResponseLimit(request: DesktopApiRequest): number {
+  const pathname = parseRequestPathname(request.path);
+  if (!pathname) return 1024 * 1024;
+  const pdfCreate = request.method === "POST" && pdfKnowledgeDraft.test(pathname);
+  const privatePdfRead = request.method === "GET" && (privatePdfFile.test(pathname) || sharedWithMePdf.test(pathname));
+  const knowledgeDetail = ((request.method === "GET" || request.method === "PATCH")
+    && (knowledgeDraftItem.test(pathname) || knowledgeDraftVersionItem.test(pathname)))
+    || (request.method === "GET" && (knowledgeReviewItem.test(pathname)
+      || publishedKnowledgeItem.test(pathname)));
+  if (pdfCreate || knowledgeDetail || privatePdfRead) return 7_100_000;
+  if (request.method === "GET" && aiConversationItemPath.test(pathname)) return 2 * 1024 * 1024;
+  return 1024 * 1024;
+}
+
+/** AI and reader deadlines are main-owned; other routes retain the validated renderer bound. */
 export function desktopApiTimeout(request: DesktopApiRequest): number | undefined {
-  if (request.method === "POST" && knowledgeReviewAi.test(request.path)) return 85_000;
-  if (request.method === "POST" && writingActionPath.test(request.path)) return 90_000;
-  if (request.method === "POST" && (readerQuestionPath.test(request.path) || privateNoteQuestionPath.test(request.path))) return 240_000;
-  if (request.method === "POST" && readerSummaryPath.test(request.path)) return 300_000;
-  if (request.method === "GET" && readerSummaryAccess.test(request.path)) return 30_000;
+  const pathname = parseRequestPathname(request.path);
+  if (!pathname) return request.timeoutMs;
+  if (request.method === "POST" && knowledgeReviewAi.test(pathname)) return 85_000;
+  if (request.method === "POST" && aiAnswerPath.test(pathname)) return 120_000;
+  if (request.method === "POST" && writingActionPath.test(pathname)) return 90_000;
+  if (request.method === "POST" && (readerQuestionPath.test(pathname) || privateNoteQuestionPath.test(pathname))) return 240_000;
+  if (request.method === "POST" && readerSummaryPath.test(pathname)) return 300_000;
+  if (request.method === "GET" && readerSummaryAccess.test(pathname)) return 30_000;
   return request.timeoutMs;
 }
 
@@ -141,6 +163,54 @@ function reviewAiBody(body: string | undefined): boolean {
       && "snapshotVersionId" in value && typeof value.snapshotVersionId === "string" && uuidPattern.test(value.snapshotVersionId)
       && "snapshotContentHash" in value && typeof value.snapshotContentHash === "string"
       && /^[0-9a-f]{64}$/.test(value.snapshotContentHash);
+  } catch { return false; }
+}
+
+const answerBodyKeys = new Set(["query", "conversationId", "requestId", "expectedRevision", "scopeFilter"]);
+
+function answerBody(body: string | undefined): boolean {
+  if (!body || Buffer.byteLength(body, "utf8") > 32_768) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const data = value as Record<string, unknown>;
+    if (Object.keys(data).some((key) => !answerBodyKeys.has(key))) return false;
+    if (!Object.hasOwn(data, "query") || typeof data.query !== "string"
+      || !data.query.trim() || Array.from(data.query).length > 4_000) return false;
+    if (Object.hasOwn(data, "conversationId")
+      && (typeof data.conversationId !== "string" || !uuidPattern.test(data.conversationId))) return false;
+    if (Object.hasOwn(data, "requestId")
+      && (typeof data.requestId !== "string" || !uuidPattern.test(data.requestId))) return false;
+    if (Object.hasOwn(data, "expectedRevision")
+      && (typeof data.expectedRevision !== "number" || !Number.isSafeInteger(data.expectedRevision)
+        || data.expectedRevision < 0 || data.expectedRevision > 1_000_000)) return false;
+    if (Object.hasOwn(data, "scopeFilter")) {
+      const scopeFilter = data.scopeFilter;
+      if (typeof scopeFilter !== "object" || scopeFilter === null || Array.isArray(scopeFilter)) return false;
+      const scopeKeys = Object.keys(scopeFilter);
+      if (scopeKeys.length !== 1 || scopeKeys[0] !== "documentIds") return false;
+      const documentIds = (scopeFilter as Record<string, unknown>).documentIds;
+      if (!Array.isArray(documentIds) || documentIds.length < 1 || documentIds.length > 50) return false;
+      const seen = new Set<string>();
+      for (const id of documentIds) {
+        if (typeof id !== "string" || !uuidPattern.test(id) || seen.has(id)) return false;
+        seen.add(id);
+      }
+    }
+    return true;
+  } catch { return false; }
+}
+
+function renewalBody(body: string | undefined): boolean {
+  if (!body || Buffer.byteLength(body, "utf8") > 32_768) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const data = value as Record<string, unknown>;
+    if (Object.keys(data).sort().join() !== "expirationDate,reason") return false;
+    const validDate = data.expirationDate === null
+      || (typeof data.expirationDate === "string" && data.expirationDate.length <= 10);
+    return validDate && typeof data.reason === "string" && data.reason.length >= 1 && data.reason.length <= 4_000;
   } catch { return false; }
 }
 
@@ -191,6 +261,18 @@ function writingBody(body: string | undefined): boolean {
       && ["IMPROVE", "REFORMAT", "EXPLAIN"].includes(String(data.action))
       && ["SELECTION", "PAGE"].includes(String(data.scope))
       && typeof data.text === "string" && Boolean(data.text.trim()) && data.text.length <= 12_000;
+  } catch { return false; }
+}
+
+function relationshipCreateBody(body: string | undefined): boolean {
+  if (!body || Buffer.byteLength(body, "utf8") > 1_024) return false;
+  try {
+    const value: unknown = JSON.parse(body);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+    const data = value as Record<string, unknown>;
+    if (Object.keys(data).sort().join() !== "relationshipType,targetDocumentId") return false;
+    return typeof data.targetDocumentId === "string" && uuidPattern.test(data.targetDocumentId)
+      && typeof data.relationshipType === "string" && graphRelationshipTypes.has(data.relationshipType);
   } catch { return false; }
 }
 
@@ -245,6 +327,11 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
   // T6.1/T6.4: an author's reader-change or withdrawal request carries a body and an idempotency key.
   const knowledgeChange = knowledgeChangeRequest.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
+  // Decision 0032: renewal validity list and reviewed renewal request with idempotency key.
+  const knowledgeRenewalsGet = knowledgeRenewals.test(url.pathname) && request.method === "GET"
+    && !url.search && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const knowledgeRenewalPost = knowledgeRenewalRequest.test(url.pathname) && request.method === "POST"
+    && !url.search && renewalBody(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch;
   const reportCursors = url.searchParams.getAll("cursor");
   const closedReports = closedReportQuery.test(url.pathname)
     && [...url.searchParams.keys()].every((key) => key === "disposition" || key === "cursor")
@@ -258,14 +345,16 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && request.method === "POST" && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
   const grantDeactivate = reviewerGrantDeactivate.test(url.pathname) && request.method === "POST"
     && !request.body && !request.ifMatch && !request.idempotencyKey;
-  const aiAnswer = aiAnswerPath.test(url.pathname) && request.method === "POST"
-    && Boolean(request.body) && !request.ifMatch && !request.idempotencyKey;
+  const aiAnswer = aiAnswerPath.test(url.pathname) && request.method === "POST" && !url.search
+    && answerBody(request.body) && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
   const writingAction = writingActionPath.test(url.pathname) && request.method === "POST" && !url.search
     && writingBody(request.body) && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
   const reviewAi = knowledgeReviewAi.test(url.pathname) && request.method === "POST" && !url.search
     && reviewAiBody(request.body) && !request.ifMatch && !request.idempotencyKey && request.timeoutMs === undefined;
-  const aiConversationGet = aiConversationPath.test(url.pathname) && request.method === "GET"
-    && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const aiConversationListGet = aiConversationListPath.test(url.pathname) && request.method === "GET"
+    && !url.search && !request.body && !request.ifMatch && !request.idempotencyKey;
+  const aiConversationItemGet = aiConversationItemPath.test(url.pathname) && request.method === "GET"
+    && !request.body && !request.ifMatch && !request.idempotencyKey && conversationQuery(url);
   const privateAnswerFeedback = privateFeedbackPath.test(url.pathname);
   const aiFeedback = (aiFeedbackPath.test(url.pathname) || privateAnswerFeedback) && request.method === "PUT" && !url.search
     && !request.ifMatch && !request.idempotencyKey && feedbackBody(request.body, privateAnswerFeedback);
@@ -357,17 +446,133 @@ function isAllowedRequest(request: DesktopApiRequest): boolean {
     && (!url.search || (maintenanceHistory.test(url.pathname) && [...url.searchParams.keys()].every((key) => key === "cursor")));
   const maintenanceImportPost = maintenanceImport.test(url.pathname) && request.method === "POST"
     && !request.body && !request.ifMatch && !request.idempotencyKey && !url.search;
+  const knowledgeGraphGet = knowledgeGraphPath.test(url.pathname) && request.method === "GET"
+    && request.body === undefined && !request.ifMatch && !request.idempotencyKey && graphQuery(url);
+  const knowledgeDocumentRelationshipCreate = knowledgeDocumentRelationshipsPath.test(url.pathname)
+    && request.method === "POST" && !url.search && !request.ifMatch && Boolean(request.idempotencyKey)
+    && relationshipCreateBody(request.body);
+  const knowledgeDocumentRelationshipRemove = knowledgeDocumentRelationshipRemovePath.test(url.pathname)
+    && request.method === "POST" && !url.search && !request.ifMatch && Boolean(request.idempotencyKey)
+    && request.body === "{}";
   const maintenanceWrite = maintenanceCommand.test(url.pathname) && request.method === "POST"
     && Boolean(request.body) && Boolean(request.idempotencyKey) && !request.ifMatch && !url.search;
-  return (privateOrganizationRequest || placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeCreate || knowledgePdfCreate || knowledgePatch
-    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || writingAction || reviewAi || aiConversationGet || aiFeedback || readerSummary || adminGet
+  return (privateOrganizationRequest || placementGet || placementPatch || catalogGet || catalogPost || catalogPatch || otherRequest || sharedDraftCreate || knowledgeGet || knowledgeGraphGet || knowledgeDocumentRelationshipCreate || knowledgeDocumentRelationshipRemove || knowledgeCreate || knowledgePdfCreate || knowledgePatch
+    || knowledgeSubmit || knowledgeDecision || knowledgeWithdraw || knowledgeChange || knowledgeRenewalsGet || knowledgeRenewalPost || governanceAllowed || grantCreate || grantDeactivate || aiAnswer || writingAction || reviewAi || aiConversationListGet || aiConversationItemGet || aiFeedback || readerSummary || adminGet
     || adminPost || adminAction || accountPost || invitationGet || audienceGroupGet || audienceGroupPatch
     || audienceGroupAddMember || audienceGroupRemoveMember || audienceGroupDeactivate
     || maintenanceImportPost || maintenanceList || maintenanceCreate || maintenanceRead || maintenanceWrite
     || systemAdministrationGet || systemAdministrationGrant || systemAdministrationRevoke || systemAdministrationCapability
     || systemConsoleGet || systemAuthRequest || systemAiFeedback
     || notificationsGet || notificationReadRequest || notificationReadAllRequest)
-    && (!url.search || queryAllowed || catalogQuery || notificationsGet || publicationScopeQuery || maintenanceList || maintenanceRead || closedReports || systemConsoleGet);
+    && (!url.search || queryAllowed || catalogQuery || notificationsGet || publicationScopeQuery || maintenanceList || maintenanceRead
+      || closedReports || aiConversationItemGet || knowledgeGraphGet || systemConsoleGet);
+}
+
+const graphViewModes = new Set(["accountability", "collections"]);
+const graphTypeCodes = new Set([
+  "POLICY_AND_STANDARD",
+  "PROCEDURE",
+  "GUIDE",
+  "REFERENCE",
+  "LESSONS_LEARNED",
+  "UNCATEGORIZED",
+]);
+const graphReaderScopes = new Set([
+  "ORGANIZATION",
+  "DEPARTMENT",
+  "SELECTED_MEMBERS",
+  "LEGACY_AUDIENCE",
+]);
+const graphValidityFilters = new Set(["CURRENT", "EXPIRING_SOON", "EXPIRED"]);
+const graphRelationshipTypes = new Set(["REFERENCES", "RELATED", "SUPERSEDES"]);
+const graphQueryKeys = new Set([
+  "view",
+  "q",
+  "ownerDepartmentId",
+  "typeCode",
+  "collectionId",
+  "readerScope",
+  "validity",
+  "includeLinks",
+  "relationshipTypes",
+  "monitor",
+  "onlyOpenCases",
+  "onlyUnassignedOrg",
+  "includeExpired",
+  "focusDocumentId",
+  "limit",
+]);
+
+function graphQuery(url: URL): boolean {
+  const seen = new Set<string>();
+  for (const [key, value] of url.searchParams) {
+    if (!graphQueryKeys.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    switch (key) {
+      case "view":
+        if (!graphViewModes.has(value)) return false;
+        break;
+      case "q":
+        if (Array.from(value).length > 120) return false;
+        break;
+      case "ownerDepartmentId":
+      case "focusDocumentId":
+        if (!uuidPattern.test(value)) return false;
+        break;
+      case "typeCode":
+        if (!graphTypeCodes.has(value)) return false;
+        break;
+      case "collectionId":
+        if (value !== "UNASSIGNED" && !uuidPattern.test(value)) return false;
+        break;
+      case "readerScope":
+        if (!graphReaderScopes.has(value)) return false;
+        break;
+      case "validity":
+        if (!graphValidityFilters.has(value)) return false;
+        break;
+      case "includeLinks":
+      case "monitor":
+      case "onlyOpenCases":
+      case "onlyUnassignedOrg":
+      case "includeExpired":
+        if (value !== "true" && value !== "false") return false;
+        break;
+      case "relationshipTypes": {
+        if (!value) return false;
+        const parts = value.split(",");
+        if (parts.length > graphRelationshipTypes.size) return false;
+        const seenTypes = new Set<string>();
+        for (const part of parts) {
+          if (!graphRelationshipTypes.has(part) || seenTypes.has(part)) return false;
+          seenTypes.add(part);
+        }
+        break;
+      }
+      case "limit":
+        if (!/^[1-9][0-9]{0,2}$/.test(value) || Number(value) > 500) return false;
+        break;
+      default:
+        return false;
+    }
+  }
+  return true;
+}
+
+function conversationQuery(url: URL): boolean {
+  const allowed = new Set(["limit", "beforeSequence"]);
+  const seen = new Set<string>();
+  for (const [key, value] of url.searchParams) {
+    if (!allowed.has(key) || seen.has(key)) return false;
+    seen.add(key);
+    if (key === "limit" && (!/^[1-9][0-9]?$/.test(value) || Number(value) > 50)) return false;
+    if (key === "beforeSequence") {
+      if (!/^[1-9][0-9]{0,9}$/.test(value)) return false;
+      const parsed = Number(value);
+      if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 2_147_483_647) return false;
+    }
+  }
+  return true;
 }
 
 function notificationQuery(url: URL): boolean {

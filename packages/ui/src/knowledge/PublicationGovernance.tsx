@@ -71,7 +71,7 @@ export function ReasonDialog({ title, subtitle, icon, notice, noticeIcon, label,
 }
 
 /** Read-only content of an inspection or a responsible view. It is never a Library or Ask Arden source. */
-function GovernanceContentDialog({ document, heading, onClose }: { document: GovernanceDocument; heading: ReactNode; onClose: () => void }) {
+export function GovernanceContentDialog({ document, heading, onClose }: { document: GovernanceDocument; heading: ReactNode; onClose: () => void }) {
   return <KnowledgeDialog title={document.title} onClose={onClose}>
     <div className="governance-view">
       <div className="governance-view-meta">{heading}</div>
@@ -247,8 +247,10 @@ export function PublicationReportsPanel({ platform, organizationId, departmentNa
 }
 
 /** Decision 0023: Administration → Documents. Metadata only until the Admin opens an audited inspection. */
-export function GovernanceDocumentsPanel({ platform, organizationId, departmentName }: {
+export function GovernanceDocumentsPanel({ platform, organizationId, departmentName, requestedInspection, onInspectionRequestHandled }: {
   platform: Platform; organizationId: string; departmentName: (id: string | null) => string;
+  requestedInspection?: { documentId: string; title: string } | null;
+  onInspectionRequestHandled?: () => void;
 }) {
   const [items, setItems] = useState<GovernancePublication[] | null>(null);
   const [error, setError] = useState("");
@@ -271,6 +273,15 @@ export function GovernanceDocumentsPanel({ platform, organizationId, departmentN
       .catch(() => { if (present) setValidity(new Map()); });
     return () => { present = false; };
   }, [platform, organizationId, refresh]);
+  useEffect(() => {
+    if (!requestedInspection || items === null) return;
+    const item = items.find((candidate) => candidate.documentId === requestedInspection.documentId);
+    setInspectTarget({
+      documentId: requestedInspection.documentId,
+      title: item?.title ?? requestedInspection.title,
+    });
+    onInspectionRequestHandled?.();
+  }, [items, requestedInspection, onInspectionRequestHandled]);
   const shown = (items ?? []).filter((item) => item.title.toLowerCase().includes(query.trim().toLowerCase())
     && matchesValidityFilter(validity.get(item.documentId), validityFilter));
   const reload = () => setRefresh((value) => value + 1);

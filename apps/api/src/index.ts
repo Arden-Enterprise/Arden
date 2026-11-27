@@ -6,6 +6,7 @@ import { buildApp } from "./app.js";
 import { resolveSupabaseAuthPublicUrl, SupabaseAuthProvider } from "./auth/provider.js";
 import { sessionSigningKey } from "./auth/session-timebox.js";
 import { assertLocalFlow1TestTarget, LocalFlow1TestAuthProvider, parseLocalTestAccounts } from "./auth/local-flow1-test.js";
+import { assertBooleanEnvironmentValue, parseUiSurfaceV3Environment } from "./config/env.js";
 import { ArdenRepository } from "./db/repository.js";
 import { LocalPrivateContentStorage } from "./private-notes/content-storage.js";
 import { createSmtpMailer, smtpConfigurationFromEnvironment } from "./email/smtp-mailer.js";
@@ -88,6 +89,7 @@ if (Boolean(aiUrl) !== Boolean(aiServiceToken)) {
   throw new Error("ARDEN_AI_URL and ARDEN_AI_SERVICE_TOKEN must be configured together");
 }
 const askArden = aiUrl && aiServiceToken ? new HttpAskArdenClient(aiUrl, aiServiceToken) : null;
+const useUiSurfaceV3 = parseUiSurfaceV3Environment(process.env.ARDEN_AI_UI_SURFACE_V3);
 function optedInOrganizations(variable: string): ReadonlySet<string> {
   const ids = new Set((process.env[variable] ?? "").split(",").map(id => id.trim().toLowerCase()).filter(Boolean));
   if ([...ids].some(id => !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id))) {
@@ -212,6 +214,7 @@ const app = buildApp({
   storage: contentStorage,
   invitationMailer,
   askArden,
+  useUiSurfaceV3,
   privateNoteAiOrganizations,
   reviewerAiOrganizations,
   readerAi: askArden,
@@ -369,8 +372,4 @@ function localFlow1Origin(name: string, fallback: string): string {
     throw new Error(`${name} must be an exact loopback HTTP origin`);
   }
   return parsed.origin;
-}
-
-function assertBooleanEnvironmentValue(name: string, value: string | undefined): void {
-  if (value !== undefined && value !== "true" && value !== "false") throw new Error(`${name} must be true or false`);
 }

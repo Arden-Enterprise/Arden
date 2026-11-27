@@ -25,7 +25,8 @@ import { departmentDeletionSummary, filterOrganizationMembers, isOrganizationAdm
 import { GovernanceDocumentsPanel } from "../knowledge/PublicationGovernance";
 import { MAX_INVITATIONS_PER_BATCH, planInvitationBatch, sendInvitationBatch, type InvitationBatchPlan, type InvitationSendResult } from "./invitationBatch";
 
-type Props = { platform: Platform; organizationId: string; organizationName: string; onDirtyChange?: (dirty: boolean) => void;
+type Props = { platform: Platform; organizationId: string; organizationName: string; initialTab?: AdminTab; onDirtyChange?: (dirty: boolean) => void;
+  requestedInspection?: { documentId: string; title: string } | null; onInspectionRequestHandled?: () => void;
   onSendingInvitationsChange?: (sending: boolean) => void } & ContextControlProps;
 type AdminTab = "members" | "departments" | "audiences" | "invitations" | "reviewers" | "documents" | "sharing";
 type Confirmation = { title: string; description: string; action: string; run: () => Promise<void> };
@@ -49,11 +50,14 @@ function invitationResultLabel(result: InvitationSendResult): string {
   }
 }
 
-export function OrganizationAdminPage({ platform, organizationId, organizationName, contextOpen, onToggleContext,
-  onDirtyChange, onSendingInvitationsChange }: Props) {
+export function OrganizationAdminPage({ platform, organizationId, organizationName, initialTab, contextOpen, onToggleContext,
+  requestedInspection, onInspectionRequestHandled, onDirtyChange, onSendingInvitationsChange }: Props) {
   const [data, setData] = useState<OrganizationAdministration | null>(null);
   const [reviewerGrants, setReviewerGrants] = useState<ReviewerGrant[]>([]);
-  const [tab, setTab] = useState<AdminTab>("members");
+  const [tab, setTab] = useState<AdminTab>(initialTab ?? "members");
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
   const [audienceDirty, setAudienceDirty] = useState(false);
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<string | null>(null);
@@ -419,7 +423,8 @@ export function OrganizationAdminPage({ platform, organizationId, organizationNa
           </div>
         </div>}
         {tab === "documents" && <div role="tabpanel" aria-label="Documents"><GovernanceDocumentsPanel platform={platform}
-          organizationId={organizationId} departmentName={departmentName} /></div>}
+          organizationId={organizationId} departmentName={departmentName} requestedInspection={requestedInspection}
+          onInspectionRequestHandled={onInspectionRequestHandled} /></div>}
         {tab === "sharing" && <div role="tabpanel" aria-label="Sharing"><DirectSharingSettings platform={platform}
           organizationId={organizationId} /></div>}
         {tab === "reviewers" && <div role="tabpanel" aria-label="Review permissions" className="admin-tabpanel">

@@ -4,7 +4,7 @@ import { accountPasswordMaximumLength, accountPasswordMaximumLengthMessage, acco
 import type { AuthProvider, AuthSessionTokens } from "./auth/provider.js";
 import { SignInThrottle } from "./auth/sign-in-throttle.js";
 import { ReviewerGrantConflictError, type ArdenDataRepository, type DraftCursor, type DraftPatch,
-  type DraftWrite, type PrivateDraft, type ReviewerGrantInput, type SharedDraftPatch,
+  type DraftWrite, type PrivateDraft, type PublishedKnowledge, type ReviewerGrantInput, type SharedDraftPatch,
   type SharedKnowledgeDraft, type SharedKnowledgeSubmission, type GovernanceDocumentView, type StoredContentFields } from "./db/repository.js";
 import { newSessionExpiry, readSessionExpiry, sealSession } from "./auth/session-timebox.js";
 import type { PrivateContentStorage } from "./private-notes/content-storage.js";
@@ -37,6 +37,9 @@ import { registerMaintenanceRoutes } from "./maintenance/routes.js";
 import { registerPrivateOrganizationRoutes, representNoteSummary, representPrivateNote } from "./private-notes/organization-routes.js";
 import { registerDirectShareRoutes } from "./private-notes/direct-share-routes.js";
 import { isNormalizedEmail } from "./email-address.js";
+import { GraphProjectionService } from "./graph/graph-service.js";
+import { DocumentRelationshipService } from "./graph/relationship-service.js";
+import { registerGraphRoutes } from "./graph/graph-routes.js";
 
 const maxBodyBytes = 100_000;
 const maxPdfBytes = 5 * 1024 * 1024;
@@ -72,6 +75,7 @@ type AppDependencies = {
   publicApiOrigin?: string | null;
   invitationDeliveryMode?: "email" | "local-test-no-email";
   askArden?: AskArdenClient | null;
+  useUiSurfaceV3?: boolean;
   privateNoteAiOrganizations?: ReadonlySet<string>;
   reviewerAiOrganizations?: ReadonlySet<string>;
   readerAi?: ReaderAiClient | null;
@@ -126,7 +130,8 @@ export function buildApp(dependencies: AppDependencies) {
     requireAuthenticatedActor(request, reply, dependencies.auth, dependencies.secureCookies, sessionKey, dependencies.testActor);
   registerAudienceGroupRoutes(app, dependencies.repository.audienceGroups, requestActor, uuidPattern);
   registerKnowledgeCatalogRoutes(app, dependencies.repository.knowledgeCatalog, requestActor, uuidPattern);
-  registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern);
+  registerAnswerRoutes(app, dependencies.repository, dependencies.askArden ?? null, requestActor, uuidPattern,
+    { useUiSurfaceV3: dependencies.useUiSurfaceV3 });
   registerReaderSummaryRoutes(app, dependencies.repository, dependencies.storage, dependencies.readerAi ?? null, requestActor, uuidPattern);
   registerReaderQuestionRoutes(app, dependencies.repository, dependencies.storage, dependencies.askArden ?? null, requestActor, uuidPattern);
   // Decision 0010 (2026-11-27): System Admin routes accept only the isolated System Admin
@@ -164,6 +169,15 @@ export function buildApp(dependencies: AppDependencies) {
   if (dependencies.repository.directShares) {
     registerDirectShareRoutes(app, { store: dependencies.repository.directShares, storage: dependencies.storage, requestActor, uuidPattern });
   }
+  const graphRelationshipService = dependencies.repository.graphRelationships
+    ? new DocumentRelationshipService(dependencies.repository.graphRelationships)
+    : undefined;
+  registerGraphRoutes(app, {
+    service: dependencies.repository.graph ? new GraphProjectionService(dependencies.repository.graph) : undefined,
+    relationshipService: graphRelationshipService,
+    requestActor,
+    uuidPattern,
+  });
   const maintenanceMode = process.env.ARDEN_MAINTENANCE_ANALYSIS_ADAPTER;
   const maintenanceAdapter = maintenanceMode === "http" || maintenanceMode === "http-provider"
     ? httpAnalysisAdapter(process.env.ARDEN_AI_URL ?? "", process.env.ARDEN_AI_SERVICE_TOKEN ?? "",
@@ -2116,10 +2130,8 @@ export function buildApp(dependencies: AppDependencies) {
           const found = await dependencies.repository.getPublishedKnowledge(context.userId, organizationId, publishedVersionId);
           return found && canRead(actor, { organizationId, readers: found.targetReaders }) ? found : null;
         };
-        const publication = await readablePublication();
-        if (!publication) return reply.code(404).send(resourceNotAvailable(request.id));
         // Decision 0032 A3: an old link to an expired publication explains instead of showing the content.
-        if (publication.expired) {
+        const expiredPublication = (publication: PublishedKnowledge) => {
           reply.header("Cache-Control", "no-store");
           const expiredOn = publication.management?.expirationDate ?? null;
           const owner = publication.responsibleDepartmentName;
@@ -2128,16 +2140,24 @@ export function buildApp(dependencies: AppDependencies) {
           return reply.code(410).send({ error: { code: "DOCUMENT_EXPIRED", requestId: request.id,
             message: `This document expired${shown ? ` on ${shown}` : ""}. Contact ${owner ?? "the owner department"}.`,
             expiredOn, ownerDepartmentName: owner, title: publication.title } });
-        }
+        };
+        const publication = await readablePublication();
+        if (!publication) return reply.code(404).send(resourceNotAvailable(request.id));
+        if (publication.expired) return expiredPublication(publication);
         const mimeType = publication.sourceUri.endsWith(".pdf") ? "application/pdf" : "text/plain";
         const content = await readKnowledgeContent(dependencies.storage, publication.sourceUri, publication.contentHash, mimeType);
+        const canEditRelationships = await graphRelationshipService?.canManageLinks(
+          context.userId, organizationId, publication.draftId,
+        ) ?? false;
         const stillAuthorized = await readablePublication();
         if (!stillAuthorized || stillAuthorized.contentHash !== publication.contentHash) {
           return reply.code(404).send(resourceNotAvailable(request.id));
         }
+        if (stillAuthorized.expired) return expiredPublication(stillAuthorized);
         reply.header("Cache-Control", "no-store");
         return { id: publication.id, draftId: publication.draftId, title: publication.title,
           management: publication.management,
+          canEditRelationships,
           classification: publication.classification,
           responsibleDepartmentId: publication.responsibleDepartmentId,
           responsibleDepartmentName: publication.responsibleDepartmentName,

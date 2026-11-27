@@ -4,37 +4,29 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { RealtimeClient, type RealtimeChannel } from "@supabase/realtime-js";
-import { desktopApiResponseLimit, desktopApiTimeout, validateDesktopApiRequest, type DesktopApiRequest } from "./apiRequestPolicy";
-
-type DesktopApiResponse = { status: number; body: string; etag?: string; location?: string };
-type CookieJar = Map<string, string>;
+import { validateDesktopApiRequest, type DesktopApiRequest } from "./apiRequestPolicy";
+import { createDesktopApi, type CookieJar } from "./desktopApi";
 
 const outputDirectory = fileURLToPath(new URL(".", import.meta.url));
 const sessionFile = () => join(app.getPath("userData"), "auth-session.enc");
-let cookieJar: CookieJar | null = null;
-let requestQueue: Promise<void> = Promise.resolve();
+const desktopApi = createDesktopApi({
+  origin: trustedApiOrigin,
+  read: readCookieJar,
+  persist: persistCookieJar,
+  clear: () => rm(sessionFile(), { force: true }),
+});
 let notificationLifecycle: Promise<void> = Promise.resolve();
 let notificationClient: RealtimeClient | null = null;
 let notificationChannel: RealtimeChannel | null = null;
 let notificationWindow: BrowserWindow | null = null;
 let notificationOrganizationId: string | null = null;
+let notificationEpoch: number | null = null;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type MainNotificationCredential = { endpoint: string; apiKey: string; accessToken: string; topic: string; expiresAt: string };
 
 class NotificationCredentialError extends Error {
   constructor(readonly status: number) { super("Notification updates are unavailable"); }
-}
-let jarLock: Promise<void> = Promise.resolve();
-
-function withJarLock<T>(work: () => Promise<T>): Promise<T> {
-  const run = jarLock.then(work, work);
-  jarLock = run.then(() => undefined, () => undefined);
-  return run;
-}
-
-function canPassWaitingRequests(request: DesktopApiRequest): boolean {
-  return request.method === "POST" && request.path.endsWith("/analysis-cancellation");
 }
 
 function isTrustedRenderer(event: Electron.IpcMainInvokeEvent): boolean {
@@ -66,7 +58,6 @@ function trustedApiOrigin(): string {
 }
 
 async function readCookieJar(origin: string): Promise<CookieJar> {
-  if (cookieJar) return cookieJar;
   try {
     if (!await safeStorage.isAsyncEncryptionAvailable()) throw new Error("OS secure storage is unavailable");
     const encoded = await readFile(sessionFile(), "utf8");
@@ -79,15 +70,13 @@ async function readCookieJar(origin: string): Promise<CookieJar> {
     }
     if (parsed.origin !== origin) {
       await rm(sessionFile(), { force: true });
-      cookieJar = new Map();
-    } else {
-      cookieJar = new Map(parsed.cookies as Array<[string, string]>);
+      return new Map();
     }
+    return new Map(parsed.cookies as Array<[string, string]>);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") cookieJar = new Map();
-    else throw new Error("The secure desktop session could not be read");
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+    throw new Error("The secure desktop session could not be read");
   }
-  return cookieJar;
 }
 
 async function persistCookieJar(jar: CookieJar, origin: string): Promise<void> {
@@ -99,71 +88,18 @@ async function persistCookieJar(jar: CookieJar, origin: string): Promise<void> {
   await rename(temporary, destination);
 }
 
-function applySetCookies(jar: CookieJar, setCookies: string[]): void {
-  for (const cookie of setCookies) {
-    const pair = cookie.split(";", 1)[0];
-    const separator = pair.indexOf("=");
-    if (separator <= 0) continue;
-    const name = pair.slice(0, separator).trim();
-    const value = pair.slice(separator + 1).trim();
-    const expiresText = cookie.match(/(?:^|;)\s*expires=([^;]+)/i)?.[1];
-    const expiresAt = expiresText ? Date.parse(expiresText.trim()) : Number.NaN;
-    const expired = /(?:^|;)\s*max-age=0\s*(?:;|$)/i.test(cookie) ||
-      (Number.isFinite(expiresAt) && expiresAt <= Date.now());
-    if (expired || value.length === 0) jar.delete(name);
-    else if (/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(name)) jar.set(name, value);
-  }
-}
-
-async function doApiRequest(request: DesktopApiRequest): Promise<DesktopApiResponse> {
-  const origin = trustedApiOrigin();
-  const jar = await withJarLock(() => readCookieJar(origin));
-  const headers = new Headers({ accept: "application/json", origin });
-  if (request.body !== undefined) headers.set("content-type", "application/json");
-  if (request.ifMatch) headers.set("if-match", request.ifMatch);
-  if (request.idempotencyKey) headers.set("idempotency-key", request.idempotencyKey);
-  if (jar.size > 0) headers.set("cookie", [...jar].map(([name, value]) => `${name}=${value}`).join("; "));
-  const deadline = desktopApiTimeout(request);
-  const controller = deadline === undefined ? undefined : new AbortController();
-  const timeout = deadline === undefined ? undefined : setTimeout(() => controller?.abort(), deadline);
-  try {
-    const response = await fetch(`${origin}${request.path}`, {
-      method: request.method,
-      headers,
-      body: request.body,
-      redirect: "error",
-      ...(controller ? { signal: controller.signal } : {}),
-    });
-    const setCookies = response.headers.getSetCookie();
-    const body = await response.text();
-    await withJarLock(async () => {
-      applySetCookies(jar, setCookies);
-      await persistCookieJar(jar, origin);
-    });
-    if (Buffer.byteLength(body, "utf8") > desktopApiResponseLimit(request)) throw new Error("The Arden response exceeded the desktop limit");
-    return {
-      status: response.status,
-      body,
-      etag: response.headers.get("etag") ?? undefined,
-      location: response.headers.get("location") ?? undefined,
-    };
-  } finally {
-    if (timeout !== undefined) clearTimeout(timeout);
-  }
-}
-
 function enqueueNotificationLifecycle(work: () => Promise<void>): Promise<void> {
   const current = notificationLifecycle.then(work, work);
   notificationLifecycle = current.catch(() => undefined);
   return current;
 }
 
-async function requestNotificationCredential(organizationId: string): Promise<MainNotificationCredential> {
-  const request = requestQueue.then(() => doApiRequest({
-    path: `/api/v1/organizations/${organizationId}/notifications/realtime-credential`, method: "GET",
-  }));
-  requestQueue = request.then(() => undefined, () => undefined);
-  const response = await request;
+async function requestNotificationCredential(organizationId: string, epoch: number): Promise<MainNotificationCredential> {
+  const credentialRequest: DesktopApiRequest = {
+    path: `/api/v1/organizations/${organizationId}/notifications/realtime-credential`,
+    method: "GET",
+  };
+  const response = await desktopApi.request(credentialRequest, epoch);
   if (response.status !== 200) throw new NotificationCredentialError(response.status);
   let parsed: unknown;
   try { parsed = JSON.parse(response.body); }
@@ -200,22 +136,28 @@ async function disposeNotificationStream(): Promise<void> {
   notificationChannel = null;
   notificationWindow = null;
   notificationOrganizationId = null;
+  notificationEpoch = null;
   if (currentClient && currentChannel) await currentClient.removeChannel(currentChannel).catch(() => undefined);
   currentClient?.disconnect();
 }
 
-function startNotificationStream(parent: BrowserWindow, organizationId: string): Promise<void> {
+function startNotificationStream(parent: BrowserWindow, organizationId: string, epoch: number): Promise<void> {
   return enqueueNotificationLifecycle(async () => {
-    if (notificationClient && notificationOrganizationId === organizationId && notificationWindow === parent) return;
+    desktopApi.assertCurrent(epoch);
+    if (notificationClient && notificationOrganizationId === organizationId && notificationWindow === parent && notificationEpoch === epoch) return;
     await disposeNotificationStream();
     if (parent.isDestroyed()) return;
-    let credential = await requestNotificationCredential(organizationId);
+    let credential = await requestNotificationCredential(organizationId, epoch);
+    desktopApi.assertCurrent(epoch);
+    const canNotify = () => desktopApi.epoch() === epoch && !parent.isDestroyed() && notificationWindow === parent;
     let refreshPromise: Promise<MainNotificationCredential> | null = null;
     const refresh = async () => {
+      desktopApi.assertCurrent(epoch);
       if (Date.parse(credential.expiresAt) > Date.now() + 45_000) return credential;
-      refreshPromise ??= requestNotificationCredential(organizationId).finally(() => { refreshPromise = null; });
+      refreshPromise ??= requestNotificationCredential(organizationId, epoch).finally(() => { refreshPromise = null; });
       try {
         const next = await refreshPromise;
+        desktopApi.assertCurrent(epoch);
         if (next.endpoint !== credential.endpoint || next.topic !== credential.topic) {
           throw new Error("Notification channel scope changed");
         }
@@ -223,8 +165,10 @@ function startNotificationStream(parent: BrowserWindow, organizationId: string):
         return credential;
       } catch (error) {
         if (error instanceof NotificationCredentialError && (error.status === 401 || error.status === 404)) {
-          if (!parent.isDestroyed()) parent.webContents.send("arden:notification-status", "session-ended");
-          void stopNotificationStream();
+          if (canNotify()) {
+            parent.webContents.send("arden:notification-status", "session-ended");
+            void stopNotificationStream(epoch);
+          }
         }
         throw error;
       }
@@ -236,7 +180,7 @@ function startNotificationStream(parent: BrowserWindow, organizationId: string):
       accessToken: async () => (await refresh()).accessToken,
     });
     await client.setAuth();
-    if (parent.isDestroyed()) {
+    if (parent.isDestroyed() || desktopApi.epoch() !== epoch) {
       await client.disconnect();
       return;
     }
@@ -247,19 +191,18 @@ function startNotificationStream(parent: BrowserWindow, organizationId: string):
         ? (message as { payload?: unknown }).payload : null;
       const notificationId = typeof payload === "object" && payload !== null && "notificationId" in payload
         ? (payload as { notificationId?: unknown }).notificationId : null;
-      if (typeof notificationId === "string" && uuidPattern.test(notificationId)
-        && !parent.isDestroyed() && notificationWindow === parent) {
+      if (typeof notificationId === "string" && uuidPattern.test(notificationId) && canNotify()) {
         parent.webContents.send("arden:notification-event", notificationId);
       }
     });
     channel.subscribe((status) => {
       if (status === "SUBSCRIBED") {
-        if (!parent.isDestroyed() && notificationWindow === parent) {
+        if (canNotify()) {
           parent.webContents.send("arden:notification-status", subscribed ? "reconnected" : "connected");
         }
         subscribed = true;
       } else if ((status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED")
-        && !parent.isDestroyed() && notificationWindow === parent) {
+        && canNotify()) {
         parent.webContents.send("arden:notification-status", "disconnected");
       }
     });
@@ -267,21 +210,20 @@ function startNotificationStream(parent: BrowserWindow, organizationId: string):
     notificationChannel = channel;
     notificationWindow = parent;
     notificationOrganizationId = organizationId;
+    notificationEpoch = epoch;
   });
 }
 
-function stopNotificationStream(): Promise<void> {
-  return enqueueNotificationLifecycle(disposeNotificationStream);
+function stopNotificationStream(epoch?: number): Promise<void> {
+  return enqueueNotificationLifecycle(async () => {
+    if (epoch === undefined || desktopApi.epoch() === epoch) await disposeNotificationStream();
+  });
 }
 
 ipcMain.handle("arden:api-request", async (event, value: unknown) => {
   if (!isTrustedRenderer(event)) throw new Error("Untrusted IPC sender");
   if (!validateDesktopApiRequest(value)) throw new Error("Invalid desktop API request");
-  const request = value as DesktopApiRequest;
-  if (canPassWaitingRequests(request)) return doApiRequest(request);
-  const current = requestQueue.then(() => doApiRequest(request));
-  requestQueue = current.then(() => undefined, () => undefined);
-  return current;
+  return desktopApi.request(value);
 });
 
 ipcMain.handle("arden:notifications:start", async (event, organizationId: unknown) => {
@@ -290,12 +232,14 @@ ipcMain.handle("arden:notifications:start", async (event, organizationId: unknow
   if (!parent || typeof organizationId !== "string" || !uuidPattern.test(organizationId)) {
     throw new Error("Invalid notification stream request");
   }
-  try { await startNotificationStream(parent, organizationId); }
+  const epoch = desktopApi.epoch();
+  try { await startNotificationStream(parent, organizationId, epoch); }
   catch (error) {
-    if (error instanceof NotificationCredentialError && (error.status === 401 || error.status === 404)) {
+    if (desktopApi.epoch() === epoch && error instanceof NotificationCredentialError
+      && (error.status === 401 || error.status === 404) && !parent.isDestroyed()) {
       parent.webContents.send("arden:notification-status", "session-ended");
     }
-    await stopNotificationStream();
+    await stopNotificationStream(epoch);
     throw new Error("Notification updates are unavailable");
   }
 });
@@ -311,9 +255,7 @@ ipcMain.handle("arden:notifications:stop", async (event, organizationId: unknown
 
 ipcMain.handle("arden:session:clear", async (event) => {
   if (!isTrustedRenderer(event)) throw new Error("Untrusted IPC sender");
-  await stopNotificationStream();
-  cookieJar = new Map();
-  await rm(sessionFile(), { force: true });
+  await Promise.all([desktopApi.clear(), stopNotificationStream()]);
 });
 
 ipcMain.handle("arden:auth:google", async (event) => {
@@ -325,6 +267,7 @@ ipcMain.handle("arden:auth:google", async (event) => {
 
 async function startDesktopGoogleSignIn(parent: BrowserWindow): Promise<void> {
   const origin = trustedApiOrigin();
+  const epoch = desktopApi.epoch();
   const partition = `arden-oauth-${randomUUID()}`;
   const authSession = session.fromPartition(partition, { cache: false });
   authSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -357,6 +300,7 @@ async function startDesktopGoogleSignIn(parent: BrowserWindow): Promise<void> {
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
+    let completing = false;
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
@@ -372,19 +316,15 @@ async function startDesktopGoogleSignIn(parent: BrowserWindow): Promise<void> {
       try {
         const url = new URL(target);
         if (url.origin !== origin || url.pathname !== "/api/v1/auth/google/desktop-complete") return;
+        if (settled || completing) return;
+        completing = true;
         if (url.searchParams.get("status") !== "success") return finish(new Error("Google sign-in could not be completed"));
         const cookies = await authSession.cookies.get({ url: origin });
-        const allowedNames = new Set(["arden_access", "arden_refresh", "arden_session",
-          "__Host-arden_access", "__Host-arden_refresh", "__Host-arden_session"]);
-        const jar = await readCookieJar(origin);
-        for (const name of allowedNames) jar.delete(name);
-        for (const cookie of cookies) if (allowedNames.has(cookie.name) && cookie.value) jar.set(cookie.name, cookie.value);
-        if (!["arden_access", "__Host-arden_access"].some((name) => jar.has(name)) ||
-          !["arden_refresh", "__Host-arden_refresh"].some((name) => jar.has(name)) ||
-          !["arden_session", "__Host-arden_session"].some((name) => jar.has(name))) {
+        if (settled) return;
+        const validSession = await desktopApi.completeGoogleSignIn(epoch, cookies);
+        if (!validSession) {
           return finish(new Error("Google sign-in did not return an Arden session"));
         }
-        await persistCookieJar(jar, origin);
         finish();
       } catch (error) {
         finish(error instanceof Error ? error : new Error("Google sign-in could not be completed"));

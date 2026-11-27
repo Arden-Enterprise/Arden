@@ -20,15 +20,18 @@ function caseTitle(item: MaintenanceCase) {
   return item.kind === "minimal" ? "Document unavailable" : item.title || "Untitled document";
 }
 
-export function MaintenanceQueue({ items, loading, error, onOpen, onRetry }: {
+export function MaintenanceQueue({ items, loading, error, onOpen, onRetry, focusDocumentId }: {
   items: MaintenanceCase[];
   loading: boolean;
   error: string;
   onOpen: (caseId: string) => void;
   onRetry: () => void;
+  focusDocumentId?: string;
 }) {
-  const [filter, setFilter] = useState<(typeof filters)[number]["id"]>("unassigned");
-  const visible = items.filter((item) => matches(item, filter));
+  const [filter, setFilter] = useState<(typeof filters)[number]["id"]>(focusDocumentId ? "all" : "unassigned");
+  const isFocused = (item: MaintenanceCase) => Boolean(focusDocumentId && item.documentId === focusDocumentId);
+  const visible = items.filter((item) => matches(item, filter))
+    .sort((left, right) => Number(isFocused(right)) - Number(isFocused(left)));
   const empty = filter === "mine" ? "Nothing is assigned to you" : filter === "unassigned" ? "No unassigned cases" : "No cases you can review";
   return <section className="island review-board maintenance-queue maintenance-enter" aria-labelledby="maintenance-queue-title">
     <header className="review-board-toolbar">
@@ -68,6 +71,7 @@ export function MaintenanceQueue({ items, loading, error, onOpen, onRetry }: {
                 {item.unread && <span className="maintenance-unread"><span className="sr-only">Unread</span></span>}
               </span>
               <span className="maintenance-queue-flags">
+                {isFocused(item) && <span className="island-chip has-dot tone-info">Selected document</span>}
                 {item.needsReassignment && <span className="island-chip has-dot tone-warning">Needs reassignment</span>}
                 <MaintenanceStatus status={item.reporterStatus} />
               </span>

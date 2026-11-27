@@ -54,6 +54,8 @@ import { PublicationChangeDialog, publicationChangeSentMessage, type Publication
 import { OnBehalfRenewalDecision, RenewPublicationDialog, renewalStatus } from "./RenewPublicationDialog";
 import type { KnowledgeReaderTarget, KnowledgeCitationReference } from "./knowledgeCitation";
 import type { KnowledgeHomeLocation, KnowledgeLocation, KnowledgeReviewLocation, KnowledgeRoute, KnowledgeRouteRequest } from "./knowledgeRoute";
+import { useShellBridge } from "../app/ShellBridgeContext";
+import { GraphRelationshipDialog } from "../graph/GraphRelationshipDialog";
 
 const ArdenRichTextEditor = lazy(() => import("./ArdenRichTextEditor")
   .then((module) => ({ default: module.ArdenRichTextEditor })));
@@ -99,6 +101,7 @@ type Props = ContextControlProps & {
   onAssignedReviewCount?: (count: number) => void;
   onDirtyChange?: (dirty: boolean) => void;
   awaitingAssignment?: boolean;
+  isAdmin?: boolean;
   onOpenPrivateNotes?: () => void;
   canUsePrivateWorkspace?: boolean;
 };
@@ -145,6 +148,8 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   requestedContributionId, onContributionTargetHandled, routeRequest, onRouteChange, onRouteSettled,
   onAssignedReviewCount, onDirtyChange, awaitingAssignment = false,
   onOpenPrivateNotes, canUsePrivateWorkspace = false, contextOpen, onToggleContext, onOpenReviews }: Props) {
+  const shellBridge = useShellBridge();
+  const [manageLinksOpen, setManageLinksOpen] = useState(false);
   const home = useHomePublications(platform, organizationId);
   const [managingCatalog, setManagingCatalog] = useState(false);
   const [filtersBySource, setFiltersBySource] = useState<Record<HomeSource, LibraryFilters>>(() => ({
@@ -177,6 +182,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   const [reportsError, setReportsError] = useState("");
   const [reviewSection, setReviewSection] = useState<"publication" | "maintenance">("publication");
   const [maintenanceQueue, setMaintenanceQueue] = useState<MaintenanceCase[]>([]);
+  const [maintenanceFocus, setMaintenanceFocus] = useState<{ documentId: string; navigationId: string } | null>(null);
   const [maintenanceQueueLoading, setMaintenanceQueueLoading] = useState(false);
   const [maintenanceQueueError, setMaintenanceQueueError] = useState("");
   const [maintenanceCase, setMaintenanceCase] = useState<MaintenanceCase | null>(null);
@@ -1006,7 +1012,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
     setOpenedCitation(null); setError(""); setScreen("library");
   };
   const closeReview = () => { setReview(null); setComment(""); setCommentSubmitted(false); decisionRequest.current = null; };
-  const showLocation = (location: KnowledgeLocation) => {
+  const showLocation = (location: KnowledgeLocation, focusDocumentId?: string, navigationId?: string) => {
     const settle = () => onRouteSettled?.();
     const homeDirty = (screen === "create" && creationDirty) || (screen === "editor" && dirty);
     const reviewDirty = Boolean(review && comment.trim());
@@ -1032,7 +1038,12 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
         setReviewSection("publication"); leaveMaintenanceCase();
         setReview(loaded); setComment(""); setCommentSubmitted(false); decisionRequest.current = null;
       }));
-      case "maintenance": return show(false, () => { setReviewSection("maintenance"); if (caseSurface === "reviews") leaveMaintenanceCase(); });
+      case "maintenance": return show(reviewDirty, () => {
+        closeReview();
+        setReviewSection("maintenance");
+        setMaintenanceFocus(focusDocumentId && navigationId ? { documentId: focusDocumentId, navigationId } : null);
+        if (caseSurface === "reviews") leaveMaintenanceCase();
+      });
       case "maintenance-case": return show(false, async () => {
         setReviewSection("maintenance");
         await openMaintenanceCase(location.caseId, "reviews");
@@ -1042,7 +1053,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
   useEffect(() => {
     if (!routeRequest || handledRoute.current === routeRequest.navigationId) return;
     handledRoute.current = routeRequest.navigationId;
-    showLocation(routeRequest.location);
+    showLocation(routeRequest.location, routeRequest.focusDocumentId, routeRequest.navigationId);
   }, [routeRequest]);
   const loadMoreHistory = () => {
     if (!maintenanceCase || !maintenanceHistory?.nextCursor) return;
@@ -1210,12 +1221,13 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
               reassignKey.current = null;
               return next;
             });
-          }} /> : <MaintenanceQueue items={maintenanceQueue} loading={maintenanceQueueLoading} error={maintenanceQueueError}
+          }} /> : <MaintenanceQueue key={maintenanceFocus?.navigationId} focusDocumentId={maintenanceFocus?.documentId}
+          items={maintenanceQueue} loading={maintenanceQueueLoading} error={maintenanceQueueError}
             onOpen={(caseId) => void openMaintenanceCase(caseId, "reviews")} onRetry={() => void loadMaintenanceQueue()} />}
       </> : view === "review-queue" && !review ? <>
         <div className="island-seg maintenance-section-switch" role="group" aria-label="Review sections">
           <button type="button" aria-pressed={true}>Publications</button>
-          <button type="button" aria-pressed={false} onClick={() => setReviewSection("maintenance")}>Maintenance</button>
+          <button type="button" aria-pressed={false} onClick={() => { setMaintenanceFocus(null); setReviewSection("maintenance"); }}>Maintenance</button>
         </div>
         {reviewBoard.loading ? <div className="island island-empty" role="status">Loading reviews…</div>
           : reviewBoard.error ? <div className="island island-empty">
@@ -1449,7 +1461,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           documentId: document.draftId, versionId: document.id, contentHash: document.contentHash },
           onCitation: citation => setOpenedCitation(previous => citation ? { ...citation, navigationId: `reader-summary:${crypto.randomUUID()}` }
             : previous?.navigationId.startsWith("reader-summary:") ? null : previous),
-          onAccessLost: () => { home.forget(document.id); void home.refresh(); setOpenedCitation(null); setDocument(null); setScreen("library"); setError("This document is unavailable."); } }}
+          onAccessLost: () => { home.forget(document.id); void home.refresh(); setOpenedCitation(null); setManageLinksOpen(false); setDocument(null); setScreen("library"); setError("This document is unavailable."); } }}
         metadata={{
           title: document.title,
           ownerDepartment: publicationDepartmentName(document),
@@ -1461,7 +1473,13 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
           versions: [{ id: document.id, label: document.management?.version || document.versionLabel || "",
             ...readerValidity(document) }],
         }}
-        onBack={() => { readerReturnId.current = document.id; setOpenedCitation(null); setScreen("library"); }}
+        onBack={() => { readerReturnId.current = document.id; setOpenedCitation(null); setManageLinksOpen(false); setScreen("library"); }}
+        informationActions={(shellBridge || document.canEditRelationships) ? <>
+          {shellBridge && <button type="button" className="secondary-button" onClick={() => shellBridge.dispatchGraphIntent({ type: "focus_nodes", documentIds: [document.draftId] })}>
+            <Icon name="graph" size={13} />View in Graph</button>}
+          {document.canEditRelationships && <button type="button" className="secondary-button" onClick={() => setManageLinksOpen(true)}>
+            <Icon name="branch" size={13} />Manage links</button>}
+        </> : undefined}
         surfaceActions={<>
           {readerPdfUrl && <a className="secondary-button" href={readerPdfUrl} download={pdfFileName(document.title)}><Icon name="download" size={13} />Download</a>}
           <button type="button" className="secondary-button" onClick={() => setReportOpen(true)}>
@@ -1507,6 +1525,7 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
               items: home.views[source].items.map(item => ({ ...item, responsibleDepartmentName: publicationDepartmentName(item) })) }}
             catalog={catalog} catalogError={catalogError} query={query} filters={libraryFilters} onFilters={setLibraryFilters}
             organizationView={organizationView} onOrganizationView={value => { setOrganizationView(value); if (value === "overview") setQuery(""); }} onOpen={openPublished}
+            onViewInGraph={shellBridge ? (documentId) => shellBridge.dispatchGraphIntent({ type: "focus_nodes", documentIds: [documentId] }) : undefined}
             onManage={() => setManagingCatalog(true)} onRetry={() => void home.refresh()} />}
         {!managingCatalog && libraryTab === "shared" && <DirectSharesSection platform={platform} organizationId={organizationId}
           refreshKey={directShareRefresh} onOpen={(itemId) => { setSharedItemId(itemId); setScreen("shared"); }} />}
@@ -1644,6 +1663,16 @@ function ConnectedKnowledgePage({ platform, organizationId, organizationName,
       departmentName={departmentName}
       onClose={() => setRenewing(null)}
       onSent={() => { setRenewing(null); setMessage("Renewal sent for review"); void refreshContributions(); }} />}
+    {manageLinksOpen && document && <GraphRelationshipDialog
+      platform={platform}
+      organizationId={organizationId}
+      sourceDocument={{
+        documentId: document.draftId,
+        title: document.title,
+        version: document.management?.version || document.versionLabel || undefined,
+      }}
+      onClose={() => setManageLinksOpen(false)}
+    />}
     {discardAction && <DiscardChangesDialog exiting={false} onCancel={() => setDiscardAction(null)} onDiscard={() => {
       discardAction(); setDiscardAction(null);
     }} />}

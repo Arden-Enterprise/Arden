@@ -2700,7 +2700,7 @@ describe("API auth and private draft routes", () => {
     repository.authorDecisionWindow = false;
   });
 
-  it("hides an expired publication from readers and explains an old link instead of serving it (0032 A)", async () => {
+  it.each(["on initial read", "before delivery"])("hides an expired publication %s and explains the link (0032 A)", async (when) => {
     const owner = await desktopSession(app, "owner@example.test");
     const headers = { cookie: owner, origin: "http://localhost:5180" };
     const root = `/api/v1/organizations/${organizationId}/knowledge`;
@@ -2715,7 +2715,11 @@ describe("API auth and private draft routes", () => {
     const listed = await app.inject({ method: "GET", url: `${root}/published`, headers });
     expect(listed.statusCode).toBe(200);
     expect(listed.json().items).toEqual([]);
+    const read = when === "before delivery"
+      ? vi.spyOn(repository, "getPublishedKnowledge").mockResolvedValueOnce({ ...repository.publication, expired: false })
+      : undefined;
     const opened = await app.inject({ method: "GET", url: `${root}/published/${publicationId}`, headers });
+    read?.mockRestore();
     expect(opened.statusCode).toBe(410);
     expect(opened.json().error).toMatchObject({ code: "DOCUMENT_EXPIRED", expiredOn: "2026-11-01", ownerDepartmentName: "Sales",
       message: "This document expired on Nov 1, 2026. Contact Sales." });

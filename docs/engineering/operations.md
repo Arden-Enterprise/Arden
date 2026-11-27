@@ -129,6 +129,7 @@ Hosted backend commands now exist: `pnpm dev:remote`, `pnpm remote:preview`, and
 | `ARDEN_PRIVATE_STORAGE_ROOT` | `.private/note-content` default | Required in production; must resolve to a protected persistent mount outside the image/static web root |
 | `ARDEN_CORE_URL` | `http://127.0.0.1:3001` for local desktop | Public HTTPS Core origin for the Windows desktop process; loopback HTTP is allowed only for local development |
 | `ARDEN_AI_URL` | Unset | Private HTTP(S) origin of Arden-AI, with no path or credentials; configure together with the service token |
+| `ARDEN_AI_UI_SURFACE_V3` | Enabled | Core-only flag for Company Ask Arden. Set to `false` to use `/v2/generations` and Core's deterministic answer surface during a paired rollout or rollback. |
 | `ARDEN_AI_SERVICE_TOKEN` | Unset | Server-only shared credential for Core/worker to call Arden-AI; never expose it to web/desktop clients |
 | `ARDEN_PRIVATE_NOTE_AI_ORGANIZATIONS` | Unset | Comma-separated organization UUIDs that have opted in to the configured provider handling Private questions, note excerpts and client-supplied AI writing text; writing actions for shared drafts are also gated because Core cannot verify text provenance |
 | `ARDEN_REVIEWER_AI_ORGANIZATIONS` | Unset | Comma-separated organization UUIDs authorized to send extracted text from pending content submissions to the configured provider via the paired [Reviewer AI endpoint](reviewer-ai.md) |

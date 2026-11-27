@@ -62,7 +62,16 @@ const rowOf = (title: string) => within(tree()).getAllByRole("button", { name: t
 const openRowMenu = (title: string) => fireEvent.click(within(tree()).getAllByRole("button", { name: `More actions for ${title}` }).at(-1)!);
 const menuItem = (name: string) => within(screen.getByRole("menu")).getByRole("menuitem", { name });
 const expandCapstone = () => fireEvent.click(within(tree()).getByRole("button", { name: "Expand Capstone" }));
-const dataTransfer = () => ({ setData: vi.fn(), getData: vi.fn(), effectAllowed: "", dropEffect: "" });
+const dataTransfer = () => {
+  const items = new Map<string, string>();
+  return {
+    setData: (format: string, value: string) => items.set(format, value),
+    getData: (format: string) => items.get(format) ?? "",
+    get types() { return [...items.keys()]; },
+    effectAllowed: "",
+    dropEffect: "",
+  };
+};
 
 describe("note order model", () => {
   it("lists unplaced notes first (newest first, never-saved first), then by position, like the API", () => {

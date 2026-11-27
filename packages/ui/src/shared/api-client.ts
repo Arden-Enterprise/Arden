@@ -1,6 +1,19 @@
 import type { Platform } from "./types";
 import { rememberReturnPath } from "../app/workspaceRoute";
-import type { KnowledgeMetadata, PublicationScope, KnowledgeType, SubmissionReviewResult } from "@arden/domain";
+import type {
+  AnswerScopeFilter,
+  BoundUiSurface,
+  DocumentRelationshipType,
+  GraphRelationshipEdge,
+  HydratedDocumentSummary,
+  KnowledgeGraphPayload,
+  KnowledgeGraphQuery,
+  KnowledgeMetadata,
+  KnowledgeType,
+  PublicationScope,
+  SubmissionReviewResult,
+  TurnHydration,
+} from "@arden/domain";
 
 export type TargetReaders = { mode: "ORGANIZATION" | "DEPARTMENT" | "SELECTED_MEMBERS";
   departmentId: string | null; memberIds: string[] };
@@ -224,6 +237,7 @@ export type PublishedKnowledge = {
   validUntil: string | null;
   /** Home AUTHOR column: the active author's display name; null shows "—" (decision 0032). */
   authorName?: string | null;
+  canEditRelationships?: boolean;
   body?: string;
   mimeType?: "text/plain" | "application/pdf";
   pdfBase64?: string;
@@ -265,14 +279,23 @@ export type AskArdenAnswer = {
     startOffset?: number;
     endOffset?: number;
   }>;
+  uiSurface?: BoundUiSurface | null;
+  turnHydration?: TurnHydration | null;
+  hydratedDocuments?: Record<string, HydratedDocumentSummary>;
 };
 export type AiConversationSummary = { id: string; title: string; revision: number; updatedAt: string };
-export type AiConversation = AiConversationSummary & { turns: Array<{
-  id: string; requestId: string; question: string; sequence: number; answer: string;
-  status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE";
-  citations: AskArdenAnswer["citations"];
-  feedback?: AnswerFeedback;
-}> };
+export type AiConversation = AiConversationSummary & {
+  hasMore?: boolean;
+  hydratedDocuments?: Record<string, HydratedDocumentSummary>;
+  turns: Array<{
+    id: string; requestId: string; question: string; sequence: number; answer: string;
+    status: "ANSWERED" | "INSUFFICIENT_EVIDENCE" | "UNAVAILABLE";
+    citations: AskArdenAnswer["citations"];
+    feedback?: AnswerFeedback;
+    uiSurface?: BoundUiSurface | null;
+    turnHydration?: TurnHydration | null;
+  }>;
+};
 
 export type SystemConsoleQuery = { from: string; to: string; search?: string; status?: string; page?: number; pageSize?: number; organizationId?: string };
 export type SystemConsoleReport = Record<string, unknown>;
@@ -646,8 +669,74 @@ export function loadPublishedKnowledge(platform: Platform, organizationId: strin
   return request(platform, `${knowledgePath(organizationId)}/published/${publishedVersionId}`);
 }
 
+/** Fetches the authorized Knowledge Graph projection for the active organization. */
+export function getKnowledgeGraph(
+  platform: Platform,
+  organizationId: string,
+  query?: KnowledgeGraphQuery,
+): Promise<KnowledgeGraphPayload> {
+  const params = new URLSearchParams();
+  if (query) {
+    if (query.view) params.set("view", query.view);
+    if (query.q && query.q.trim()) params.set("q", query.q.trim().slice(0, 120));
+    if (query.ownerDepartmentId) params.set("ownerDepartmentId", query.ownerDepartmentId);
+    if (query.typeCode) params.set("typeCode", query.typeCode);
+    if (query.collectionId) params.set("collectionId", query.collectionId);
+    if (query.readerScope) params.set("readerScope", query.readerScope);
+    if (query.validity) params.set("validity", query.validity);
+    if (query.includeLinks) params.set("includeLinks", "true");
+    if (query.relationshipTypes) params.set("relationshipTypes", query.relationshipTypes);
+    if (query.monitor) params.set("monitor", "true");
+    if (query.onlyOpenCases) params.set("onlyOpenCases", "true");
+    if (query.onlyUnassignedOrg) params.set("onlyUnassignedOrg", "true");
+    if (query.includeExpired) params.set("includeExpired", "true");
+    if (query.focusDocumentId) params.set("focusDocumentId", query.focusDocumentId);
+    if (query.limit !== undefined && Number.isInteger(query.limit)) params.set("limit", String(query.limit));
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : "";
+  return request<KnowledgeGraphPayload>(platform, `${knowledgePath(organizationId)}/graph${suffix}`);
+}
+
+/** Declares an explicit governed relationship between two authorized published documents. */
+export function createDocumentRelationship(
+  platform: Platform,
+  organizationId: string,
+  sourceDocumentId: string,
+  input: { targetDocumentId: string; relationshipType: DocumentRelationshipType },
+  idempotencyKey: string,
+): Promise<GraphRelationshipEdge> {
+  return request<GraphRelationshipEdge>(
+    platform,
+    `${knowledgePath(organizationId)}/documents/${encodeURIComponent(sourceDocumentId)}/relationships`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+/** Removes an explicit governed relationship from a published document. */
+export function removeDocumentRelationship(
+  platform: Platform,
+  organizationId: string,
+  sourceDocumentId: string,
+  relationshipId: string,
+  idempotencyKey: string,
+): Promise<{ removed: boolean }> {
+  return request<{ removed: boolean }>(
+    platform,
+    `${knowledgePath(organizationId)}/documents/${encodeURIComponent(sourceDocumentId)}/relationships/${encodeURIComponent(relationshipId)}/remove`,
+    {
+      method: "POST",
+      headers: { "Idempotency-Key": idempotencyKey },
+      body: "{}",
+    },
+  );
+}
+
 export function askArden(platform: Platform, organizationId: string, query: string, conversation?: {
-  conversationId: string; requestId: string; expectedRevision: number;
+  conversationId: string; requestId: string; expectedRevision: number; scopeFilter?: AnswerScopeFilter;
 }): Promise<AskArdenAnswer> {
   return request(platform, `/api/v1/organizations/${organizationId}/ai/answers`, {
     method: "POST", body: JSON.stringify({ query, ...conversation }),
@@ -664,8 +753,14 @@ export async function listAiConversations(platform: Platform, organizationId: st
     `/api/v1/organizations/${organizationId}/ai/conversations`);
   return result.items;
 }
-export function loadAiConversation(platform: Platform, organizationId: string, id: string): Promise<AiConversation> {
-  return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${id}`);
+export function loadAiConversation(
+  platform: Platform, organizationId: string, id: string, options?: { beforeSequence?: number; limit?: number },
+): Promise<AiConversation> {
+  const query = new URLSearchParams();
+  if (options?.beforeSequence !== undefined) query.set("beforeSequence", String(options.beforeSequence));
+  if (options?.limit !== undefined) query.set("limit", String(options.limit));
+  const search = query.size > 0 ? `?${query}` : "";
+  return request(platform, `/api/v1/organizations/${organizationId}/ai/conversations/${id}${search}`);
 }
 
 export function rateAiAnswer(platform: Platform, organizationId: string, conversationId: string, turnId: string,
@@ -699,6 +794,8 @@ const userErrorMessages: Record<string, string> = {
   IDEMPOTENCY_CONFLICT: "Request changed. Reopen to try again.",
   INVALID_EMAIL: "Enter a valid email address.",
   COLLECTION_CYCLE: "A collection can’t move into itself or a collection inside it.",
+  RELATIONSHIP_CYCLE: "This supersedes link would create a cycle between documents.",
+  RELATIONSHIP_EXISTS: "This relationship already exists between these documents.",
 };
 
 export class ApiError extends Error {
@@ -718,8 +815,8 @@ export async function signIn(platform: Platform, email: string, password: string
 
 export async function beginGoogleSignIn(platform: Platform): Promise<CurrentSession | null> {
   if (platform === "web") {
-    // Google returns to `/`; keep the workspace page the member was opening so sign-in lands there.
-    rememberReturnPath(window.location.pathname);
+    // Google returns to `/`; keep the workspace page (and query string) the member was opening so sign-in lands there.
+    rememberReturnPath(window.location.pathname, window.location.search);
     window.location.assign("/api/v1/auth/google/start?client=web");
     return null;
   }
