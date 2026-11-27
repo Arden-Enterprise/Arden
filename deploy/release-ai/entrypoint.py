@@ -60,6 +60,10 @@ def error_response(error):
     return {"ok": False, "error": category}
 
 
+def _alarm_timeout(_signum, _frame):
+    raise TimeoutError("AI release request timed out")
+
+
 def main():
     os.umask(0o077)
     if os.name != "posix" or os.geteuid() != 0 or len(sys.argv) != 2:
@@ -67,6 +71,7 @@ def main():
     environment = sys.argv[1]
     if environment not in {"staging", "production"}:
         raise ValueError("Unknown forced-command AI environment")
+    signal.signal(signal.SIGALRM, _alarm_timeout)
     signal.alarm(1800)
     config_path = Path("/etc/arden/releases-ai") / f"{environment}.json"
     secure_file(config_path)

@@ -55,9 +55,10 @@ execFileSync(process.execPath, ["tools/releases/ai-smoke.mjs"], { stdio: "inheri
 
 if (process.env.ARDEN_AI_SKIP_BUNDLE_CHECK !== "1") {
   try {
+    // Budget covers docker save + gzip + normalize (360s) + verify (360s) + roundtrip (360s).
     execFileSync(process.execPath, ["tools/releases/ai-release.mjs", "check-bundle"], {
       stdio: "inherit",
-      timeout: 10 * 60 * 1000,
+      timeout: 22 * 60 * 1000,
     });
   } finally {
     execFileSync(process.execPath, ["tools/releases/ai-release.mjs", "cleanup"], {

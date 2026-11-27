@@ -7,6 +7,7 @@ import {
   checkAiReadiness,
   executeProductionAiRelease,
   executeStagingAiRelease,
+  formatCliError,
   isStagingUpToDate,
   planPromotionRequest,
   promotionRequest,
@@ -154,4 +155,13 @@ test("sshArguments, promotionRequest, planPromotionRequest, and assertCurrentHea
   assert.equal(planPromotionRequest(prodEnv, "b".repeat(40)).op, "plan-promote");
   assert.equal(promotionRequest(prodEnv, "b".repeat(40)).op, "promote");
   await assert.rejects(() => assertCurrentHead(baseEnv, async () => "f".repeat(40)), /superseded/i);
+});
+
+test("formatCliError surfaces allowlisted local bundle errors while redacting raw transport failures", () => {
+  const oversized = Object.assign(new Error("AI release archive (2000 bytes) exceeds approved 1024 limit"), {
+    code: "ARDEN_AI_ARCHIVE_LIMIT",
+  });
+  assert.match(formatCliError("bundle", oversized), /2000 bytes/);
+  assert.doesNotMatch(formatCliError("check-bundle", new Error("raw secret stdout")), /raw secret|receiver status/i);
+  assert.match(formatCliError("deploy", new Error("raw ssh stderr")), /receiver status/i);
 });

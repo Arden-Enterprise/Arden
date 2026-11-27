@@ -54,6 +54,7 @@ class AiManagementTests(unittest.TestCase):
             bad_cases = [
                 {**cfg, "environment": "production"},
                 {**cfg, "api_url": "http://10.0.0.5:8080/api/v1"},
+                {**cfg, "api_namespace": True, "api_url": "http://[::1]:8080/api/v1"},
                 {**cfg, "protected_containers": ["arden-ai-aistaging12345"]},
                 {**cfg, "protected_containers": []},
                 {**cfg, "docker_timeout": 10},
@@ -104,7 +105,7 @@ class AiManagementTests(unittest.TestCase):
                 if args[0] == "inspect" and args[-1] == "chromadb-staging":
                     return json.dumps({"id": "chroma-id-1", "image": "chroma", "state": {"Running": True}})
                 if args[0] == "inspect" and args[-1] == "arden-ai-aistaging12345":
-                    return json.dumps({"id": "ai-id-2", "image": local_image,
+                    return json.dumps({"id": "abcdef123456", "image": local_image,
                                        "state": {"Running": True, "Health": {"Status": "healthy"}}})
                 if args[0] == "exec":
                     return "AI_VERIFY_OK\n"
@@ -120,7 +121,57 @@ class AiManagementTests(unittest.TestCase):
             patched_compose = json.loads(base64.b64decode(patch_body["docker_compose_raw"]))
             self.assertEqual(patched_compose["services"]["arden-ai"]["image"], local_image)
             self.assertIs(patch_body["instant_deploy"], False)
-            self.assertTrue(any(args[0] == "exec" and "--user" in args and "1000:1000" in args for args in execs))
+            self.assertTrue(any(args[0] == "exec" and "abcdef123456" in args and "1000:1000" in args for args in execs))
+
+    def test_verify_retries_timeout_and_rejects_mid_probe_container_swap(self):
+        import subprocess
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state_dir = root / "staging"
+            state_dir.mkdir()
+            cfg = valid_config(state_dir)
+            cfg["rollout_timeout"] = 3
+            manifest, _ = make_ai_archive(commit="1" * 40, ai_tree="2" * 40)
+            local_image = "sha256:" + "9" * 64
+            write_json(root / "image-bindings.json", {manifest["images"]["ai"]["id"]: local_image})
+
+            inspect_calls = {"count": 0}
+
+            def cmd_retry(args):
+                if args[-1] == "chromadb-staging":
+                    return json.dumps({"id": "chroma-id-1", "image": "chroma", "state": {"Running": True}})
+                if args[0] == "inspect":
+                    inspect_calls["count"] += 1
+                    if inspect_calls["count"] == 1:
+                        raise subprocess.TimeoutExpired(args, 5)
+                    return json.dumps({"id": "abcdef123456", "image": local_image,
+                                       "state": {"Running": True, "Health": {"Status": "healthy"}}})
+                if args[0] == "exec":
+                    return "AI_VERIFY_OK\n"
+                raise AssertionError(args)
+
+            manager = CoolifyAiManager(cfg, request=lambda *_: {}, command=cmd_retry, operation=lambda _: {})
+            manager.verify(manifest)
+            self.assertGreaterEqual(inspect_calls["count"], 3)
+
+            swap_calls = {"count": 0}
+
+            def cmd_swap(args):
+                if args[-1] == "chromadb-staging":
+                    return json.dumps({"id": "chroma-id-1", "image": "chroma", "state": {"Running": True}})
+                if args[0] == "inspect":
+                    swap_calls["count"] += 1
+                    cid = "abcdef123456" if swap_calls["count"] % 2 == 1 else "fedcba654321"
+                    return json.dumps({"id": cid, "image": local_image,
+                                       "state": {"Running": True, "Health": {"Status": "healthy"}}})
+                if args[0] == "exec":
+                    return "AI_VERIFY_OK\n"
+                raise AssertionError(args)
+
+            cfg["rollout_timeout"] = 0.2
+            swap_mgr = CoolifyAiManager(cfg, request=lambda *_: {}, command=cmd_swap, operation=lambda _: {})
+            with self.assertRaisesRegex(RuntimeError, "did not verify"):
+                swap_mgr.verify(manifest)
 
     def test_activate_rejects_untracked_compose_drift(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -171,6 +222,10 @@ class AiManagementTests(unittest.TestCase):
 
         local_http = (base / "local_http.py").read_text(encoding="utf-8")
         self.assertIn("/etc/arden/releases-ai/management.token", local_http)
+        self.assertIn("ProxyHandler({})", local_http)
+
+        mgmt_src = (base / "management.py").read_text(encoding="utf-8")
+        self.assertIn("ProxyHandler({})", mgmt_src)
 
         wrapper = (base / "arden-release-ai").read_text(encoding="utf-8")
         self.assertIn("/usr/bin/python3 -I /opt/arden-release-ai/entrypoint.py", wrapper)

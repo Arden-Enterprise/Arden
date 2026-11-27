@@ -111,6 +111,47 @@ class AiProtocolTests(unittest.TestCase):
             with self.subTest(bad_name=bad_name), self.assertRaises(ValueError):
                 validate_archive(io.BytesIO(archive), manifest)
 
+    def test_rejects_directory_referenced_as_layer_entry(self):
+        commit, ai_tree = "a" * 40, "b" * 40
+        dir_digest = "f" * 64
+        config = {
+            "architecture": "amd64",
+            "os": "linux",
+            "config": {"User": "1000:1000", "Labels": {
+                "org.opencontainers.image.revision": commit,
+                "io.arden.release.ai_tree": ai_tree,
+                "io.arden.release.ai_managed": "1",
+            }},
+            "rootfs": {"type": "layers", "diff_ids": ["sha256:" + dir_digest]},
+        }
+        config_bytes = json.dumps(config, separators=(",", ":")).encode()
+        config_digest = hashlib.sha256(config_bytes).hexdigest()
+        config_name = f"blobs/sha256/{config_digest}"
+        tag = f"arden-release-ai:sha-{commit}"
+        manifest_bytes = json.dumps(
+            [{"Config": config_name, "RepoTags": [tag], "Layers": [dir_digest]}],
+            separators=(",", ":"),
+        ).encode()
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz", compresslevel=3, format=tarfile.USTAR_FORMAT) as tar:
+            dir_info = tarfile.TarInfo(dir_digest)
+            dir_info.type = tarfile.DIRTYPE
+            dir_info.size = 0
+            tar.addfile(dir_info)
+            for name, data in [(config_name, config_bytes), ("manifest.json", manifest_bytes)]:
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        archive = buf.getvalue()
+        manifest = {
+            "schema": 1, "commit": commit, "ai_tree": ai_tree, "run_id": "1", "attempt": 1,
+            "images": {"ai": {"tag": tag, "id": "sha256:" + config_digest}},
+            "archive_sha256": hashlib.sha256(archive).hexdigest(),
+            "archive_size": len(archive),
+        }
+        with self.assertRaisesRegex(ValueError, "Missing AI image content"):
+            validate_archive(io.BytesIO(archive), manifest)
+
     def test_rejects_oversized_manifest_and_duplicate_json_keys(self):
         manifest, _ = make_ai_archive()
         manifest["archive_size"] = MAX_ARCHIVE + 1

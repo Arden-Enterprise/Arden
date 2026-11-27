@@ -72,6 +72,7 @@ class MemoryAiManager:
 
     def remove_incomplete_upload(self, manifest, _proof, _retained):
         self.incomplete_removed.append(manifest["commit"])
+        return True
 
 
 class AiReceiverTests(unittest.TestCase):
@@ -182,6 +183,102 @@ class AiReceiverTests(unittest.TestCase):
                 with self.assertRaises(TimeoutError):
                     with release_lock(lock_path, timeout=0.05):
                         pass
+
+    def test_plan_promote_is_strictly_read_only_and_rejects_same_failed_attempt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            lock_path = root / "shared.lock"
+            stage_mgr = MemoryAiManager()
+            prod_mgr = MemoryAiManager()
+            staging = AiReleaseEngine("staging", root / "staging", stage_mgr, lock_path=lock_path)
+            prod = AiReleaseEngine("production", root / "production", prod_mgr,
+                                   staging_dir=root / "staging", lock_path=lock_path)
+            manifest, archive = make_ai_archive(commit="1" * 40, ai_tree="2" * 40, run_id="100", attempt=1)
+            staging.upload(manifest, io.BytesIO(archive), verified_proof("upload", "staging", manifest))
+            staging.deploy(manifest, verified_proof("deploy", "staging", manifest))
+            prod_mgr.loaded.add(manifest["images"]["ai"]["id"])
+
+            plan_req = {"op": "plan-promote", "environment": "production", "commit": "3" * 40,
+                        "ai_tree": "2" * 40, "run_id": "101", "attempt": 1}
+            plan = prod.plan_promote(plan_req, verified_proof("plan-promote", "production", plan_req))
+            self.assertEqual(plan, {"status": "READY", "staging_commit": "1" * 40})
+            self.assertFalse((root / "production" / "state.json").exists())
+
+            prod_mgr.fail_verify_commit = "1" * 40
+            with self.assertRaisesRegex(RuntimeError, "previous release recovered"):
+                prod.promote({**plan_req, "op": "promote"},
+                             verified_proof("promote", "production", {**plan_req, "op": "promote"}))
+            prod_mgr.fail_verify_commit = None
+            self.assertEqual(
+                prod.plan_promote(plan_req, verified_proof("plan-promote", "production", plan_req)),
+                {"status": "STALE_RUN"},
+            )
+
+    def test_rollback_checks_preflight_journals_intent_and_reconciles_after_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mgr = MemoryAiManager()
+            preflights = []
+            mgr.preflight = lambda m: preflights.append(m["commit"])
+            staging = AiReleaseEngine("staging", root / "staging", mgr, lock_path=root / "shared.lock")
+            manifest, archive = make_ai_archive(commit="1" * 40, ai_tree="2" * 40, run_id="100", attempt=1)
+            staging.upload(manifest, io.BytesIO(archive), verified_proof("upload", "staging", manifest))
+            staging.deploy(manifest, verified_proof("deploy", "staging", manifest))
+
+            mgr.fail_verify_commit = "0" * 40
+            with self.assertRaisesRegex(RuntimeError, "pending rollback journal"):
+                staging.rollback()
+            self.assertEqual(preflights[-1], "0" * 40)
+            mid = staging.status()
+            self.assertEqual(mid["pending"]["phase"], "rolling-back")
+            self.assertIs(mid["active"]["eligible_for_promotion"], False)
+
+            mgr.fail_verify_commit = None
+            recovered = staging.rollback()
+            self.assertEqual(recovered["status"], "recovered")
+            after = staging.status()
+            self.assertIsNone(after["pending"])
+            self.assertEqual(after["active"]["manifest"]["commit"], "0" * 40)
+            self.assertIs(after["previous"]["eligible_for_promotion"], False)
+
+    def test_abandoned_incoming_part_and_stale_intents_cleaned_safely(self):
+        from retention import collect_releases
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mgr = MemoryAiManager()
+            staging = AiReleaseEngine("staging", root / "staging", mgr, lock_path=root / "shared.lock")
+            incoming = staging.root / "incoming"
+            incoming.mkdir(parents=True, exist_ok=True)
+            abandoned = incoming / "upload-999-deadbeef.part"
+            abandoned.write_bytes(b"partial-data")
+
+            manifest, archive = make_ai_archive(commit="1" * 40, ai_tree="2" * 40, run_id="100", attempt=1)
+            staging.upload(manifest, io.BytesIO(archive), verified_proof("upload", "staging", manifest))
+            self.assertFalse(abandoned.exists())
+
+            # Stale upload-intent is unlinked only when remove_incomplete_upload reports True.
+            intent = staging.root / "upload-intents" / "stale.json"
+            write_json(intent, {"manifest": manifest, "proof": {"ai": {}}, "started_at": time.time() - 7200})
+            mgr.remove_incomplete_upload = lambda *_args: False
+            collect_releases(staging.root.parent, mgr)
+            self.assertTrue(intent.exists())
+            mgr.remove_incomplete_upload = lambda *_args: True
+            collect_releases(staging.root.parent, mgr)
+            self.assertFalse(intent.exists())
+
+    def test_post_commit_retention_error_does_not_fail_committed_deploy(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mgr = MemoryAiManager()
+            staging = AiReleaseEngine("staging", root / "staging", mgr, lock_path=root / "shared.lock")
+            manifest, archive = make_ai_archive(commit="1" * 40, ai_tree="2" * 40, run_id="100", attempt=1)
+            staging.upload(manifest, io.BytesIO(archive), verified_proof("upload", "staging", manifest))
+            with patch("receiver.collect_releases", side_effect=RuntimeError("transient cleanup failure")):
+                res = staging.deploy(manifest, verified_proof("deploy", "staging", manifest))
+            self.assertEqual(res["status"], "deployed")
+            self.assertEqual(res["retention_warning"], "cleanup_deferred")
+            self.assertEqual(staging.status()["active"]["manifest"]["commit"], "1" * 40)
 
 
 if __name__ == "__main__":

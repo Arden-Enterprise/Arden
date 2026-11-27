@@ -28,7 +28,8 @@ def main():
         method=message["method"],
         headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
     )
-    with http.build_opener(NoRedirect).open(request, timeout=30) as response:
+    # Disable proxy discovery so bearer tokens never leave loopback over HTTP_PROXY.
+    with http.build_opener(http.ProxyHandler({}), NoRedirect).open(request, timeout=30) as response:
         raw = response.read(4 * 1024 * 1024 + 1)
         if len(raw) > 4 * 1024 * 1024:
             raise ValueError("Management response exceeds limit")

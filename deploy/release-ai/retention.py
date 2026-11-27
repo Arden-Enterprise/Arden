@@ -7,9 +7,35 @@ from protocol import validate_manifest
 from state import read_json
 
 
+def _safe_subdir(root, name):
+    directory = root / name
+    if not directory.exists() and not directory.is_symlink():
+        return None
+    if directory.is_symlink() or not directory.is_dir() or directory.resolve() != directory:
+        raise ValueError(f"Unexpected AI {name} directory")
+    return directory
+
+
+def sweep_incoming_uploads(root, max_age_seconds=3600, now=None):
+    """Remove abandoned partial upload files from the private incoming spool directory."""
+    root = Path(root).resolve()
+    now = time.time() if now is None else now
+    directory = _safe_subdir(root, "incoming")
+    if directory is None:
+        return 0
+    removed = 0
+    for item in directory.glob("upload-*.part"):
+        if item.is_symlink() or not item.is_file():
+            raise ValueError("Unexpected AI incoming upload entry")
+        if max_age_seconds <= 0 or item.stat().st_mtime <= now - max_age_seconds:
+            item.unlink()
+            removed += 1
+    return removed
+
+
 def collect_releases(parent, manager, now=None):
     """Caller owns the shared host lock. Never touches Core-managed images."""
-    parent = Path(parent)
+    parent = Path(parent).resolve()
     now = time.time() if now is None else now
     retained, uploads, intents = set(), [], []
 
@@ -19,6 +45,8 @@ def collect_releases(parent, manager, now=None):
 
     for environment in ["staging", "production"]:
         root = parent / environment
+        if root.is_symlink():
+            raise ValueError("Unexpected AI environment directory")
         path = root / "state.json"
         if path.exists():
             state = read_json(path)
@@ -28,26 +56,25 @@ def collect_releases(parent, manager, now=None):
             if state.get("pending"):
                 protect(state["pending"]["before"]["manifest"])
                 protect(state["pending"]["target"])
-        directory = root / "uploads"
-        if directory.exists():
-            if directory.resolve() != directory or not directory.is_dir():
-                raise ValueError("Unexpected AI release-receipt directory")
+                if state["pending"].get("rollback_target"):
+                    protect(state["pending"]["rollback_target"]["manifest"])
+        directory = _safe_subdir(root, "uploads")
+        if directory is not None:
             for receipt in directory.glob("*.json"):
                 if receipt.is_symlink() or not receipt.is_file():
                     raise ValueError("Unexpected AI release receipt")
                 value = read_json(receipt)
                 manifest = validate_manifest(value.get("manifest", value))
                 uploads.append((receipt, manifest))
-        directory = root / "upload-intents"
-        if directory.exists():
-            if directory.resolve() != directory or not directory.is_dir():
-                raise ValueError("Unexpected AI upload-intent directory")
+        directory = _safe_subdir(root, "upload-intents")
+        if directory is not None:
             for intent in directory.glob("*.json"):
                 if intent.is_symlink() or not intent.is_file():
                     raise ValueError("Unexpected AI upload intent")
                 value = read_json(intent)
                 validate_manifest(value["manifest"])
                 intents.append((intent, value))
+        sweep_incoming_uploads(root, max_age_seconds=3600, now=now)
 
     if uploads:
         recent = max(uploads, key=lambda item: item[0].stat().st_mtime_ns)
@@ -65,7 +92,9 @@ def collect_releases(parent, manager, now=None):
         if (intent.parent.parent / "uploads" / intent.name).exists():
             intent.unlink()
         elif value["started_at"] <= now - 3600:
-            manager.remove_incomplete_upload(value["manifest"], value["proof"], retained_local)
+            cleared = manager.remove_incomplete_upload(value["manifest"], value["proof"], retained_local)
+            if cleared is True:
+                intent.unlink()
 
     removed = 0
     for receipt, manifest in uploads:

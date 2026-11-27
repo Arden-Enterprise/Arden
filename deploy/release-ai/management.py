@@ -15,6 +15,7 @@ from protocol import IMAGE_ID, strict_json
 from state import read_json, write_json
 
 CONTAINER_NAME = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}\Z")
+CONTAINER_ID = re.compile(r"[a-f0-9]{12,64}\Z")
 
 VERIFY_HTTP_SCRIPT = (
     "import urllib.error, urllib.request\n"
@@ -41,11 +42,14 @@ def validate_config(config, environment):
         raise ValueError("AI configuration belongs to a different environment")
     if not re.fullmatch(r"[a-z0-9]{8,64}", config.get("service_uuid", "")):
         raise ValueError("Invalid configured AI service identity")
-    url = urlsplit(config.get("api_url", ""))
+    api_url = config.get("api_url", "")
+    url = urlsplit(api_url)
     if (url.scheme != "http" or url.hostname not in {"127.0.0.1", "::1"}
             or url.username or url.password or url.query or url.fragment
             or url.path != "/api/v1"):
         raise ValueError("Management API must be an explicit loopback endpoint")
+    if config.get("api_namespace") is True and api_url != "http://127.0.0.1:8080/api/v1":
+        raise ValueError("Coolify namespace transport requires http://127.0.0.1:8080/api/v1")
     services = config.get("template", {}).get("services", {})
     if type(services) is not dict or set(services) != {"arden-ai"}:
         raise ValueError("Only the single arden-ai container may belong to an AI release Service")
@@ -83,6 +87,7 @@ class CoolifyAiManager:
     def __init__(self, config, request=None, command=None, operation=None):
         self.config = validate_config(config, config.get("environment"))
         self.request = request or self._request
+        self._custom_command = command is not None
         self.command = command or self._command
         self.operation = operation or self._operation
         self.protected = None
@@ -144,7 +149,8 @@ class CoolifyAiManager:
             headers={"Authorization": "Bearer " + token, "Content-Type": "application/json"},
         )
         try:
-            with http.build_opener(NoRedirect).open(req, timeout=30) as response:
+            # Disable proxy discovery so bearer tokens never leave loopback over HTTP_PROXY.
+            with http.build_opener(http.ProxyHandler({}), NoRedirect).open(req, timeout=30) as response:
                 raw = response.read(4 * 1024 * 1024 + 1)
                 if len(raw) > 4 * 1024 * 1024:
                     raise ValueError("Management response exceeds limit")
@@ -152,18 +158,23 @@ class CoolifyAiManager:
         except (http_error.URLError, OSError) as error:
             raise RuntimeError("Coolify AI management request failed") from error
 
-    def _command(self, arguments):
-        timeout = self.config.get("docker_timeout", 360)
+    def _command(self, arguments, timeout=None):
+        effective_timeout = self.config.get("docker_timeout", 360) if timeout is None else timeout
         result = subprocess.run(
             ["/usr/bin/docker", *arguments],
             capture_output=True,
             text=True,
-            timeout=timeout,
+            timeout=effective_timeout,
             check=False,
         )
         if result.returncode:
             raise RuntimeError("AI release Docker operation failed")
         return result.stdout
+
+    def _run_bounded(self, arguments, timeout):
+        if self._custom_command:
+            return self.command(arguments)
+        return self._command(arguments, timeout=timeout)
 
     def baseline(self):
         return copy.deepcopy(self.config["baseline"])
@@ -187,14 +198,16 @@ class CoolifyAiManager:
             raise ValueError("Portable AI image content has no verified local binding")
         return value
 
-    def _inspect(self, name):
+    def _inspect(self, name, timeout=None):
         template = '{"id":{{json .Id}},"image":{{json .Image}},"state":{{json .State}}}'
-        return strict_json(self.command(["inspect", "--format", template, name]))
+        args = ["inspect", "--format", template, name]
+        raw = self._run_bounded(args, timeout) if timeout is not None else self.command(args)
+        return strict_json(raw)
 
-    def _check_protected(self):
+    def _check_protected(self, timeout=None):
         current = {}
         for name in self.config["protected_containers"]:
-            item = self._inspect(name)
+            item = self._inspect(name, timeout=timeout)
             if not item["state"].get("Running"):
                 raise RuntimeError("Protected infrastructure is not running")
             current[name] = item["id"]
@@ -267,21 +280,27 @@ class CoolifyAiManager:
         return self._remove_local_image(local, commit)
 
     def remove_incomplete_upload(self, manifest, proof, retained):
+        """Remove matching incomplete images; return True only when none remain."""
         candidates = self.command([
             "image", "ls", "--all", "--quiet", "--no-trunc",
             "--filter", "label=io.arden.release.ai_managed=1",
             "--filter", "label=org.opencontainers.image.revision=" + manifest["commit"],
         ]).split()
+        all_cleared = True
         for identifier in sorted(set(candidates)):
             if not IMAGE_ID.fullmatch(identifier):
                 raise ValueError("Unexpected incomplete AI image identity")
-            if identifier in retained:
-                continue
             actual = strict_json(self.command(["image", "inspect", "--format", "{{json .}}", identifier]))
             if actual.get("Id") != identifier:
                 raise ValueError("Incomplete AI image identity changed")
-            if self._matches_content(actual, proof["ai"]):
-                self._remove_local_image(identifier, manifest["commit"])
+            if not self._matches_content(actual, proof["ai"]):
+                continue
+            if identifier in retained:
+                all_cleared = False
+                continue
+            if not self._remove_local_image(identifier, manifest["commit"]):
+                all_cleared = False
+        return all_cleared
 
     def _remove_local_image(self, identifier, commit):
         template = '{"labels":{{json .Config.Labels}},"tags":{{json .RepoTags}}}'
@@ -304,7 +323,7 @@ class CoolifyAiManager:
             return False
         containers = self.command(["ps", "--all", "--quiet"]).split()
         if containers:
-            if any(not re.fullmatch(r"[a-f0-9]{12,64}", value) for value in containers):
+            if any(not CONTAINER_ID.fullmatch(value) for value in containers):
                 raise ValueError("Unexpected Docker container identity")
             used = self.command(["inspect", "--format", "{{.Image}}", *containers]).splitlines()
             if identifier in used:
@@ -341,23 +360,36 @@ class CoolifyAiManager:
     def verify(self, manifest):
         deadline = time.monotonic() + self.config.get("rollout_timeout", 180)
         name = f"arden-ai-{self.config['service_uuid']}"
+        wanted = self.image_id(manifest)
         last_error = None
         while time.monotonic() < deadline:
+            def budget():
+                return max(1, min(30, int(deadline - time.monotonic())))
             try:
-                item = self._inspect(name)
-                if (item["image"] != self.image_id(manifest)
+                item = self._inspect(name, timeout=budget())
+                container_id = item.get("id", "")
+                if (not isinstance(container_id, str) or not CONTAINER_ID.fullmatch(container_id)
+                        or item["image"] != wanted
                         or not item["state"].get("Running")
                         or item["state"].get("Health", {}).get("Status") != "healthy"):
                     raise RuntimeError("AI container image or health does not match the release")
-                self._check_protected()
-                probe = self.command([
-                    "exec", "--user", "1000:1000", name,
+                self._check_protected(timeout=budget())
+                # Pin exec to the exact inspected container ID to prevent container-swap TOCTOU.
+                probe = self._run_bounded([
+                    "exec", "--user", "1000:1000", container_id,
                     "/app/.venv/bin/python", "-c", VERIFY_HTTP_SCRIPT,
-                ])
+                ], timeout=budget())
                 if "AI_VERIFY_OK" not in probe:
                     raise RuntimeError("AI HTTP health and 401 auth probe failed")
+                after = self._inspect(name, timeout=budget())
+                if (after.get("id") != container_id or after.get("image") != wanted
+                        or not after["state"].get("Running")
+                        or after["state"].get("Health", {}).get("Status") != "healthy"):
+                    raise RuntimeError("AI container changed during verification")
                 return
-            except (RuntimeError, ValueError, OSError) as error:
+            except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as error:
                 last_error = error
-                time.sleep(2)
+                left = deadline - time.monotonic()
+                if left > 0.05:
+                    time.sleep(min(2.0, left / 2))
         raise RuntimeError("AI release did not verify before its deadline") from last_error

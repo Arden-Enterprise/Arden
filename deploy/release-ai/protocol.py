@@ -158,7 +158,8 @@ def validate_archive(stream, manifest):
     if size != manifest["archive_size"] or digest.hexdigest() != manifest["archive_sha256"]:
         raise ValueError("AI archive integrity check failed")
     stream.seek(0)
-    metadata, names, total = {}, set(), 0
+    metadata, names, files, total = {}, set(), set(), 0
+    layer_member = re.compile(r"(?:blobs/sha256/[0-9a-f]{64}|[0-9a-f]{64}/layer\.tar)\Z")
     ai_id = manifest["images"]["ai"]["id"][7:]
     config_names = {"blobs/sha256/" + ai_id, ai_id + ".json"}
     try:
@@ -200,6 +201,7 @@ def validate_archive(stream, manifest):
                     continue
                 if not MEMBER.fullmatch(name):
                     raise ValueError("Unexpected AI archive file")
+                files.add(name)
                 if total + item.size + (-item.size % 512) > MAX_EXPANDED:
                     raise ValueError("Expanded AI archive exceeds limit")
                 if name == "manifest.json" or name in config_names:
@@ -225,7 +227,8 @@ def validate_archive(stream, manifest):
         raise ValueError("Unexpected archived AI image tag")
     if (type(entry["Config"]) is not str or entry["Config"] not in metadata
             or type(entry["Layers"]) is not list or not entry["Layers"]
-            or any(type(layer) is not str or layer not in names for layer in entry["Layers"])):
+            or any(type(layer) is not str or layer not in files or not layer_member.fullmatch(layer)
+                   for layer in entry["Layers"])):
         raise ValueError("Missing AI image content")
     raw = metadata[entry["Config"]]
     if "sha256:" + hashlib.sha256(raw).hexdigest() != manifest["images"]["ai"]["id"]:

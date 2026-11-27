@@ -17,6 +17,27 @@ const maxArchive = 1024 * 1024 * 1024;
 const stagingFreshnessSeconds = 86_400;
 const aiExchangeTimeoutMs = 30 * 60 * 1000;
 
+function localError(code, safeMessage) {
+  const error = new Error(safeMessage);
+  error.code = code;
+  return error;
+}
+
+export function formatCliError(mode, error) {
+  const allowedLocalCodes = new Set([
+    "ARDEN_AI_ARCHIVE_LIMIT",
+    "ARDEN_AI_BUNDLE_INVALID",
+    "ARDEN_AI_PROMOTION_BLOCKED",
+  ]);
+  if (error?.code && allowedLocalCodes.has(error.code) && typeof error.message === "string") {
+    return error.message;
+  }
+  if (mode === "bundle" || mode === "check-bundle" || mode === "metadata" || mode === "cleanup") {
+    return `Local AI ${mode} command failed. Check runner image size, disk, or archive validation logs.`;
+  }
+  return "AI release command failed. Check the failed stage and receiver status; no blind retries were made.";
+}
+
 export function aiReleaseContext(env) {
   const branch = env.GITHUB_REF_NAME;
   const event = env.GITHUB_EVENT_NAME;
@@ -146,7 +167,7 @@ export async function executeProductionAiRelease(env, source, send, getHead) {
     return { status: "already-current", commit: source.commit, ai_tree: source.ai_tree };
   }
   if (plan?.status !== "READY") {
-    throw new Error(`Production AI promotion blocked: ${plan?.status ?? "UNKNOWN"}`);
+    throw localError("ARDEN_AI_PROMOTION_BLOCKED", `Production AI promotion blocked: ${plan?.status ?? "UNKNOWN"}`);
   }
   await assertCurrentHead(env, getHead);
   return send(promotionRequest(env, source.ai_tree));
@@ -242,7 +263,10 @@ async function bundle(env, root, context = aiReleaseContext(env)) {
   unlinkSync(rawArchive);
   const size = statSync(archive).size;
   if (size <= 0 || size > maxArchive) {
-    throw new Error(`AI release archive (${size} bytes) exceeds approved 1024 MiB limit`);
+    throw localError(
+      "ARDEN_AI_ARCHIVE_LIMIT",
+      `AI release archive (${size} bytes) exceeds approved ${maxArchive} byte (1024 MiB) limit`,
+    );
   }
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(archive)) hash.update(chunk);
@@ -322,7 +346,7 @@ async function main(mode, env) {
           writeOutput(env, { deploy_action: "promote", ai_tree: source.ai_tree });
           console.log("Production AI preflight complete: deploy_action=promote.");
         } else {
-          throw new Error(`Production AI preflight blocked: ${plan?.status ?? "UNKNOWN"}`);
+          throw localError("ARDEN_AI_PROMOTION_BLOCKED", `Production AI preflight blocked: ${plan?.status ?? "UNKNOWN"}`);
         }
       }
     } finally {
@@ -354,8 +378,7 @@ async function main(mode, env) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   main(process.argv[2], process.env).catch(error => {
-    console.error("AI release command failed. Check the failed stage and receiver status; no blind retries were made.");
-    if (error?.message?.startsWith("Production AI")) console.error(error.message);
+    console.error(formatCliError(process.argv[2], error));
     process.exitCode = 1;
   });
 }
