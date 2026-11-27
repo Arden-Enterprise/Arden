@@ -69,6 +69,29 @@ export function findQuoteInSegments(segments: readonly string[], quote: string):
   return locate(needle, true) ?? locatePrefix(needle, locate);
 }
 
+function orderedLineMatches(lines: Array<{ match: TextMatch; length: number }>): Array<{ match: TextMatch; length: number }> {
+  // A heading or column can move in the text layer. Keep the strongest ordered run of exact,
+  // unique matches and leave moved or ambiguous lines unmarked.
+  const chains = lines.map(line => ({ total: line.length, previous: -1 }));
+  let best = 0;
+  for (let index = 1; index < lines.length; index++) {
+    const current = lines[index]!;
+    for (let earlier = 0; earlier < index; earlier++) {
+      const end = lines[earlier]!.match.end;
+      const start = current.match.start;
+      const follows = end.segment < start.segment || (end.segment === start.segment && end.offset <= start.offset);
+      const total = chains[earlier]!.total + current.length;
+      if (follows && total > chains[index]!.total) chains[index] = { total, previous: earlier };
+    }
+    if (chains[index]!.total > chains[best]!.total) best = index;
+  }
+  const ordered = [];
+  for (let index = best; index >= 0 && index < lines.length; index = chains[index]!.previous) {
+    ordered.push(lines[index]!);
+  }
+  return ordered.reverse();
+}
+
 /** The same PDF page can expose table cells or headings between lines in its rendered text order. */
 export function findPageQuoteMatches(segments: readonly string[], quote: string): TextMatch[] {
   const needle = compact(quote);
@@ -82,14 +105,10 @@ export function findPageQuoteMatches(segments: readonly string[], quote: string)
     const match = locate(line, false, true);
     return match ? [{ match, length: line.length }] : [];
   });
-  const inOrder = matched.every(({ match }, index) => {
-    const previous = matched[index - 1]?.match.end;
-    return !previous || previous.segment < match.start.segment
-      || (previous.segment === match.start.segment && previous.offset <= match.start.offset);
-  });
+  const ordered = orderedLineMatches(matched);
   // Require multiple unique, ordered lines covering most of the quote. Leave layout-only gaps unpainted.
-  if (matched.length >= 2 && inOrder && matched.reduce((size, line) => size + line.length, 0) / needle.length >= 0.6) {
-    return matched.map(line => line.match);
+  if (ordered.length >= 2 && ordered.reduce((size, line) => size + line.length, 0) / needle.length >= 0.6) {
+    return ordered.map(line => line.match);
   }
   const prefix = locatePrefix(needle, locate);
   return prefix ? [prefix] : [];
