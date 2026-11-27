@@ -1,0 +1,234 @@
+{
+  "$defs": {
+    "ChunkManifestEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkId": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunkid",
+          "type": "string"
+        },
+        "contentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contenthash",
+          "type": "string"
+        },
+        "endOffset": {
+          "exclusiveMinimum": 0,
+          "title": "Endoffset",
+          "type": "integer"
+        },
+        "ordinal": {
+          "minimum": 0,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "parentSectionBlockId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parentsectionblockid"
+        },
+        "sourceBlockIds": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Sourceblockids",
+          "type": "array"
+        },
+        "startOffset": {
+          "minimum": 0,
+          "title": "Startoffset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "chunkId",
+        "ordinal",
+        "contentHash",
+        "startOffset",
+        "endOffset",
+        "sourceBlockIds",
+        "parentSectionBlockId"
+      ],
+      "title": "ChunkManifestEntry",
+      "type": "object"
+    },
+    "IndexGenerationManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkingVersion": {
+          "title": "Chunkingversion",
+          "type": "string"
+        },
+        "chunks": {
+          "items": {
+            "$ref": "#/$defs/ChunkManifestEntry"
+          },
+          "minItems": 1,
+          "title": "Chunks",
+          "type": "array"
+        },
+        "chunksDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunksdigest",
+          "type": "string"
+        },
+        "compilerVersion": {
+          "title": "Compilerversion",
+          "type": "string"
+        },
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "embeddingDimensions": {
+          "exclusiveMinimum": 0,
+          "title": "Embeddingdimensions",
+          "type": "integer"
+        },
+        "embeddingModel": {
+          "title": "Embeddingmodel",
+          "type": "string"
+        },
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "jobId": {
+          "format": "uuid",
+          "title": "Jobid",
+          "type": "string"
+        },
+        "markdownContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Markdowncontenthash",
+          "type": "string"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "jobId",
+        "generationId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "compilerVersion",
+        "chunkingVersion",
+        "embeddingModel",
+        "embeddingDimensions",
+        "markdownContentHash",
+        "chunksDigest",
+        "chunks"
+      ],
+      "title": "IndexGenerationManifest",
+      "type": "object"
+    },
+    "IndexGenerationRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "jobId": {
+          "format": "uuid",
+          "title": "Jobid",
+          "type": "string"
+        },
+        "organizationId": {
+          "format": "uuid",
+          "title": "Organizationid",
+          "type": "string"
+        },
+        "snapshotContent": {
+          "anyOf": [
+            {
+              "maxLength": 1500000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshotcontent"
+        },
+        "snapshotContentBase64": {
+          "anyOf": [
+            {
+              "maxLength": 16000000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshotcontentbase64"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotMimeType": {
+          "enum": [
+            "text/plain",
+            "application/pdf"
+          ],
+          "title": "Snapshotmimetype",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        },
+        "submissionId": {
+          "format": "uuid",
+          "title": "Submissionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "jobId",
+        "organizationId",
+        "submissionId",
+        "generationId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "snapshotMimeType"
+      ],
+      "title": "IndexGenerationRequest",
+      "type": "object"
+    }
+  },
+  "title": "Arden indexing contract v1"
+}

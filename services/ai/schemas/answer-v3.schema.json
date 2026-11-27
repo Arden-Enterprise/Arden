@@ -1,0 +1,1620 @@
+{
+  "$defs": {
+    "AiApplyFilterAction": {
+      "additionalProperties": false,
+      "properties": {
+        "collectionRef": {
+          "anyOf": [
+            {
+              "pattern": "^C[1-9][0-9]{0,2}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collectionref"
+        },
+        "departmentRef": {
+          "anyOf": [
+            {
+              "pattern": "^DEPT[1-9][0-9]{0,2}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Departmentref"
+        },
+        "op": {
+          "const": "apply_filter",
+          "title": "Op",
+          "type": "string"
+        },
+        "readerScope": {
+          "anyOf": [
+            {
+              "enum": [
+                "ORGANIZATION",
+                "DEPARTMENT",
+                "SELECTED_MEMBERS",
+                "LEGACY_AUDIENCE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Readerscope"
+        },
+        "typeCode": {
+          "anyOf": [
+            {
+              "enum": [
+                "POLICY_AND_STANDARD",
+                "PROCEDURE",
+                "GUIDE",
+                "REFERENCE",
+                "LESSONS_LEARNED",
+                "UNCATEGORIZED"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Typecode"
+        },
+        "validity": {
+          "anyOf": [
+            {
+              "enum": [
+                "CURRENT",
+                "EXPIRING_SOON"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validity"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "title": "AiApplyFilterAction",
+      "type": "object"
+    },
+    "AiCalloutNode": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "maxLength": 800,
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        },
+        "citationIndexes": {
+          "items": {
+            "maximum": 12,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Citationindexes",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "callout",
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "tone": {
+          "enum": [
+            "info",
+            "conflict"
+          ],
+          "title": "Tone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "tone",
+        "title",
+        "body",
+        "citationIndexes"
+      ],
+      "title": "AiCalloutNode",
+      "type": "object"
+    },
+    "AiCardNode": {
+      "additionalProperties": false,
+      "properties": {
+        "bodyIds": {
+          "items": {
+            "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Bodyids",
+          "type": "array"
+        },
+        "footerIds": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+                "type": "string"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Footerids"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "card",
+          "title": "Kind",
+          "type": "string"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "maxLength": 160,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subtitle"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "tone": {
+          "anyOf": [
+            {
+              "enum": [
+                "default",
+                "subtle"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tone"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "bodyIds"
+      ],
+      "title": "AiCardNode",
+      "type": "object"
+    },
+    "AiComparisonTableNode": {
+      "additionalProperties": false,
+      "properties": {
+        "caption": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Caption"
+        },
+        "columns": {
+          "items": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 2,
+          "title": "Columns",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "comparison_table",
+          "title": "Kind",
+          "type": "string"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/AiTableRow"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "columns",
+        "rows"
+      ],
+      "title": "AiComparisonTableNode",
+      "type": "object"
+    },
+    "AiDocumentItemNode": {
+      "additionalProperties": false,
+      "properties": {
+        "docRef": {
+          "pattern": "^D[1-8]$",
+          "title": "Docref",
+          "type": "string"
+        },
+        "highlightNote": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Highlightnote"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "document_item",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "docRef"
+      ],
+      "title": "AiDocumentItemNode",
+      "type": "object"
+    },
+    "AiFocusNodesAction": {
+      "additionalProperties": false,
+      "properties": {
+        "docRefs": {
+          "items": {
+            "pattern": "^D[1-8]$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Docrefs",
+          "type": "array"
+        },
+        "op": {
+          "const": "focus_nodes",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "docRefs"
+      ],
+      "title": "AiFocusNodesAction",
+      "type": "object"
+    },
+    "AiGovernanceKvNode": {
+      "additionalProperties": false,
+      "properties": {
+        "docRef": {
+          "pattern": "^D[1-8]$",
+          "title": "Docref",
+          "type": "string"
+        },
+        "fields": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "ownerDepartment",
+                  "authorDisplayName",
+                  "type",
+                  "version",
+                  "publishedAt",
+                  "validUntil",
+                  "validityStatus",
+                  "readerScope",
+                  "collectionName",
+                  "openMaintenanceCaseCount"
+                ],
+                "type": "string"
+              },
+              "maxItems": 10,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "governance_kv",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "docRef"
+      ],
+      "title": "AiGovernanceKvNode",
+      "type": "object"
+    },
+    "AiGraphActionNode": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AiFocusNodesAction"
+            },
+            {
+              "$ref": "#/$defs/AiApplyFilterAction"
+            },
+            {
+              "$ref": "#/$defs/AiIsolateBranchAction"
+            },
+            {
+              "$ref": "#/$defs/AiToggleLinksAction"
+            },
+            {
+              "$ref": "#/$defs/AiPinToContextAction"
+            }
+          ],
+          "title": "Action"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "graph_action",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 48,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "action"
+      ],
+      "title": "AiGraphActionNode",
+      "type": "object"
+    },
+    "AiIsolateBranchAction": {
+      "additionalProperties": false,
+      "properties": {
+        "branchKind": {
+          "enum": [
+            "department",
+            "collection",
+            "type"
+          ],
+          "title": "Branchkind",
+          "type": "string"
+        },
+        "branchRef": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Branchref",
+          "type": "string"
+        },
+        "op": {
+          "const": "isolate_branch",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "branchKind",
+        "branchRef"
+      ],
+      "title": "AiIsolateBranchAction",
+      "type": "object"
+    },
+    "AiLineageTreeNode": {
+      "additionalProperties": false,
+      "properties": {
+        "docRef": {
+          "pattern": "^D[1-8]$",
+          "title": "Docref",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "lineage_tree",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "docRef"
+      ],
+      "title": "AiLineageTreeNode",
+      "type": "object"
+    },
+    "AiMetricStripNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "metric_strip",
+          "title": "Kind",
+          "type": "string"
+        },
+        "metricKeys": {
+          "items": {
+            "enum": [
+              "MATCHED_DOCS",
+              "EXPIRING_SOON_DOCS",
+              "OPEN_MAINTENANCE_CASES",
+              "DISTINCT_OWNER_DEPTS"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "title": "Metrickeys",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "metricKeys"
+      ],
+      "title": "AiMetricStripNode",
+      "type": "object"
+    },
+    "AiOpenReaderNode": {
+      "additionalProperties": false,
+      "properties": {
+        "blockId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Blockid"
+        },
+        "docRef": {
+          "pattern": "^D[1-8]$",
+          "title": "Docref",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "open_reader",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 48,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "page": {
+          "anyOf": [
+            {
+              "maximum": 100000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Page"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "docRef"
+      ],
+      "title": "AiOpenReaderNode",
+      "type": "object"
+    },
+    "AiPinToContextAction": {
+      "additionalProperties": false,
+      "properties": {
+        "docRefs": {
+          "items": {
+            "pattern": "^D[1-8]$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Docrefs",
+          "type": "array"
+        },
+        "op": {
+          "const": "pin_to_context",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "docRefs"
+      ],
+      "title": "AiPinToContextAction",
+      "type": "object"
+    },
+    "AiPromptChipNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "prompt_chip",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 60,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 400,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "prompt"
+      ],
+      "title": "AiPromptChipNode",
+      "type": "object"
+    },
+    "AiProseNode": {
+      "additionalProperties": false,
+      "properties": {
+        "citationIndexes": {
+          "anyOf": [
+            {
+              "items": {
+                "maximum": 12,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 12,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Citationindexes"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "prose",
+          "title": "Kind",
+          "type": "string"
+        },
+        "markdown": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Markdown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "markdown"
+      ],
+      "title": "AiProseNode",
+      "type": "object"
+    },
+    "AiRowNode": {
+      "additionalProperties": false,
+      "properties": {
+        "childIds": {
+          "items": {
+            "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+            "type": "string"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Childids",
+          "type": "array"
+        },
+        "columns": {
+          "anyOf": [
+            {
+              "enum": [
+                2,
+                3
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Columns"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "row",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "childIds"
+      ],
+      "title": "AiRowNode",
+      "type": "object"
+    },
+    "AiSectionNode": {
+      "additionalProperties": false,
+      "properties": {
+        "childIds": {
+          "items": {
+            "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Childids",
+          "type": "array"
+        },
+        "defaultOpen": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Defaultopen"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "section",
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "childIds"
+      ],
+      "title": "AiSectionNode",
+      "type": "object"
+    },
+    "AiSplitNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "split",
+          "title": "Kind",
+          "type": "string"
+        },
+        "leftId": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Leftid",
+          "type": "string"
+        },
+        "leftTitle": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lefttitle"
+        },
+        "rightId": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Rightid",
+          "type": "string"
+        },
+        "rightTitle": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Righttitle"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "leftId",
+        "rightId"
+      ],
+      "title": "AiSplitNode",
+      "type": "object"
+    },
+    "AiStackNode": {
+      "additionalProperties": false,
+      "properties": {
+        "childIds": {
+          "items": {
+            "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+            "type": "string"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Childids",
+          "type": "array"
+        },
+        "gap": {
+          "anyOf": [
+            {
+              "enum": [
+                "sm",
+                "md"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gap"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "stack",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "childIds"
+      ],
+      "title": "AiStackNode",
+      "type": "object"
+    },
+    "AiSurfaceDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/AiStackNode"
+              },
+              {
+                "$ref": "#/$defs/AiRowNode"
+              },
+              {
+                "$ref": "#/$defs/AiCardNode"
+              },
+              {
+                "$ref": "#/$defs/AiSectionNode"
+              },
+              {
+                "$ref": "#/$defs/AiTabsNode"
+              },
+              {
+                "$ref": "#/$defs/AiSplitNode"
+              },
+              {
+                "$ref": "#/$defs/AiProseNode"
+              },
+              {
+                "$ref": "#/$defs/AiDocumentItemNode"
+              },
+              {
+                "$ref": "#/$defs/AiGovernanceKvNode"
+              },
+              {
+                "$ref": "#/$defs/AiComparisonTableNode"
+              },
+              {
+                "$ref": "#/$defs/AiCalloutNode"
+              },
+              {
+                "$ref": "#/$defs/AiMetricStripNode"
+              },
+              {
+                "$ref": "#/$defs/AiLineageTreeNode"
+              },
+              {
+                "$ref": "#/$defs/AiGraphActionNode"
+              },
+              {
+                "$ref": "#/$defs/AiOpenReaderNode"
+              },
+              {
+                "$ref": "#/$defs/AiWorkflowHandoffNode"
+              },
+              {
+                "$ref": "#/$defs/AiPromptChipNode"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "rootId": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Rootid",
+          "type": "string"
+        },
+        "schemaVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Schemaversion",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "rootId",
+        "nodes"
+      ],
+      "title": "AiSurfaceDraft",
+      "type": "object"
+    },
+    "AiTabPanel": {
+      "additionalProperties": false,
+      "properties": {
+        "childIds": {
+          "items": {
+            "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+            "type": "string"
+          },
+          "maxItems": 6,
+          "minItems": 1,
+          "title": "Childids",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "childIds"
+      ],
+      "title": "AiTabPanel",
+      "type": "object"
+    },
+    "AiTableCell": {
+      "additionalProperties": false,
+      "properties": {
+        "citationIndexes": {
+          "anyOf": [
+            {
+              "items": {
+                "maximum": 12,
+                "minimum": 1,
+                "type": "integer"
+              },
+              "maxItems": 4,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Citationindexes"
+        },
+        "text": {
+          "maxLength": 280,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "AiTableCell",
+      "type": "object"
+    },
+    "AiTableRow": {
+      "additionalProperties": false,
+      "properties": {
+        "cells": {
+          "items": {
+            "$ref": "#/$defs/AiTableCell"
+          },
+          "maxItems": 5,
+          "minItems": 2,
+          "title": "Cells",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cells"
+      ],
+      "title": "AiTableRow",
+      "type": "object"
+    },
+    "AiTabsNode": {
+      "additionalProperties": false,
+      "properties": {
+        "defaultTabId": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Defaulttabid",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "tabs",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tabs": {
+          "items": {
+            "$ref": "#/$defs/AiTabPanel"
+          },
+          "maxItems": 4,
+          "minItems": 2,
+          "title": "Tabs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "defaultTabId",
+        "tabs"
+      ],
+      "title": "AiTabsNode",
+      "type": "object"
+    },
+    "AiToggleLinksAction": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "op": {
+          "const": "toggle_links",
+          "title": "Op",
+          "type": "string"
+        },
+        "relationshipTypes": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "REFERENCES",
+                  "RELATED",
+                  "SUPERSEDES"
+                ],
+                "type": "string"
+              },
+              "maxItems": 3,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Relationshiptypes"
+        }
+      },
+      "required": [
+        "op",
+        "enabled"
+      ],
+      "title": "AiToggleLinksAction",
+      "type": "object"
+    },
+    "AiWorkflowHandoffNode": {
+      "additionalProperties": false,
+      "properties": {
+        "docRef": {
+          "pattern": "^D[1-8]$",
+          "title": "Docref",
+          "type": "string"
+        },
+        "handoff": {
+          "enum": [
+            "report_issue",
+            "open_maintenance_case",
+            "open_renewal"
+          ],
+          "title": "Handoff",
+          "type": "string"
+        },
+        "id": {
+          "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "workflow_handoff",
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 48,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "handoff",
+        "docRef"
+      ],
+      "title": "AiWorkflowHandoffNode",
+      "type": "object"
+    },
+    "DialogueTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Answer",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question",
+        "answer"
+      ],
+      "title": "DialogueTurn",
+      "type": "object"
+    },
+    "Evidence": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkId": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunkid",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 16000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "contentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contenthash",
+          "type": "string"
+        },
+        "endOffset": {
+          "exclusiveMinimum": 0,
+          "title": "Endoffset",
+          "type": "integer"
+        },
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "maxLength": 800,
+          "title": "Label",
+          "type": "string"
+        },
+        "parentSectionBlockId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parentsectionblockid"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        },
+        "sourceBlockIds": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Sourceblockids",
+          "type": "array"
+        },
+        "startOffset": {
+          "minimum": 0,
+          "title": "Startoffset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "generationId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "chunkId",
+        "contentHash",
+        "content",
+        "startOffset",
+        "endOffset",
+        "sourceBlockIds",
+        "parentSectionBlockId"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "EvidenceCitation": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkId": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunkid",
+          "type": "string"
+        },
+        "quote": {
+          "maxLength": 1200,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "chunkId",
+        "quote"
+      ],
+      "title": "EvidenceCitation",
+      "type": "object"
+    },
+    "GenerationV3Request": {
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": 3,
+          "default": 3,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/DialogueTurn"
+          },
+          "maxItems": 4,
+          "title": "History",
+          "type": "array"
+        },
+        "organizationId": {
+          "format": "uuid",
+          "title": "Organizationid",
+          "type": "string"
+        },
+        "purpose": {
+          "const": "PUBLISHED_CHAT",
+          "default": "PUBLISHED_CHAT",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "query": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "sourceCatalog": {
+          "items": {
+            "$ref": "#/$defs/SourceCatalogEntry"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Sourcecatalog",
+          "type": "array"
+        },
+        "uiSurfaceMode": {
+          "default": "AUTO",
+          "enum": [
+            "AUTO",
+            "DISABLED"
+          ],
+          "title": "Uisurfacemode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "requestId",
+        "organizationId",
+        "query",
+        "evidence",
+        "sourceCatalog"
+      ],
+      "title": "GenerationV3Request",
+      "type": "object"
+    },
+    "GenerationV3Response": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "maxLength": 12000,
+          "minLength": 1,
+          "title": "Answer",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/EvidenceCitation"
+          },
+          "maxItems": 12,
+          "title": "Citations",
+          "type": "array"
+        },
+        "contractVersion": {
+          "const": 3,
+          "default": 3,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "ANSWERED",
+            "INSUFFICIENT_EVIDENCE"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "uiSurface": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AiSurfaceDraft"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uiSurfaceStatus": {
+          "enum": [
+            "GENERATED",
+            "OMITTED_INSUFFICIENT",
+            "OMITTED_INVALID",
+            "DISABLED"
+          ],
+          "title": "Uisurfacestatus",
+          "type": "string"
+        },
+        "usedEvidence": {
+          "items": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Usedevidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "requestId",
+        "status",
+        "answer",
+        "citations",
+        "usedEvidence",
+        "uiSurface",
+        "uiSurfaceStatus"
+      ],
+      "title": "GenerationV3Response",
+      "type": "object"
+    },
+    "SourceCatalogEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "collectionRef": {
+          "anyOf": [
+            {
+              "pattern": "^C[1-9][0-9]{0,2}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Collectionref"
+        },
+        "departmentRef": {
+          "pattern": "^DEPT[1-9][0-9]{0,2}$",
+          "title": "Departmentref",
+          "type": "string"
+        },
+        "docRef": {
+          "pattern": "^D[1-8]$",
+          "title": "Docref",
+          "type": "string"
+        },
+        "hasDirectRelationships": {
+          "default": false,
+          "title": "Hasdirectrelationships",
+          "type": "boolean"
+        },
+        "ownerDepartment": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Ownerdepartment",
+          "type": "string"
+        },
+        "readerScope": {
+          "enum": [
+            "ORGANIZATION",
+            "DEPARTMENT",
+            "SELECTED_MEMBERS",
+            "LEGACY_AUDIENCE"
+          ],
+          "title": "Readerscope",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "enum": [
+                "Policy & Standard",
+                "Procedure",
+                "Guide",
+                "Reference",
+                "Lessons Learned"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        },
+        "version": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "docRef",
+        "title",
+        "ownerDepartment",
+        "version",
+        "readerScope",
+        "departmentRef"
+      ],
+      "title": "SourceCatalogEntry",
+      "type": "object"
+    }
+  },
+  "title": "Arden governed answer contract v3"
+}

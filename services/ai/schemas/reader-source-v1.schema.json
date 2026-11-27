@@ -1,0 +1,300 @@
+{
+  "$defs": {
+    "IndexGenerationRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "jobId": {
+          "format": "uuid",
+          "title": "Jobid",
+          "type": "string"
+        },
+        "organizationId": {
+          "format": "uuid",
+          "title": "Organizationid",
+          "type": "string"
+        },
+        "snapshotContent": {
+          "anyOf": [
+            {
+              "maxLength": 1500000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshotcontent"
+        },
+        "snapshotContentBase64": {
+          "anyOf": [
+            {
+              "maxLength": 16000000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snapshotcontentbase64"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotMimeType": {
+          "enum": [
+            "text/plain",
+            "application/pdf"
+          ],
+          "title": "Snapshotmimetype",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        },
+        "submissionId": {
+          "format": "uuid",
+          "title": "Submissionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "jobId",
+        "organizationId",
+        "submissionId",
+        "generationId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "snapshotMimeType"
+      ],
+      "title": "IndexGenerationRequest",
+      "type": "object"
+    },
+    "ReaderChunk": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkId": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunkid",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 16000,
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "contentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contenthash",
+          "type": "string"
+        },
+        "endOffset": {
+          "exclusiveMinimum": 0,
+          "title": "Endoffset",
+          "type": "integer"
+        },
+        "ordinal": {
+          "minimum": 0,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "parentSectionBlockId": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,128}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Parentsectionblockid"
+        },
+        "sourceBlockIds": {
+          "items": {
+            "pattern": "^[A-Za-z0-9_-]{1,128}$",
+            "type": "string"
+          },
+          "maxItems": 100,
+          "minItems": 1,
+          "title": "Sourceblockids",
+          "type": "array"
+        },
+        "startOffset": {
+          "minimum": 0,
+          "title": "Startoffset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "chunkId",
+        "ordinal",
+        "contentHash",
+        "startOffset",
+        "endOffset",
+        "sourceBlockIds",
+        "parentSectionBlockId",
+        "content"
+      ],
+      "title": "ReaderChunk",
+      "type": "object"
+    },
+    "ReaderSourceRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "publishedVersionId": {
+          "format": "uuid",
+          "title": "Publishedversionid",
+          "type": "string"
+        },
+        "purpose": {
+          "const": "READER_SUMMARY",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "snapshot": {
+          "$ref": "#/$defs/IndexGenerationRequest"
+        }
+      },
+      "required": [
+        "purpose",
+        "requestId",
+        "publishedVersionId",
+        "snapshot"
+      ],
+      "title": "ReaderSourceRequest",
+      "type": "object"
+    },
+    "ReaderSourceResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "chunkingVersion": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Chunkingversion",
+          "type": "string"
+        },
+        "chunks": {
+          "items": {
+            "$ref": "#/$defs/ReaderChunk"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "title": "Chunks",
+          "type": "array"
+        },
+        "chunksDigest": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Chunksdigest",
+          "type": "string"
+        },
+        "compilerVersion": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Compilerversion",
+          "type": "string"
+        },
+        "contractVersion": {
+          "const": 1,
+          "default": 1,
+          "title": "Contractversion",
+          "type": "integer"
+        },
+        "generationId": {
+          "format": "uuid",
+          "title": "Generationid",
+          "type": "string"
+        },
+        "markdown": {
+          "maxLength": 200000,
+          "minLength": 1,
+          "title": "Markdown",
+          "type": "string"
+        },
+        "markdownContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Markdowncontenthash",
+          "type": "string"
+        },
+        "organizationId": {
+          "format": "uuid",
+          "title": "Organizationid",
+          "type": "string"
+        },
+        "publishedVersionId": {
+          "format": "uuid",
+          "title": "Publishedversionid",
+          "type": "string"
+        },
+        "purpose": {
+          "const": "READER_SUMMARY",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "requestId": {
+          "format": "uuid",
+          "title": "Requestid",
+          "type": "string"
+        },
+        "snapshotContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Snapshotcontenthash",
+          "type": "string"
+        },
+        "snapshotVersionId": {
+          "format": "uuid",
+          "title": "Snapshotversionid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "purpose",
+        "requestId",
+        "organizationId",
+        "publishedVersionId",
+        "generationId",
+        "snapshotVersionId",
+        "snapshotContentHash",
+        "compilerVersion",
+        "chunkingVersion",
+        "markdownContentHash",
+        "chunksDigest",
+        "markdown",
+        "chunks"
+      ],
+      "title": "ReaderSourceResponse",
+      "type": "object"
+    }
+  },
+  "title": "Arden reader source contract v1"
+}

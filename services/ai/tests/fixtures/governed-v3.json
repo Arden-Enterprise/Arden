@@ -1,0 +1,130 @@
+{
+  "generationV3Request": {
+    "contractVersion": 3,
+    "purpose": "PUBLISHED_CHAT",
+    "requestId": "10000000-0000-4000-8000-000000000004",
+    "organizationId": "10000000-0000-4000-8000-000000000001",
+    "query": "Compare MFA requirements in the Security Policy.",
+    "history": [],
+    "evidence": [
+      {
+        "generationId": "10000000-0000-4000-8000-000000000002",
+        "snapshotVersionId": "10000000-0000-4000-8000-000000000003",
+        "snapshotContentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "chunkId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "contentHash": "ceda8131cff784ce6b69f1ede54cdc17d0564f9dbaef3768f1dbdc881cdd5283",
+        "content": "MFA is required for all production accounts.",
+        "startOffset": 0,
+        "endOffset": 44,
+        "sourceBlockIds": [
+          "pdf-page-2"
+        ],
+        "parentSectionBlockId": "security",
+        "label": "Security Policy · Version 1.0"
+      }
+    ],
+    "sourceCatalog": [
+      {
+        "docRef": "D1",
+        "title": "Security Policy",
+        "type": "Policy & Standard",
+        "ownerDepartment": "Security",
+        "version": "1.0",
+        "readerScope": "ORGANIZATION",
+        "hasDirectRelationships": true,
+        "departmentRef": "DEPT1",
+        "collectionRef": "C1"
+      }
+    ],
+    "uiSurfaceMode": "AUTO"
+  },
+  "generationV3Response": {
+    "contractVersion": 3,
+    "requestId": "10000000-0000-4000-8000-000000000004",
+    "status": "ANSWERED",
+    "answer": "MFA is required for all production accounts [1].",
+    "citations": [
+      {
+        "chunkId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "quote": "MFA is required for all production accounts."
+      }
+    ],
+    "usedEvidence": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "uiSurface": {
+      "schemaVersion": 1,
+      "rootId": "root",
+      "nodes": [
+        {
+          "id": "root",
+          "kind": "stack",
+          "gap": "md",
+          "childIds": [
+            "summary_prose",
+            "doc_card"
+          ]
+        },
+        {
+          "id": "summary_prose",
+          "kind": "prose",
+          "markdown": "MFA is required for all production accounts [1].",
+          "citationIndexes": [
+            1
+          ]
+        },
+        {
+          "id": "doc_card",
+          "kind": "card",
+          "title": "Security Policy",
+          "subtitle": "Production access control",
+          "tone": "default",
+          "bodyIds": [
+            "doc_ref_1",
+            "gov_1"
+          ],
+          "footerIds": [
+            "open_1",
+            "focus_1"
+          ]
+        },
+        {
+          "id": "doc_ref_1",
+          "kind": "document_item",
+          "docRef": "D1",
+          "highlightNote": "Mandates MFA for production accounts."
+        },
+        {
+          "id": "gov_1",
+          "kind": "governance_kv",
+          "docRef": "D1",
+          "fields": [
+            "ownerDepartment",
+            "version",
+            "validityStatus"
+          ]
+        },
+        {
+          "id": "open_1",
+          "kind": "open_reader",
+          "label": "Open Security Policy",
+          "docRef": "D1",
+          "blockId": "pdf-page-2",
+          "page": 2
+        },
+        {
+          "id": "focus_1",
+          "kind": "graph_action",
+          "label": "Focus in Graph",
+          "action": {
+            "op": "focus_nodes",
+            "docRefs": [
+              "D1"
+            ]
+          }
+        }
+      ]
+    },
+    "uiSurfaceStatus": "GENERATED"
+  }
+}
