@@ -4,6 +4,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      force_ai_deploy:
+        description: "Force staging AI rebuild and deploy (staging branch only)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -46,7 +52,7 @@ jobs:
       - run: pnpm test
       - run: pnpm test:remote
       - name: Release client and branch policy tests
-        run: node --test tools/releases/release.test.mjs tools/releases/transport.test.mjs tools/releases/identity.test.mjs tools/releases/migration-inventory.test.mjs tools/releases/ai-contract-parity.test.mjs tools/pull-requests/conventions.test.mjs
+        run: node --test tools/releases/release.test.mjs tools/releases/transport.test.mjs tools/releases/identity.test.mjs tools/releases/migration-inventory.test.mjs tools/releases/ai-contract-parity.test.mjs tools/releases/ai-identity.test.mjs tools/releases/ai-release.test.mjs tools/pull-requests/conventions.test.mjs
       - name: Verify AI contract parity, Chroma pin, and Dockerfile hardening
         run: node tools/releases/ai-contract-parity.mjs
       - name: Prepare temporary release-verifier test environment without pip caching
@@ -54,9 +60,15 @@ jobs:
       - name: Release protocol tests (Windows)
         if: runner.os == 'Windows'
         run: '& "$env:ARDEN_RELEASE_PYTHON" -m unittest discover -s deploy/release/tests -v'
+      - name: AI release protocol tests (Windows)
+        if: runner.os == 'Windows'
+        run: '& "$env:ARDEN_RELEASE_PYTHON" -m unittest discover -s deploy/release-ai/tests -v'
       - name: Release protocol and privilege tests (Linux)
         if: runner.os == 'Linux'
         run: sudo --non-interactive "$ARDEN_RELEASE_PYTHON" -m unittest discover -s deploy/release/tests -v
+      - name: AI release protocol and privilege tests (Linux)
+        if: runner.os == 'Linux'
+        run: sudo --non-interactive "$ARDEN_RELEASE_PYTHON" -m unittest discover -s deploy/release-ai/tests -v
       - name: Hosted protocol and maintenance fence tests (Linux)
         if: runner.os == 'Linux'
         run: sudo --non-interactive python3 -m unittest discover -s deploy/hosted/tests -v
@@ -132,12 +144,16 @@ jobs:
     name: AI service checks and container scan
     if: github.repository == 'Arden-Enterprise/Arden' && github.event.repository.visibility == 'public'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     permissions:
       contents: read
+      actions: read
+    outputs:
+      ai_changed: ${{ steps.changes.outputs.ai_changed }}
+      tooling_changed: ${{ steps.changes.outputs.tooling_changed }}
     concurrency:
       group: ai-check-${{ github.event.pull_request.number || github.ref }}
-      cancel-in-progress: true
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -146,30 +162,73 @@ jobs:
         id: changes
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
-          if [ "$EVENT_NAME" = "workflow_dispatch" ] || ([ "$EVENT_NAME" = "push" ] && ([ "$REF_NAME" = "staging" ] || [ "$REF_NAME" = "main" ])); then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          AI_PATHS=(
+            services/ai
+            tools/releases/ai-build.mjs
+            tools/releases/ai-smoke.mjs
+            tools/releases/ai-release.mjs
+            tools/releases/ai-identity.mjs
+            tools/releases/ai-contract-parity.mjs
+            deploy/release-ai
+            .github/workflows/release-ai.yml
+          )
+          TOOLING_PATHS=(
+            tools/releases/ai-build.mjs
+            tools/releases/ai-smoke.mjs
+            tools/releases/ai-release.mjs
+            tools/releases/ai-identity.mjs
+            deploy/release-ai
+            .github/workflows/release-ai.yml
+          )
           BASE_SHA="${PR_BASE_SHA:-$PUSH_BEFORE_SHA}"
+          AI_CHANGED="false"
+          TOOLING_CHANGED="false"
+          CI_CHANGED="false"
+          COMPARE_SHAS=()
           if [ -z "$BASE_SHA" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if ! git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only "$BASE_SHA" HEAD -- services/ai tools/releases/ai-build.mjs tools/releases/ai-smoke.mjs tools/releases/ai-contract-parity.mjs .github/workflows/ci.yml | grep -q .; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
+            AI_CHANGED="true"
+            TOOLING_CHANGED="true"
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "No AI service or AI CI files changed; skipping Python CI and image scan."
+            COMPARE_SHAS+=("$BASE_SHA")
           fi
+          # On staging/main pushes, also diff against the last successful CI push run so an
+          # undeployed AI change from a superseded/cancelled push is carried forward cleanly.
+          if [ "$EVENT_NAME" = "push" ] && ([ "$REF_NAME" = "staging" ] || [ "$REF_NAME" = "main" ]); then
+            LAST_SUCCESS_SHA="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=${REF_NAME}&event=push&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // empty' 2>/dev/null || true)"
+            if [[ "$LAST_SUCCESS_SHA" =~ ^[0-9a-f]{40}$ ]] && [ "$LAST_SUCCESS_SHA" != "$BASE_SHA" ]; then
+              COMPARE_SHAS+=("$LAST_SUCCESS_SHA")
+            fi
+          fi
+          for SHA in "${COMPARE_SHAS[@]}"; do
+            if ! git fetch --no-tags --depth=1 origin "$SHA" 2>/dev/null; then
+              AI_CHANGED="true"
+              TOOLING_CHANGED="true"
+              continue
+            fi
+            if git diff --name-only "$SHA" HEAD -- "${AI_PATHS[@]}" | grep -q .; then
+              AI_CHANGED="true"
+            fi
+            if git diff --name-only "$SHA" HEAD -- "${TOOLING_PATHS[@]}" | grep -q .; then
+              TOOLING_CHANGED="true"
+            fi
+            if git diff --name-only "$SHA" HEAD -- .github/workflows/ci.yml | grep -q .; then
+              CI_CHANGED="true"
+            fi
+          done
+          RUN_CHECK="false"
+          if [ "$AI_CHANGED" = "true" ] || [ "$CI_CHANGED" = "true" ] || [ "$EVENT_NAME" = "workflow_dispatch" ] || ([ "$EVENT_NAME" = "push" ] && ([ "$REF_NAME" = "staging" ] || [ "$REF_NAME" = "main" ])); then
+            RUN_CHECK="true"
+          fi
+          echo "run=${RUN_CHECK}" >> "$GITHUB_OUTPUT"
+          echo "ai_changed=${AI_CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "tooling_changed=${TOOLING_CHANGED}" >> "$GITHUB_OUTPUT"
+          echo "AI change detection: run=${RUN_CHECK}, ai_changed=${AI_CHANGED}, tooling_changed=${TOOLING_CHANGED}"
       - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         if: steps.changes.outputs.run == 'true'
         with:
@@ -216,12 +275,38 @@ jobs:
       - name: Build and scan without retained cache or registry publication
         run: node tools/releases/build.mjs
 
+  release-ai:
+    name: Deploy verified AI release
+    needs: [check, ai-check]
+    if: >-
+      github.repository == 'Arden-Enterprise/Arden' &&
+      github.event.repository.visibility == 'public' &&
+      (
+        (github.event_name == 'push' && (github.ref_name == 'staging' || github.ref_name == 'main') && needs.ai-check.outputs.ai_changed == 'true') ||
+        (github.event_name == 'workflow_dispatch' && github.ref_name == 'staging' && inputs.force_ai_deploy == true)
+      )
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/release-ai.yml
+    secrets: inherit
+    with:
+      target_environment: ${{ github.ref_name == 'staging' && 'staging' || 'production' }}
+      tooling_changed: ${{ needs.ai-check.outputs.tooling_changed == 'true' }}
+      force_ai_deploy: ${{ github.event_name == 'workflow_dispatch' && inputs.force_ai_deploy == true }}
+
   release:
     name: Deploy verified app release
-    needs: [check, database]
+    needs: [check, database, release-ai]
     if: >-
-      github.repository == 'Arden-Enterprise/Arden' && github.event.repository.visibility == 'public' &&
-      github.event_name == 'push' && (github.ref_name == 'staging' || github.ref_name == 'main')
+      always() && !cancelled() &&
+      needs.check.result == 'success' &&
+      needs.database.result == 'success' &&
+      (needs.release-ai.result == 'success' || needs.release-ai.result == 'skipped') &&
+      github.repository == 'Arden-Enterprise/Arden' &&
+      github.event.repository.visibility == 'public' &&
+      github.event_name == 'push' &&
+      (github.ref_name == 'staging' || github.ref_name == 'main')
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     permissions:
