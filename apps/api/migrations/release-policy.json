@@ -532,7 +532,7 @@
     {
       "id": "0089",
       "filename": "0089_retire_legacy_collection_links.sql",
-      "sha256": "f4e3bb39ee3c58e4c5dd9e0a639e5005fc529c2679ae3d8cf09c56cab331d1b4",
+      "sha256": "790371afeac6c193b97748087ecad8721bfcf2c763758ebbb06e1f19c60238f5",
       "rollout": "operator"
     },
     {

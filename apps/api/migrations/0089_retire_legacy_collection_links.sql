@@ -11,9 +11,10 @@ BEGIN
     IF EXISTS (
         SELECT 1 FROM knowledge_collection_document legacy
           JOIN published_knowledge_version pv USING (published_version_id)
+          LEFT JOIN shared_draft document ON document.shared_draft_id = pv.shared_draft_id
           LEFT JOIN knowledge_collection_placement placement
             ON placement.shared_draft_id = pv.shared_draft_id AND placement.organization_id = legacy.organization_id
-         WHERE pv.organization_id IS DISTINCT FROM legacy.organization_id
+         WHERE document.organization_id IS DISTINCT FROM legacy.organization_id
             OR (placement.shared_draft_id IS NULL
                 AND collection_source_eligible(legacy.organization_id, pv.shared_draft_id, legacy.collection_id))
     ) THEN
