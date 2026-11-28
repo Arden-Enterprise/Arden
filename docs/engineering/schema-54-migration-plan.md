@@ -75,6 +75,7 @@ Maintainer xác nhận dữ liệu Team/Project và Audience Role đã được 
 
 - Dọn types và fixtures, SQL đọc/ghi, policy, indexes và hàm dựng quyền trước khi drop. Giữ `review_rule` và các mốc hiệu lực đang được workflow query cho đến khi rà riêng được tác dụng của chúng. `published_at` và `valid_until` có ý nghĩa riêng.
 - **Nghiệm thu.** Preflight kiểm tra không còn bản công bố/bản nộp phụ thuộc vào legacy. Kiểm tra Organization, Department, Selected Members, thành viên đã rời, reviewer scope, PDF, nguồn Ask Arden, lịch sử citation và Graph. Dừng migration ở môi trường có dữ liệu ngoài điều kiện này để xử lý riêng.
+- **Backfill phạm vi Organization.** `0083` phục hồi Target Readers còn trống khi bản ghi có duy nhất Audience `ORGANIZATION_ALL` đang hoạt động của chính tổ chức. Bản nộp duyệt giữ quyết định cũ và reviewer scope. Phiên bản lịch sử chỉ được backfill nếu khớp Audience của bản nộp đã duyệt và nằm ngoài current pointer. Bản ghi có phạm vi không xác định vẫn dừng ở các guard.
 
 ## Các bảng giữ theo ranh giới nghiệp vụ
 

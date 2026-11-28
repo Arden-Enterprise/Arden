@@ -1,10 +1,76 @@
 SET search_path TO arden, public;
 
--- Refuse the switch if any live publication still needs the compatibility policy,
--- or if in-flight approvals could activate a document without Target Readers.
-LOCK TABLE shared_submission, published_knowledge_version, knowledge_current_publication
+LOCK TABLE shared_draft, shared_draft_audience, audience, shared_submission,
+    published_knowledge_version, knowledge_current_publication
     IN ACCESS EXCLUSIVE MODE;
 
+-- The original Organization audience means the whole active organization.
+-- Recover that intent only when it was the sole active audience of the same
+-- organization. Leave existing proposals, approvals and live pointers intact.
+-- A historical version is eligible only when it carries that same frozen scope.
+CREATE TEMP TABLE legacy_organization_readers ON COMMIT DROP AS
+WITH organization_audiences AS (
+    SELECT a.audience_id, a.organization_id
+      FROM audience a JOIN organization o USING (organization_id)
+     WHERE a.kind = 'ORGANIZATION_ALL' AND a.status = 'ACTIVE'
+       AND a.department_id IS NULL AND o.status = 'ACTIVE'
+), targets AS (
+    SELECT 'draft' AS subject, d.shared_draft_id AS subject_id, d.organization_id
+      FROM shared_draft d
+      JOIN shared_draft_audience da USING (shared_draft_id, organization_id)
+      JOIN organization_audiences a ON a.audience_id = da.role_id AND a.organization_id = d.organization_id
+     WHERE d.draft_selection_id IS NULL AND d.target_scope_type = 'ORGANIZATION'
+       AND NOT EXISTS (SELECT 1 FROM shared_draft_audience other
+            WHERE other.shared_draft_id = d.shared_draft_id AND other.role_id <> da.role_id)
+    UNION ALL
+    SELECT 'submission', s.submission_id, s.organization_id
+      FROM shared_submission s
+      JOIN organization_audiences a ON s.audience_role_ids = ARRAY[a.audience_id]
+                                    AND a.organization_id = s.organization_id
+     WHERE s.shared_draft_version_id IS NOT NULL AND s.request_type = 'CONTENT'
+       AND s.proposed_selection_id IS NULL AND s.target_scope_type = 'ORGANIZATION' AND s.target_department_id IS NULL
+    UNION ALL
+    SELECT 'historical_version', pv.published_version_id, s.organization_id
+      FROM published_knowledge_version pv JOIN shared_submission s USING (submission_id)
+      JOIN knowledge_base kb ON kb.knowledge_base_id = pv.knowledge_base_id AND kb.organization_id = s.organization_id
+      JOIN organization_audiences a ON pv.audience_role_ids = ARRAY[a.audience_id]
+                                    AND a.organization_id = s.organization_id
+     WHERE pv.reader_selection_id IS NULL AND pv.shared_draft_id = s.shared_draft_id
+       AND s.status = 'APPROVED' AND s.request_type = 'CONTENT' AND s.approved_selection_id IS NULL
+       AND s.target_scope_type = 'ORGANIZATION' AND s.target_department_id IS NULL
+       AND pv.audience_role_ids = s.audience_role_ids
+       AND NOT EXISTS (SELECT 1 FROM knowledge_current_publication cp
+            WHERE cp.published_version_id = pv.published_version_id)
+)
+SELECT *, gen_random_uuid() AS selection_id FROM targets;
+
+SET CONSTRAINTS trg_check_reader_selection_size IMMEDIATE;
+INSERT INTO reader_selection (selection_id, organization_id, reader_mode)
+SELECT selection_id, organization_id, 'ORGANIZATION' FROM legacy_organization_readers;
+SET CONSTRAINTS trg_check_reader_selection_size DEFERRED;
+
+ALTER TABLE shared_draft DISABLE TRIGGER trg_shared_draft_updated_at;
+UPDATE shared_draft d SET draft_selection_id = r.selection_id
+  FROM legacy_organization_readers r
+ WHERE r.subject = 'draft' AND r.subject_id = d.shared_draft_id AND d.draft_selection_id IS NULL;
+ALTER TABLE shared_draft ENABLE TRIGGER trg_shared_draft_updated_at;
+
+ALTER TABLE shared_submission DISABLE TRIGGER trg_protect_flow2_submission_snapshot;
+UPDATE shared_submission s SET proposed_selection_id = r.selection_id
+  FROM legacy_organization_readers r
+ WHERE r.subject = 'submission' AND r.subject_id = s.submission_id AND s.proposed_selection_id IS NULL;
+ALTER TABLE shared_submission ENABLE TRIGGER trg_protect_flow2_submission_snapshot;
+
+-- These versions are historical. Their reader metadata has no bearing on the
+-- current Handbook placement or on activation of the live document.
+ALTER TABLE published_knowledge_version DISABLE TRIGGER trg_reconcile_collection_readers;
+UPDATE published_knowledge_version pv SET reader_selection_id = r.selection_id
+  FROM legacy_organization_readers r
+ WHERE r.subject = 'historical_version' AND r.subject_id = pv.published_version_id AND pv.reader_selection_id IS NULL;
+ALTER TABLE published_knowledge_version ENABLE TRIGGER trg_reconcile_collection_readers;
+
+-- Refuse the switch if a live publication still needs legacy rights or a
+-- review cannot use an approved reader policy.
 DO $$
 BEGIN
     IF EXISTS (

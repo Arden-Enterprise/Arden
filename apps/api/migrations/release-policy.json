@@ -496,7 +496,7 @@
     {
       "id": "0083",
       "filename": "0083_retire_legacy_audience_reads.sql",
-      "sha256": "e0c1046c5422e14e0306e497a05e4859d7e94ceb3174537da7b047360eedefd0",
+      "sha256": "c4bbb4390adca7314ad913832b785c11c94bf552b87b5b0b70aa8f7261eedf04",
       "rollout": "operator"
     },
     {
